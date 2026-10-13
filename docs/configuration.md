@@ -2231,3 +2231,5 @@ Settings. Search scope is remembered in browser local storage separately for
 new-thread and follow-up composers. Starred text and mentions persist in the
 plugin database. See the [Prompt Library skill](../plugins/prompt-library/skills/prompt-library/SKILL.md)
 for CLI and SDK commands.
+
+Plugin capability usage passes through shared CLI, agent-tool, classified RPC action and explicit panel-open boundaries. Plugin RPC contracts may set `experimental_usage: "action"` or `"query"`; unclassified methods are excluded rather than guessed from names. `bb.experimental_withFeatureUse({ trigger }, run)` covers actual background work outside those boundaries, including scheduled automations. Polling, load, registration and restored panels do not count. Nested plugin RPC and core SDK calls are attributed to the outer plugin invocation. The server derives `builtin`, `public_catalog`, `private_marketplace`, `local` or `unknown` from installed provenance, including development overrides; the new event contains no plugin identifiers, names or URLs.
