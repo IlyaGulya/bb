@@ -14,6 +14,7 @@ import {
 } from "@bb/db";
 import {
   systemErrorEventDataSchema,
+  systemThreadInterruptedEventDataSchema,
   type ProviderErrorCategory,
   type ThreadLifecycleEvent,
   type ThreadStatus,
@@ -30,7 +31,6 @@ const SYSTEM_ERROR_CATEGORIES: Readonly<Record<string, TurnErrorCategory>> = {
   thread_command_failed: "start_failed",
   thread_provisioning_failed: "start_failed",
   provider_cli_unsupported_version: "start_failed",
-  host_disconnected: "host_lost",
 };
 
 let turnTelemetryDeps: TurnTelemetryDeps | undefined;
@@ -88,6 +88,21 @@ function failureCategory(
   db: TurnTelemetryDeps["db"],
   threadId: string,
 ): TurnErrorCategory {
+  const interruption = getLatestStoredThreadEventOfTypes(db, {
+    threadId,
+    types: ["system/thread/interrupted", "system/error", "turn/started"],
+    afterSequence: 0,
+  });
+  if (interruption?.type === "system/thread/interrupted") {
+    let data: unknown = null;
+    try {
+      data = JSON.parse(interruption.data);
+    } catch {}
+    const parsed = systemThreadInterruptedEventDataSchema.safeParse(data).data;
+    const reason = parsed?.cause ?? parsed?.reason;
+    if (reason === "host-daemon-restarted" || reason === "host-connection-lost")
+      return "host_lost";
+  }
   const latest = getLatestStoredThreadEventOfTypes(db, {
     threadId,
     types: ["system/error", "turn/started"],
