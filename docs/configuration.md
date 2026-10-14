@@ -156,6 +156,42 @@ Two things read that file:
 Both confirm that the recorded process really is a bb launcher before they
 signal it, so a stale file left by a crash cannot stop an unrelated process.
 
+## The bb Command On PATH
+
+Settings → General → Command line has an **Install** button that installs the
+bb CLI for use outside bb: it puts the `bb` command on your PATH, so you, a
+script, or an agent running outside bb (such as Claude Code or Codex) can
+control bb with `bb thread list` and every other CLI command. Threads in bb
+already have `bb` on their PATH and need nothing. **Remove** takes it off again. Nothing changes your PATH until
+you choose Install. The CLI equivalent is `bb settings cli-command` (show),
+`bb settings cli-command install`, and `bb settings cli-command remove`; the
+SDK methods are `system.experimental_cliCommand()`,
+`system.experimental_installCliCommand()`, and
+`system.experimental_removeCliCommand()`, over
+`GET /api/v1/system/cli-command` and `POST .../install` and `.../remove`.
+
+- Every start of an installed bb (`npx bb-app` or the desktop app) writes a
+  small launcher to `<dataDir>/bin/bb` (`bb.cmd` on Windows). It runs the bb
+  CLI of the install that started last, with that install's own Node runtime,
+  so the desktop app needs no separate Node. After bb moves or updates, start
+  it once to refresh the launcher. Source checkouts (`pnpm start`, `pnpm dev`)
+  write no launcher and do not show the setting.
+- Install acts on the computer that runs the bb server. On macOS and Linux it
+  links the launcher into the first usable folder of `/opt/homebrew/bin` and
+  `/usr/local/bin` (macOS only), `~/.local/bin`, and `~/bin`, preferring one
+  already on your PATH. If the folder is not on your PATH, the setting says so.
+  On Windows it appends `<dataDir>\bin` to your user PATH.
+- bb never replaces another `bb`. If one already comes first on your PATH
+  (for example a global `npm install -g bb-app`, the `~/.local/bin/bb` a bb
+  machine install added, or Babashka), the setting names it and Install is
+  refused with `409 cli_command_blocked`.
+- Remove deletes only links that point at a bb launcher, or the
+  `<dataDir>\bin` PATH entry on Windows.
+- Machine credentials cannot install or remove the command.
+
+`BB_CLI_LAUNCHER` is an internal path the launcher passes to its server child;
+do not set it yourself.
+
 ## In-App Updates
 
 In-app updates are on when you start bb with `npx bb-app start` (or a global
@@ -2233,3 +2269,16 @@ plugin database. See the [Prompt Library skill](../plugins/prompt-library/skills
 for CLI and SDK commands.
 
 Plugin capability usage passes through shared CLI, agent-tool, classified RPC action and explicit panel-open boundaries. Plugin RPC contracts may set `experimental_usage: "action"` or `"query"`; unclassified methods are excluded rather than guessed from names. `bb.experimental_withFeatureUse({ trigger }, run)` covers actual background work outside those boundaries, including scheduled automations. Polling, load, registration and restored panels do not count. Nested plugin RPC and core SDK calls are attributed to the outer plugin invocation. The server derives `builtin`, `public_catalog`, `private_marketplace`, `local` or `unknown` from installed provenance, including development overrides; the new event contains no plugin identifiers, names or URLs.
+
+## MCP server
+
+The bundled MCP server plugin is disabled by default. Enable it in
+Settings → Plugins or with `bb plugin enable bb--mcp`. While it is enabled, bb
+serves a Model Context Protocol endpoint at `/mcp` on its bb connect address
+and at `/api/v1/plugins/bb--mcp/http/mcp` on the loopback address.
+`bb mcp status` prints both. Remote apps sign in through the bb account, and
+an approved app can run any `bb` command; `bb mcp clients` lists them and
+`bb mcp revoke <grant-id>` disconnects one. The local address needs no
+sign-in and has the same trust as the `bb` CLI on that machine. See the
+[MCP skill](../plugins/mcp/skills/mcp/SKILL.md) for the tools and the few
+commands that cannot run over MCP.
