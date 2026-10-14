@@ -58,6 +58,7 @@ const PROMPT_STACK_ACTIVE_ROW_CLASS = "shadow-none ring-0";
 const PROMPT_STACK_ACTIVE_ICON_CLASS = "text-foreground";
 const PROMPT_STACK_ACTIVE_TEXT_CLASS = "font-medium text-foreground";
 const PROMPT_STACK_ACTIVE_AGENT_TEXT_CLASS = "text-foreground";
+const PROMPT_STACK_FLAT_ROW_CLASS = "bg-transparent px-2 py-0.5 ring-0";
 
 function isSettledAgentState(state: WorkflowProgressAgentState): boolean {
   return (
@@ -194,8 +195,24 @@ function promptStackActivityRowClass(
 ): string {
   return activityRowClass(
     state,
-    cn(state === "active" && PROMPT_STACK_ACTIVE_ROW_CLASS, className),
+    cn(
+      state === "active" && PROMPT_STACK_ACTIVE_ROW_CLASS,
+      state === "failed" && PROMPT_STACK_FLAT_ROW_CLASS,
+      className,
+    ),
   );
+}
+
+function promptStackAgentFlags(
+  agent: WorkflowProgressAgent,
+  displayState: WorkflowAgentDisplayState,
+): string {
+  const flags: string[] = [];
+  if (agent.attempt > 1) flags.push(`attempt ${agent.attempt}`);
+  if (agent.cached) flags.push("cached");
+  if (displayState === "interrupted") flags.push("stopped");
+  if (displayState === "cancelled") flags.push("cancelled");
+  return flags.join(" · ");
 }
 
 function promptStackActivityIconClass(
@@ -242,6 +259,7 @@ function WorkflowAgentLine({
   const displayState = deriveAgentDisplayState(agent, workflowSettled);
   const activityState = activityStateForAgent(displayState);
   const stats = buildAgentStats(agent, displayState);
+  const flags = promptStack ? promptStackAgentFlags(agent, displayState) : "";
   const content = (
     <>
       <WorkflowAgentStateIcon
@@ -268,7 +286,11 @@ function WorkflowAgentLine({
                   : "text-muted-foreground",
               )
         }
-        title={agent.label}
+        title={
+          promptStack && stats.meta !== ""
+            ? `${agent.label} · ${stats.meta}`
+            : agent.label
+        }
       >
         {agent.label}
       </span>
@@ -277,21 +299,32 @@ function WorkflowAgentLine({
           — {agent.error}
         </span>
       ) : null}
-      <span className="ml-auto flex shrink-0 items-baseline gap-2">
-        {stats.meta === "" ? null : (
-          <span
-            className="whitespace-nowrap font-mono text-2xs text-subtle-foreground/80"
-            title={stats.meta}
-          >
-            {stats.meta}
-          </span>
-        )}
-        {stats.duration === null ? null : (
-          <span className="min-w-9 whitespace-nowrap text-right text-xs tabular-nums text-subtle-foreground">
-            {stats.duration}
-          </span>
-        )}
-      </span>
+      {promptStack ? (
+        <span className="ml-auto flex shrink-0 items-baseline gap-2 text-2xs tabular-nums text-subtle-foreground">
+          {flags === "" ? null : (
+            <span className="whitespace-nowrap">{flags}</span>
+          )}
+          {stats.duration === null ? null : (
+            <span className="whitespace-nowrap">{stats.duration}</span>
+          )}
+        </span>
+      ) : (
+        <span className="ml-auto flex shrink-0 items-baseline gap-2">
+          {stats.meta === "" ? null : (
+            <span
+              className="whitespace-nowrap font-mono text-2xs text-subtle-foreground/80"
+              title={stats.meta}
+            >
+              {stats.meta}
+            </span>
+          )}
+          {stats.duration === null ? null : (
+            <span className="min-w-9 whitespace-nowrap text-right text-xs tabular-nums text-subtle-foreground">
+              {stats.duration}
+            </span>
+          )}
+        </span>
+      )}
     </>
   );
   const className = promptStack
