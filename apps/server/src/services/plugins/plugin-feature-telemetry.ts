@@ -14,14 +14,16 @@ import { captureFeatureUsed } from "../system/feature-telemetry.js";
 import type { PluginServiceDeps } from "./plugin-service-internal.js";
 
 const invocation = new AsyncLocalStorage<TelemetryTrigger>();
-const capabilities: Readonly<Record<string, CoreFeature>> = {
+export const BUILTIN_PLUGIN_CAPABILITIES: Readonly<
+  Record<string, CoreFeature>
+> = {
   automations: "automation",
   "browser-automation": "browser",
   connect: "remote_access",
   "push-notifications": "remote_access",
   github: "git",
   "monaco-editor": "file",
-  docs: "file",
+  "simple-notes": "file",
   "side-chat": "child_thread",
   tasks: "thread",
   workflows: "child_thread",
@@ -29,11 +31,12 @@ const capabilities: Readonly<Record<string, CoreFeature>> = {
   "keep-awake": "settings",
   "thread-list": "settings",
   "theme-preview": "settings",
-  "storage-retention": "settings",
+  "bb--storage-retention": "settings",
   "bb-account": "settings",
   "bb-ai": "provider",
   "account-pool": "provider",
-  "provider-usage": "provider",
+  "bb--provider-usage": "provider",
+  "bb--provider-acp-next": "provider",
   "environment-git-worktree": "environment",
   "environment-project-checkout": "environment",
   "environment-personal-workspace": "environment",
@@ -79,7 +82,7 @@ export function capturePluginUse(
     }
     const feature =
       row.provenance === "builtin" && row.sourceKind === "builtin"
-        ? (capabilities[pluginId] ??
+        ? (BUILTIN_PLUGIN_CAPABILITIES[pluginId] ??
           (pluginId.startsWith("provider-") ? "provider" : "plugin"))
         : "plugin";
     captureFeatureUsed(deps.telemetry, {
