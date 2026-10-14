@@ -8,9 +8,9 @@ import {
   linkedCell,
   price,
 } from "../compare-content";
-import { SPAWN_COPY, spawnSection } from "../compare-sections";
+import { AGENTS_COPY, agentsSection } from "../compare-sections";
 import type { Comparison } from "../compare-types";
-import { AgentSplit } from "../compare-visuals";
+import { FleetVisual } from "../compare-visuals";
 import { meta } from "./devin.meta";
 
 export const comparison: Comparison = {
@@ -20,7 +20,7 @@ export const comparison: Comparison = {
     "Compare bb and Devin. Run Claude Code, Codex, and other coding agents together in a free, open-source workspace, using your existing AI plans.",
   headline: "The open-source Devin alternative",
   sub: "Bring Claude Code, Codex, and your existing AI plans. Let your agents work together in one free workspace you can make your own.",
-  heroVisual: <AgentSplit />,
+  heroVisual: <FleetVisual />,
   tailored: {
     title: "Keep the agents you already trust",
     body: (
@@ -40,7 +40,7 @@ export const comparison: Comparison = {
     visual: null,
     wide: true,
   },
-  sections: [spawnSection(SPAWN_COPY)],
+  sections: [agentsSection(AGENTS_COPY)],
   tableNote: null,
   table: [
     {
