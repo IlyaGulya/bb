@@ -13,6 +13,7 @@ import {
   turnFinishedOutcome,
 } from "../../src/services/system/turn-telemetry.js";
 import { applyLoggedThreadLifecycleEvent } from "../../src/services/threads/lifecycle-outcome.js";
+import { interruptActiveThreadsForHost } from "../../src/services/threads/thread-lifecycle.js";
 import { internalAuthHeaders } from "../helpers/commands.js";
 import {
   seedEnvironment,
@@ -81,7 +82,7 @@ async function setup(
     capture.mock.calls
       .map(([event]) => event)
       .filter((event) => event.name === "turn_finished");
-  return { harness, session, thread, turnFinished };
+  return { harness, host, session, thread, turnFinished };
 }
 
 describe("turn_finished telemetry", () => {
@@ -223,6 +224,79 @@ describe("turn_finished telemetry", () => {
             },
           },
         ]),
+      );
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  it.each([
+    { reason: "host-daemon-restarted" as const, cause: undefined },
+    {
+      reason: "host-daemon-restarted" as const,
+      cause: "host-connection-lost" as const,
+    },
+  ])(
+    "reports a host interruption ($reason, $cause) as host_lost",
+    async ({ reason, cause }) => {
+      const { harness, host, turnFinished } = await setup();
+      try {
+        interruptActiveThreadsForHost(harness.deps, {
+          hostId: host.id,
+          includeStopping: false,
+          reason,
+          ...(cause ? { cause } : {}),
+        });
+        await vi.waitFor(() =>
+          expect(turnFinished()).toMatchObject([
+            {
+              properties: { outcome: "failed", error_category: "host_lost" },
+            },
+          ]),
+        );
+      } finally {
+        await harness.cleanup();
+      }
+    },
+  );
+
+  it("keeps a command failure after an earlier host interruption as start_failed", async () => {
+    const { harness, host, session, thread, turnFinished } = await setup();
+    try {
+      interruptActiveThreadsForHost(harness.deps, {
+        hostId: host.id,
+        includeStopping: false,
+        reason: "host-daemon-restarted",
+      });
+      applyLoggedThreadLifecycleEvent(harness.deps, {
+        event: { type: "run.preparing" },
+        threadId: thread.id,
+      });
+      const response = await postEventBatch(harness, session.id, [
+        {
+          threadId: thread.id,
+          event: {
+            type: "system/error",
+            threadId: thread.id,
+            scope: threadScope(),
+            code: "thread_command_failed",
+            message: "Command thread.start failed",
+          },
+        },
+      ]);
+      expect(response.status).toBe(200);
+      applyLoggedThreadLifecycleEvent(harness.deps, {
+        event: { type: "run.failed" },
+        threadId: thread.id,
+      });
+      await vi.waitFor(() =>
+        expect(
+          turnFinished().map((event) =>
+            event.name === "turn_finished"
+              ? event.properties.error_category
+              : null,
+          ),
+        ).toEqual(["host_lost", "start_failed"]),
       );
     } finally {
       await harness.cleanup();
