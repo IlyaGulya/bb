@@ -11,6 +11,12 @@ import {
 } from "./ThreadSecondaryPanelTabContent";
 import type { FilePreview } from "@bb/client-core";
 
+const projectPreviewQuery = vi.hoisted(() =>
+  vi.fn<
+    (_projectId: string, path: string) => ReturnType<typeof previewQuery>
+  >(),
+);
+
 function markdownPreview(path: string, url = `/content/${path}`): FilePreview {
   return {
     kind: "text",
@@ -46,8 +52,9 @@ vi.mock("@/hooks/queries/environment-queries", () => ({
 }));
 
 vi.mock("@/hooks/queries/project-queries", () => ({
-  useProjectFilePreview: (_projectId: string, path: string) =>
-    previewQuery(path),
+  useProjectFilePreview: projectPreviewQuery.mockImplementation(
+    (_projectId, path) => previewQuery(path),
+  ),
 }));
 
 vi.mock("@/hooks/queries/thread-queries", () => ({
@@ -73,6 +80,34 @@ afterEach(cleanup);
 function imageSrc(name: string): string | null {
   return screen.getByRole("img", { name }).getAttribute("src");
 }
+
+it("renders project HTML through the selected host's file route", () => {
+  projectPreviewQuery.mockReturnValueOnce({
+    ...previewQuery("docs/report.html"),
+    data: {
+      kind: "text",
+      content: "<!doctype html><h1>Report</h1>",
+      mimeType: "text/html",
+      path: "docs/report.html",
+      url: "/content/docs/report.html",
+    },
+  });
+  const view = render(
+    <ProjectFilePreviewTabContent
+      activePath="docs/report.html"
+      environmentId={null}
+      hostId="host_preview"
+      isPanelOpen
+      lineRange={null}
+      projectId="proj_preview"
+      rootPath="/workspace"
+    />,
+  );
+
+  expect(view.container.querySelector("iframe")?.getAttribute("src")).toBe(
+    "/api/v1/projects/proj_preview/hosts/host_preview/files/docs/report.html",
+  );
+});
 
 describe("secondary-panel Markdown image routing", () => {
   it("routes workspace images when the preview caller supplies no routing", () => {
