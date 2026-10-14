@@ -115,8 +115,23 @@ interface SkillTreeManifest {
   treeHash: string;
 }
 
+interface SkillTreeFile {
+  absolutePath: string;
+  ctimeMs: number;
+  mode: number;
+  mtimeMs: number;
+  path: string;
+  size: number;
+}
+
+interface CachedSkillTreeHash {
+  signature: string;
+  treeHash: string;
+}
+
 export class SkillTreeRegistry {
   readonly #rootsByHash = new Map<string, string>();
+  readonly #hashesByRoot = new Map<string, CachedSkillTreeHash>();
 
   register(treeHash: string, sourceRootPath: string): void {
     this.#rootsByHash.set(treeHash, sourceRootPath);
@@ -124,6 +139,24 @@ export class SkillTreeRegistry {
 
   resolve(treeHash: string): string | undefined {
     return this.#rootsByHash.get(treeHash);
+  }
+
+  readTreeHash(rootPath: string): string {
+    const files = collectSkillTreeFiles(rootPath);
+    const signature = files
+      .map((file) =>
+        [file.path, file.mode, file.size, file.mtimeMs, file.ctimeMs].join(
+          "\0",
+        ),
+      )
+      .join("\0\0");
+    const cached = this.#hashesByRoot.get(rootPath);
+    if (cached?.signature === signature) {
+      return cached.treeHash;
+    }
+    const treeHash = hashSkillTreeEntries(readSkillTreeFiles(files));
+    this.#hashesByRoot.set(rootPath, { signature, treeHash });
+    return treeHash;
   }
 }
 
@@ -221,18 +254,18 @@ interface SkillTreeTotals {
   files: number;
 }
 
-function collectSkillTreeEntries(
+function collectSkillTreeFiles(
   rootPath: string,
   currentPath = rootPath,
   depth = 0,
   totals: SkillTreeTotals = { bytes: 0, files: 0 },
-): SkillTreeEntry[] {
+): SkillTreeFile[] {
   if (depth > SKILL_TREE_LIMITS.maxDepth) {
     throw new Error(
       `Skill tree is nested deeper than ${SKILL_TREE_LIMITS.maxDepth} directories`,
     );
   }
-  const entries: SkillTreeEntry[] = [];
+  const files: SkillTreeFile[] = [];
   for (const entry of fs
     .readdirSync(currentPath, { withFileTypes: true })
     .sort(sortDirentsByName)) {
@@ -248,8 +281,8 @@ function collectSkillTreeEntries(
       throw new Error(`Skill tree contains a symlink: ${entryPath}`);
     }
     if (stat.isDirectory()) {
-      entries.push(
-        ...collectSkillTreeEntries(rootPath, entryPath, depth + 1, totals),
+      files.push(
+        ...collectSkillTreeFiles(rootPath, entryPath, depth + 1, totals),
       );
       continue;
     }
@@ -268,13 +301,24 @@ function collectSkillTreeEntries(
         `Skill tree is larger than ${SKILL_TREE_LIMITS.maxBytes / 1024 / 1024} MB`,
       );
     }
-    entries.push({
-      bytes: fs.readFileSync(entryPath),
+    files.push({
+      absolutePath: entryPath,
+      ctimeMs: stat.ctimeMs,
       mode: stat.mode & 0o777,
+      mtimeMs: stat.mtimeMs,
       path: normalizeRelativePath(path.relative(rootPath, entryPath)),
+      size: stat.size,
     });
   }
-  return entries;
+  return files;
+}
+
+function readSkillTreeFiles(files: readonly SkillTreeFile[]): SkillTreeEntry[] {
+  return files.map((file) => ({
+    bytes: fs.readFileSync(file.absolutePath),
+    mode: file.mode,
+    path: file.path,
+  }));
 }
 
 export function hashSkillTreeEntries(
@@ -298,7 +342,7 @@ export function hashSkillTreeEntries(
 }
 
 export function readSkillTreeManifest(rootPath: string): SkillTreeManifest {
-  const entries = collectSkillTreeEntries(rootPath);
+  const entries = readSkillTreeFiles(collectSkillTreeFiles(rootPath));
   return { entries, treeHash: hashSkillTreeEntries(entries) };
 }
 
@@ -385,9 +429,9 @@ function readSkillCandidate(
     return null;
   }
 
-  let manifest: SkillTreeManifest;
+  let treeHash: string;
   try {
-    manifest = readSkillTreeManifest(args.candidatePath);
+    treeHash = args.skillTreeRegistry.readTreeHash(args.candidatePath);
   } catch (error) {
     logInvalidSkill({
       ...args,
@@ -396,13 +440,13 @@ function readSkillCandidate(
     });
     return null;
   }
-  args.skillTreeRegistry.register(manifest.treeHash, args.candidatePath);
+  args.skillTreeRegistry.register(treeHash, args.candidatePath);
   return {
     kind: "tree",
     sourceType: args.sourceType,
     name: frontmatter.data.name,
     description: frontmatter.data.description,
-    treeHash: manifest.treeHash,
+    treeHash,
     entryPath: SKILL_FILE_NAME,
   };
 }

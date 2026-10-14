@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import fs from "node:fs";
 import {
   chmod,
   mkdir,
@@ -11,7 +12,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveBuiltinSkillsRootPath } from "../../src/services/skills/builtin-skills-copy.js";
 import {
   hashSkillTreeEntries,
@@ -168,6 +169,38 @@ describe("injected skill source discovery", () => {
     if (process.platform !== "win32") {
       await chmod(secondReference, 0o755);
       expect(readSkillTreeManifest(secondRoot).treeHash).not.toBe(baseline);
+    }
+  });
+
+  it("reuses a skill tree hash without reading contents until its files change", async () => {
+    const temp = await makeTempDir();
+    const rootPath = await writeSkill({ rootPath: temp, name: "cached-skill" });
+    const referencePath = path.join(rootPath, "notes.md");
+    await writeFile(referencePath, "first\n");
+    const registry = new SkillTreeRegistry();
+    const expectCurrentHash = () =>
+      expect(registry.readTreeHash(rootPath)).toBe(
+        readSkillTreeManifest(rootPath).treeHash,
+      );
+
+    expectCurrentHash();
+    const readFileSync = vi.spyOn(fs, "readFileSync");
+    try {
+      registry.readTreeHash(rootPath);
+      expect(readFileSync).not.toHaveBeenCalled();
+    } finally {
+      readFileSync.mockRestore();
+    }
+
+    await writeFile(referencePath, "second edit\n");
+    expectCurrentHash();
+    await writeFile(path.join(rootPath, "added.md"), "added\n");
+    expectCurrentHash();
+    await rm(path.join(rootPath, "added.md"));
+    expectCurrentHash();
+    if (process.platform !== "win32") {
+      await chmod(referencePath, 0o755);
+      expectCurrentHash();
     }
   });
 
