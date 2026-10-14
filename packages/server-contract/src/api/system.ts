@@ -100,9 +100,18 @@ export const systemExecutionOptionsQuerySchema = z
   .object({
     ...systemProviderHostQueryFields,
     providerId: z.string().min(1),
+    projectId: z.string().min(1),
   })
   .partial()
-  .superRefine(rejectMultipleWorkspaceSelectors);
+  .superRefine(rejectMultipleWorkspaceSelectors)
+  .superRefine((query, context) => {
+    if (query.projectId !== undefined && query.environmentId !== undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "projectId and environmentId are mutually exclusive",
+      });
+    }
+  });
 export type SystemExecutionOptionsQuery = z.infer<
   typeof systemExecutionOptionsQuerySchema
 >;
@@ -410,6 +419,24 @@ export const systemVersionQuerySchema = z.object({
   force: z.enum(["true", "false"]).optional(),
 });
 export type SystemVersionQuery = z.infer<typeof systemVersionQuerySchema>;
+
+export const systemCliCommandShadowSchema = z.object({
+  path: z.string().min(1),
+  source: z.enum(["machine", "npm", "other"]),
+});
+export type SystemCliCommandShadow = z.infer<
+  typeof systemCliCommandShadowSchema
+>;
+
+export const systemCliCommandStatusSchema = z.object({
+  installedPath: z.string().min(1).nullable(),
+  onPath: z.boolean(),
+  shadowedBy: systemCliCommandShadowSchema.nullable(),
+  supported: z.boolean(),
+});
+export type SystemCliCommandStatus = z.infer<
+  typeof systemCliCommandStatusSchema
+>;
 
 export const systemAppUpdateRevisionSchema = z.object({
   commit: z.string().nullable(),
