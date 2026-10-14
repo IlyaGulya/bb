@@ -412,3 +412,170 @@ export function AutoAdvance() {
     </StoryCard>
   );
 }
+
+const STATE_PROGRESS_AT = 1780540129098;
+
+function stateAgent(
+  index: number,
+  label: string,
+  state: WorkflowAgentState,
+  phase: WorkflowPhaseSnapshot | null,
+  extra: Partial<WorkflowAgentSnapshot> = {},
+): WorkflowAgentSnapshot {
+  const settled = state === "done" || state === "failed";
+  return {
+    index,
+    label,
+    state,
+    model: "opus",
+    attempt: 1,
+    cached: false,
+    lastProgressAt: STATE_PROGRESS_AT,
+    ...(phase ? { phaseIndex: phase.index, phaseTitle: phase.title } : {}),
+    queuedAt: STATE_PROGRESS_AT - 2_000,
+    ...(state === "queued" || state === "skipped"
+      ? {}
+      : { startedAt: STATE_PROGRESS_AT - 1_000, tokens: 48_300, toolCalls: 14 }),
+    ...(settled ? { durationMs: 132_000 } : {}),
+    ...extra,
+  };
+}
+
+function stateWorkflow(
+  name: string,
+  workflow: WorkflowProgressSnapshot | null,
+  extra: { error?: string; summary?: string } = {},
+) {
+  return workflowRow({
+    id: `thr_fixture:workflow:states:${name}`,
+    status: "pending",
+    taskStatus: "running",
+    workflowName: name,
+    description: name,
+    startedAt: Date.now() - 214_000,
+    workflow,
+    error: extra.error ?? null,
+    summary: extra.summary ?? null,
+  });
+}
+
+const reviewPhase = { index: 1, title: "Review" };
+const agentStatesWorkflow = stateWorkflow("agent-states", {
+  phases: [reviewPhase],
+  agents: [
+    stateAgent(1, "running-agent", "running", reviewPhase),
+    stateAgent(2, "done-agent", "done", reviewPhase),
+    stateAgent(3, "failed-agent", "failed", reviewPhase, {
+      error: "Tool call timed out",
+    }),
+    stateAgent(4, "retried-agent", "running", reviewPhase, { attempt: 2 }),
+    stateAgent(5, "cached-agent", "done", reviewPhase, { cached: true }),
+    stateAgent(6, "skipped-agent", "skipped", reviewPhase),
+    stateAgent(7, "queued-agent", "queued", reviewPhase),
+  ],
+});
+
+const donePhase = { index: 1, title: "Completed phase" };
+const failedPhase = { index: 2, title: "Phase with a failure" };
+const activePhase = { index: 3, title: "Active phase" };
+const upcomingPhase = { index: 4, title: "Upcoming phase" };
+const emptyPhase = { index: 5, title: "Not started phase" };
+const phaseStatesWorkflow = stateWorkflow("phase-states", {
+  phases: [donePhase, failedPhase, activePhase, upcomingPhase, emptyPhase],
+  agents: [
+    stateAgent(1, "collect-1", "done", donePhase),
+    stateAgent(2, "collect-2", "done", donePhase),
+    stateAgent(3, "check-1", "done", failedPhase),
+    stateAgent(4, "check-2", "failed", failedPhase, {
+      error: "Exited with code 1",
+    }),
+    stateAgent(5, "build-1", "running", activePhase),
+    stateAgent(6, "build-2", "queued", activePhase),
+    stateAgent(7, "ship-1", "queued", upcomingPhase),
+  ],
+});
+
+const unphasedWorkflow = stateWorkflow("unphased-agents", {
+  phases: [],
+  agents: [
+    stateAgent(1, "scout-1", "done", null),
+    stateAgent(2, "scout-2", "running", null),
+    stateAgent(3, "scout-3", "queued", null),
+  ],
+});
+
+const workflowErrorWorkflow = stateWorkflow(
+  "workflow-error",
+  {
+    phases: [reviewPhase],
+    agents: [stateAgent(1, "running-agent", "running", reviewPhase)],
+  },
+  { error: "Workflow script threw: phase 2 schema mismatch" },
+);
+
+const noProgressWorkflow = stateWorkflow("no-progress-yet", null, {
+  summary: "Starting workflow…",
+});
+
+const startingWorkflow = stateWorkflow("starting", {
+  phases: [
+    { index: 1, title: "Plan" },
+    { index: 2, title: "Build" },
+  ],
+  agents: [],
+});
+
+export function States() {
+  return (
+    <StoryCard>
+      <StoryRow
+        label="agent states"
+        hint="running, done, failed with error, retried, cached, skipped, queued — all in one phase"
+      >
+        <ResponsiveStage>
+          <ToggleableCard workflow={agentStatesWorkflow} />
+        </ResponsiveStage>
+      </StoryRow>
+      <StoryRow
+        label="phase states"
+        hint="completed (collapsed, check), failed (open), active (open, highlighted), upcoming (open, queued), not started (no agents, no chevron)"
+      >
+        <ResponsiveStage>
+          <ToggleableCard workflow={phaseStatesWorkflow} />
+        </ResponsiveStage>
+      </StoryRow>
+      <StoryRow
+        label="unphased agents"
+        hint="workflow without phases lists agents flat"
+      >
+        <ResponsiveStage>
+          <ToggleableCard workflow={unphasedWorkflow} />
+        </ResponsiveStage>
+      </StoryRow>
+      <StoryRow
+        label="workflow error"
+        hint="workflow-level error line below the phases"
+      >
+        <ResponsiveStage>
+          <ToggleableCard workflow={workflowErrorWorkflow} />
+        </ResponsiveStage>
+      </StoryRow>
+      <StoryRow
+        label="starting"
+        hint="phases declared, no agents spawned yet"
+      >
+        <ResponsiveStage>
+          <ToggleableCard workflow={startingWorkflow} />
+        </ResponsiveStage>
+      </StoryRow>
+      <StoryRow
+        label="no progress yet"
+        hint="no progress snapshot; shows the summary text only"
+      >
+        <ResponsiveStage>
+          <ToggleableCard workflow={noProgressWorkflow} />
+        </ResponsiveStage>
+      </StoryRow>
+    </StoryCard>
+  );
+}

@@ -57,6 +57,7 @@ const ACTIVE_PHASE_SCROLL_OFFSET = 12;
 const PROMPT_STACK_ACTIVE_ROW_CLASS = "shadow-none ring-0";
 const PROMPT_STACK_ACTIVE_ICON_CLASS = "text-foreground";
 const PROMPT_STACK_ACTIVE_TEXT_CLASS = "font-medium text-foreground";
+const PROMPT_STACK_ACTIVE_AGENT_TEXT_CLASS = "text-foreground";
 
 function isSettledAgentState(state: WorkflowProgressAgentState): boolean {
   return (
@@ -217,6 +218,16 @@ function promptStackActivityTextClass(
   return activityTextClass(state, className);
 }
 
+function promptStackAgentTextClass(
+  state: ActivityRowState,
+  className?: string,
+): string {
+  if (state === "active") {
+    return cn(PROMPT_STACK_ACTIVE_AGENT_TEXT_CLASS, className);
+  }
+  return activityTextClass(state, className);
+}
+
 function WorkflowAgentLine({
   agent,
   onActivate,
@@ -238,15 +249,15 @@ function WorkflowAgentLine({
         className={
           promptStack
             ? displayState === "running"
-              ? undefined
-              : promptStackActivityIconClass(activityState)
+              ? "size-3"
+              : promptStackActivityIconClass(activityState, "size-3")
             : undefined
         }
       />
       <span
         className={
           promptStack
-            ? promptStackActivityTextClass(
+            ? promptStackAgentTextClass(
                 activityState,
                 "min-w-0 truncate text-xs no-underline",
               )
@@ -287,7 +298,7 @@ function WorkflowAgentLine({
     ? promptStackActivityRowClass(
         activityState,
         cn(
-          "flex min-h-7 w-full min-w-0 items-center gap-2 text-left text-xs",
+          "flex min-h-6 w-full min-w-0 items-center gap-1.5 text-left text-xs",
           onActivate && "cursor-pointer hover:bg-state-hover",
         ),
       )
@@ -586,7 +597,9 @@ function CollapsiblePhaseSection({
         <PhaseCompletedBadge visible={activityState === "completed"} />
       </button>
       {expanded ? (
-        <div className="mt-1 flex min-w-0 flex-col">{agentLines}</div>
+        <div className="ml-3.5 mt-0.5 flex min-w-0 flex-col border-l border-border/60 pl-0.5">
+          {agentLines}
+        </div>
       ) : null}
     </div>
   );
@@ -667,7 +680,7 @@ export function WorkflowProgress({
     <div
       className={cn(
         "flex flex-col",
-        collapsiblePhases ? "gap-1.5" : "gap-1 py-1",
+        collapsiblePhases ? "gap-2" : "gap-1 py-1",
       )}
     >
       {collapsiblePhases ? (
