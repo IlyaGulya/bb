@@ -83,37 +83,6 @@ export interface ModelReasoningMenuProps {
   onStartHandoff: (() => void) | null;
 }
 
-const SINGLE_ROW_REASONING_LEVELS = 6;
-const SINGLE_ROW_REASONING_LABEL_BUDGET = 32;
-const WIDE_REASONING_LABEL_LENGTH = 12;
-const TWO_ROW_REASONING_GRID_CLASS_NAMES = [
-  "grid grid-cols-1 gap-1",
-  "grid grid-cols-2 gap-1",
-  "grid grid-cols-3 gap-1",
-] as const;
-
-function reasoningLadderClassName(
-  options: readonly PickerOption<ReasoningLevel>[],
-): string {
-  if (options.length <= SINGLE_ROW_REASONING_LEVELS) {
-    const labelLength = options.reduce(
-      (total, option) => total + option.label.length,
-      0,
-    );
-    if (labelLength <= SINGLE_ROW_REASONING_LABEL_BUDGET) {
-      return "flex flex-wrap gap-1";
-    }
-    return TWO_ROW_REASONING_GRID_CLASS_NAMES[
-      Math.ceil(options.length / 2) - 1
-    ];
-  }
-  return options.some(
-    (option) => option.label.length > WIDE_REASONING_LABEL_LENGTH,
-  )
-    ? "grid grid-cols-3 gap-1"
-    : "grid grid-cols-4 gap-1";
-}
-
 export function ModelReasoningMenu({
   listRef,
   providerId,
@@ -294,7 +263,7 @@ export function ModelReasoningMenu({
                   if (option) onReasoningSelect(option.value);
                 }}
                 disabled={selectionBlocked}
-                className={reasoningLadderClassName(reasoningOptions)}
+                className="flex flex-nowrap justify-start gap-1 overflow-x-auto"
               >
                 {reasoningOptions.map((option) => (
                   <ToggleGroupItem

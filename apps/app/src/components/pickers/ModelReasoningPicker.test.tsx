@@ -1458,7 +1458,7 @@ describe("ModelReasoningPicker service tiers", () => {
     expect(onAgentOptionChange).toHaveBeenLastCalledWith("depth", "shallow");
   });
 
-  it("keeps a short ladder on one row and lays out a crowded ladder as an even grid", () => {
+  it("keeps reasoning ladders on one scrollable row", () => {
     const levels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
     const layoutOf = (
       pickerReasoningOptions: readonly PickerOption<ReasoningLevel>[],
@@ -1480,7 +1480,7 @@ describe("ModelReasoningPicker service tiers", () => {
       return [classes.join(" "), speedWraps];
     };
 
-    expect(layoutOf(reasoningOptions)).toEqual(["flex flex-wrap", true]);
+    expect(layoutOf(reasoningOptions)).toEqual(["flex flex-nowrap", true]);
     const standardLadder = [
       { value: "low", label: "Low" },
       { value: "medium", label: "Medium" },
@@ -1488,25 +1488,25 @@ describe("ModelReasoningPicker service tiers", () => {
       { value: "xhigh", label: "Extra High" },
       { value: "max", label: "Max" },
     ];
-    expect(layoutOf(standardLadder)).toEqual(["flex flex-wrap", true]);
+    expect(layoutOf(standardLadder)).toEqual(["flex flex-nowrap", true]);
     expect(
       layoutOf([...standardLadder, { value: "ultra", label: "Ultra" }]),
-    ).toEqual(["flex flex-wrap", true]);
+    ).toEqual(["flex flex-nowrap", true]);
     expect(
       layoutOf([
         ...standardLadder.slice(0, 4),
         { value: "ultracode", label: "Ultracode" },
         { value: "max", label: "Max" },
       ]),
-    ).toEqual(["grid grid-cols-3", true]);
+    ).toEqual(["flex flex-nowrap", true]);
     expect(
       layoutOf(levels.map((level) => ({ value: level, label: level }))),
-    ).toEqual(["grid grid-cols-4", true]);
+    ).toEqual(["flex flex-nowrap", true]);
     expect(
       layoutOf(
         levels.map((level) => ({ value: level, label: `Thinking: ${level}` })),
       ),
-    ).toEqual(["grid grid-cols-3", true]);
+    ).toEqual(["flex flex-nowrap", true]);
   });
 
   it("shows no agent options when the provider reports none", () => {
