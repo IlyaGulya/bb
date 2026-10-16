@@ -3,7 +3,6 @@ import {
   useCallback,
   useEffect,
   useRef,
-  useState,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -82,93 +81,6 @@ export interface ModelReasoningMenuProps {
   agentSections: readonly SessionOptionMenuSection[];
   onAgentOptionChange: (optionId: string, value: SessionOptionChoice) => void;
   onStartHandoff: (() => void) | null;
-}
-
-function ReasoningScrollRow({ children }: { children: ReactNode }) {
-  const rowRef = useRef<HTMLDivElement>(null);
-  const viewportRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [overflow, setOverflow] = useState({
-    left: false,
-    right: false,
-    any: false,
-  });
-
-  useEffect(() => {
-    const row = rowRef.current;
-    const viewport = viewportRef.current;
-    const content = contentRef.current;
-    if (!row || !viewport || !content) return;
-
-    const measure = () => {
-      const any = content.scrollWidth > row.clientWidth + 1;
-      const left = any && viewport.scrollLeft > 1;
-      const right =
-        any &&
-        viewport.scrollLeft + viewport.clientWidth < viewport.scrollWidth - 1;
-      setOverflow((previous) =>
-        previous.any === any &&
-        previous.left === left &&
-        previous.right === right
-          ? previous
-          : { any, left, right },
-      );
-    };
-    const observer = new ResizeObserver(measure);
-    observer.observe(row);
-    observer.observe(viewport);
-    observer.observe(content);
-    viewport.addEventListener("scroll", measure, { passive: true });
-    measure();
-    return () => {
-      observer.disconnect();
-      viewport.removeEventListener("scroll", measure);
-    };
-  }, []);
-
-  const scrollButton = (direction: "left" | "right") =>
-    overflow.any ? (
-      <button
-        type="button"
-        aria-label={`Scroll reasoning options ${direction}`}
-        disabled={!overflow[direction]}
-        onClick={() => {
-          const viewport = viewportRef.current;
-          if (!viewport) return;
-          viewport.scrollBy({
-            left: (direction === "left" ? -1 : 1) * viewport.clientWidth * 0.8,
-            behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
-              .matches
-              ? "instant"
-              : "smooth",
-          });
-        }}
-        className="flex h-6 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-state-hover hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent max-md:pointer-coarse:h-9 max-md:pointer-coarse:w-8"
-      >
-        <Icon
-          name={direction === "left" ? "ChevronLeft" : "ChevronRight"}
-          className="size-3.5"
-        />
-      </button>
-    ) : null;
-
-  return (
-    <div ref={rowRef} className="flex items-center [contain:inline-size]">
-      {scrollButton("left")}
-      <div
-        ref={viewportRef}
-        className="no-scrollbar min-w-0 flex-1 overflow-x-auto"
-        style={{
-          maskImage: `linear-gradient(to right, ${overflow.left ? "transparent, black 1rem" : "black"}, ${overflow.right ? "black calc(100% - 1rem), transparent" : "black"})`,
-        }}
-      >
-        <div ref={contentRef} className="w-max min-w-full">
-          {children}
-        </div>
-      </div>
-      {scrollButton("right")}
-    </div>
-  );
 }
 
 export function ModelReasoningMenu({
@@ -340,38 +252,36 @@ export function ModelReasoningMenu({
               <MenuSectionLabel className="mb-2 px-1 py-0">
                 Reasoning
               </MenuSectionLabel>
-              <ReasoningScrollRow>
-                <ToggleGroup
-                  type="single"
-                  aria-label="Reasoning"
-                  value={reasoningValue}
-                  onValueChange={(value) => {
-                    const option = reasoningOptions.find(
-                      (candidate) => candidate.value === value,
-                    );
-                    if (option) onReasoningSelect(option.value);
-                  }}
-                  disabled={selectionBlocked}
-                  className="flex flex-nowrap justify-start gap-1"
-                >
-                  {reasoningOptions.map((option) => (
-                    <ToggleGroupItem
-                      key={option.value}
-                      value={option.value}
-                      aria-label={option.label}
-                      className={cn(
-                        "h-6 min-w-0 flex-auto shrink-0 whitespace-nowrap rounded-sm px-1 text-xs font-normal shadow-none hover:bg-state-hover hover:text-foreground data-[state=on]:bg-state-active data-[state=on]:text-foreground data-[state=on]:hover:bg-state-active",
-                        "max-md:pointer-coarse:h-9 max-md:pointer-coarse:text-sm",
-                        LIST_HOVER_TRANSITION,
-                      )}
-                    >
-                      <span className="min-w-0 truncate" title={option.label}>
-                        {option.label}
-                      </span>
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </ReasoningScrollRow>
+              <ToggleGroup
+                type="single"
+                aria-label="Reasoning"
+                value={reasoningValue}
+                onValueChange={(value) => {
+                  const option = reasoningOptions.find(
+                    (candidate) => candidate.value === value,
+                  );
+                  if (option) onReasoningSelect(option.value);
+                }}
+                disabled={selectionBlocked}
+                className="no-scrollbar flex flex-nowrap justify-start gap-1 overflow-x-auto [contain:inline-size]"
+              >
+                {reasoningOptions.map((option) => (
+                  <ToggleGroupItem
+                    key={option.value}
+                    value={option.value}
+                    aria-label={option.label}
+                    className={cn(
+                      "h-6 min-w-0 flex-auto shrink-0 whitespace-nowrap rounded-sm px-1 text-xs font-normal shadow-none hover:bg-state-hover hover:text-foreground data-[state=on]:bg-state-active data-[state=on]:text-foreground data-[state=on]:hover:bg-state-active",
+                      "max-md:pointer-coarse:h-9 max-md:pointer-coarse:text-sm",
+                      LIST_HOVER_TRANSITION,
+                    )}
+                  >
+                    <span className="min-w-0 truncate" title={option.label}>
+                      {option.label}
+                    </span>
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
             </div>
           </>
         ) : null}
