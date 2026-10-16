@@ -1509,6 +1509,65 @@ describe("ModelReasoningPicker service tiers", () => {
     ).toEqual(["flex flex-nowrap", true]);
   });
 
+  it("enables scroll arrows only toward hidden reasoning options", () => {
+    renderPicker();
+    openPicker();
+    const group = screen.getByRole("radiogroup", { name: "Reasoning" });
+    const content = group.parentElement!;
+    const viewport = content.parentElement!;
+    const row = viewport.parentElement!;
+    expect(
+      screen.queryByRole("button", { name: "Scroll reasoning options right" }),
+    ).toBeNull();
+
+    Object.defineProperty(row, "clientWidth", {
+      configurable: true,
+      value: 240,
+    });
+    Object.defineProperty(content, "scrollWidth", {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 200 },
+      scrollWidth: { configurable: true, value: 400 },
+      scrollLeft: { configurable: true, value: 0, writable: true },
+    });
+    fireEvent.scroll(viewport);
+    const left = screen.getByRole<HTMLButtonElement>("button", {
+      name: "Scroll reasoning options left",
+    });
+    const right = screen.getByRole<HTMLButtonElement>("button", {
+      name: "Scroll reasoning options right",
+    });
+    expect(left.disabled).toBe(true);
+    expect(right.disabled).toBe(false);
+
+    const scrollBy = vi.fn();
+    Object.defineProperty(viewport, "scrollBy", { value: scrollBy });
+    fireEvent.click(right);
+    expect(scrollBy).toHaveBeenCalledWith(
+      expect.objectContaining({ left: expect.any(Number) }),
+    );
+    expect(scrollBy.mock.calls[0][0].left).toBeGreaterThan(0);
+
+    viewport.scrollLeft = 200;
+    fireEvent.scroll(viewport);
+    expect(left.disabled).toBe(false);
+    expect(right.disabled).toBe(true);
+    fireEvent.click(left);
+    expect(scrollBy.mock.lastCall?.[0].left).toBeLessThan(0);
+
+    Object.defineProperty(row, "clientWidth", { value: 500 });
+    fireEvent.scroll(viewport);
+    expect(
+      screen.queryByRole("button", { name: "Scroll reasoning options right" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Scroll reasoning options left" }),
+    ).toBeNull();
+  });
+
   it("shows no agent options when the provider reports none", () => {
     renderPicker();
     openPicker();
