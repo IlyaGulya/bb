@@ -1047,7 +1047,6 @@ export function ModelReasoningPicker({
         className={cn(
           "flex min-h-0 flex-col p-0",
           MODEL_PICKER_MENU_WIDTH_CLASS_NAME,
-          "max-w-[calc(100vw-1rem)]",
           isCompactViewport
             ? "flex-1 overflow-y-hidden"
             : "max-h-[min(var(--radix-popover-content-available-height),calc(100dvh-0.5rem))] overflow-hidden",

@@ -263,7 +263,7 @@ export function ModelReasoningMenu({
                   if (option) onReasoningSelect(option.value);
                 }}
                 disabled={selectionBlocked}
-                className="flex flex-nowrap justify-start gap-1 overflow-x-auto"
+                className="flex flex-nowrap justify-start gap-1 overflow-x-auto [contain:inline-size]"
               >
                 {reasoningOptions.map((option) => (
                   <ToggleGroupItem
