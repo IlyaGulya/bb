@@ -63,20 +63,22 @@ interface WorkspaceRootWatchSpecArgs {
 function runGitIgnoredMatchingStatus(
   args: GitStatusCommandArgs,
 ): Promise<GitStatusCommandResult> {
+  const gitArgs = [
+    "--no-optional-locks",
+    "status",
+    "--porcelain=v1",
+    "-z",
+    "--ignored=matching",
+    "--untracked-files=normal",
+  ];
   return runVcsProcess(
     "git",
+    gitArgs,
     () =>
       new Promise<GitStatusCommandResult>((resolve, reject) => {
         execFile(
           "git",
-          [
-            "--no-optional-locks",
-            "status",
-            "--porcelain=v1",
-            "-z",
-            "--ignored=matching",
-            "--untracked-files=normal",
-          ],
+          gitArgs,
           {
             cwd: args.cwd,
             encoding: "utf8",
