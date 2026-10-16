@@ -34,12 +34,12 @@ import { useAppCommandShortcut } from "@/components/commands/AppCommandProvider"
 import {
   CHROME_ROW_HEIGHT_CLASS,
   getBbDesktopInfo,
-  MACOS_CHROME_CONTROL_AXIS_CLASS,
   MACOS_WINDOW_DRAG_CLASS,
   shouldUseMacosDesktopChrome,
 } from "@/lib/bb-desktop";
 import { getRootComposeRoutePath } from "@/lib/route-paths";
 import { NAV_RAIL_WIDTH_CLASS } from "./navRailWidth";
+import { useSidebarHeaderControlAxisClass } from "./SidebarChrome";
 import { SidebarNavigationCustomize } from "./SidebarNavigationCustomize";
 import {
   SidebarNavigationIcon,
@@ -311,11 +311,11 @@ export function AppNavRail({
       <nav
         aria-label="Primary navigation"
         className={cn(
-          "flex min-h-0 flex-1 flex-col items-center gap-2.5 pb-2",
-          isFramed && "pt-2",
+          "flex min-h-0 flex-1 flex-col items-center gap-1 pb-2",
+          isFramed && "pt-2.5",
         )}
       >
-        <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-2.5 overflow-y-auto py-0.5 [scrollbar-width:none]">
+        <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-0.5 [scrollbar-width:none]">
           <Popover
             open={customize.isOpen}
             onOpenChange={customize.onOpenChange}
@@ -388,7 +388,7 @@ export function NavRailSettingsButton({
         settingsShortcut ? `Settings (${settingsShortcut.label})` : "Settings"
       }
       active={isSettingsActive}
-      className="h-8 max-md:pointer-coarse:h-9"
+      className="my-1 max-md:pointer-coarse:my-0"
       aria-keyshortcuts={settingsShortcut?.ariaKeyshortcuts}
       onClick={() => {
         if (!isSettingsActive) void navigate(settingsRoutePath);
@@ -402,7 +402,7 @@ export function NavRailSettingsButton({
 export function NavRailNewThreadButton() {
   const { items, actions, isShortcutModifierHeld } = useSidebarNavigation();
   const split = useSidebarNavigationSplit(NEW_THREAD_NAVIGATION_ITEM_ID);
-  const [desktopInfo] = useState(getBbDesktopInfo);
+  const axisClass = useSidebarHeaderControlAxisClass();
   const item = items.find(
     (candidate) => candidate.action.kind === "new-thread",
   );
@@ -417,8 +417,7 @@ export function NavRailNewThreadButton() {
       className={cn(
         PROJECT_LIST_ACTION_BUTTON_CLASS,
         "w-auto flex-1",
-        shouldUseMacosDesktopChrome(desktopInfo) &&
-          MACOS_CHROME_CONTROL_AXIS_CLASS,
+        axisClass,
       )}
       disabled={item.isDisabled}
       aria-keyshortcuts={item.shortcut?.ariaKeyShortcuts}

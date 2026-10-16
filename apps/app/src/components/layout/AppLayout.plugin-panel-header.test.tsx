@@ -12,7 +12,6 @@ import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppLayout } from "./AppLayout";
-import { useWindowRightPanel } from "./WindowRightPanelToggle";
 import { APP_OVERLAY_LAYER } from "@/components/ui/app-overlay-layers";
 import {
   COMPACT_SHELF_HIDDEN_FIXED_CHROME_CLASS,
@@ -43,6 +42,7 @@ vi.mock("@/hooks/queries/system-queries", () => ({
         changelogPreview: false,
         serverMove: false,
         performanceDiagnostics: false,
+        timelinePush: false,
       },
     },
   }),
@@ -129,6 +129,9 @@ vi.mock("@/lib/bb-desktop", () => ({
   DEFAULT_DESKTOP_WINDOW_STATE: { isFullScreen: false },
   MACOS_CHROME_CONTROL_AXIS_CLASS: "",
   MACOS_CHROME_CONTROL_NO_DRAG_CLASS: "",
+  MACOS_TITLE_BAR_CONTROL_AXIS_CLASS: "",
+  MACOS_TITLE_BAR_CONTROL_SIZE_CLASS: "",
+  MACOS_TITLE_BAR_PINNED_TOGGLE_CLASS: "",
   MACOS_TRAFFIC_LIGHT_RESERVE_OFFSET_CLASS: "",
   MACOS_TRAFFIC_LIGHT_RESERVE_PADDING_CLASS: "",
   MACOS_WINDOW_DRAG_CLASS: "",
@@ -178,6 +181,7 @@ vi.mock("@/hooks/queries/sidebar-navigation-query", () => ({
 }));
 
 vi.mock("@/hooks/queries/thread-queries", () => ({
+  useArchivedThreads: () => ({ data: undefined }),
   didThreadDetailBootstrapRefreshAfterMount: () => true,
   useThread: () => ({ data: undefined }),
   useThreadDetailBootstrap: () => ({ isError: false, isSuccess: true }),
@@ -297,56 +301,10 @@ describe("AppLayout plugin panel header", () => {
     expect(screen.queryByTestId("app-desktop-sidebar-trigger")).toBeNull();
   });
 
-  it("adds the right panel toggle to the macOS title bar row only while a page has a right panel", () => {
-    viewportState.macosChrome = true;
-    function RightPanelPage({ isOpen }: { isOpen: boolean }) {
-      useWindowRightPanel({ isOpen, enabled: true });
-      return null;
-    }
-    function renderRoute(page: ReactNode) {
-      return (
-        <MemoryRouter initialEntries={["/plugins/helm-wiki/wiki"]}>
-          <AppLayout>{page}</AppLayout>
-        </MemoryRouter>
-      );
-    }
-    const view = render(renderRoute(null));
-    expect(screen.queryByTestId("window-right-panel-toggle")).toBeNull();
-
-    view.rerender(renderRoute(<RightPanelPage isOpen={false} />));
-    const toggle = screen.getByTestId("window-right-panel-toggle");
-    expect(screen.getByTestId("app-window-title-bar").contains(toggle)).toBe(
-      true,
-    );
-    expect(toggle.getAttribute("aria-label")).toBe("Show right panel");
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-
-    view.rerender(renderRoute(<RightPanelPage isOpen />));
-    expect(
-      screen
-        .getByTestId("window-right-panel-toggle")
-        .getAttribute("aria-label"),
-    ).toBe("Hide right panel");
-
-    view.rerender(renderRoute(null));
-    expect(screen.queryByTestId("window-right-panel-toggle")).toBeNull();
-  });
-
   it("keeps the sidebar toggle in the rail column and no title bar on wide web, Windows, and Linux windows", () => {
-    function RightPanelPage() {
-      useWindowRightPanel({ isOpen: false, enabled: true });
-      return null;
-    }
-    render(
-      <MemoryRouter initialEntries={["/plugins/helm-wiki/wiki"]}>
-        <AppLayout>
-          <RightPanelPage />
-        </AppLayout>
-      </MemoryRouter>,
-    );
+    renderPluginPanelRoute();
 
     expect(screen.queryByTestId("app-window-title-bar")).toBeNull();
-    expect(screen.queryByTestId("window-right-panel-toggle")).toBeNull();
     expect(screen.getByTestId("app-sidebar-trigger-overlay")).toBeTruthy();
     expect(
       screen.getByTestId("app-layout-root").dataset.framed,

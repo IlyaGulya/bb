@@ -480,6 +480,7 @@ export const systemAppUpdateResultSchema = z.object({
 export type SystemAppUpdateResult = z.infer<typeof systemAppUpdateResultSchema>;
 
 export const systemAppUpdateStatusSchema = z.object({
+  desktopUpdateSupported: z.literal(true).optional(),
   activity: systemAppUpdateActivitySchema,
   available: systemAppUpdateAvailableSchema.nullable(),
   blocked: systemAppUpdateBlockedSchema.nullable(),

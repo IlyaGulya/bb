@@ -459,6 +459,14 @@ function loggedAcpRequests(path: string): LoggedAcpRequest[] {
     .map((line) => JSON.parse(line) as LoggedAcpRequest);
 }
 
+async function advanceBusyQuietTimer(): Promise<void> {
+  await waitFor(
+    () => (vi.getTimerCount() > 0 ? true : undefined),
+    "the busy-quiet timer to be scheduled",
+  );
+  await vi.advanceTimersByTimeAsync(2_000);
+}
+
 async function waitForTurnCompleted(): Promise<Record<string, unknown>> {
   return waitFor(
     () => threadEventsOfType("turn/completed").at(-1),
@@ -1261,11 +1269,49 @@ describe("acp bridge", () => {
     });
   });
 
-  it("falls back to the synthetic model when the list command prints no models", async () => {
-    const emptyId = sendModelList({ modelLines: "no model lines here" });
-    expect((await waitForResponse(emptyId)).result).toMatchObject({
-      models: [{ id: "acp-default", isDefault: true }],
+  it.each([
+    ["exits unsuccessfully", "process.exit(2)"],
+    ["prints no models", "process.stdout.write('no model lines here')"],
+    ["times out", "setInterval(() => {}, 1000)"],
+  ])(
+    "fails model/list when the configured command %s without a cached catalog",
+    async (_failure, script) => {
+      const failingId = sendModelList({
+        agent: { command: process.execPath, args: ["-e", script] },
+        modelListArgs: ["--"],
+      });
+      const response = await waitFor(
+        () => findResponse(failingId),
+        `response ${failingId}`,
+        40_000,
+      );
+      expect(response.error?.message).toBe(
+        "ACP model list command failed to provide a model catalog.",
+      );
+      expect(response.result).toBeUndefined();
+    },
+    45_000,
+  );
+
+  it("keeps the last good CLI catalog when the same command later fails", async () => {
+    const scriptPath = join(workspaceDir, "model-list.cjs");
+    writeFileSync(
+      scriptPath,
+      "process.stdout.write('cached-model - Cached Model\\n')",
+    );
+    const launch = {
+      agent: { command: process.execPath, args: [scriptPath] },
+      modelListArgs: ["--"],
+    };
+    const first = await waitForResponse(sendModelList(launch));
+    expect(first.result).toMatchObject({
+      models: [{ id: "cached-model", displayName: "Cached Model" }],
     });
+
+    writeFileSync(scriptPath, "process.exit(2)");
+    const second = await waitForResponse(sendModelList(launch));
+    expect(second.error).toBeUndefined();
+    expect(second.result).toEqual(first.result);
   });
 
   it("keeps CLI reasoning on the resolved model variant instead of ACP config", async () => {
@@ -2830,6 +2876,7 @@ describe("acp bridge", () => {
         rmSync(outsideDir, { recursive: true, force: true });
       }
     },
+    30_000,
   );
 
   it("rejects simultaneous starts while reconciling unchanged permissions", async () => {
@@ -4476,7 +4523,7 @@ describe("acp bridge: busy agents, restored sessions and stop reasons", () => {
       );
       expect(threadEventsOfType("turn/completed")).toEqual([]);
 
-      await vi.advanceTimersByTimeAsync(2_000);
+      await advanceBusyQuietTimer();
       expect(await waitForTurnCompleted()).toMatchObject({
         status: "completed",
       });
@@ -4508,7 +4555,9 @@ describe("acp bridge: busy agents, restored sessions and stop reasons", () => {
             loggedPrompts(promptLog).length === attempt ? true : undefined,
           `prompt attempt ${attempt}`,
         );
-        await vi.advanceTimersByTimeAsync(2_000);
+        if (attempt < 4) {
+          await advanceBusyQuietTimer();
+        }
       }
       expect(await waitForTurnCompleted()).toMatchObject({ status: "failed" });
       expect(loggedPrompts(promptLog)).toHaveLength(4);
