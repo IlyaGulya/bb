@@ -46,6 +46,11 @@ import {
 import { queueChildThreadTurnNotificationBestEffort } from "../services/threads/child-thread-notifications.js";
 import { isParentNotifiableChildThread } from "../services/threads/thread-parent.js";
 import {
+  continueAfterEnvironmentDirectoryUpdate,
+  findEnvironmentDirectoryContinuation,
+  type EnvironmentDirectoryContinuation,
+} from "../services/threads/environment-directory-continuation.js";
+import {
   runQueuedMessageDispatch,
   type QueuedMessageDispatchWake,
 } from "../services/threads/queued-message-dispatch.js";
@@ -254,7 +259,14 @@ interface QueuedMessageDispatchFollowUp {
   >;
 }
 
+interface EnvironmentDirectoryContinuationFollowUp {
+  kind: "environment-directory-continuation";
+  continuation: EnvironmentDirectoryContinuation;
+  threadId: string;
+}
+
 type EventEffectFollowUp =
+  | EnvironmentDirectoryContinuationFollowUp
   | ParentTurnNotificationFollowUp
   | QueuedMessageDispatchFollowUp;
 
@@ -514,6 +526,19 @@ async function applyEventEffects(
           event.status === "completed" &&
           turnCompleted.nextStatus === "idle"
         ) {
+          const continuation = turnCompleted.isRootTurnCompletion
+            ? findEnvironmentDirectoryContinuation(deps, {
+                threadId: entry.threadId,
+                turnId,
+              })
+            : null;
+          if (continuation) {
+            followUps.push({
+              kind: "environment-directory-continuation",
+              continuation,
+              threadId: entry.threadId,
+            });
+          }
           followUps.push({
             kind: "queued-message-dispatch",
             wake: { kind: "thread-ready", threadId: entry.threadId },
@@ -585,6 +610,12 @@ async function executeEventFollowUpBestEffort(
         return;
       case "queued-message-dispatch":
         await runQueuedMessageDispatch(deps, followUp.wake);
+        return;
+      case "environment-directory-continuation":
+        await continueAfterEnvironmentDirectoryUpdate(deps, {
+          ...followUp.continuation,
+          threadId: followUp.threadId,
+        });
         return;
     }
   } catch (error) {
