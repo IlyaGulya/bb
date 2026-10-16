@@ -7,6 +7,7 @@ import { cn } from "@bb/shared-ui/lib/utils";
 import {
   SidebarContent,
   useCloseMobileSidebar,
+  useIsSidebarFramed,
 } from "@/components/ui/sidebar.js";
 import {
   SidebarResizeHandle,
@@ -99,15 +100,18 @@ export function SectionSidebarLabel({ children }: { children: ReactNode }) {
 
 export function SectionSidebar({
   children,
+  headerSlot,
   isResizing,
   onResizeMouseDown,
   testIdPrefix,
 }: {
   children: ReactNode;
+  headerSlot?: ReactNode;
   isResizing: boolean;
   onResizeMouseDown: (event: ReactMouseEvent<HTMLDivElement>) => void;
   testIdPrefix: string;
 }) {
+  const isFramed = useIsSidebarFramed();
   return (
     <div
       data-testid={`${testIdPrefix}-sidebar-body`}
@@ -115,9 +119,27 @@ export function SectionSidebar({
     >
       <SidebarTopReserveRow
         testId={`${testIdPrefix}-sidebar-top-reserve-row`}
+        headerSlot={
+          headerSlot === undefined ? undefined : (
+            <div
+              data-sidebar-header-slot=""
+              className="flex h-full min-w-0 flex-1 items-center"
+            >
+              {headerSlot}
+            </div>
+          )
+        }
       />
       <SidebarContent>
-        <div className="min-w-0 px-2">{children}</div>
+        <div
+          className={cn(
+            "min-w-0 px-2 pb-2.5 max-md:pointer-coarse:pb-1.5",
+            isFramed &&
+              "pb-[max(0px,calc(var(--bb-macos-traffic-light-center-y)_-_var(--bb-window-frame-lip)_-_1px_-_var(--bb-sidebar-row-height)/2))]",
+          )}
+        >
+          {children}
+        </div>
       </SidebarContent>
       <SidebarResizeHandle
         testId={`${testIdPrefix}-sidebar-resize-handle`}

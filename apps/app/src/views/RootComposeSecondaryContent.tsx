@@ -11,6 +11,7 @@ import {
   CHROME_ROW_HEIGHT_CLASS,
   getBbDesktopInfo,
   MACOS_APP_REGION_NO_DRAG_CLASS,
+  MACOS_CHROME_CONTROL_AXIS_CLASS,
   MACOS_WINDOW_DRAG_CLASS,
   shouldUseMacosDesktopChrome,
 } from "@/lib/bb-desktop";
@@ -81,7 +82,7 @@ export function RootComposeSecondaryContent({
   const { renderBrowserDeck, ...threadSecondaryPanelProps } = secondaryPanel;
 
   const mainContent = (
-    <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+    <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden pt-(--bb-window-frame-top)">
       {rendersWindowDragStrip ? (
         <div
           data-testid="root-compose-main-window-drag-strip"
@@ -100,6 +101,7 @@ export function RootComposeSecondaryContent({
                 ROOT_COMPOSE_PINNED_PANEL_TOGGLE_POSITION_CLASS,
                 COARSE_POINTER_HEADER_ICON_BUTTON_CLASS,
                 MACOS_APP_REGION_NO_DRAG_CLASS,
+                MACOS_CHROME_CONTROL_AXIS_CLASS,
               )}
             />
           ) : null}
@@ -138,6 +140,7 @@ export function RootComposeSecondaryContent({
       <SecondaryPanelLayout
         open={isSecondaryPanelOpen}
         onToggle={onToggleSecondaryPanel}
+        onSwipeOpen={onToggleSecondaryPanel}
         onClose={threadSecondaryPanelProps.onClose}
         resetKey="new-thread"
         contentKey="new-thread"
@@ -169,6 +172,7 @@ export function RootComposeSecondaryContent({
             onToggleConversationCollapse={onToggleMainCollapse}
             showNewTabButton
             resizablePanelId={resizablePanelId}
+            isAtWindowTop={paneContext?.isTopRow !== false}
           />
         )}
       />

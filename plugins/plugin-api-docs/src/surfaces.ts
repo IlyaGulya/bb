@@ -656,6 +656,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         bullets: [
           "Declare text, number, toggle, choice, or project fields as data",
           "Get validation and autosave without extra code",
+          "Have each field found by Settings search through its label, key, or description",
           "Keep secret values on the server, never sent to the browser",
         ],
         apiSymbols: [
@@ -1378,7 +1379,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Use bb's own chat, prompt box, and pickers inside plugin pages. With this, a plugin can:",
         bullets: [
           "Embed a thread, a new-thread prompt box, or a textarea with editable voice input",
-          "Render Markdown, code, diffs, and file links, and copy text, the way bb does",
+          "Render Markdown, code, diffs, and file links, and copy text and save files, the way bb does",
           "Add or override app icons",
           "Match bb's styling with no extra work",
         ],
@@ -1408,6 +1409,9 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginCodeThemeState",
           "experimental_copyToClipboard",
           "ExperimentalClipboardContent",
+          "experimental_saveFile",
+          "ExperimentalSaveFileRequest",
+          "ExperimentalSaveFileOutcome",
           "UrlLink",
           "UrlLinkProps",
           "experimental_FileLink",
