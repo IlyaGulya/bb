@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "83926609-838b-47d0-8f88-7b3744649953",
+  "id": "d4b02fa4-a3e0-473f-bbc2-0cee3c0d4606",
   "prevId": "5d5a1cb9-1fe8-406a-920a-2734560120b2",
   "tables": {
     "app_settings": {
@@ -3614,6 +3614,13 @@
           "autoincrement": false,
           "default": false
         },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "send_at": {
           "name": "send_at",
           "type": "integer",
@@ -3751,11 +3758,20 @@
         "queued_thread_messages_due_idx": {
           "name": "queued_thread_messages_due_idx",
           "columns": [
+            "state",
             "send_at",
             "id"
           ],
-          "isUnique": false,
-          "where": "\"queued_thread_messages\".\"send_at\" IS NOT NULL AND \"queued_thread_messages\".\"claimed_at\" IS NULL AND \"queued_thread_messages\".\"claim_token\" IS NULL"
+          "isUnique": false
+        },
+        "queued_thread_messages_retry_idx": {
+          "name": "queued_thread_messages_retry_idx",
+          "columns": [
+            "state",
+            "next_attempt_at",
+            "id"
+          ],
+          "isUnique": false
         },
         "queued_thread_messages_wait_holder_idx": {
           "name": "queued_thread_messages_wait_holder_idx",
@@ -3784,7 +3800,28 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "queued_thread_messages_state_check": {
+          "name": "queued_thread_messages_state_check",
+          "value": "CASE \"queued_thread_messages\".\"state\"\n        WHEN 'claimed' THEN \"queued_thread_messages\".\"claimed_at\" IS NOT NULL\n        WHEN 'failed_retrying' THEN \"queued_thread_messages\".\"claimed_at\" IS NULL AND \"queued_thread_messages\".\"failure_reason\" IS NOT NULL AND \"queued_thread_messages\".\"next_attempt_at\" IS NOT NULL\n        WHEN 'failed_exhausted' THEN \"queued_thread_messages\".\"claimed_at\" IS NULL AND \"queued_thread_messages\".\"failure_reason\" IS NOT NULL AND \"queued_thread_messages\".\"next_attempt_at\" IS NULL\n        WHEN 'scheduled' THEN \"queued_thread_messages\".\"claimed_at\" IS NULL AND \"queued_thread_messages\".\"failure_reason\" IS NULL AND \"queued_thread_messages\".\"send_at\" IS NOT NULL\n        WHEN 'waiting' THEN \"queued_thread_messages\".\"claimed_at\" IS NULL AND \"queued_thread_messages\".\"failure_reason\" IS NULL AND \"queued_thread_messages\".\"send_at\" IS NULL AND \"queued_thread_messages\".\"waiting_on\" IS NOT NULL\n        WHEN 'queued' THEN \"queued_thread_messages\".\"claimed_at\" IS NULL AND \"queued_thread_messages\".\"failure_reason\" IS NULL AND \"queued_thread_messages\".\"send_at\" IS NULL AND \"queued_thread_messages\".\"waiting_on\" IS NULL\n        ELSE 0\n      END"
+        },
+        "queued_thread_messages_claim_check": {
+          "name": "queued_thread_messages_claim_check",
+          "value": "(\"queued_thread_messages\".\"claimed_at\" IS NULL) = (\"queued_thread_messages\".\"claim_token\" IS NULL)"
+        },
+        "queued_thread_messages_failure_check": {
+          "name": "queued_thread_messages_failure_check",
+          "value": "(\"queued_thread_messages\".\"failure_reason\" IS NULL AND \"queued_thread_messages\".\"failure_count\" = 0 AND \"queued_thread_messages\".\"next_attempt_at\" IS NULL)\n        OR (\"queued_thread_messages\".\"failure_reason\" IS NOT NULL AND \"queued_thread_messages\".\"failure_count\" > 0)"
+        },
+        "queued_thread_messages_schedule_check": {
+          "name": "queued_thread_messages_schedule_check",
+          "value": "\"queued_thread_messages\".\"send_at\" IS NULL OR \"queued_thread_messages\".\"waiting_on\" IS NOT NULL"
+        },
+        "queued_thread_messages_wait_holder_check": {
+          "name": "queued_thread_messages_wait_holder_check",
+          "value": "\"queued_thread_messages\".\"wait_holder\" IS (CASE WHEN json_extract(\"queued_thread_messages\".\"waiting_on\", '$.kind') = 'plugin' THEN 'plugin:' || json_extract(\"queued_thread_messages\".\"waiting_on\", '$.pluginId') END)"
+        }
+      }
     },
     "retained_event_outputs": {
       "name": "retained_event_outputs",
@@ -3874,202 +3911,6 @@
       },
       "indexes": {},
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "telemetry_messages": {
-      "name": "telemetry_messages",
-      "columns": {
-        "analytics_id": {
-          "name": "analytics_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "thread_id": {
-          "name": "thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "accepted_at": {
-          "name": "accepted_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "trigger": {
-          "name": "trigger",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "message_source": {
-          "name": "message_source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "telemetry_messages_thread_idx": {
-          "name": "telemetry_messages_thread_idx",
-          "columns": [
-            "thread_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "telemetry_messages_thread_id_threads_id_fk": {
-          "name": "telemetry_messages_thread_id_threads_id_fk",
-          "tableFrom": "telemetry_messages",
-          "tableTo": "threads",
-          "columnsFrom": [
-            "thread_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "telemetry_origins": {
-      "name": "telemetry_origins",
-      "columns": {
-        "thread_id": {
-          "name": "thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "message_ids": {
-          "name": "message_ids",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "telemetry_origins_thread_id_threads_id_fk": {
-          "name": "telemetry_origins_thread_id_threads_id_fk",
-          "tableFrom": "telemetry_origins",
-          "tableTo": "threads",
-          "columnsFrom": [
-            "thread_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "telemetry_origins_thread_id_kind_key_pk": {
-          "columns": [
-            "thread_id",
-            "kind",
-            "key"
-          ],
-          "name": "telemetry_origins_thread_id_kind_key_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "telemetry_threads": {
-      "name": "telemetry_threads",
-      "columns": {
-        "thread_id": {
-          "name": "thread_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "analytics_id": {
-          "name": "analytics_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "pending_request_id": {
-          "name": "pending_request_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "active_request_id": {
-          "name": "active_request_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "waiting": {
-          "name": "waiting",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        }
-      },
-      "indexes": {
-        "telemetry_threads_analytics_id_unique": {
-          "name": "telemetry_threads_analytics_id_unique",
-          "columns": [
-            "analytics_id"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "telemetry_threads_thread_id_threads_id_fk": {
-          "name": "telemetry_threads_thread_id_threads_id_fk",
-          "tableFrom": "telemetry_threads",
-          "tableTo": "threads",
-          "columnsFrom": [
-            "thread_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
