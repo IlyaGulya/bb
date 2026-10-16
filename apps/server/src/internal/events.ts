@@ -235,7 +235,7 @@ interface ResolveActivePruneCandidatesArgs {
 
 interface AddParentTurnNotificationFollowUpArgs {
   failedParentNotificationThreadIds: Set<string>;
-  followUps: EventEffectFollowUp[];
+  followUps: EventEffectFollowUp[] | ParentTurnNotificationFollowUp[];
   thread: NonNullable<ReturnType<typeof getThread>>;
   turnStatus: ThreadEventTurnStatus;
   interruption?: ChildThreadOutcome["interruption"];
@@ -262,6 +262,7 @@ interface QueuedMessageDispatchFollowUp {
 interface EnvironmentDirectoryContinuationFollowUp {
   kind: "environment-directory-continuation";
   continuation: EnvironmentDirectoryContinuation;
+  parentNotification: ParentTurnNotificationFollowUp | null;
   threadId: string;
 }
 
@@ -487,6 +488,17 @@ async function applyEventEffects(
           ...event,
           threadId: entry.threadId,
         });
+        const continuation =
+          event.status === "completed" &&
+          turnCompleted.nextStatus === "idle" &&
+          turnCompleted.isRootTurnCompletion
+            ? findEnvironmentDirectoryContinuation(deps, {
+                threadId: entry.threadId,
+                turnId,
+              })
+            : null;
+        const deferredParentNotifications: ParentTurnNotificationFollowUp[] =
+          [];
         if (
           turnCompleted.thread &&
           turnCompleted.isRootTurnCompletion &&
@@ -515,7 +527,7 @@ async function applyEventEffects(
           if (!alreadyHandledByCommandFailure && !manuallyStopped) {
             addParentTurnNotificationFollowUp({
               failedParentNotificationThreadIds,
-              followUps,
+              followUps: continuation ? deferredParentNotifications : followUps,
               thread: turnCompleted.thread,
               turnStatus: event.status,
               ...(interruption ? { interruption } : {}),
@@ -526,16 +538,11 @@ async function applyEventEffects(
           event.status === "completed" &&
           turnCompleted.nextStatus === "idle"
         ) {
-          const continuation = turnCompleted.isRootTurnCompletion
-            ? findEnvironmentDirectoryContinuation(deps, {
-                threadId: entry.threadId,
-                turnId,
-              })
-            : null;
           if (continuation) {
             followUps.push({
               kind: "environment-directory-continuation",
               continuation,
+              parentNotification: deferredParentNotifications[0] ?? null,
               threadId: entry.threadId,
             });
           }
@@ -611,12 +618,23 @@ async function executeEventFollowUpBestEffort(
       case "queued-message-dispatch":
         await runQueuedMessageDispatch(deps, followUp.wake);
         return;
-      case "environment-directory-continuation":
-        await continueAfterEnvironmentDirectoryUpdate(deps, {
-          ...followUp.continuation,
-          threadId: followUp.threadId,
-        });
+      case "environment-directory-continuation": {
+        let continued = false;
+        try {
+          continued = await continueAfterEnvironmentDirectoryUpdate(deps, {
+            ...followUp.continuation,
+            threadId: followUp.threadId,
+          });
+        } finally {
+          if (!continued && followUp.parentNotification) {
+            await executeEventFollowUpBestEffort(
+              deps,
+              followUp.parentNotification,
+            );
+          }
+        }
         return;
+      }
     }
   } catch (error) {
     if (isCommandTimeoutError(error)) {

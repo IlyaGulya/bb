@@ -1224,6 +1224,109 @@ describe("internal event and tool-call routes", () => {
     },
   );
 
+  it.each([
+    { environmentMovedBack: false, parentNotified: false },
+    { environmentMovedBack: true, parentNotified: true },
+  ])(
+    "holds a child's parent notification while it continues in the new directory (moved back: $environmentMovedBack)",
+    async ({ environmentMovedBack, parentNotified }) => {
+      await withChildThreadNotificationClock(async (harness) => {
+        const { host, session } = seedHostSession(harness.deps);
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+        });
+        const currentEnvironment = seedEnvironment(harness.deps, {
+          hostId: host.id,
+          projectId: project.id,
+          path: "/tmp/current-environment",
+        });
+        seedEnvironment(harness.deps, {
+          hostId: host.id,
+          projectId: project.id,
+          path: "/tmp/continue-worktree",
+          environmentProviderId: "git-worktree",
+        });
+        const parentThread = seedThread(harness.deps, {
+          projectId: project.id,
+          environmentId: currentEnvironment.id,
+          providerId: "codex",
+          status: "idle",
+        });
+        seedThreadRuntimeState(harness.deps, {
+          environmentId: currentEnvironment.id,
+          inputText: "Coordinate the worktree investigation",
+          providerThreadId: "provider-parent",
+          threadId: parentThread.id,
+        });
+        const childThread = seedThread(harness.deps, {
+          projectId: project.id,
+          environmentId: currentEnvironment.id,
+          parentThreadId: parentThread.id,
+          providerId: "codex",
+          status: "active",
+        });
+        seedThreadRuntimeState(harness.deps, {
+          environmentId: currentEnvironment.id,
+          inputText: "Start the investigation in a new worktree",
+          providerThreadId: "provider-tool-call",
+          threadId: childThread.id,
+        });
+        const turnId = "turn-child-switch-directory";
+        seedEvent(harness.deps, {
+          threadId: childThread.id,
+          environmentId: currentEnvironment.id,
+          providerThreadId: "provider-tool-call",
+          sequence: 3,
+          type: "turn/started",
+          scope: turnScope(turnId),
+          data: { providerThreadId: "provider-tool-call" },
+        });
+        const toolCallResponse = await postToolCall({
+          harness,
+          sessionId: session.id,
+          threadId: childThread.id,
+          turnId,
+          tool: "update_environment_directory",
+          arguments: { path: "/tmp/continue-worktree" },
+        });
+        expect(toolCallResponse.status).toBe(200);
+        if (environmentMovedBack) {
+          harness.db
+            .update(threads)
+            .set({ environmentId: currentEnvironment.id })
+            .where(eq(threads.id, childThread.id))
+            .run();
+        }
+
+        const response = await postEventBatch({
+          harness,
+          sessionId: session.id,
+          events: [
+            {
+              threadId: childThread.id,
+              event: {
+                type: "turn/completed",
+                threadId: childThread.id,
+                providerThreadId: "provider-tool-call",
+                scope: turnScope(turnId),
+                status: "completed",
+              },
+            },
+          ],
+        });
+        expect(response.status).toBe(200);
+        await flushChildThreadNotifications();
+
+        expect(
+          listQueuedThreadCommands(harness, "turn.submit", childThread.id),
+        ).toHaveLength(parentNotified ? 0 : 1);
+        expect(
+          listQueuedThreadCommands(harness, "turn.submit", parentThread.id),
+        ).toHaveLength(parentNotified ? 1 : 0);
+      });
+    },
+  );
+
   it("creates an unmanaged environment for a new requested host path", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps);

@@ -62,16 +62,16 @@ export function findEnvironmentDirectoryContinuation(
 export async function continueAfterEnvironmentDirectoryUpdate(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: EnvironmentDirectoryContinuation & { threadId: string },
-): Promise<void> {
+): Promise<boolean> {
   const thread = getThread(deps.db, args.threadId);
   if (
     !thread ||
     thread.environmentId !== args.environmentId ||
     threadWritableFailure(thread) !== null
   ) {
-    return;
+    return false;
   }
-  await queueParentSystemMessage(deps, {
+  return queueParentSystemMessage(deps, {
     parentThreadId: thread.id,
     input: [
       {
