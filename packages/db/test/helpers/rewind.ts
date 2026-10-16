@@ -112,6 +112,9 @@ export function rewindQueuedMessageStateMigration(db: DbConnection): void {
     CREATE INDEX queued_thread_messages_thread_sort_idx ON queued_thread_messages (thread_id, sort_key, id);
     CREATE INDEX queued_thread_messages_due_idx ON queued_thread_messages (send_at, id) WHERE send_at IS NOT NULL AND claimed_at IS NULL AND claim_token IS NULL;
     CREATE INDEX queued_thread_messages_wait_holder_idx ON queued_thread_messages (wait_holder, id) WHERE wait_holder IS NOT NULL;
+    DROP TABLE IF EXISTS telemetry_messages;
+    DROP TABLE IF EXISTS telemetry_origins;
+    DROP TABLE IF EXISTS telemetry_threads;
     DELETE FROM __drizzle_migrations WHERE created_at >= ${QUEUED_MESSAGE_STATE_MIGRATION_WHEN};
   `);
 }
