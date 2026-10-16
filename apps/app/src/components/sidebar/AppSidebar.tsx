@@ -262,18 +262,20 @@ export function AppSidebar({
         splitEnabled
       >
         <Sidebar ref={sidebarRef}>
-          <div className="flex min-h-0 flex-1">
+          <div className="grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto]">
             {renderRail({
               isOpen: isNavigationCustomizing,
               onOpenChange: setNavigationCustomizing,
             })}
             <SidebarCollapsibleBody
               data-testid="nav-rail-sidebar-body"
-              className={
-                isFramed
-                  ? "rounded-bl-none border-b-0 [clip-path:inset(0_-6px_0_0_round_0.75rem_0_0_0)]"
-                  : undefined
-              }
+              className={cn(
+                "col-start-2 row-start-1",
+                isBodyHidden && "row-span-2",
+                isFramed &&
+                  !isBodyHidden &&
+                  "rounded-bl-none border-b-0 [clip-path:inset(0_-6px_0_0_round_var(--bb-frame-card-radius)_0_0_0)]",
+              )}
             >
               <div
                 data-testid="app-sidebar-body"
@@ -284,32 +286,34 @@ export function AppSidebar({
               </div>
               {alternateBody}
             </SidebarCollapsibleBody>
-          </div>
-          <div
-            data-testid="sidebar-footer-row"
-            className="flex shrink-0 items-stretch"
-          >
             <div
               className={cn(
-                "flex shrink-0 items-center justify-center py-2",
+                "col-start-1 row-start-2 flex shrink-0 items-center justify-center pt-2",
                 NAV_RAIL_WIDTH_CLASS,
-                isFramed && "border-b border-transparent",
-                !isFramed &&
-                  "bg-surface-recessed -mb-[env(safe-area-inset-bottom)] pb-[calc(0.5rem_+_env(safe-area-inset-bottom))]",
+                isFramed
+                  ? "box-content h-(--bb-window-footer-row-height) border-b border-transparent"
+                  : "bg-surface-recessed -mb-[env(safe-area-inset-bottom)] pb-[calc(var(--bb-frame-footer-inset)_+_env(safe-area-inset-bottom))]",
               )}
             >
               {railFooter}
             </div>
             <SidebarCollapsibleBody
+              data-testid="sidebar-footer-body"
               contentInFlow
+              hidden={isBodyHidden}
               className={cn(
+                "col-start-2 row-start-2",
                 isFramed &&
-                  "rounded-tl-none border-t-0 [clip-path:inset(0_-6px_0_0_round_0_0_0_0.75rem)]",
+                  "rounded-tl-none border-t-0 [clip-path:inset(0_-6px_0_0_round_0_0_0_var(--bb-frame-card-radius))]",
               )}
             >
               <SidebarFooter
-                hidden={isBodyHidden}
-                className="w-full justify-center"
+                className={cn(
+                  "w-full justify-center pl-(--bb-frame-footer-inset)",
+                  isFramed
+                    ? "box-content h-(--bb-window-footer-row-height) pb-0 pointer-fine:pl-[calc(var(--bb-frame-footer-inset)_+_(2rem_-_var(--bb-title-bar-control-size))/2)] pointer-fine:[&_[data-sidebar=menu-button]]:size-(--bb-title-bar-control-size) [&_[data-sidebar=menu-button]]:ring-inset pointer-fine:[&_[data-sidebar=menu]]:gap-[calc(0.25rem_+_2rem_-_var(--bb-title-bar-control-size))]"
+                    : "pb-(--bb-frame-footer-inset)",
+                )}
               >
                 <SidebarMenu
                   className={cn(
