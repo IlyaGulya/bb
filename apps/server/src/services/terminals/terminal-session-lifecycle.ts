@@ -1583,7 +1583,10 @@ export class TerminalSessionLifecycle {
         return;
       case "visibility":
         if (this.outputAckSocketVisibility.has(args.socket)) {
-          this.outputAckSocketVisibility.set(args.socket, args.message.visible);
+          this.outputAckSocketVisibility.set(
+            args.socket,
+            args.message.visible,
+          );
         }
         this.outputFlow.setVisible(
           args.terminalId,

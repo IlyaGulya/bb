@@ -473,6 +473,8 @@ describe("slow query index plans", () => {
   });
 
   it("finds the occupying threads through the archived/status index", () => {
+    // A dispatch gate calls this on every admission decision, so a plan that
+    // degraded to a table scan would put one on every send in the server.
     const { db } = setup();
 
     const captured = captureStatements(db, () => {
