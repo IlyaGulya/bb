@@ -1,5 +1,7 @@
 import { proposalSchema, type Proposal } from "./proposals.js";
 import { watch } from "node:fs";
+import { readFile as readNativeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { isRecord, parseMarkdownDocument } from "./markdown-document.js";
@@ -103,16 +105,29 @@ interface VaultWatcher {
 type WatchVault = (
   rootPath: string,
   onChange: (relativePath?: string) => void,
+  writtenFiles: Map<string, string>,
 ) => VaultWatcher;
 
-const watchNativeVault: WatchVault = (rootPath, onChange) => {
+const watchNativeVault: WatchVault = (rootPath, onChange, writtenFiles) => {
   const pending = new Map<string | undefined, ReturnType<typeof setTimeout>>();
   const watcher = watch(rootPath, { recursive: true }, (_event, filename) => {
     const file = filename?.toString().replaceAll("\\", "/");
     if (/\.bb-write-[0-9a-f-]{36}$/i.test(file ?? "")) return;
     if (pending.has(file)) return;
-    pending.set(file, setTimeout(() => {
+    pending.set(file, setTimeout(async () => {
       pending.delete(file);
+      if (file !== undefined) {
+        const absolute = path.join(rootPath, file);
+        const written = writtenFiles.get(absolute);
+        if (written !== undefined) {
+          try {
+            const content = await readNativeFile(absolute);
+            if (createHash("sha256").update(content).digest("hex") === written)
+              return;
+          } catch {}
+          writtenFiles.delete(absolute);
+        }
+      }
       onChange(file);
     }, 5));
   });
@@ -850,6 +865,12 @@ export default async function plugin(
   watchVault: WatchVault = watchNativeVault,
 ) {
   const db = bb.storage.database();
+  const writtenFiles = new Map<string, string>();
+  function forgetWrittenFiles(...paths: string[]) {
+    for (const file of writtenFiles.keys())
+      if (paths.some((root) => file === root || file.startsWith(`${root}/`)))
+        writtenFiles.delete(file);
+  }
   bb.storage.migrate(db, [
     `CREATE TABLE IF NOT EXISTS vaults (
       id TEXT PRIMARY KEY,
@@ -1141,6 +1162,11 @@ export default async function plugin(
           : {}),
     });
     if (result.outcome === "written") {
+      if (!vault.hostId) {
+        writtenFiles.set(absolutePath(vault, relativePath), result.sha256);
+        if (writtenFiles.size > 1024)
+          writtenFiles.delete(writtenFiles.keys().next().value!);
+      }
       mentionSummaries.delete(vault.id);
     }
     return result;
@@ -1331,6 +1357,7 @@ export default async function plugin(
         destinationPath: absolutePath(vault, to),
         rootPath: vault.rootPath,
       });
+      forgetWrittenFiles(absolutePath(vault, from), absolutePath(vault, to));
       db.transaction(() => {
         const rows = db
           .prepare(
@@ -1374,6 +1401,7 @@ export default async function plugin(
         rootPath: vault.rootPath,
         recursive,
       });
+      forgetWrittenFiles(absolutePath(vault, relativePath));
       deleteProposals(vault.id, relativePath);
       mentionSummaries.delete(vault.id);
       return { ok: true };
@@ -3799,7 +3827,7 @@ export default async function plugin(
                         `path:${vault.id}:${relativePath}`,
                       ],
                 );
-              });
+              }, writtenFiles);
               watcher.on("error", () => {
                 watcher.close();
                 watchers.delete(vault.id);

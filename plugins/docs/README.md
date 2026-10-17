@@ -245,9 +245,9 @@ Proposals follow file and folder moves made through Docs and are cleared when
 their document, folder, or vault is removed.
 
 The RPC equivalents are `readProposal`, `proposeNote`, `updateProposal`, and
-`resolveProposal`. `proposal-changed` signals carry `vaultId`, `path`, and
-`version`. `vault-changed` can include `path` for a single-document change and
-`proposalOnly: true` when the matching `proposal-changed` signal covers it.
-Events without a path still invalidate the whole vault (or all vaults when
-`vaultId` is absent), including external filesystem changes. Existing file
-read, save, and sync APIs remain supported.
+`resolveProposal`. Watch `readDocument` for a coherent content/proposal/preview
+snapshot through `bb.sdk.plugins.experimental_watchRpc` or
+`bb plugin rpc call simple-notes readDocument --input-file <json-file> --watch`.
+Contract tags scope updates to the affected document, proposal, or vault tree,
+including external file changes. Existing file read, save, and sync APIs remain
+supported.
