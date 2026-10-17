@@ -32,7 +32,7 @@ export function rpcResponseTags<Input, Output>(
 export function createRpcKeyedProvider(warmMethods: readonly string[]) {
   const providers = new Map<string, () => Readonly<Record<string, unknown>>>();
   return {
-    experimental_provideKeyed(
+    provideKeyed(
       method: string,
       values: () => Readonly<Record<string, unknown>>,
     ) {

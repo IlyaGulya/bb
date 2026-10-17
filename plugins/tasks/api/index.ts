@@ -730,7 +730,7 @@ export function registerHandlers(
     },
     taskMembership(input, context) {
       const membership = store.tasks.listTaskKeys(input);
-      context?.experimental_provideKeyed("getTasksKeyed", () =>
+      context?.provideKeyed("getTasksKeyed", () =>
         Object.fromEntries(
           apiTasks(
             store,

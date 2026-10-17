@@ -152,7 +152,7 @@ export type ExperimentalPluginRpcCaller =
 export interface ExperimentalPluginRpcHandlerContext {
   readonly experimental_caller: ExperimentalPluginRpcCaller;
   /** Lazily seed a registered keyed method only for a cold client cache. */
-  experimental_provideKeyed(
+  provideKeyed(
     method: string,
     values: () => Readonly<Record<string, unknown>>,
   ): void;

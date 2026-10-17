@@ -555,7 +555,7 @@ it("seeds cold rows with declared tags and skips the warm producer", async () =>
       experimental_rpcContract: contract,
       rpc: {
         membership: (_input, ctx) => {
-          ctx!.experimental_provideKeyed("rows", produce);
+          ctx!.provideKeyed("rows", produce);
           return ["a"];
         },
         rows: readRows,

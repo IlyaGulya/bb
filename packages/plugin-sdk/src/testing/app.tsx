@@ -2097,7 +2097,7 @@ export function renderSlot<
     const provider = createRpcKeyedProvider(warmKeyedMethods);
     const result = declaration
       ? await handler(parsedInput, {
-          experimental_provideKeyed: provider.experimental_provideKeyed,
+          provideKeyed: provider.provideKeyed,
           experimental_caller: { kind: "client" },
         })
       : await handler(parsedInput);

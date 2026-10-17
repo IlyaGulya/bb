@@ -130,7 +130,7 @@ const WIRE_SOURCE = `
         throw new experimental_PluginRpcRefusal({ code, message: "Cannot change this item", issues: [{ path: ["id"], message: "Unavailable" }] });
       },
       seed: (input: any, ctx: any) => {
-        ctx.experimental_provideKeyed("rows", () => ({ a: input.invalid ? "invalid" : 42 }));
+        ctx.provideKeyed("rows", () => ({ a: input.invalid ? "invalid" : 42 }));
         return null;
       },
       rows: () => ({ a: 42 }),

@@ -2185,7 +2185,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         let result: unknown;
         try {
           result = await handler.handler(parsedInput, {
-            experimental_provideKeyed: provider.experimental_provideKeyed,
+            provideKeyed: provider.provideKeyed,
             experimental_caller: caller,
           });
         } catch (error) {

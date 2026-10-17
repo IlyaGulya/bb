@@ -1834,7 +1834,7 @@ function createFakePluginHostInternal(
       let result: unknown;
       try {
         result = await record.handler(validatedInput as never, {
-          experimental_provideKeyed: provider.experimental_provideKeyed,
+          provideKeyed: provider.provideKeyed,
           experimental_caller: options.experimental_caller ?? {
             kind: "client",
           },
