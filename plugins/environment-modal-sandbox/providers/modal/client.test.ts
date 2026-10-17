@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Status } from "nice-grpc-common";
 import {
   createModalSandboxClient,
   createModalSandboxExecutor,
@@ -83,13 +84,13 @@ describe("Modal bootstrap executor", () => {
     vendor.poll.mockRejectedValueOnce(
       Object.assign(new Error("SandboxWait NOT_FOUND"), {
         name: "ClientError",
-        code: 5,
+        code: Status.NOT_FOUND,
       }),
     );
     await expect(client.fromId("sandbox-1")).resolves.toBeNull();
     const unavailable = Object.assign(new Error("unavailable"), {
       name: "ClientError",
-      code: 14,
+      code: Status.UNAVAILABLE,
     });
     vendor.poll.mockRejectedValueOnce(unavailable);
     await expect(client.fromId("sandbox-1")).rejects.toBe(unavailable);
