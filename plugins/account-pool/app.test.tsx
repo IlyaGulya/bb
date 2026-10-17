@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { accountPoolRpcContract } from "./src/rpc.js";
@@ -358,23 +364,46 @@ describe("Account Pool settings", () => {
     async (enabled) => {
       const write = deferred<{ account: AccountSummary | null }>();
       const slot = render(
-        [account({ enabled, status: enabled ? "ready" : "disabled" })],
+        [
+          account({ enabled, status: enabled ? "ready" : "disabled" }),
+          account({
+            id: "22222222-2222-4222-8222-222222222222",
+            label: "Other",
+          }),
+        ],
         {
           [enabled ? "account.disable" : "account.enable"]: () => write.promise,
         },
       );
       const previous = enabled ? "Ready" : "Disabled";
       const predicted = enabled ? "Disabled" : "Ready";
-      await slot.findByText(previous);
+      const details = () =>
+        within(slot.getByRole("button", { name: "Open person@example.com" }));
+      await waitFor(() => expect(details().getByText(previous)).toBeTruthy());
       fireEvent.pointerDown(
         slot.getByRole("button", { name: "person@example.com actions" }),
       );
       fireEvent.click(await slot.findByText(enabled ? "Disable" : "Enable"));
-      await slot.findByText(predicted);
-      expect(slot.queryByText(previous)).toBeNull();
+      await waitFor(() => expect(details().getByText(predicted)).toBeTruthy());
+      expect(details().queryByText(previous)).toBeNull();
+      expect(
+        slot
+          .getByRole("button", { name: "Reorder person@example.com" })
+          .hasAttribute("disabled"),
+      ).toBe(true);
+      expect(
+        slot
+          .getByRole("button", { name: "Reorder Other" })
+          .hasAttribute("disabled"),
+      ).toBe(false);
       await act(async () => write.reject(new Error("Toggle rejected")));
       await slot.findByText("Toggle rejected");
-      expect(slot.getByText(previous)).toBeTruthy();
+      expect(details().getByText(previous)).toBeTruthy();
+      expect(
+        slot
+          .getByRole("button", { name: "Reorder person@example.com" })
+          .hasAttribute("disabled"),
+      ).toBe(false);
     },
   );
 
