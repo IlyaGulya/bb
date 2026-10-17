@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { memo, useState } from "react";
-import { act, cleanup, fireEvent, renderHook, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  renderHook,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient } from "@tanstack/react-query";
 import { createRpcQueryHooks } from "../../internal/rpc-query-host.js";
 import { afterEach, expect, it, vi } from "vitest";

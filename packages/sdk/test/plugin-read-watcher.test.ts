@@ -4,34 +4,44 @@ import { createPluginReadWatcher } from "../src/plugin-read-watcher.js";
 
 afterEach(() => vi.useRealTimers());
 
-it.each([400, 401, 403, 404, 409, 422])(
-  "stops on permanent HTTP %i",
-  async (status) => {
-    vi.useFakeTimers();
-    const read = vi.fn().mockRejectedValue(
-      new BbHttpError({
-        status,
-        message: "rejected",
-        code: null,
-        body: null,
-      }),
-    );
-    const onStop = vi.fn();
-    const watch = createPluginReadWatcher({
-      signal: new AbortController().signal,
-      read,
-      onChange: vi.fn(),
-      onStop,
-    });
-    watch.refresh();
-    await vi.advanceTimersByTimeAsync(0);
-    watch.refresh();
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(read).toHaveBeenCalledTimes(1);
-    expect(onStop).toHaveBeenCalledTimes(1);
-    await watch.done;
-  },
-);
+it.each([
+  [400, null],
+  [401, null],
+  [403, "forbidden"],
+  [404, "not_found"],
+  [409, "conflict"],
+  [422, "invalid"],
+] as const)("stops on permanent HTTP %i", async (status, code) => {
+  vi.useFakeTimers();
+  const read = vi.fn().mockRejectedValue(
+    new BbHttpError({
+      status,
+      message: "rejected",
+      code,
+      body: null,
+    }),
+  );
+  const onStop = vi.fn();
+  const onError = vi.fn();
+  const watch = createPluginReadWatcher({
+    signal: new AbortController().signal,
+    read,
+    onChange: vi.fn(),
+    onStop,
+    onError,
+  });
+  watch.refresh();
+  await vi.advanceTimersByTimeAsync(0);
+  watch.refresh();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(onStop).toHaveBeenCalledTimes(1);
+  expect(onError.mock.calls[0]?.[0]).toMatchObject({
+    code,
+    message: `HTTP ${status}: rejected`,
+  });
+  await watch.done;
+});
 
 it.each([408, 429, 503, 404])(
   "recovers from unavailable HTTP %i",
