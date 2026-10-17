@@ -175,3 +175,5 @@ These reads are also available through `bb plugin rpc call tasks <method>` and
 `bb.sdk.plugins.callRpc`. A watched `listTaskPullRequests` refreshes every minute
 while a linked PR is open or draft, and stops when its last viewer leaves.
 Window focus refreshes the displayed PRs. No task view runs a refresh timer.
+
+Task mutation RPC responses contain successful results only. A rejected domain write throws a typed RPC refusal: `invalid` for invalid input and `conflict` for conflicting state. The CLI prints the same message and exits non-zero; JSON errors include the refusal code. List and detail edits share optimistic cached updates and roll back on a refused write. Title drafts stay visible through a successful save until refreshed data arrives. Description saves clear rejected drafts for `conflict` or `invalid`; other failures keep the draft pending for retry.

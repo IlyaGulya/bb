@@ -226,35 +226,17 @@ const presetSchema = z
   })
   .strict();
 
-const tasksDomainErrorSchema = z
-  .object({
-    code: z.enum([
-      "task_parent_invalid",
-      "subtask_depth_exceeded",
-      "subtask_project_mismatch",
-      "label_project_mismatch",
-      "project_not_empty",
-      "project_prefix_conflict",
-      "attachment_referenced",
-    ]),
-    message: z.string(),
-  })
+const taskMutationResultSchema = z
+  .object({ ok: z.literal(true), task: taskSchema })
   .strict();
 
-const taskMutationResultSchema = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), task: taskSchema }).strict(),
-  z.object({ ok: z.literal(false), error: tasksDomainErrorSchema }).strict(),
-]);
+const projectMutationResultSchema = z
+  .object({ ok: z.literal(true), project: projectSchema })
+  .strict();
 
-const projectMutationResultSchema = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), project: projectSchema }).strict(),
-  z.object({ ok: z.literal(false), error: tasksDomainErrorSchema }).strict(),
-]);
-
-const projectDeleteResultSchema = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), deleted: z.boolean() }).strict(),
-  z.object({ ok: z.literal(false), error: tasksDomainErrorSchema }).strict(),
-]);
+const projectDeleteResultSchema = z
+  .object({ ok: z.literal(true), deleted: z.boolean() })
+  .strict();
 
 const attachmentDeleteResultSchema = z.union([
   z
@@ -271,7 +253,6 @@ const attachmentDeleteResultSchema = z.union([
       attachment: z.null(),
     })
     .strict(),
-  z.object({ ok: z.literal(false), error: tasksDomainErrorSchema }).strict(),
 ]);
 
 const taskLabelsSchema = z
@@ -548,10 +529,10 @@ export const tasksRpcContract = defineRpcContract({
     output: z.object({ projects: z.array(projectSchema) }).strict(),
   },
   createTask: {
-    invalidates: (_input, output) =>
-      output.ok
-        ? [...taskRowTags(output.task), ...taskMembershipTags(output.task)]
-        : [],
+    invalidates: (_input, output) => [
+      ...taskRowTags(output.task),
+      ...taskMembershipTags(output.task),
+    ],
     input: z
       .object({
         projectId: idSchema,
@@ -632,17 +613,14 @@ export const tasksRpcContract = defineRpcContract({
     output: z.object({ task: taskSchema.nullable() }).strict(),
   },
   updateTask: {
-    invalidates: (input, output) =>
-      output.ok
-        ? [
-            ...taskRowTags(output.task),
-            `comments:${input.taskId}`,
-            ...(input.parentTaskId !== undefined
-              ? taskMembershipTags(output.task)
-              : []),
-            ...membershipEditTags(output.task, input),
-          ]
-        : [],
+    invalidates: (input, output) => [
+      ...taskRowTags(output.task),
+      `comments:${input.taskId}`,
+      ...(input.parentTaskId !== undefined
+        ? taskMembershipTags(output.task)
+        : []),
+      ...membershipEditTags(output.task, input),
+    ],
     input: updateTaskInputSchema,
     output: taskMutationResultSchema,
   },
@@ -666,14 +644,11 @@ export const tasksRpcContract = defineRpcContract({
       .strict(),
   },
   boardMove: {
-    invalidates: (input, output) =>
-      output.ok
-        ? [
-            ...taskRowTags(output.task),
-            `comments:${input.taskId}`,
-            ...membershipEditTags(output.task, { status: input.status }),
-          ]
-        : [],
+    invalidates: (input, output) => [
+      ...taskRowTags(output.task),
+      `comments:${input.taskId}`,
+      ...membershipEditTags(output.task, { status: input.status }),
+    ],
     input: z
       .object({
         taskId: idSchema,
@@ -686,14 +661,11 @@ export const tasksRpcContract = defineRpcContract({
     output: taskMutationResultSchema,
   },
   moveTaskToProject: {
-    invalidates: (_input, output) =>
-      output.ok
-        ? [
-            ...taskRowTags(output.task),
-            ...taskMembershipTags(output.task),
-            "projects",
-          ]
-        : [],
+    invalidates: (_input, output) => [
+      ...taskRowTags(output.task),
+      ...taskMembershipTags(output.task),
+      "projects",
+    ],
     input: z
       .object({
         taskId: idSchema,
@@ -784,7 +756,7 @@ export const tasksRpcContract = defineRpcContract({
   },
   deleteAttachment: {
     invalidates: (_input, output) =>
-      output.ok && output.attachment
+      output.attachment
         ? [
             output.attachment.taskId
               ? `attachments:${output.attachment.taskId}`
@@ -973,7 +945,6 @@ export type Attachment = z.infer<typeof attachmentSchema>;
 export type TaskThread = z.infer<typeof taskThreadSchema>;
 export type TaskPullRequest = z.infer<typeof taskPullRequestSchema>;
 export type Preset = z.infer<typeof presetSchema>;
-export type TasksDomainError = z.infer<typeof tasksDomainErrorSchema>;
 export type TaskMutationResult = z.infer<typeof taskMutationResultSchema>;
 export type BbProjectOption = z.infer<
   (typeof tasksRpcContract)["listBbProjects"]["output"]

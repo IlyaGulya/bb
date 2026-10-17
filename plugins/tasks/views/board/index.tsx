@@ -278,12 +278,7 @@ export function BoardView({ projectId }: BoardViewProps) {
       beforeTaskId: neighbors.beforeTaskId,
       afterTaskId: neighbors.afterTaskId,
       authorName: "You",
-    }).then(
-      (result) => {
-        if (!result.ok) board.refresh();
-      },
-      () => board.refresh(),
-    );
+    }).catch(() => board.refresh());
   };
 
   const handleCardPointerDown = (

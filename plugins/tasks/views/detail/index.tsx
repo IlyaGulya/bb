@@ -14,6 +14,7 @@ import {
   useTaskRead,
   useTaskRows,
   useTaskMutation,
+  useTaskUpdateMutation,
 } from "../../shell/data.js";
 import { useTasksNavigation } from "../../shell/routes.js";
 import { TasksEditor } from "../../editor/tasks-editor.js";
@@ -21,6 +22,7 @@ import { TaskActivity } from "../activity/task-activity.js";
 import { AttachmentsGrid, uploadAttachment } from "./attachments.js";
 import {
   createDescriptionSaver,
+  saveDescriptionMutation,
   type DescriptionSaver,
 } from "./description-save.js";
 import { StatusIcon } from "./meta.js";
@@ -196,8 +198,14 @@ function DetailSkeleton() {
   );
 }
 
-function TaskDetail({ task }: { task: Task }) {
-  const updateTaskMutation = useTaskMutation("updateTask");
+function TaskDetail({
+  task,
+  readTaskKey,
+}: {
+  task: Task;
+  readTaskKey: string;
+}) {
+  const updateTaskMutation = useTaskUpdateMutation(() => readTaskKey).mutate;
   const moveTaskToProjectMutation = useTaskMutation("moveTaskToProject");
   const createTaskMutation = useTaskMutation("createTask");
   const deleteAttachmentMutation = useTaskMutation("deleteAttachment");
@@ -217,15 +225,10 @@ function TaskDetail({ task }: { task: Task }) {
   pushRef.current = push;
   const saverRef = useRef<DescriptionSaver | null>(null);
   saverRef.current ??= createDescriptionSaver({
-    save: async (taskId, markdown) => {
-      const result = await rpcRef.current({
-        taskId,
-        description: markdown,
-      });
-      return result.ok
-        ? { ok: true }
-        : { ok: false, errorMessage: result.error.message };
-    },
+    save: (taskId, markdown) =>
+      saveDescriptionMutation(async () => {
+        await rpcRef.current({ taskId, description: markdown });
+      }),
     onError: (message) => pushRef.current(message),
     delayMs: DESCRIPTION_SAVE_DELAY_MS,
   });
@@ -270,11 +273,10 @@ function TaskDetail({ task }: { task: Task }) {
     input: TaskPropertyUpdate & { title?: string; description?: string },
   ) => {
     try {
-      const result = await updateTaskMutation({
+      await updateTaskMutation({
         taskId: task.id,
         ...input,
       });
-      if (!result.ok) push(result.error.message);
     } catch (error) {
       push(errorMessage(error));
     }
@@ -287,10 +289,6 @@ function TaskDetail({ task }: { task: Task }) {
         taskId: task.id,
         projectId,
       });
-      if (!result.ok) {
-        push(result.error.message);
-        return;
-      }
       navigation.go(
         { kind: "task", taskKey: result.task.key },
         { replace: true },
@@ -334,10 +332,6 @@ function TaskDetail({ task }: { task: Task }) {
         parentTaskId: task.id,
         status: "todo",
       });
-      if (!result.ok) {
-        push(result.error.message);
-        return false;
-      }
       subtasks.refresh();
       return true;
     } catch (error) {
@@ -453,7 +447,6 @@ function TaskDetail({ task }: { task: Task }) {
                 attachmentId: attachment.id,
                 removeDescriptionReferences: true,
               });
-              if (!result.ok) throw new Error(result.error.message);
               attachments.refresh();
             }}
             onError={(message) => push(message)}
@@ -584,7 +577,7 @@ export function DetailView({ taskKey, onCanonicalKey }: DetailViewProps) {
       {query.error ? (
         <RefreshError message={query.error} onRetry={query.refresh} />
       ) : null}
-      <TaskDetail task={query.data} />
+      <TaskDetail task={query.data} readTaskKey={taskKey} />
     </>
   );
 }

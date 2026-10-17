@@ -157,16 +157,12 @@ describe("Tasks RPC domain API", () => {
       description: `![diagram](${attachmentDownloadUrl(attachmentId)})`,
     });
 
-    const conflict = tasksRpcContract.deleteAttachment.output.parse(
-      await harness.callRpc("deleteAttachment", { attachmentId }),
-    );
-    expect(conflict).toEqual({
-      ok: false,
-      error: {
-        code: "attachment_referenced",
-        message:
-          'Attachment "diagram.png" is used in the task description. Remove it from the description before deleting the attachment.',
-      },
+    await expect(
+      harness.callRpc("deleteAttachment", { attachmentId }),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      message:
+        'Attachment "diagram.png" is used in the task description. Remove it from the description before deleting the attachment.',
     });
     expect(store.tasks.getAttachment(attachmentId)).toBeDefined();
 
@@ -970,7 +966,6 @@ describe("Tasks RPC domain API", () => {
       }),
     );
     expect(createResult.ok).toBe(true);
-    if (!createResult.ok) throw new Error(createResult.error.message);
 
     const updateResult = tasksRpcContract.updateTask.output.parse(
       await harness.callRpc("updateTask", {
@@ -1083,13 +1078,10 @@ describe("Tasks RPC domain API", () => {
     });
     await expect(
       harness.callRpc("deleteProject", { projectId: project.id }),
-    ).resolves.toEqual({
-      ok: false,
-      error: {
-        code: "project_not_empty",
-        message:
-          "A project must be empty before it can be deleted; pass force: true to delete its tasks",
-      },
+    ).rejects.toMatchObject({
+      code: "conflict",
+      message:
+        "A project must be empty before it can be deleted; pass force: true to delete its tasks",
     });
 
     await expect(
@@ -1202,7 +1194,7 @@ describe("Tasks RPC domain API", () => {
         authorName: "Jem",
       }),
     );
-    if (!result.ok) throw new Error(result.error.message);
+
     expect(result.task).toMatchObject({
       id: parent.id,
       projectId: home.id,
@@ -1338,7 +1330,7 @@ describe("Tasks RPC domain API", () => {
         title: "Parent",
       }),
     );
-    if (!parentResult.ok) throw new Error(parentResult.error.message);
+
     const childResult = tasksRpcContract.createTask.output.parse(
       await harness.callRpc("createTask", {
         projectId: projectResult.project.id,
@@ -1346,7 +1338,6 @@ describe("Tasks RPC domain API", () => {
         parentTaskId: parentResult.task.id,
       }),
     );
-    if (!childResult.ok) throw new Error(childResult.error.message);
 
     await expect(
       harness.callRpc("createTask", {
@@ -1354,12 +1345,9 @@ describe("Tasks RPC domain API", () => {
         title: "Grandchild",
         parentTaskId: childResult.task.id,
       }),
-    ).resolves.toEqual({
-      ok: false,
-      error: {
-        code: "subtask_depth_exceeded",
-        message: "Tasks support at most one level of sub-tasks",
-      },
+    ).rejects.toMatchObject({
+      code: "invalid",
+      message: "Tasks support at most one level of sub-tasks",
     });
 
     await harness.dispose();

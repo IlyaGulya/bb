@@ -335,10 +335,6 @@ export function NewTaskDialog({
         parentTaskId: null,
         labelIds,
       });
-      if (!result.ok) {
-        setError(result.error.message);
-        return;
-      }
       clearNewTaskDraft();
       const staged = pendingFiles.filter((entry) => entry.status === "staged");
       const failed = await uploadStagedAttachments(staged, {

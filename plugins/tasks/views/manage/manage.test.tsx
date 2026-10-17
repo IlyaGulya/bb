@@ -320,13 +320,12 @@ describe("NewTaskDialog", () => {
           sidebarSummary: () => ({ projects: [] }),
           listTasks: () => ({ tasks: [] }),
           listLabels: () => ({ labels: [] }),
-          createTask: () => ({
-            ok: false,
-            error: {
-              code: "subtask_depth_exceeded",
-              message: "Sub-tasks cannot have their own sub-tasks",
-            },
-          }),
+          createTask: () => {
+            throw Object.assign(
+              new Error("Sub-tasks cannot have their own sub-tasks"),
+              { code: "invalid" },
+            );
+          },
         }),
       },
     );

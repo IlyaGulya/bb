@@ -1,4 +1,4 @@
-import { useTaskMutation } from "../../shell/data.js";
+import { useTaskMutation, useTaskUpdateMutation } from "../../shell/data.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Label, TaskSummary as Task } from "../../shared/contract.js";
 import { errorMessage } from "../../shared/errors.js";
@@ -37,8 +37,7 @@ import {
   selectedLabelIds,
   STATUS_LABELS,
 } from "./lib.js";
-import { editedTasks, matchesFilters } from "./optimistic.js";
-import { useListTaskEdits } from "./use-task-edits.js";
+import { matchesFilters, type TaskEdit } from "../../shared/task-edit.js";
 import { TaskRow } from "./row.js";
 import { rowWindows, useRowWindowViewport } from "./row-window.js";
 
@@ -127,8 +126,18 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
     priorities: filters.priorities,
     labelIds,
   });
+  const { mutate: updateTask, isPending: updatingTask } = useTaskUpdateMutation(
+    (taskId) => tasksQuery.data?.find((task) => task.id === taskId)?.key,
+  );
+  const editTask = useCallback(
+    (task: Task, patch: TaskEdit) => {
+      void updateTask({ taskId: task.id, ...patch }).catch((error: unknown) =>
+        push(errorMessage(error)),
+      );
+    },
+    [updateTask, push],
+  );
   const meta = useTaskListMeta(projectId);
-  const edits = useListTaskEdits(tasksQuery.data, (message) => push(message));
 
   const labelsById = useMemo(
     () => new Map((labels.data ?? []).map((label) => [label.id, label])),
@@ -148,12 +157,7 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
       moveTaskToProjectMutation({
         taskId: task.id,
         projectId: targetProjectId,
-      }).then(
-        (result) => {
-          if (!result.ok) push(result.error.message);
-        },
-        (error: unknown) => push(errorMessage(error)),
-      );
+      }).catch((error: unknown) => push(errorMessage(error)));
     },
     [moveTaskToProjectMutation, push],
   );
@@ -165,7 +169,7 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
 
   const displayTasks = useMemo(() => {
     if (tasksQuery.data === undefined) return undefined;
-    return editedTasks(tasksQuery.data, edits.entries).filter((task) =>
+    return tasksQuery.data.filter((task) =>
       matchesFilters(
         task,
         filters.statuses,
@@ -173,13 +177,7 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
         labelIds ?? [],
       ),
     );
-  }, [
-    tasksQuery.data,
-    edits.entries,
-    filters.statuses,
-    filters.priorities,
-    labelIds,
-  ]);
+  }, [tasksQuery.data, filters.statuses, filters.priorities, labelIds]);
   const groups = useMemo(
     () => groupTasksByStatus(sortTasks(displayTasks ?? [], sort)),
     [displayTasks, sort],
@@ -298,9 +296,8 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
               projectLabels={labelsByProject.get(task.projectId) ?? NO_LABELS}
               projects={projects.data ?? []}
               onMoveToProject={moveToProject}
-              onEdit={edits.edit}
+              onEdit={editTask}
               onOpen={openTask}
-              pending={edits.pending.has(task.id)}
             />
           ))}
           {hiddenBelow > 0 ? (
@@ -334,6 +331,9 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
       />
       <div
         ref={scrollRef}
+        role="region"
+        aria-label="Tasks"
+        aria-busy={updatingTask || undefined}
         className="min-h-0 flex-1 overflow-y-auto @container"
       >
         {body}

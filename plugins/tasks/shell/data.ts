@@ -16,6 +16,7 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from "../shared/contract.js";
+import { applyEdit } from "../shared/task-edit.js";
 import { sortTasks } from "../shared/sort.js";
 import { TASKS_PAGE_MAX_LIMIT, type TaskSort } from "../shared/pagination.js";
 import type { MentionItem } from "../editor/extensions.js";
@@ -54,6 +55,38 @@ export function useTaskMutation<Method extends keyof TasksRpcContract & string>(
 ) {
   return experimental_useRpcMutation<TasksRpcContract, Method>({ method })
     .mutate;
+}
+
+export function useTaskUpdateMutation(
+  taskKeyFor: (taskId: string) => string | undefined,
+) {
+  return experimental_useRpcMutation<TasksRpcContract, "updateTask">({
+    method: "updateTask",
+    optimistic(input, cache) {
+      cache.updateKey("getTasksKeyed", input.taskId, (current) =>
+        current === null ? null : applyEdit(current, input),
+      );
+      const update = (current: { task: Task | null }) => ({
+        ...current,
+        task:
+          current.task === null
+            ? null
+            : {
+                ...applyEdit(current.task, input),
+                ...(input.description !== undefined
+                  ? { description: input.description }
+                  : {}),
+                ...(input.parentTaskId !== undefined
+                  ? { parentTaskId: input.parentTaskId }
+                  : {}),
+              },
+      });
+      cache.update("getTask", { taskId: input.taskId }, update);
+      const taskKey = taskKeyFor(input.taskId);
+      if (taskKey !== undefined)
+        cache.update("getTaskByKey", { taskKey }, update);
+    },
+  });
 }
 
 export function useTaskRows(

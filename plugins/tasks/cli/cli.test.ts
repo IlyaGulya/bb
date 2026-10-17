@@ -475,6 +475,20 @@ describe("bb tasks CLI", () => {
       stdout: "",
       stderr: "A task cannot be its own parent\n",
     });
+    const refusal = await harness.runCli([
+      "update",
+      "REL-3",
+      "--parent",
+      "REL-3",
+      "--json",
+    ]);
+    expect(refusal.exitCode).toBe(1);
+    expect(refusal.stderr).toBe("A task cannot be its own parent\n");
+    expect(JSON.parse(refusal.stdout)).toMatchObject({
+      ok: false,
+      error: { code: "invalid", message: "A task cannot be its own parent" },
+    });
+
     await expect(
       harness.runCli(["update", "REL-3", "--parent", "OTH-1"]),
     ).resolves.toEqual({

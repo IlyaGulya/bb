@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
+import { experimental_PluginRpcRefusal } from "@get-bb/plugin-sdk";
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import {
   loadPluginApp,
@@ -68,7 +69,7 @@ function setup() {
         status,
       }),
     );
-    if (!result.ok) throw new Error(result.error.message);
+
     return result.task;
   }
   async function write(method: string, input: unknown) {
@@ -260,4 +261,145 @@ it("keeps the activity snapshot with Retry when its refresh fails", async () => 
   server.failures.clear();
   fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
   await slot.findByText("Second comment");
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((accept, refuse) => {
+    resolve = accept;
+    reject = refuse;
+  });
+  return { promise, resolve, reject };
+}
+
+it("predicts detail status immediately and rolls back a refused write", async () => {
+  const server = setup();
+  const task = await server.create("Status draft");
+  const write = deferred<never>();
+  server.options.rpc = {
+    ...server.options.rpc,
+    updateTask: () => write.promise,
+  };
+  const slot = server.connect(
+    renderSlot(
+      app.navPanels[0]!,
+      { subPath: `task/${task.key}` },
+      server.options,
+    ),
+  );
+  const triggers = await slot.findAllByRole("button", { name: "Todo" });
+  fireEvent.pointerDown(triggers[0]!, { button: 0, ctrlKey: false });
+  fireEvent.click(await slot.findByRole("menuitem", { name: /Done/ }));
+  await slot.findAllByRole("button", { name: "Done" });
+  expect(slot.queryAllByRole("button", { name: "Todo" })).toHaveLength(0);
+  await act(async () =>
+    write.reject(
+      new experimental_PluginRpcRefusal({
+        code: "conflict",
+        message: "Task changed",
+      }),
+    ),
+  );
+  await slot.findAllByRole("button", { name: "Todo" });
+  await slot.findByText("Task changed");
+  expect(slot.queryAllByRole("button", { name: "Done" })).toHaveLength(0);
+});
+
+it("keeps a saved title draft while the accepted write rereads", async () => {
+  const server = setup();
+  const task = await server.create("Old title");
+  const write = deferred<void>();
+  const reread = deferred<void>();
+  const readStarted = deferred<void>();
+  const originalWrite = server.options.rpc?.updateTask;
+  const originalRead = server.options.rpc?.getTaskByKey;
+  if (!originalWrite || !originalRead)
+    throw new Error("Missing tasks handlers");
+  let waitForRead = false;
+  server.options.rpc = {
+    ...server.options.rpc,
+    updateTask: async (input, context) => {
+      await write.promise;
+      const result = await originalWrite(input, context);
+      waitForRead = true;
+      return result;
+    },
+    getTaskByKey: async (input, context) => {
+      if (waitForRead) {
+        readStarted.resolve();
+        await reread.promise;
+      }
+      return originalRead(input, context);
+    },
+  };
+  const slot = server.connect(
+    renderSlot(
+      app.navPanels[0]!,
+      { subPath: `task/${task.key}` },
+      server.options,
+    ),
+  );
+  const title = await slot.findByRole("textbox", { name: "Task title" });
+  title.textContent = "Saved title";
+  fireEvent.blur(title);
+  await waitFor(() =>
+    expect(slot.getByRole("textbox", { name: "Task title" }).textContent).toBe(
+      "Saved title",
+    ),
+  );
+  await act(async () => {
+    write.resolve();
+    await readStarted.promise;
+  });
+  expect(slot.getByRole("textbox", { name: "Task title" }).textContent).toBe(
+    "Saved title",
+  );
+  await act(async () => reread.resolve());
+  await waitFor(() =>
+    expect(slot.getByRole("textbox", { name: "Task title" }).textContent).toBe(
+      "Saved title",
+    ),
+  );
+  expect(server.store.tasks.getTask(task.id)?.title).toBe("Saved title");
+});
+
+it("shows the server's destination order after accepting a list status edit", async () => {
+  const server = setup();
+  const first = await server.create("Moving task");
+  const second = await server.create("Already done", "done");
+  const slot = server.connect(
+    renderSlot(
+      app.navPanels[0]!,
+      { subPath: server.project.id },
+      server.options,
+    ),
+  );
+  await slot.findByText("Moving task");
+  await slot.findByText("Already done");
+  const row = slot.container.querySelector(`[data-task-key="${first.key}"]`);
+  if (!(row instanceof HTMLElement)) throw new Error("Missing task row");
+  fireEvent.keyDown(
+    within(row).getByRole("button", { name: `Open ${first.key}: Moving task` }),
+    { key: "s" },
+  );
+  fireEvent.click(await slot.findByRole("menuitem", { name: /Done/ }));
+  await waitFor(() =>
+    expect(
+      Array.from(
+        slot.container.querySelectorAll("[data-task-key]"),
+        (element) => element.getAttribute("data-task-key"),
+      ),
+    ).toEqual([second.key, first.key]),
+  );
+  await waitFor(() =>
+    expect(
+      slot.getByRole("region", { name: "Tasks" }).hasAttribute("aria-busy"),
+    ).toBe(false),
+  );
+  await act(async () => {
+    await server.write("deleteTask", { taskId: first.id });
+  });
+  await waitFor(() => expect(slot.queryByText("Moving task")).toBeNull());
+  expect(slot.getByText("Already done")).toBeTruthy();
 });
