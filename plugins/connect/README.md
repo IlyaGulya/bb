@@ -66,3 +66,12 @@ typed failed result; unexpected thrown errors remain private at the plugin bound
 
 Release revokes the completed grant's device even if enrollment never finished.
 The record is deleted only after successful cleanup; failures keep it for retry.
+
+Exposed origins that refuse a connection are kept in a per-tunnel cooldown for
+five seconds. HTTP and WebSocket requests share the cooldown; requests during
+that interval fail locally without opening another connection or logging a
+warning. Afterward, one request probes the origin while other requests still
+fail locally. A successful response clears the cooldown. Shares remain exposed
+so restarted servers recover automatically. The cache holds at most 1,024 origins
+and resets when the tunnel closes. The primary bb origin and other errors retain
+their existing behavior.
