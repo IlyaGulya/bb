@@ -1,4 +1,8 @@
-import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
+import type {
+  BbPluginApi,
+  PluginRpcHandlers,
+  ExperimentalPluginRpcHandlerContext,
+} from "@get-bb/plugin-sdk";
 import {
   createTasksStore,
   type Attachment as StoredAttachment,
@@ -17,14 +21,13 @@ import { errorMessage } from "../shared/errors";
 import { isSideChatShapedThread } from "../shared/side-chat";
 import {
   tasksRpcContract,
+  taskRowTags,
+  taskMembershipTags,
   type Attachment as AttachmentMetadata,
-  type ProjectsChangedEvent,
   type SidebarProjectSummary,
   type Task,
   type TaskPullRequest,
-  type TasksChangedEvent,
   type TasksDomainError,
-  type CommentsChangedEvent,
   type CommentProvider,
 } from "../shared/contract";
 
@@ -170,26 +173,58 @@ function taskFailure(error: TasksDomainFailure) {
   return { ok: false as const, error: error.detail };
 }
 
+const stores = new WeakMap<BbPluginApi, TasksApiStore>();
+
 export function publishTasksChanged(
   bb: BbPluginApi,
   taskId: string,
   projectId: string,
 ): void {
-  const payload: TasksChangedEvent = { taskId, projectId };
-  bb.realtime.publish("tasks:changed", payload);
+  bb.realtime.publish("tasks:changed", { taskId, projectId });
+  const task = stores.get(bb)?.tasks.getTask(taskId);
+  bb.rpc.experimental_invalidate([
+    `task:${taskId}`,
+    `attachments:${taskId}`,
+    "sidebar",
+    `task-list:${projectId}`,
+    "task-list:all",
+    `membership:${projectId}`,
+    "membership:all",
+    ...(task
+      ? [
+          `task-key:${task.key}`,
+          ...(task.parentTaskId ? [`subtasks:${task.parentTaskId}`] : []),
+        ]
+      : []),
+  ]);
 }
 
 export function publishProjectsChanged(
   bb: BbPluginApi,
   projectId: string | null,
 ): void {
-  const payload: ProjectsChangedEvent = { projectId };
-  bb.realtime.publish("projects:changed", payload);
+  bb.realtime.publish("projects:changed", { projectId });
+  bb.rpc.experimental_invalidate([
+    "projects",
+    "folders",
+    "presets",
+    "sidebar",
+    "task-keys",
+    `project:${projectId}`,
+    `task-project:${projectId}`,
+    `membership:${projectId}`,
+    "membership:all",
+    `task-list:${projectId}`,
+    "task-list:all",
+  ]);
 }
 
 export function publishCommentsChanged(bb: BbPluginApi, taskId: string): void {
-  const payload: CommentsChangedEvent = { taskId };
-  bb.realtime.publish("comments:changed", payload);
+  bb.realtime.publish("comments:changed", { taskId });
+  bb.rpc.experimental_invalidate([
+    `comments:${taskId}`,
+    `attachments:${taskId}`,
+  ]);
 }
 
 function apiTask(store: TasksApiStore, task: StoredTask): Task {
@@ -578,10 +613,17 @@ async function listTaskPullRequests(
   };
 }
 
+type TaskHandlers = {
+  [M in keyof typeof tasksRpcContract]: (
+    input: Parameters<PluginRpcHandlers<typeof tasksRpcContract>[M]>[0],
+    context?: ExperimentalPluginRpcHandlerContext,
+  ) => ReturnType<PluginRpcHandlers<typeof tasksRpcContract>[M]>;
+};
+
 export function registerHandlers(
   bb: BbPluginApi,
   store: TasksApiStore,
-): PluginRpcHandlers<typeof tasksRpcContract> {
+): TaskHandlers {
   return {
     createFolder(input) {
       const folder = store.tasks.createFolder(input);
@@ -689,6 +731,53 @@ export function registerHandlers(
         throw error;
       }
     },
+    taskMembership(input, context) {
+      const membership = store.tasks.listTaskKeys(input);
+      context?.experimental_provideKeyed("getTasksKeyed", () =>
+        Object.fromEntries(
+          apiTasks(
+            store,
+            store.tasks.getTasksByIds(membership.keys.slice(0, 25)),
+          ).map(({ description: _description, ...task }) => [task.id, task]),
+        ),
+      );
+      return membership;
+    },
+    getTasksKeyed({ keys }) {
+      const tasks = new Map(
+        apiTasks(store, store.tasks.getTasksByIds(keys)).map(
+          ({ description: _description, ...task }) => [task.id, task],
+        ),
+      );
+      return Object.fromEntries(
+        keys.map((key) => [key, tasks.get(key) ?? null]),
+      );
+    },
+    getLabelsKeyed({ keys }) {
+      return Object.fromEntries(
+        keys.map((key) => [key, store.tasks.listLabels(key)]),
+      );
+    },
+    getTaskThreadsKeyed({ keys }) {
+      const threads = store.tasks.listTaskThreadsForTasks(keys);
+      return Object.fromEntries(
+        keys.map((key) => [
+          key,
+          threads.filter((thread) => thread.taskId === key),
+        ]),
+      );
+    },
+    getTaskAttachmentsKeyed({ keys }) {
+      const attachments = store.tasks.listAttachmentsForTasks(keys);
+      return Object.fromEntries(
+        keys.map((key) => [
+          key,
+          attachments
+            .filter((attachment) => attachment.taskId === key)
+            .map(attachmentMetadata),
+        ]),
+      );
+    },
     getTask(input) {
       const task = store.tasks.getTask(input.taskId);
       return { task: task ? apiTask(store, task) : null };
@@ -754,7 +843,23 @@ export function registerHandlers(
           };
         });
 
-        publishTasksChanged(bb, result.task.id, result.task.projectId);
+        bb.realtime.publish("tasks:changed", {
+          taskId: result.task.id,
+          projectId: result.task.projectId,
+        });
+        const tags = [
+          ...(tasksRpcContract.updateTask.invalidates?.(input, {
+            ok: true,
+            task: result.task,
+          }) ?? []),
+        ];
+        if (
+          current.parentTaskId !== result.task.parentTaskId &&
+          current.parentTaskId
+        )
+          tags.push(`subtasks:${current.parentTaskId}`);
+        if (tags.length)
+          bb.rpc.experimental_invalidate([tags[0]!, ...tags.slice(1)]);
         if (result.systemCommentsWritten > 0) {
           publishCommentsChanged(bb, result.task.id);
         }
@@ -813,7 +918,14 @@ export function registerHandlers(
         }
         return { task: apiTask(store, moved), statusChanged };
       });
-      publishTasksChanged(bb, result.task.id, result.task.projectId);
+      bb.realtime.publish("tasks:changed", {
+        taskId: result.task.id,
+        projectId: result.task.projectId,
+      });
+      bb.rpc.experimental_invalidate([
+        ...taskRowTags(result.task),
+        ...taskMembershipTags(result.task).map((scope) => `${scope}:status`),
+      ]);
       if (result.statusChanged) publishCommentsChanged(bb, result.task.id);
       return { ok: true, task: result.task };
     },
@@ -879,9 +991,13 @@ export function registerHandlers(
     },
     async listComments(input) {
       const comments = store.tasks.listComments(input.taskId);
+      const attachments = store.tasks
+        .listAttachmentsForTaskComments(input.taskId)
+        .map(attachmentMetadata);
       const threadInfo = await resolveAgentThreadInfo(bb, comments);
       const providerBadges = await resolveProviderBadges(bb, threadInfo);
       return {
+        attachments,
         comments: comments.map((comment) => {
           const info =
             comment.kind === "agent" && comment.threadId !== null
@@ -1041,5 +1157,39 @@ export function registerHandlers(
 }
 
 export function registerTasksApi(bb: BbPluginApi, store: TasksApiStore): void {
-  bb.rpc.register(tasksRpcContract, registerHandlers(bb, store));
+  stores.set(bb, store);
+  const handlers = registerHandlers(bb, store);
+  const activePullRequests = new Set<string>();
+  bb.rpc.register(tasksRpcContract, {
+    ...handlers,
+    async listTaskPullRequests(input) {
+      const result = await handlers.listTaskPullRequests(input);
+      if (
+        result.pullRequests.some(
+          (pr) => pr.state === "open" || pr.state === "draft",
+        )
+      )
+        activePullRequests.add(input.taskId);
+      else activePullRequests.delete(input.taskId);
+      return result;
+    },
+  });
+  bb.rpc.experimental_whileWatched("listTaskPullRequests", (read, signal) => {
+    if (!("input" in read)) return;
+    const { taskId } = tasksRpcContract.listTaskPullRequests.input.parse(
+      read.input,
+    );
+    const timer = setInterval(() => {
+      if (activePullRequests.has(taskId))
+        bb.rpc.experimental_invalidate([`prs:${taskId}`]);
+    }, 60_000);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearInterval(timer);
+        activePullRequests.delete(taskId);
+      },
+      { once: true },
+    );
+  });
 }
