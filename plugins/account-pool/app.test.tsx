@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { accountPoolRpcContract } from "./src/rpc.js";
 import type {
   AccountPoolConfig,
   AccountSummary,
@@ -124,6 +125,7 @@ function render(
     app.settingsSections[0]!,
     {},
     {
+      experimental_rpcContract: accountPoolRpcContract,
       rpc: {
         "status.get": () => status(accounts),
         "config.get": () => config(),
@@ -345,7 +347,9 @@ describe("Account Pool settings", () => {
         await slot.findByRole("button", { name: "person@example.com actions" }),
       );
       fireEvent.click(await slot.findByText(action));
-      expect(slot.rpcCalls).toContainEqual({ method, input });
+      await waitFor(() =>
+        expect(slot.rpcCalls).toContainEqual({ method, input }),
+      );
     },
   );
 
@@ -362,10 +366,12 @@ describe("Account Pool settings", () => {
       false,
     );
     fireEvent.click(slot.getByRole("button", { name: "Remove" }));
-    expect(slot.rpcCalls).toContainEqual({
-      method: "account.remove",
-      input: { id: account().id },
-    });
+    await waitFor(() =>
+      expect(slot.rpcCalls).toContainEqual({
+        method: "account.remove",
+        input: { id: account().id },
+      }),
+    );
   });
 
   it("opens the correct provider sign-in flow from each Add account menu", async () => {
@@ -794,3 +800,43 @@ describe("Account Pool settings", () => {
     },
   );
 });
+
+it.each([false, true])(
+  "shows configuration failures with Retry and preserves an existing draft (loaded=%s)",
+  async (loaded) => {
+    let failed = !loaded;
+    const slot = render([account()], {
+      "config.get": () => {
+        if (failed) throw new Error("Configuration unavailable");
+        return config();
+      },
+    });
+    let input: HTMLInputElement | null = null;
+    if (loaded) {
+      fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
+      const field = await slot.findByLabelText("Anthropic upstream base URL");
+      if (!(field instanceof HTMLInputElement))
+        throw new Error("Expected config input");
+      input = field;
+      fireEvent.change(input, {
+        target: { value: "https://draft.example.com" },
+      });
+      failed = true;
+      await act(async () => {
+        await slot.experimental_invalidateRpc(["config"]);
+      });
+    }
+    await slot.findByText("Configuration unavailable", {}, { timeout: 12_000 });
+    if (input) expect(input.value).toBe("https://draft.example.com");
+    failed = false;
+    fireEvent.click(slot.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(slot.queryByText("Configuration unavailable")).toBeNull(),
+    );
+    if (input) {
+      expect(slot.getByLabelText("Anthropic upstream base URL")).toBe(input);
+      expect(input.value).toBe("https://draft.example.com");
+    }
+  },
+  20_000,
+);
