@@ -66,13 +66,16 @@ describe("performance diagnostics", () => {
   it("logs the sampled blocker without attributing an adjacent short callback", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "bb-stall-attribution-"));
     const records: object[] = [];
+    const warnings: object[] = [];
     const monitor = await startPerformanceDiagnostics({
       dataDir,
       logger: {
         info: (fields, message) => {
           if (message === "Event loop stall attribution") records.push(fields);
         },
-        warn: () => {},
+        warn: (fields) => {
+          warnings.push(fields);
+        },
       },
     });
     function unwrappedPluginBlocker() {
@@ -105,6 +108,10 @@ describe("performance diagnostics", () => {
           }),
         ]),
       );
+      const files = await readdir(join(dataDir, "logs", "performance"));
+      expect(files).toHaveLength(1);
+      expect(files[0]).toMatch(/\.cpuprofile$/);
+      expect(warnings).toEqual([]);
       expect(JSON.stringify(records)).not.toContain(
         '"functionName":"shortHeartbeat"',
       );

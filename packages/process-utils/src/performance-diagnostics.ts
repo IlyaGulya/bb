@@ -149,12 +149,12 @@ export async function startPerformanceDiagnostics(options: {
     stop: () => {
       stopPromise ??= (async () => {
         clearInterval(profileTimer);
-        stallWindows.stop();
         clearInterval(summaryTimer);
         histogram.disable();
         observer.disconnect();
         worker.ref();
         await rotation;
+        stallWindows.stop();
         await request("stop");
         terminating = true;
         await worker.terminate();
