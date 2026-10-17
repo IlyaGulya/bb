@@ -22,7 +22,13 @@ provider, and directive are all Docs.
   go through `bb.sdk.files` with an explicit vault root. Saves retain SHA-256
   compare-and-swap conflict handling. Local vaults use native filesystem
   watching for immediate UI refreshes; remote or unwatchable vaults fall back
-  to polling.
+  to polling. Remote vault scans run only while a notebook or document is watched.
+- **Live documents:** tagged RPC queries share snapshots of content, proposal,
+  and preview lease. Saves refresh the touched note and vault tree; proposal
+  edits refresh that proposal, and folder moves/deletes refresh descendants.
+  Refresh failures keep loaded content visible with Retry. Returning to a cached
+  document reads it again. Watched preview leases renew at expiry without
+  replacing the editor; an expired preview URL clears while renewal is pending.
 - **Default Markdown editor:** Docs registers for `.md`, `.mdx`, and
   `.markdown` files, so it can be selected under Settings → File openers or
   chosen from a file link's Open with menu. Workspace, absolute host, and
