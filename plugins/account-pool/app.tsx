@@ -862,16 +862,54 @@ function usePoolMutation<Method extends keyof typeof accountPoolRpcContract>(
   }).mutate;
 }
 
+function useAccountEnabledMutation(
+  method: "account.enable" | "account.disable",
+) {
+  return experimental_useRpcMutation<
+    typeof accountPoolRpcContract,
+    typeof method
+  >({
+    method,
+    optimistic(input, cache) {
+      cache.update("status.get", null, (current) => {
+        const enabled = method === "account.enable";
+        const accounts = current.accounts.map((account): AccountSummary =>
+          account.id === input.id
+            ? { ...account, enabled, status: enabled ? "ready" : "disabled" }
+            : account,
+        );
+        return {
+          ...current,
+          accounts,
+          enabledAccountCount: accounts.filter((account) => account.enabled)
+            .length,
+        };
+      });
+    },
+  });
+}
+
 function AccountPoolSettings() {
   const rpc = useRpc<typeof accountPoolRpcContract>();
+  const enable = useAccountEnabledMutation("account.enable");
+  const disable = useAccountEnabledMutation("account.disable");
+  const configMutation = experimental_useRpcMutation<
+    typeof accountPoolRpcContract,
+    "config.set"
+  >({
+    method: "config.set",
+    optimistic(input, cache) {
+      cache.update("config.get", null, (current) => ({ ...current, ...input }));
+    },
+  });
   const mutations = {
     "account.add": usePoolMutation("account.add"),
     "account.remove": usePoolMutation("account.remove"),
-    "account.enable": usePoolMutation("account.enable"),
-    "account.disable": usePoolMutation("account.disable"),
+    "account.enable": enable.mutate,
+    "account.disable": disable.mutate,
     "account.setPriority": usePoolMutation("account.setPriority"),
     "account.refreshUsage": usePoolMutation("account.refreshUsage"),
-    "config.set": usePoolMutation("config.set"),
+    "config.set": configMutation.mutate,
     "login.complete": usePoolMutation("login.complete"),
     "codexLogin.poll": usePoolMutation("codexLogin.poll"),
     "token.rotate": usePoolMutation("token.rotate"),
@@ -940,9 +978,7 @@ function AccountPoolSettings() {
   const [pending, setPending] = useState<ReadonlyMap<string, boolean | null>>(
     () => new Map(),
   );
-  const configSaving = CONFIG_FIELDS.some((field) =>
-    pending.has(`config-${field}`),
-  );
+  const configSaving = configMutation.isPending;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, {
@@ -1006,6 +1042,8 @@ function AccountPoolSettings() {
   const displayError =
     configQuery.error?.message ??
     statusQuery.error?.message ??
+    enable.error?.message ??
+    disable.error?.message ??
     routing.error?.message ??
     reorder.error?.message ??
     error;
@@ -1083,8 +1121,10 @@ function AccountPoolSettings() {
     return pending.get(key) ?? stored;
   }
   function accountPending(accountId: string): boolean {
-    return ACCOUNT_ACTIONS.some((action) =>
-      pending.has(`${action}-${accountId}`),
+    return (
+      enable.isPending ||
+      disable.isPending ||
+      ACCOUNT_ACTIONS.some((action) => pending.has(`${action}-${accountId}`))
     );
   }
   function updateConfigDraft(field: ConfigField, value: string): void {
@@ -1127,7 +1167,6 @@ function AccountPoolSettings() {
           ? { anthropicUpstreamBaseUrl: value }
           : { codexUpstreamBaseUrl: value };
     }
-    markPending(`config-${field}`, null);
     setConfigErrors((current) => ({ ...current, [field]: null }));
     try {
       applyConfig(await mutations["config.set"](update));
@@ -1136,8 +1175,6 @@ function AccountPoolSettings() {
         ...current,
         [field]: errorText(saveError),
       }));
-    } finally {
-      clearPending(`config-${field}`);
     }
   }
   async function startClaude(): Promise<void> {
@@ -1191,13 +1228,14 @@ function AccountPoolSettings() {
       setDialog({ kind: "remove", accountId: account.id });
       return;
     }
+    if (action === "toggle") {
+      setError(null);
+      await mutations[account.enabled ? "account.disable" : "account.enable"]({
+        id: account.id,
+      }).catch((actionError) => setError(errorText(actionError)));
+      return;
+    }
     await run(`${action}-${account.id}`, async () => {
-      if (action === "toggle")
-        await mutations[account.enabled ? "account.disable" : "account.enable"](
-          {
-            id: account.id,
-          },
-        );
       if (action === "refresh")
         await mutations["account.refreshUsage"]({ accountId: account.id });
     });

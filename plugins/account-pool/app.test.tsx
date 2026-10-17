@@ -353,6 +353,31 @@ describe("Account Pool settings", () => {
     },
   );
 
+  it.each([true, false])(
+    "predicts account enabled=%s and rolls back a rejected write",
+    async (enabled) => {
+      const write = deferred<{ account: AccountSummary | null }>();
+      const slot = render(
+        [account({ enabled, status: enabled ? "ready" : "disabled" })],
+        {
+          [enabled ? "account.disable" : "account.enable"]: () => write.promise,
+        },
+      );
+      const previous = enabled ? "Ready" : "Disabled";
+      const predicted = enabled ? "Disabled" : "Ready";
+      await slot.findByText(previous);
+      fireEvent.pointerDown(
+        slot.getByRole("button", { name: "person@example.com actions" }),
+      );
+      fireEvent.click(await slot.findByText(enabled ? "Disable" : "Enable"));
+      await slot.findByText(predicted);
+      expect(slot.queryByText(previous)).toBeNull();
+      await act(async () => write.reject(new Error("Toggle rejected")));
+      await slot.findByText("Toggle rejected");
+      expect(slot.getByText(previous)).toBeTruthy();
+    },
+  );
+
   it("confirms Remove before dispatching its RPC contract", async () => {
     const slot = render([account()], {
       "account.remove": () => ({ removed: true }),
@@ -422,6 +447,33 @@ describe("Account Pool settings", () => {
     await act(async () => write.reject(new Error("Routing unavailable")));
     await slot.findByText("Routing unavailable");
     expect(control.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("keeps a saved config draft visible until its re-read lands", async () => {
+    const write = deferred<AccountPoolConfig>();
+    const read = deferred<AccountPoolConfig>();
+    let saved = false;
+    const next = config({ switchThreshold: 0.86 });
+    const slot = render([account()], {
+      "config.get": () => (saved ? read.promise : config()),
+      "config.set": async () => {
+        const result = await write.promise;
+        saved = true;
+        return result;
+      },
+    });
+    fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
+    const input = await slot.findByLabelText("Quota switch threshold");
+    if (!(input instanceof HTMLInputElement))
+      throw new Error("Expected threshold input");
+    await waitFor(() => expect(input.value).toBe("0.98"));
+    fireEvent.change(input, { target: { value: "0.86" } });
+    fireEvent.blur(input);
+    expect(input.value).toBe("0.86");
+    await act(async () => write.resolve(next));
+    expect(input.value).toBe("0.86");
+    await act(async () => read.resolve(next));
+    expect(input.value).toBe("0.86");
   });
 
   it("edits Advanced config fields and shows URL validation inline", async () => {
