@@ -53,14 +53,17 @@ const ENDLESS_CATALOG: Catalog = {
 interface Deferred<T> {
   promise: Promise<T>;
   resolve(value: T): void;
+  reject(error: Error): void;
 }
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 class ResizeObserverStub {
@@ -905,14 +908,15 @@ describe("Theme Preview", () => {
     );
   });
 
-  it("keeps a failed selection recoverable beside the owning control", async () => {
+  it("predicts a selection, rolls back a failed write, and offers Retry", async () => {
+    const write = deferred<Catalog>();
     let current = DEFAULT_CATALOG;
     let selectionCalls = 0;
     renderPreview({
       themeCatalog: () => current,
       setTheme: () => {
         selectionCalls += 1;
-        if (selectionCalls === 1) throw new Error("rpc disconnected");
+        if (selectionCalls === 1) return write.promise;
         current = ENDLESS_CATALOG;
         return current;
       },
@@ -920,9 +924,15 @@ describe("Theme Preview", () => {
 
     await chooseEndlessDark();
 
+    expect(
+      (await screen.findByRole("combobox", { name: /Applying Endless Color/i }))
+        .textContent,
+    ).toContain("Endless Color");
+    await act(async () => write.reject(new Error("rpc disconnected")));
     expect((await screen.findByRole("alert")).textContent).toContain(
       "Theme didn’t apply",
     );
+    expect(themeControl().textContent).toContain("Default");
     fireEvent.click(screen.getByRole("button", { name: "Retry theme" }));
     await waitFor(() =>
       expect(
@@ -955,6 +965,9 @@ describe("Theme Preview", () => {
     if (!endless) throw new Error("Endless Color option was not rendered");
     pickOption(endless);
 
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
     expect(control.disabled).toBe(true);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(20_000);

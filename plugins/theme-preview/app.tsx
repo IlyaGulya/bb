@@ -3145,7 +3145,7 @@ function ThemePicker({
   catalog,
   computed,
   mode,
-  pendingSelection,
+  selectionPending,
   selectionSlow,
   selectionFailed,
   onPick,
@@ -3154,14 +3154,14 @@ function ThemePicker({
   catalog: Catalog;
   computed: Computed;
   mode: Mode;
-  pendingSelection: ThemeSelection | null;
+  selectionPending: boolean;
   selectionSlow: boolean;
   selectionFailed: boolean;
   onPick: (themeId: string, mode: Mode) => void;
   onRetry: () => void;
 }) {
-  const displayThemeId = pendingSelection?.themeId ?? catalog.activeThemeId;
-  const displayMode = pendingSelection?.mode ?? mode;
+  const displayThemeId = catalog.activeThemeId;
+  const displayMode = mode;
   const current =
     catalog.themes.find((theme) => theme.id === displayThemeId) ??
     catalog.themes[0];
@@ -3172,7 +3172,7 @@ function ThemePicker({
     : null;
   const measured = (name: string): string | null => computed[name]?.rgb || null;
   const currentSwatch: Swatch | null =
-    pendingSelection === null && current?.id === catalog.activeThemeId
+    !selectionPending && current?.id === catalog.activeThemeId
       ? {
           canvas: diskSwatch?.canvas ?? measured("canvas"),
           sidebar: diskSwatch?.sidebar ?? measured("sidebar"),
@@ -3184,7 +3184,7 @@ function ThemePicker({
           fontMono: diskSwatch?.fontMono ?? null,
         }
       : diskSwatch;
-  const pending = pendingSelection !== null;
+  const pending = selectionPending;
   const unavailable = pending;
   const loading = catalog.themes.length === 0;
   const accessibleName = loading
@@ -3365,6 +3365,12 @@ function PreviewPage({ subPath }: { subPath: string }) {
   >({
     method: "setTheme",
     timeoutMs: 20_000,
+    optimistic(input, cache) {
+      cache.update("themeCatalog", {}, (current) => ({
+        ...current,
+        activeThemeId: input.themeId,
+      }));
+    },
   });
   const catalog = catalogQuery.data ?? EMPTY_CATALOG;
   const error = catalogQuery.error?.message;
@@ -3377,8 +3383,7 @@ function PreviewPage({ subPath }: { subPath: string }) {
     band: "mobile",
     width: 0,
   });
-  const [pendingSelection, setPendingSelection] =
-    useState<ThemeSelection | null>(null);
+  const selectionPending = selectionMutation.isPending;
   const [failedSelection, setFailedSelection] = useState<ThemeSelection | null>(
     null,
   );
@@ -3396,13 +3401,13 @@ function PreviewPage({ subPath }: { subPath: string }) {
   }, [catalogQuery.isFetching, catalogQuery.error]);
 
   useEffect(() => {
-    if (!pendingSelection) {
+    if (!selectionPending) {
       setSelectionSlow(false);
       return;
     }
     const timer = setTimeout(() => setSelectionSlow(true), 5_000);
     return () => clearTimeout(timer);
-  }, [pendingSelection]);
+  }, [selectionPending]);
 
   useLayoutEffect(() => {
     const header = headerRef.current;
@@ -3439,12 +3444,10 @@ function PreviewPage({ subPath }: { subPath: string }) {
   const applySelection = (selection: ThemeSelection) => {
     if (selectionMutation.isPending) return;
     setMode(selection.mode);
-    setPendingSelection(selection);
     setFailedSelection(null);
     selectionMutation
       .mutate({ themeId: selection.themeId })
-      .catch(() => setFailedSelection(selection))
-      .finally(() => setPendingSelection(null));
+      .catch(() => setFailedSelection(selection));
   };
   const pick = (themeId: string, nextMode: Mode) =>
     applySelection({ themeId, mode: nextMode });
@@ -3466,7 +3469,7 @@ function PreviewPage({ subPath }: { subPath: string }) {
   const mobilePreview = frameWidth < 768;
   const view =
     mobilePreview && requestedView === "split" ? "thread" : requestedView;
-  const displayThemeId = pendingSelection?.themeId ?? catalog.activeThemeId;
+  const displayThemeId = catalog.activeThemeId;
   const displayThemeName =
     catalog.themes.find((theme) => theme.id === displayThemeId)?.name ??
     "Current theme";
@@ -3568,7 +3571,7 @@ function PreviewPage({ subPath }: { subPath: string }) {
               catalog={catalog}
               computed={computed}
               mode={mode}
-              pendingSelection={pendingSelection}
+              selectionPending={selectionPending}
               selectionSlow={selectionSlow}
               selectionFailed={failedSelection !== null}
               onPick={pick}
