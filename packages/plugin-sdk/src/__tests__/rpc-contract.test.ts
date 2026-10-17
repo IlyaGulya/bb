@@ -71,6 +71,7 @@ describe("schema-driven rpc contract", () => {
     expectTypeOf(assertFrontendInference).toBeFunction();
     expect(
       contextHandlers.ping(null, {
+        experimental_provideKeyed: () => {},
         experimental_caller: { kind: "plugin", pluginId: "other" },
       }),
     ).toEqual({ ok: true });
