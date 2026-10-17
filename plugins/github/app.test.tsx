@@ -173,7 +173,11 @@ const pull = {
   files: [],
 };
 
-function detailView(kind: "issue" | "pr", firstError = false) {
+function detailView(
+  kind: "issue" | "pr",
+  firstError = false,
+  extraRpc: Record<string, () => unknown> = {},
+) {
   const state = { readError: firstError, authError: false, postError: false };
   const view = renderSlot(
     app.navPanels[0]!,
@@ -205,6 +209,7 @@ function detailView(kind: "issue" | "pr", firstError = false) {
           if (state.postError) throw new Error("Post failed");
           return { ok: true };
         },
+        ...extraRpc,
       },
     },
   );
@@ -276,6 +281,69 @@ it.each(["issue", "pr"] as const)(
       expect(view.queryByText("Detail unavailable")).toBeNull();
     } finally {
       view.lifecycle.unmount();
+    }
+  },
+);
+
+it.each(["labels", "assignees", "state"] as const)(
+  "predicts issue %s and rolls back a failed write",
+  async (field) => {
+    const previousScroll = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView",
+    );
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: () => {},
+    });
+    let reject!: (error: Error) => void;
+    const write = new Promise<never>((_resolve, fail) => {
+      reject = fail;
+    });
+    const { view } = detailView("issue", false, {
+      setLabels: () => write,
+      setAssignees: () => write,
+      setIssueState: () => write,
+      repositoryLabels: () => ({ labels: ["bug"] }),
+      assignableUsers: () => ({ users: ["mona"] }),
+      viewer: () => ({ login: "octocat" }),
+    });
+    try {
+      await view.findByText("Live detail");
+      if (field === "state") {
+        const control = view.getByRole("combobox");
+        fireEvent.click(control);
+        fireEvent.click(await view.findByRole("option", { name: "Closed" }));
+        await waitFor(() => expect(control.textContent).toContain("Closed"));
+        await act(async () => reject(new Error("Write failed")));
+        await waitFor(() => expect(control.textContent).toContain("Open"));
+      } else {
+        fireEvent.pointerDown(
+          view.getAllByRole("button", { name: "Edit" })[
+            field === "assignees" ? 0 : 1
+          ]!,
+        );
+        const option = await view.findByRole("menuitemcheckbox", {
+          name: field === "labels" ? /bug/ : /mona/,
+        });
+        fireEvent.click(option);
+        await waitFor(() =>
+          expect(option.getAttribute("aria-checked")).toBe("true"),
+        );
+        await act(async () => reject(new Error("Write failed")));
+        await waitFor(() =>
+          expect(option.getAttribute("aria-checked")).toBe("false"),
+        );
+      }
+    } finally {
+      view.lifecycle.unmount();
+      if (previousScroll)
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollIntoView",
+          previousScroll,
+        );
+      else Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
     }
   },
 );

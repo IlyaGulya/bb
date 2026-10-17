@@ -8,6 +8,7 @@ import {
   useBbNavigate,
   experimental_useRpcQuery,
   experimental_useRpcMutation,
+  type ExperimentalRpcOptimisticCache,
   type PluginNavPanelProps,
   type PluginRpcResult,
   type PluginThreadPanelProps,
@@ -311,19 +312,66 @@ function LabelChips({
   );
 }
 
+function predictIssueMetadata(
+  cache: ExperimentalRpcOptimisticCache<typeof githubRpcContract>,
+  input: { repo: string; number: number },
+  patch: Partial<
+    Pick<
+      NonNullable<
+        PluginRpcResult<(typeof githubRpcContract)["getIssue"]>["issue"]
+      >,
+      "state" | "assignees" | "labels"
+    >
+  >,
+) {
+  cache.update(
+    "getIssue",
+    { repo: input.repo, number: input.number },
+    (current) => ({
+      ...current,
+      issue: { ...current.issue, ...patch },
+    }),
+  );
+  cache.update("listItems", { kind: "issue" }, (current) => ({
+    ...current,
+    items: current.items.map((item) =>
+      item.repo === input.repo && item.number === input.number
+        ? { ...item, ...patch }
+        : item,
+    ),
+  }));
+}
+
 function useIssueMutations() {
   const state = experimental_useRpcMutation<
     typeof githubRpcContract,
     "setIssueState"
-  >({ method: "setIssueState" });
+  >({
+    method: "setIssueState",
+    optimistic(input, cache) {
+      predictIssueMetadata(cache, input, {
+        state: input.state === "closed" ? "CLOSED" : "OPEN",
+      });
+    },
+  });
   const assignees = experimental_useRpcMutation<
     typeof githubRpcContract,
     "setAssignees"
-  >({ method: "setAssignees" });
+  >({
+    method: "setAssignees",
+    optimistic(input, cache) {
+      predictIssueMetadata(cache, input, { assignees: input.assignees });
+    },
+  });
   const labels = experimental_useRpcMutation<
     typeof githubRpcContract,
     "setLabels"
-  >({ method: "setLabels" });
+  >({
+    method: "setLabels",
+    optimistic(input, cache) {
+      predictIssueMetadata(cache, input, { labels: input.labels });
+    },
+  });
   return {
     isPending: state.isPending || assignees.isPending || labels.isPending,
     setIssueState: (repo: string, number: number, next: "open" | "closed") =>
