@@ -1,3 +1,4 @@
+import { liveTaskRpcFixtures } from "../../test-fixtures.js";
 // @vitest-environment jsdom
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -123,7 +124,7 @@ describe("NewTaskDialog", () => {
           app.navPanels[0]!,
           { subPath: PROJECT_ID },
           {
-            rpc: {
+            rpc: liveTaskRpcFixtures({
               listProjects: () => ({ projects: [project, otherProject] }),
               listFolders: () => ({ folders: [] }),
               listPresets: () => ({ presets: [] }),
@@ -135,7 +136,7 @@ describe("NewTaskDialog", () => {
                 createCalls.push(input);
                 return { ok: true, task: createdTask(input) };
               },
-            },
+            }),
           },
         );
         fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
@@ -200,7 +201,7 @@ describe("NewTaskDialog", () => {
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
       {
-        rpc: {
+        rpc: liveTaskRpcFixtures({
           listProjects: () => ({ projects: [project] }),
           listFolders: () => ({ folders: [] }),
           listPresets: () => ({ presets: [] }),
@@ -212,7 +213,7 @@ describe("NewTaskDialog", () => {
             createCalls.push(input);
             return { ok: true, task: createdTask(input) };
           },
-        },
+        }),
       },
     );
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
@@ -235,7 +236,7 @@ describe("NewTaskDialog", () => {
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
       {
-        rpc: {
+        rpc: liveTaskRpcFixtures({
           listProjects: () => ({ projects: [project] }),
           listFolders: () => ({ folders: [] }),
           listPresets: () => ({ presets: [] }),
@@ -247,7 +248,7 @@ describe("NewTaskDialog", () => {
             createCalls.push(input);
             return { ok: true, task: createdTask(input) };
           },
-        },
+        }),
       },
     );
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
@@ -280,7 +281,7 @@ describe("NewTaskDialog", () => {
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
       {
-        rpc: {
+        rpc: liveTaskRpcFixtures({
           listProjects: () => ({ projects: [project] }),
           listFolders: () => ({ folders: [] }),
           listPresets: () => ({ presets: [] }),
@@ -292,7 +293,7 @@ describe("NewTaskDialog", () => {
             createCalls.push(input);
             return { ok: true, task: createdTask(input) };
           },
-        },
+        }),
       },
     );
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
@@ -312,7 +313,7 @@ describe("NewTaskDialog", () => {
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
       {
-        rpc: {
+        rpc: liveTaskRpcFixtures({
           listProjects: () => ({ projects: [project] }),
           listFolders: () => ({ folders: [] }),
           listPresets: () => ({ presets: [] }),
@@ -326,7 +327,7 @@ describe("NewTaskDialog", () => {
               message: "Sub-tasks cannot have their own sub-tasks",
             },
           }),
-        },
+        }),
       },
     );
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
@@ -344,7 +345,7 @@ describe("NewTaskDialog", () => {
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
       {
-        rpc: {
+        rpc: liveTaskRpcFixtures({
           listProjects: () => ({ projects: [project] }),
           listFolders: () => ({ folders: [] }),
           listPresets: () => ({ presets: [] }),
@@ -372,7 +373,7 @@ describe("NewTaskDialog", () => {
               },
             };
           },
-        },
+        }),
       },
     );
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
@@ -424,7 +425,7 @@ describe("NewTaskDialog drafts", () => {
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
-      { rpc: draftRpc(createCalls) },
+      { rpc: liveTaskRpcFixtures(draftRpc(createCalls)) },
     );
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
     fireEvent.change(await slot.findByLabelText("Task title"), {
@@ -500,10 +501,10 @@ describe("NewTaskDialog drafts", () => {
       app.navPanels[0]!,
       { subPath: "all" },
       {
-        rpc: {
+        rpc: liveTaskRpcFixtures({
           ...draftRpc([]),
           listProjects: () => projects,
-        },
+        }),
       },
     );
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
@@ -548,7 +549,7 @@ describe("NewTaskDialog drafts", () => {
         app.navPanels[0]!,
         { subPath: otherProject.id },
         {
-          rpc: {
+          rpc: liveTaskRpcFixtures({
             ...draftRpc(createCalls),
             listProjects: () => ({
               projects:
@@ -556,7 +557,7 @@ describe("NewTaskDialog drafts", () => {
                   ? [otherProject]
                   : [project, otherProject],
             }),
-          },
+          }),
         },
       );
       fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
@@ -576,7 +577,7 @@ describe("NewTaskDialog drafts", () => {
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
-      { rpc: draftRpc([]) },
+      { rpc: liveTaskRpcFixtures(draftRpc([])) },
     );
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
     fireEvent.change(await slot.findByLabelText("Task title"), {
@@ -600,7 +601,7 @@ describe("NewTaskDialog drafts", () => {
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
-      { rpc: draftRpc([]) },
+      { rpc: liveTaskRpcFixtures(draftRpc([])) },
     );
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
     const title = (await slot.findByLabelText(
@@ -682,7 +683,7 @@ describe("NewTaskDialog attachments", () => {
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
-      { rpc: dialogRpc() },
+      { rpc: liveTaskRpcFixtures(dialogRpc()) },
     );
     const titleInput = await openDialogWithTitle(slot, "With files");
     pasteFile(titleInput, new File(["png"], "shot.png", { type: "image/png" }));
@@ -718,7 +719,7 @@ describe("NewTaskDialog attachments", () => {
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
-      { rpc: dialogRpc() },
+      { rpc: liveTaskRpcFixtures(dialogRpc()) },
     );
     const titleInput = await openDialogWithTitle(slot, "Partial failure");
     pasteFile(titleInput, new File(["ok"], "good.png", { type: "image/png" }));
@@ -757,7 +758,7 @@ describe("NewTaskDialog attachments", () => {
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
-      { rpc: dialogRpc() },
+      { rpc: liveTaskRpcFixtures(dialogRpc()) },
     );
     const titleInput = await openDialogWithTitle(slot, "Too big");
     const big = new File(["x"], "big.bin", { type: "application/zip" });
@@ -797,7 +798,7 @@ describe("NewTaskDialog attachments", () => {
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
-      { rpc: dialogRpc() },
+      { rpc: liveTaskRpcFixtures(dialogRpc()) },
     );
     const titleInput = await openDialogWithTitle(slot, "In flight");
     pasteFile(titleInput, new File(["x"], "slow.png", { type: "image/png" }));
@@ -831,7 +832,7 @@ describe("NewTaskDialog attachments", () => {
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
-      { rpc: dialogRpc() },
+      { rpc: liveTaskRpcFixtures(dialogRpc()) },
     );
     const titleInput = await openDialogWithTitle(slot, "Sticky recovery");
     pasteFile(
@@ -863,7 +864,7 @@ describe("NewTaskDialog attachments", () => {
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
-      { rpc: dialogRpc() },
+      { rpc: liveTaskRpcFixtures(dialogRpc()) },
     );
     const titleInput = await openDialogWithTitle(slot, "Retry once");
     pasteFile(
@@ -968,7 +969,13 @@ describe("savePresetDraft", () => {
         return Promise.resolve({});
       },
     };
-    return { calls, rpc: rpc as never };
+    return {
+      calls,
+      rpc: {
+        create: (input: never) => rpc.call("createPreset", input),
+        update: (input: never) => rpc.call("updatePreset", input),
+      } as never,
+    };
   }
 
   it("sends trimmed worktree targets on create", async () => {
@@ -1022,7 +1029,7 @@ describe("PresetDialog environment section", () => {
       app.navPanels[0]!,
       { subPath: "manage" },
       {
-        rpc: {
+        rpc: liveTaskRpcFixtures({
           listProjects: () => ({ projects: [project] }),
           listFolders: () => ({ folders: [] }),
           listPresets: () => ({ presets }),
@@ -1031,7 +1038,7 @@ describe("PresetDialog environment section", () => {
           listLabels: () => ({ labels: [] }),
           listMachines: () => ({ machines: MACHINES }),
           ...rpcOverrides,
-        },
+        }),
       },
     );
   }
@@ -1146,7 +1153,7 @@ describe("Manage folders", () => {
       app.navPanels[0]!,
       { subPath: "manage" },
       {
-        rpc: {
+        rpc: liveTaskRpcFixtures({
           listProjects: () => ({
             projects: [{ ...project, folderId: parentFolder.id }],
           }),
@@ -1156,7 +1163,7 @@ describe("Manage folders", () => {
           listTasks: () => ({ tasks: [] }),
           listLabels: () => ({ labels: [] }),
           ...overrides,
-        },
+        }),
       },
     );
   }
@@ -1273,9 +1280,7 @@ describe("Manage folders", () => {
     fireEvent.click(slot.getByRole("button", { name: "Cancel" }));
 
     projectsUnavailable = true;
-    await slot.behavior.emitRealtime("projects:changed", {
-      projectId: PROJECT_ID,
-    });
+    await slot.behavior.experimental_invalidateRpc(null);
     fireEvent.click(
       await slot.findByRole("button", { name: "Delete folder bb" }),
     );
@@ -1336,14 +1341,14 @@ describe("NewProjectDialog", () => {
       app.navPanels[0]!,
       { subPath: "" },
       {
-        rpc: {
+        rpc: liveTaskRpcFixtures({
           listProjects: () => ({ projects: [] }),
           listFolders: () => ({ folders: [] }),
           listPresets: () => ({ presets: [] }),
           sidebarSummary: () => ({ projects: [] }),
           listTasks: () => ({ tasks: [] }),
           ...overrides,
-        },
+        }),
       },
     );
   }

@@ -1,10 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
+import { sortTasks } from "../shared/sort.js";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  experimental_useRpcQuery,
+  experimental_useRpcKeyedQuery,
+  experimental_useRpcMutation,
+  type StandardSchemaV1InferInput,
+  type PluginRpcResult,
+  useRealtime,
+  useRpc,
+} from "@get-bb/plugin-sdk/app";
 import type { z } from "zod";
 import {
   TASK_STATUSES,
   tasksRpcContract,
   type TasksRpcContract,
+  type TaskSummary,
 } from "../shared/contract.js";
 import type { Task, TaskPriority, TaskStatus } from "../shared/contract.js";
 import { errorMessage } from "../shared/errors.js";
@@ -398,4 +408,75 @@ export function useActiveTasks() {
     async (rpc) => listAllTasks(rpc, { activeOnly: true }),
     ["tasks:changed", "threads:changed"],
   );
+}
+export function useTaskRead<Method extends keyof TasksRpcContract & string, T>(
+  method: Method,
+  input: StandardSchemaV1InferInput<TasksRpcContract[Method]["input"]>,
+  select: (result: PluginRpcResult<TasksRpcContract[Method]>) => T,
+  enabled = true,
+): TasksQuery<T> {
+  const query = experimental_useRpcQuery<TasksRpcContract, Method>({
+    method,
+    input,
+    enabled,
+  });
+  return {
+    data: query.data === undefined ? undefined : select(query.data),
+    error: query.error?.message ?? null,
+    isLoading: query.isLoading,
+    refresh: query.refetch,
+  };
+}
+
+export function useTaskMutation<Method extends keyof TasksRpcContract & string>(
+  method: Method,
+) {
+  return experimental_useRpcMutation<TasksRpcContract, Method>({ method })
+    .mutate;
+}
+
+export function useTaskRows(
+  input: StandardSchemaV1InferInput<
+    TasksRpcContract["taskMembership"]["input"]
+  >,
+): TasksQuery<TaskSummary[]> {
+  const membership = useTaskRead("taskMembership", input, (value) => value);
+  const rows = experimental_useRpcKeyedQuery<TaskSummary | null>({
+    method: "getTasksKeyed",
+    keys: membership.data?.keys ?? [],
+  });
+  const identity = JSON.stringify(input);
+  const [loaded, setLoaded] = useState<string>();
+  const openKeys = useMemo(
+    () => membership.data?.keys.slice(0, membership.data.openCount) ?? [],
+    [membership.data],
+  );
+  const openPending =
+    loaded !== identity &&
+    rows.error === null &&
+    openKeys.some((key) => rows.data?.[key] === undefined);
+  if (membership.data !== undefined && !openPending && loaded !== identity)
+    setLoaded(identity);
+  const data = useMemo(() => {
+    if (
+      !membership.data ||
+      (rows.isLoading && Object.keys(rows.data ?? {}).length === 0)
+    )
+      return undefined;
+    return sortTasks(
+      (openPending ? openKeys : membership.data.keys).flatMap((key) =>
+        rows.data?.[key] ? [rows.data[key]!] : [],
+      ),
+      "manual",
+    );
+  }, [membership.data, rows.data, rows.isLoading, openPending, openKeys]);
+  return {
+    data,
+    error: membership.error ?? rows.error?.message ?? null,
+    isLoading: membership.isLoading || rows.isLoading,
+    refresh: () => {
+      membership.refresh();
+      void rows.refetch();
+    },
+  };
 }
