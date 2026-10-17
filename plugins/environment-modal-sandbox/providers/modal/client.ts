@@ -238,7 +238,14 @@ export const createModalSandboxClient: ModalSandboxClientFactory = (
         const sandbox = await client.sandboxes.fromId(sandboxId);
         return (await sandbox.poll()) === null ? wrapSandbox(sandbox) : null;
       } catch (error) {
-        if (error instanceof NotFoundError) return null;
+        if (
+          error instanceof NotFoundError ||
+          (error instanceof Error &&
+            error.name === "ClientError" &&
+            "code" in error &&
+            error.code === 5)
+        )
+          return null;
         throw error;
       }
     },

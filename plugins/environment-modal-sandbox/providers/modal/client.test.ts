@@ -75,6 +75,26 @@ describe("Modal bootstrap executor", () => {
     ).resolves.toBeNull();
   });
 
+  it("treats a missing sandbox reported by SandboxWait as absent but preserves other RPC failures", async () => {
+    const client = createModalSandboxClient({
+      tokenId: "id",
+      tokenSecret: "secret",
+    });
+    vendor.poll.mockRejectedValueOnce(
+      Object.assign(new Error("SandboxWait NOT_FOUND"), {
+        name: "ClientError",
+        code: 5,
+      }),
+    );
+    await expect(client.fromId("sandbox-1")).resolves.toBeNull();
+    const unavailable = Object.assign(new Error("unavailable"), {
+      name: "ClientError",
+      code: 14,
+    });
+    vendor.poll.mockRejectedValueOnce(unavailable);
+    await expect(client.fromId("sandbox-1")).rejects.toBe(unavailable);
+  });
+
   it("delivers stdin without putting credentials into command arguments and closes input", async () => {
     const process = processResult();
     vendor.exec.mockResolvedValue(process);
