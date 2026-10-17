@@ -16,7 +16,6 @@ import {
   experimental_useRpcKeyedQuery,
   experimental_useRpcMutation,
   experimental_useRpcQuery,
-  experimental_useRpcMutation,
 } from "../../app.js";
 import {
   defineRpcContract,
