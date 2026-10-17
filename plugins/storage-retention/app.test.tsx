@@ -15,11 +15,22 @@ import { policySchema, storageRpc } from "./src/contract.js";
 import type { State } from "./src/contract.js";
 import type { HostStorageListResponse } from "./src/storage-types.js";
 
+const scrollIntoViewDescriptor = Object.getOwnPropertyDescriptor(
+  HTMLElement.prototype,
+  "scrollIntoView",
+);
 const app = await loadPluginApp(() => import("./app"));
 afterEach(() => {
   cleanup();
   toast.dismiss();
   vi.restoreAllMocks();
+  if (scrollIntoViewDescriptor)
+    Object.defineProperty(
+      HTMLElement.prototype,
+      "scrollIntoView",
+      scrollIntoViewDescriptor,
+    );
+  else Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
 });
 
 function fixture(subPath = "host_test", metadataError: Error | null = null) {
@@ -206,6 +217,55 @@ it("shows cleanup failures as toasts, keeps other actions available, and permits
   );
   expect(start).toHaveBeenCalledTimes(2);
 });
+
+it.each(["switch", "select"] as const)(
+  "predicts a %s setting and rolls back a rejected write",
+  async (kind) => {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const { slot, configure } = fixture("");
+    let reject!: (error: Error) => void;
+    configure.mockImplementationOnce(
+      () =>
+        new Promise<State>((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    const control =
+      kind === "switch"
+        ? await slot.findByRole("switch", {
+            name: "Delete thread storage on archive",
+          })
+        : await slot.findByRole("combobox", {
+            name: "Archive inactive threads",
+          });
+    if (kind === "switch") fireEvent.click(control);
+    else {
+      fireEvent.click(control);
+      fireEvent.click(
+        await slot.findByRole("option", { name: "After 1 week" }),
+      );
+    }
+    await waitFor(() =>
+      expect(
+        kind === "switch"
+          ? control.getAttribute("aria-checked")
+          : control.textContent,
+      ).toBe(kind === "switch" ? "true" : "After 1 week"),
+    );
+    await waitFor(() => expect(control.hasAttribute("disabled")).toBe(true));
+    await act(async () => reject(new Error("Save rejected")));
+    await waitFor(() =>
+      expect(
+        kind === "switch"
+          ? control.getAttribute("aria-checked")
+          : control.textContent,
+      ).toBe(kind === "switch" ? "false" : "Never"),
+    );
+  },
+);
 
 it("saves switches immediately and keeps the saved value on failure without a storage scan", async () => {
   const { slot, configure } = fixture("");

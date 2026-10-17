@@ -242,10 +242,16 @@ function StoragePage({
   loadError: string | null;
   refresh: () => void;
 }) {
-  const { mutate: configure } = experimental_useRpcMutation<
-    typeof storageRpc,
-    "configure"
-  >({ method: "configure" });
+  const { mutate: configure, isPending: savingSetting } =
+    experimental_useRpcMutation<typeof storageRpc, "configure">({
+      method: "configure",
+      optimistic(input, cache) {
+        cache.update("state", null, (current) => ({
+          ...current,
+          policy: { ...current.policy, ...input },
+        }));
+      },
+    });
   const { mutate: startCleanup } = experimental_useRpcMutation<
     typeof storageRpc,
     "startCleanup"
@@ -280,8 +286,6 @@ function StoragePage({
   const machines = data?.machines ?? {};
   const primaryHostId = data?.primaryHostId ?? null;
   const detail = hosts.find((host) => host.hostId === hostId) ?? null;
-  const [savingSetting, setSavingSetting] = useState(false);
-  const settingSavePending = useRef(false);
   const [actionBusy, setBusy] = useState(false);
   const busy =
     actionBusy ||
@@ -347,10 +351,8 @@ function StoragePage({
     }
   }
   async function saveSetting<K extends keyof Policy>(key: K, value: Policy[K]) {
-    if (state === null || settingSavePending.current) return;
+    if (state === null || savingSetting) return;
     const next = { ...state, policy: { ...state.policy, [key]: value } };
-    settingSavePending.current = true;
-    setSavingSetting(true);
     const description = {
       archiveAfterDays: "Archive inactive threads",
       deleteAfterDays: "Delete archived threads",
@@ -364,9 +366,6 @@ function StoragePage({
       toast.error("Couldn’t save setting", {
         description: `${description} · ${message(error)}`,
       });
-    } finally {
-      settingSavePending.current = false;
-      setSavingSetting(false);
     }
   }
   async function runRowAction(
