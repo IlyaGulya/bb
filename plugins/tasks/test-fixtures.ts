@@ -56,6 +56,15 @@ export function liveTaskRpcFixtures(
   handlers: Record<string, ((input: never) => unknown) | undefined>,
 ) {
   const rows = new Map<string, Task>();
+  const rowInputs = new Map<string, unknown>();
+  const fixtureTask = tasksRpcContract.getTask.output.shape.task
+    .unwrap()
+    .extend({
+      id: z.string(),
+      projectId: z.string(),
+      parentTaskId: z.string().nullable(),
+      labelIds: z.array(z.string()),
+    });
   const invoke = async (method: string, input: unknown) =>
     handlers[method]?.(input as never);
   const keysOf = (input: unknown) =>
@@ -78,9 +87,12 @@ export function liveTaskRpcFixtures(
       handlers.taskMembership ??
       (async (input: unknown) => {
         const result = z
-          .object({ tasks: tasksRpcContract.listTasks.output.shape.tasks })
+          .object({ tasks: z.array(fixtureTask) })
           .parse((await invoke("listTasks", input)) ?? { tasks: [] });
-        for (const task of result.tasks) rows.set(task.id, task);
+        for (const task of result.tasks) {
+          rows.set(task.id, task);
+          rowInputs.set(task.id, input);
+        }
         const open = result.tasks.filter(
           (task) => task.status !== "done" && task.status !== "canceled",
         );
@@ -98,12 +110,22 @@ export function liveTaskRpcFixtures(
         Object.fromEntries(
           await Promise.all(
             keysOf(input).map(async (key) => {
+              if (!handlers.getTask && handlers.listTasks) {
+                const latest = z
+                  .object({ tasks: z.array(fixtureTask) })
+                  .parse(await invoke("listTasks", rowInputs.get(key) ?? {}));
+                return [
+                  key,
+                  latest.tasks.find((task) => task.id === key) ?? null,
+                ];
+              }
               const value = await invoke("getTask", { taskId: key });
               return [
                 key,
                 value === undefined
                   ? (rows.get(key) ?? null)
-                  : tasksRpcContract.getTask.output.parse(value).task,
+                  : z.object({ task: fixtureTask.nullable() }).parse(value)
+                      .task,
               ];
             }),
           ),

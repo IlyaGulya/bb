@@ -1,3 +1,4 @@
+import { liveTaskRpcFixtures } from "../../test-fixtures.js";
 // @vitest-environment jsdom
 import { cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -72,7 +73,7 @@ function renderList(tasks: Task[], options: Options = {}) {
     app.navPanels[0]!,
     { subPath: PROJECT_ID },
     {
-      rpc: {
+      rpc: liveTaskRpcFixtures({
         listProjects: () => ({ projects: options.projects ?? [project] }),
         listFolders: () => ({ folders: [] }),
         listPresets: () => ({ presets: [] }),
@@ -92,7 +93,7 @@ function renderList(tasks: Task[], options: Options = {}) {
           const current = tasks.find((entry) => entry.id === input.taskId)!;
           return { ok: true, task: { ...current, ...input } };
         },
-      },
+      }),
     },
   );
 }

@@ -1,4 +1,8 @@
-import type { Task, TaskPriority, TaskStatus } from "../../shared/contract.js";
+import type {
+  TaskSummary as Task,
+  TaskPriority,
+  TaskStatus,
+} from "../../shared/contract.js";
 
 export interface TaskEdit {
   status?: TaskStatus;

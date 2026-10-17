@@ -1,7 +1,8 @@
+import { useTaskMutation } from "../../shell/data.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Label, Task } from "../../shared/contract.js";
+import type { Label, TaskSummary as Task } from "../../shared/contract.js";
 import { errorMessage } from "../../shared/errors.js";
-import { useProjects, useTasksRpc } from "../../shell/data.js";
+import { useProjects } from "../../shell/data.js";
 import { useTasksNavigation } from "../../shell/routes.js";
 import { NewTaskDialog } from "../manage/new-task-dialog.js";
 import { DetailToasts, useDetailToasts } from "../detail/toast.js";
@@ -71,7 +72,7 @@ function LoadingRows() {
 
 export function ListView({ projectId, activeOnly = false }: ListViewProps) {
   const navigation = useTasksNavigation();
-  const rpc = useTasksRpc();
+  const moveTaskToProjectMutation = useTaskMutation("moveTaskToProject");
   const openTask = useCallback(
     (taskKey: string) => navigation.go({ kind: "task", taskKey }),
     [navigation],
@@ -144,19 +145,17 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
   }, [labels.data]);
   const moveToProject = useCallback(
     (task: Task, targetProjectId: string) => {
-      rpc
-        .call("moveTaskToProject", {
-          taskId: task.id,
-          projectId: targetProjectId,
-        })
-        .then(
-          (result) => {
-            if (!result.ok) push(result.error.message);
-          },
-          (error: unknown) => push(errorMessage(error)),
-        );
+      moveTaskToProjectMutation({
+        taskId: task.id,
+        projectId: targetProjectId,
+      }).then(
+        (result) => {
+          if (!result.ok) push(result.error.message);
+        },
+        (error: unknown) => push(errorMessage(error)),
+      );
     },
-    [rpc, push],
+    [moveTaskToProjectMutation, push],
   );
   const projectsById = useMemo(
     () =>
@@ -196,17 +195,6 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
   useEffect(() => {
     if (!tasksQuery.isLoading) settledScope.current = scopeKey;
   }, [scopeKey, tasksQuery.isLoading, tasksQuery.data]);
-  const routeScope = `${projectId ?? "-"}/${activeOnly}`;
-  const [settledRouteScope, setSettledRouteScope] = useState(routeScope);
-  const routeScopeChanged = settledRouteScope !== routeScope;
-  const previousRouteScope = useRef(routeScope);
-  useEffect(() => {
-    const routeScopeJustChanged = previousRouteScope.current !== routeScope;
-    previousRouteScope.current = routeScope;
-    if (!routeScopeJustChanged && !tasksQuery.isLoading) {
-      setSettledRouteScope(routeScope);
-    }
-  }, [routeScope, tasksQuery.isLoading, tasksQuery.data]);
   useListScrollRestoration(scrollRef, scopeKey, {
     contentReady: tasksQuery.data !== undefined && tasksQuery.data.length > 0,
     loading: tasksQuery.isLoading || scopeChanged,
@@ -223,17 +211,18 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
   });
 
   let body: React.ReactNode;
-  if (
-    routeScopeChanged ||
-    tasksQuery.data === undefined ||
-    displayTasks === undefined
-  ) {
+  if (tasksQuery.data === undefined || displayTasks === undefined) {
     body =
-      !routeScopeChanged && tasksQuery.error !== null ? (
+      tasksQuery.error !== null ? (
         <EmptyState
           icon="AlertCircle"
           title="Couldn't load tasks"
           description={tasksQuery.error}
+          action={
+            <Button variant="outline" size="sm" onClick={tasksQuery.refresh}>
+              Retry
+            </Button>
+          }
         />
       ) : (
         <LoadingRows />
@@ -324,6 +313,17 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {tasksQuery.error && displayTasks !== undefined ? (
+        <div
+          role="alert"
+          className="flex items-center gap-2 p-3 text-sm text-destructive"
+        >
+          {tasksQuery.error}
+          <Button size="sm" variant="outline" onClick={tasksQuery.refresh}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
       <ListFilterBar
         filters={filters}
         onChange={setFilters}

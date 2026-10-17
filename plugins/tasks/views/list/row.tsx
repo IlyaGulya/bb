@@ -2,7 +2,7 @@ import { memo, useState } from "react";
 import type {
   Label,
   Project,
-  Task,
+  TaskSummary as Task,
   TaskThread,
 } from "../../shared/contract.js";
 import { Icon } from "@/components/ui/icon";

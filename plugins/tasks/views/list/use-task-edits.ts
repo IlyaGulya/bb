@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Task } from "../../shared/contract.js";
+import type { TaskSummary as Task } from "../../shared/contract.js";
 import { errorMessage } from "../../shared/errors.js";
-import { useTasksRpc } from "../../shell/data.js";
+import { useTaskMutation } from "../../shell/data.js";
 import {
   beginEdit,
   pendingIds,
@@ -22,7 +22,7 @@ export function useListTaskEdits(
   serverTasks: readonly Task[] | undefined,
   onError: (message: string) => void,
 ): ListTaskEditController {
-  const rpc = useTasksRpc();
+  const updateTaskMutation = useTaskMutation("updateTask");
   const [entries, setEntries] = useState<TaskEntries>(() => new Map());
   const genRef = useRef(0);
   const onErrorRef = useRef(onError);
@@ -38,7 +38,7 @@ export function useListTaskEdits(
       const gen = (genRef.current += 1);
       setEntries((prev) => beginEdit(prev, task.id, patch, gen));
 
-      void rpc.call("updateTask", { taskId: task.id, ...patch }).then(
+      void updateTaskMutation({ taskId: task.id, ...patch }).then(
         (result) => {
           if (result.ok) {
             setEntries((prev) =>
@@ -55,7 +55,7 @@ export function useListTaskEdits(
         },
       );
     },
-    [rpc],
+    [updateTaskMutation],
   );
 
   const pending = useMemo(() => pendingIds(entries), [entries]);
