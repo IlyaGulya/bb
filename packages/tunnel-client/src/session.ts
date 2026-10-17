@@ -394,6 +394,11 @@ export class TunnelSession {
       const oldest = this.refusedOrigins.keys().next().value;
       if (oldest !== undefined) this.refusedOrigins.delete(oldest);
     }
+    if (!this.refusedOrigins.has(origin)) {
+      this.options.log.warn(
+        `exposed origin ${origin} entered cooldown: ${String(error)}`,
+      );
+    }
     this.refusedOrigins.set(origin, {
       retryAt:
         (this.options.monotonicNow?.() ?? performance.now()) +

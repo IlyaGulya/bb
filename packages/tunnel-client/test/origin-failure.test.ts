@@ -85,6 +85,18 @@ describe("tunnel origin failures", () => {
             expect.objectContaining({ type: "close-stream", streamId: 1 }),
           ),
         );
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain(`http://127.0.0.1:${port}`);
+        expect(warnings[0]).toContain("ECONNREFUSED");
+        now = 5000;
+        if (protocol === "http") ws(9);
+        else http(9);
+        await vi.waitFor(() =>
+          expect(tunnel.frames).toContainEqual(
+            expect.objectContaining({ type: "close-stream", streamId: 9 }),
+          ),
+        );
+        expect(warnings).toHaveLength(1);
         await new Promise<void>((resolve) =>
           origin.listen(port, "127.0.0.1", resolve),
         );
@@ -107,7 +119,7 @@ describe("tunnel origin failures", () => {
             }),
           ),
         );
-        now = 5000;
+        now = 10000;
         http(6);
         http(7);
         expect(tunnel.frames).toContainEqual(
@@ -127,7 +139,15 @@ describe("tunnel origin failures", () => {
           }),
         );
         expect(hits).toBe(2);
-        expect(warnings).toEqual([]);
+        expect(warnings).toHaveLength(1);
+        await new Promise<void>((resolve) => origin.close(() => resolve()));
+        ws(10);
+        await vi.waitFor(() =>
+          expect(tunnel.frames).toContainEqual(
+            expect.objectContaining({ type: "close-stream", streamId: 10 }),
+          ),
+        );
+        expect(warnings).toHaveLength(2);
       } finally {
         session.dispose();
         await new Promise<void>((resolve) => origin.close(() => resolve()));
