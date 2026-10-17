@@ -977,6 +977,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "ExperimentalPluginWebSocketHandler",
           "ExperimentalPluginWebSocketHandlers",
           "defineRpcContract",
+          "experimental_createResourceReadCache",
           "PluginRpcContract",
           "PluginRpcError",
           "PluginRpcErrorCode",

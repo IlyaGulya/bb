@@ -8,6 +8,11 @@
       "source": "./src/index.ts",
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./resource-read-cache": {
+      "source": "./src/resource-read-cache.ts",
+      "types": "./src/resource-read-cache.ts",
+      "default": "./src/resource-read-cache.ts"
     }
   },
   "types": "./src/index.ts",
