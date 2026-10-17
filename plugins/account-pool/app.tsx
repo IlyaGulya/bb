@@ -870,9 +870,7 @@ function AccountPoolSettings() {
     "account.enable": usePoolMutation("account.enable"),
     "account.disable": usePoolMutation("account.disable"),
     "account.setPriority": usePoolMutation("account.setPriority"),
-    "account.reorder": usePoolMutation("account.reorder"),
     "account.refreshUsage": usePoolMutation("account.refreshUsage"),
-    "routing.set": usePoolMutation("routing.set"),
     "config.set": usePoolMutation("config.set"),
     "login.complete": usePoolMutation("login.complete"),
     "codexLogin.poll": usePoolMutation("codexLogin.poll"),
@@ -889,8 +887,41 @@ function AccountPoolSettings() {
   >({ method: "config.get", input: null });
   const { refresh } = experimental_useRpcRefresh();
   const navigate = useBbNavigate();
-  const [status, setStatus] = useState<PoolStatus | null>(readCachedStatus);
-  const [statusIsCached, setStatusIsCached] = useState(status !== null);
+  const [cachedStatus] = useState(readCachedStatus);
+  const status = statusQuery.data ?? cachedStatus;
+  const statusIsCached =
+    statusQuery.data === undefined && cachedStatus !== null;
+  const routing = experimental_useRpcMutation<
+    typeof accountPoolRpcContract,
+    "routing.set"
+  >({
+    method: "routing.set",
+    optimistic(input, cache) {
+      cache.update("status.get", null, (current) => ({
+        ...current,
+        routing: { ...current.routing, [input.provider]: input.enabled },
+      }));
+    },
+  });
+  const reorder = experimental_useRpcMutation<
+    typeof accountPoolRpcContract,
+    "account.reorder"
+  >({
+    method: "account.reorder",
+    optimistic(input, cache) {
+      cache.update("status.get", null, (current) => ({
+        ...current,
+        accounts: [
+          ...current.accounts.filter(
+            (account) => account.provider !== input.provider,
+          ),
+          ...input.accountIds.flatMap((id) =>
+            current.accounts.filter((account) => account.id === id),
+          ),
+        ],
+      }));
+    },
+  });
   const [config, setConfig] = useState<AccountPoolConfig | null>(null);
   const [drafts, setDrafts] = useState<Record<ConfigField, string>>({
     anthropicUpstreamBaseUrl: "",
@@ -912,10 +943,6 @@ function AccountPoolSettings() {
   const configSaving = CONFIG_FIELDS.some((field) =>
     pending.has(`config-${field}`),
   );
-  const [optimisticOrder, setOptimisticOrder] = useState<{
-    provider: PoolProvider;
-    ids: string[];
-  } | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, {
@@ -947,8 +974,6 @@ function AccountPoolSettings() {
     )
       return;
     writeCachedStatus(statusQuery.data);
-    setStatus(statusQuery.data);
-    setStatusIsCached(false);
     setError(null);
   }, [statusQuery.data, statusQuery.isFetching, statusQuery.error]);
   useEffect(() => {
@@ -979,7 +1004,11 @@ function AccountPoolSettings() {
     applyConfig,
   ]);
   const displayError =
-    configQuery.error?.message ?? statusQuery.error?.message ?? error;
+    configQuery.error?.message ??
+    statusQuery.error?.message ??
+    routing.error?.message ??
+    reorder.error?.message ??
+    error;
   useEffect(() => {
     if (codexStep === null || loginDone !== null) return;
     const update = () =>
@@ -1177,7 +1206,7 @@ function AccountPoolSettings() {
     provider: PoolProvider,
     event: DragEndEvent,
   ): Promise<void> {
-    if (pending.has(`order-${provider}`) || event.over === null) return;
+    if (reorder.isPending || event.over === null) return;
     const ids = accounts
       .filter((account) => account.provider === provider)
       .map((account) => account.id);
@@ -1185,13 +1214,11 @@ function AccountPoolSettings() {
     const to = ids.findIndex((id) => id === event.over?.id);
     if (from < 0 || to < 0 || from === to) return;
     const accountIds = arrayMove(ids, from, to);
-    setOptimisticOrder({ provider, ids: accountIds });
+    setError(null);
     try {
-      await run(`order-${provider}`, async () => {
-        await mutations["account.reorder"]({ provider, accountIds });
-      });
-    } finally {
-      setOptimisticOrder(null);
+      await reorder.mutate({ provider, accountIds });
+    } catch (actionError) {
+      setError(errorText(actionError));
     }
   }
   function closeDialog(): void {
@@ -1286,21 +1313,9 @@ function AccountPoolSettings() {
           </div>
         ) : null}
         {PROVIDERS.map((provider) => {
-          const serverAccounts = accounts.filter(
+          const providerAccounts = accounts.filter(
             (account) => account.provider === provider.id,
           );
-          const order =
-            optimisticOrder?.provider === provider.id
-              ? optimisticOrder.ids
-              : null;
-          const providerAccounts =
-            order !== null &&
-            order.length === serverAccounts.length &&
-            serverAccounts.every((account) => order.includes(account.id))
-              ? order.flatMap((id) =>
-                  serverAccounts.filter((account) => account.id === id),
-                )
-              : serverAccounts;
           return (
             <SettingsSection
               key={provider.id}
@@ -1309,34 +1324,16 @@ function AccountPoolSettings() {
               action={
                 <div className="flex items-center gap-2">
                   <Switch
-                    checked={switchValue(
-                      `routing-${provider.id}`,
-                      status?.routing[provider.id] ?? true,
-                    )}
+                    checked={status?.routing[provider.id] ?? true}
                     aria-label={`Route ${provider.title} threads`}
-                    onCheckedChange={(enabled) =>
-                      void run(
-                        `routing-${provider.id}`,
-                        async () => {
-                          const committed = await mutations["routing.set"]({
-                            provider: provider.id,
-                            enabled,
-                          });
-                          setStatus((current) =>
-                            current === null
-                              ? null
-                              : {
-                                  ...current,
-                                  routing: {
-                                    ...current.routing,
-                                    [committed.provider]: committed.enabled,
-                                  },
-                                },
-                          );
-                        },
-                        enabled,
-                      )
-                    }
+                    onCheckedChange={(enabled) => {
+                      setError(null);
+                      void routing
+                        .mutate({ provider: provider.id, enabled })
+                        .catch((actionError) =>
+                          setError(errorText(actionError)),
+                        );
+                    }}
                   />
                   <AddAccountMenu
                     provider={provider.id}
@@ -1376,8 +1373,7 @@ function AccountPoolSettings() {
                             pending.has(`refresh-${account.id}`)
                           }
                           reorderDisabled={
-                            providerAccounts.length < 2 ||
-                            pending.has(`order-${provider.id}`)
+                            providerAccounts.length < 2 || reorder.isPending
                           }
                           onAction={(action) =>
                             void accountAction(account, action)

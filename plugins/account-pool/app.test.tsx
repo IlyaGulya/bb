@@ -408,19 +408,20 @@ describe("Account Pool settings", () => {
     ).toContain("ABCD-1234");
   });
 
-  it("persists provider routing from the section switch", async () => {
-    const slot = render([account()], {
-      "routing.set": () => ({ provider: "claude", enabled: false }),
+  it("predicts provider routing and rolls back a rejected write", async () => {
+    const write = deferred<{ provider: "claude"; enabled: boolean }>();
+    const slot = render([account()], { "routing.set": () => write.promise });
+    await slot.findByText("person@example.com");
+    const control = await slot.findByRole("switch", {
+      name: "Route Claude threads",
     });
-    fireEvent.click(
-      await slot.findByRole("switch", { name: "Route Claude threads" }),
-    );
-    await waitFor(() =>
-      expect(slot.rpcCalls).toContainEqual({
-        method: "routing.set",
-        input: { provider: "claude", enabled: false },
-      }),
-    );
+    expect(control.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(control);
+    expect(control.getAttribute("aria-checked")).toBe("false");
+    expect(control.hasAttribute("disabled")).toBe(false);
+    await act(async () => write.reject(new Error("Routing unavailable")));
+    await slot.findByText("Routing unavailable");
+    expect(control.getAttribute("aria-checked")).toBe("true");
   });
 
   it("edits Advanced config fields and shows URL validation inline", async () => {
@@ -742,6 +743,7 @@ describe("Account Pool settings", () => {
 
   it("restores the displayed order and reports a rejected reorder", async () => {
     measureAccountRows();
+    const write = deferred<null>();
     const slot = render(
       [
         account({ label: "First" }),
@@ -751,14 +753,22 @@ describe("Account Pool settings", () => {
         }),
       ],
       {
-        "account.reorder": () => {
-          throw new Error("Refresh the account list and try again.");
-        },
+        "account.reorder": () => write.promise,
       },
     );
     const handle = await slot.findByRole("button", { name: "Reorder First" });
     await keyboardMove(handle);
     fireEvent.keyDown(document, { code: "Space" });
+    await waitFor(() =>
+      expect(
+        slot
+          .getAllByRole("button", { name: /Reorder/ })
+          .map((button) => button.getAttribute("aria-label")),
+      ).toEqual(["Reorder Second", "Reorder First"]),
+    );
+    await act(async () =>
+      write.reject(new Error("Refresh the account list and try again.")),
+    );
     expect(
       await slot.findByText("Refresh the account list and try again."),
     ).toBeTruthy();
