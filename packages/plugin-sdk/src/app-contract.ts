@@ -3980,8 +3980,6 @@ export interface ExperimentalRpcMutationOptions<
   ): void;
   /** Optional positive, finite RPC deadline in milliseconds. Omit for no deadline. Does not cancel server work or bound mutation reconciliation. */
   timeoutMs?: number;
-  /** Changing this identity detaches pending state and errors from the previous target. */
-  key?: JsonValue;
 }
 
 /**

@@ -397,9 +397,14 @@ describe("provider usage footer disclosure", () => {
       expect(
         slot.queryByText(/Unexpected token|bb connect|invalid JSON/i),
       ).toBeNull();
-      fireEvent.click(
-        slot.getByRole("button", { name: "Reload provider usage" }),
+      fireEvent.click(slot.getByRole("tab", { name: "Codex" }));
+      await waitFor(() =>
+        expect(
+          slot.queryByText("Couldn’t refresh. Showing last update."),
+        ).toBeNull(),
       );
+      expect(slot.getByText("team@example.com")).toBeTruthy();
+      fireEvent.click(slot.getByRole("tab", { name: "Claude Code" }));
       await waitFor(() =>
         expect(
           slot.queryByText("Couldn’t refresh. Showing last update."),

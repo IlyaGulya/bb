@@ -1,4 +1,4 @@
-import { experimental_createResourceReadCache as createResourceReadCache } from "@get-bb/plugin-sdk";
+import { createResourceReadCache } from "./resource-read-cache.js";
 import {
   normalizeUsageMeasurement,
   selectUsageResources,
@@ -398,9 +398,7 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
           measurementTags.length ? measurementTags : ["inventory"],
         );
       },
-      measurementTags.length
-        ? Math.max(1_000, request.maxAgeMs)
-        : 30 * 60_000,
+      measurementTags.length ? Math.max(1_000, request.maxAgeMs) : 30 * 60_000,
     );
     signal.addEventListener("abort", () => clearInterval(timer), {
       once: true,

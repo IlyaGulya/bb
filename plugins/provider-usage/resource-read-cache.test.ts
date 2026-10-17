@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { createResourceReadCache } from "../src/resource-read-cache.js";
+import { createResourceReadCache } from "./resource-read-cache.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

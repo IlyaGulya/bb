@@ -8,7 +8,6 @@ Read the installed declarations for exact current signatures.
 
 - `PLUGIN_CLI_OUTPUT_MAX_BYTES`
 - `defineRpcContract`
-- `experimental_createResourceReadCache`
 - `experimental_defineHostEntry`
 - `defineCli`
 - `cliCommand`

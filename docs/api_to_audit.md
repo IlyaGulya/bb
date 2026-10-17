@@ -3120,23 +3120,3 @@ and Windows hosts.
 `bb.sdk.plugins.experimental_watchRpc` reads immediately, refreshes matching tags on invalidation and after reconnect, and returns a callable stop handle with `refresh()` and `done`. Optional asynchronous `prepare(value)` completes before `onChange` and skips unchanged JSON snapshots until an error resets preparation; failed preparation retries a fresh read, invalidated preparation cannot publish stale status, and `done` drains preparation on stop. Connect uses this to synchronize its credential copy before publishing account status, without a plugin timer or ordering guard. SDK RPC watches recover from 404/503; CLI watch aborts on permanent 4xx except 408/429. `experimental_watchDiscovery` observes plugin lifecycle changes and emits distinct method lists. Plugin signals now require a plugin subscription; core `useRealtime` retains it.
 
 Stabilize after exercising producer cancellation, reload, reconnect, byte limits, permanent errors and asynchronous preparation across additional consumers. bb-account and Connect are the first callers; core controls and the CLI use the same SDK and realtime subscription implementation. No host-daemon wire fields change.
-
-## Resource collection cache
-
-`experimental_createResourceReadCache(load)` shares collection per resource, queues
-a forced collection after an ordinary read, preserves the previous value with
-its error, and retries failures without data on the next read. `invalidate()`
-expires observations and restarts invalidated collection; `expire()` only expires
-freshness, leaving pending collection intact. `retain(keys)` and
-`dispose()` abort removed resource lifetimes so late results cannot populate a
-replacement. `read` returns value/error; `peek` reads the last observation.
-Provider usage uses this path for source discovery, inventories and measurements.
-The implementation and concurrency tests live in `@bb/query-tags`.
-Stabilization requires another collector and validation of eviction, cancellation,
-forced reads and retained failures across provider sources.
-
-Mutation hooks accept an optional JSON `key` identifying the edited target.
-Changing it detaches pending state and errors from the previous target through
-the shared TanStack mutation observer. Provider usage uses this when switching
-locations and provider tabs. Stabilization requires validation with additional
-editors; the shared SDK test covers completion after switching targets.

@@ -23,5 +23,3 @@ export type {
 } from "@bb/sdk";
 
 export type * from "./machine-bootstrap.js";
-
-export { createResourceReadCache as experimental_createResourceReadCache } from "@bb/query-tags/resource-read-cache";

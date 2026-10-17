@@ -6,7 +6,7 @@
   "description": "View provider usage in plugin settings and an optional sidebar footer card",
   "engines": {
     "bb": ">=0.0",
-    "bbPluginSdk": ">=0.6.57"
+    "bbPluginSdk": ">=0.6.56"
   },
   "bb": {
     "name": "Provider usage",

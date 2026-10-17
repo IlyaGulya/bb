@@ -42,8 +42,10 @@ export function useUsage(
   const reload = experimental_useRpcMutation<
     typeof providerUsageRpcContract,
     "refreshUsage"
-  >({ method: "refreshUsage", key: input });
+  >({ method: "refreshUsage" });
   const { reset } = reload;
+  const target = JSON.stringify(input);
+  useEffect(() => reset(), [target, reset]);
   useEffect(() => {
     if (inventory.isFetching || usage.isFetching) reset();
   }, [inventory.isFetching, usage.isFetching, reset]);
