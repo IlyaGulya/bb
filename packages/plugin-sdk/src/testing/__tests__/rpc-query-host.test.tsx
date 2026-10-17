@@ -364,7 +364,10 @@ it("releases a stuck mutation with an error and permits Retry", async () => {
   try {
     let stuck = true;
     function Probe() {
-      const mutation = experimental_useRpcMutation({ method: "save" });
+      const mutation = experimental_useRpcMutation({
+        method: "save",
+        timeoutMs: 20_000,
+      });
       return (
         <button
           disabled={mutation.isPending}
@@ -408,7 +411,11 @@ it("exposes a stuck read error and recovers through Retry", async () => {
   try {
     let stuck = true;
     function Probe() {
-      const query = experimental_useRpcQuery({ method: "read", input: {} });
+      const query = experimental_useRpcQuery({
+        method: "read",
+        input: {},
+        timeoutMs: 20_000,
+      });
       return (
         <button
           disabled={query.isFetching}
@@ -437,6 +444,46 @@ it("exposes a stuck read error and recovers through Retry", async () => {
       await vi.advanceTimersByTimeAsync(1);
     });
     expect(button.textContent).toBe("loaded");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("allows slow reads and mutations without an opt-in deadline", async () => {
+  vi.useFakeTimers();
+  try {
+    let release!: (value: string) => void;
+    const pending = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+    function Probe() {
+      const query = experimental_useRpcQuery({ method: "read", input: {} });
+      const mutation = experimental_useRpcMutation({ method: "save" });
+      return (
+        <button onClick={() => void mutation.mutate({}).catch(() => {})}>
+          {query.error?.message ?? query.data?.toString() ?? "Loading"}/
+          {mutation.error?.message ?? (mutation.isPending ? "Saving" : "Ready")}
+        </button>
+      );
+    }
+    const slot = renderSlot(
+      { component: Probe },
+      {},
+      {
+        rpc: { read: () => pending, save: () => pending },
+      },
+    );
+    const button = slot.getByRole("button");
+    await act(async () => {
+      button.click();
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(button.textContent).toBe("Loading/Saving");
+    await act(async () => {
+      release("loaded");
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(button.textContent).toBe("loaded/Ready");
   } finally {
     vi.useRealTimers();
   }

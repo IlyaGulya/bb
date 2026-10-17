@@ -3357,12 +3357,14 @@ function PreviewPage({ subPath }: { subPath: string }) {
   >({
     method: "themeCatalog",
     input: {},
+    timeoutMs: 20_000,
   });
   const selectionMutation = experimental_useRpcMutation<
     typeof rpcContract,
     "setTheme"
   >({
     method: "setTheme",
+    timeoutMs: 20_000,
   });
   const catalog = catalogQuery.data ?? EMPTY_CATALOG;
   const error = catalogQuery.error?.message;
