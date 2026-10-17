@@ -982,23 +982,6 @@ export type SidebarProjectSummary = z.infer<
   (typeof tasksRpcContract)["sidebarSummary"]["output"]
 >["projects"][number];
 
-export interface TasksChangedEvent {
-  taskId: string;
-  projectId: string;
-}
-
-export interface ProjectsChangedEvent {
-  projectId: string | null;
-}
-
-export interface CommentsChangedEvent {
-  taskId: string;
-}
-
-export interface ThreadsChangedEvent {
-  taskId: string;
-}
-
 export function taskRowTags(
   task: Pick<Task, "id" | "projectId" | "key">,
 ): [string, ...string[]] {

@@ -464,7 +464,11 @@ describe("NewTaskDialog drafts", () => {
         labels: rpcInput(raw).projectId === PROJECT_ID ? [label] : [],
       }),
     };
-    const initial = renderSlot(app.navPanels[0]!, { subPath: "all" }, { rpc });
+    const initial = renderSlot(
+      app.navPanels[0]!,
+      { subPath: "all" },
+      { rpc: liveTaskRpcFixtures(rpc) },
+    );
     fireEvent.click(await initial.findByRole("button", { name: /New task/ }));
     fireEvent.change(await initial.findByLabelText("Task title"), {
       target: { value: "Preserve my project" },
@@ -475,7 +479,7 @@ describe("NewTaskDialog drafts", () => {
     const restored = renderSlot(
       app.navPanels[0]!,
       { subPath: otherProject.id },
-      { rpc },
+      { rpc: liveTaskRpcFixtures(rpc) },
     );
     fireEvent.click(await restored.findByRole("button", { name: /New task/ }));
     await restored.findByLabelText("Task title");
@@ -562,6 +566,13 @@ describe("NewTaskDialog drafts", () => {
       );
       fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
       await slot.findByLabelText("Task title");
+      await waitFor(() =>
+        expect(
+          slot
+            .getByRole("button", { name: "Create task" })
+            .hasAttribute("disabled"),
+        ).toBe(false),
+      );
       fireEvent.click(slot.getByRole("button", { name: "Create task" }));
       await waitFor(() => expect(createCalls).toHaveLength(1));
       expect(createCalls[0]).toMatchObject({

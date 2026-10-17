@@ -1771,8 +1771,6 @@ describe("bb tasks CLI", () => {
         sizeBytes: 26,
         isImage: false,
       });
-
-      const signalsBeforePng = harness.realtimeSignals.length;
       const pngAttachment = JSON.parse(
         stdout(
           await harness.runCli([
@@ -1791,15 +1789,6 @@ describe("bb tasks CLI", () => {
         sizeBytes: 8,
         isImage: true,
       });
-      expect(harness.realtimeSignals.slice(signalsBeforePng)).toEqual([
-        {
-          channel: "tasks:changed",
-          payload: {
-            taskId: pngAttachment.taskId,
-            projectId: expect.any(String),
-          },
-        },
-      ]);
 
       stdout(
         await harness.runCli([
@@ -1809,7 +1798,6 @@ describe("bb tasks CLI", () => {
           `![pixel](/api/v1/plugins/tasks/http/attachments/download?attachmentId=${pngAttachment.id})`,
         ]),
       );
-      const signalsBeforeReferencedRemove = harness.realtimeSignals.length;
       const referencedRemove = await harness.runCli([
         "attachment",
         "remove",
@@ -1818,9 +1806,6 @@ describe("bb tasks CLI", () => {
       expect(referencedRemove.exitCode).toBe(1);
       expect(referencedRemove.stderr).toContain(
         "is used in the task description",
-      );
-      expect(harness.realtimeSignals).toHaveLength(
-        signalsBeforeReferencedRemove,
       );
 
       const listed = JSON.parse(

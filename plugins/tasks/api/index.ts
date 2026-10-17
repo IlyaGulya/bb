@@ -180,7 +180,6 @@ export function publishTasksChanged(
   taskId: string,
   projectId: string,
 ): void {
-  bb.realtime.publish("tasks:changed", { taskId, projectId });
   const task = stores.get(bb)?.tasks.getTask(taskId);
   bb.rpc.experimental_invalidate([
     `task:${taskId}`,
@@ -203,7 +202,6 @@ export function publishProjectsChanged(
   bb: BbPluginApi,
   projectId: string | null,
 ): void {
-  bb.realtime.publish("projects:changed", { projectId });
   bb.rpc.experimental_invalidate([
     "projects",
     "folders",
@@ -220,7 +218,6 @@ export function publishProjectsChanged(
 }
 
 export function publishCommentsChanged(bb: BbPluginApi, taskId: string): void {
-  bb.realtime.publish("comments:changed", { taskId });
   bb.rpc.experimental_invalidate([
     `comments:${taskId}`,
     `attachments:${taskId}`,
@@ -786,7 +783,7 @@ export function registerHandlers(
       const task = store.tasks.getTaskByKey(input.taskKey);
       return { task: task ? apiTask(store, task) : null };
     },
-    updateTask(input) {
+    updateTask(input, context) {
       try {
         const current = store.tasks.getTask(input.taskId);
         if (!current) throw new Error(`Task not found: ${input.taskId}`);
@@ -842,17 +839,14 @@ export function registerHandlers(
             systemCommentsWritten: bodies.length,
           };
         });
-
-        bb.realtime.publish("tasks:changed", {
-          taskId: result.task.id,
-          projectId: result.task.projectId,
-        });
-        const tags = [
-          ...(tasksRpcContract.updateTask.invalidates?.(input, {
-            ok: true,
-            task: result.task,
-          }) ?? []),
-        ];
+        const tags = context
+          ? []
+          : [
+              ...(tasksRpcContract.updateTask.invalidates?.(input, {
+                ok: true,
+                task: result.task,
+              }) ?? []),
+            ];
         if (
           current.parentTaskId !== result.task.parentTaskId &&
           current.parentTaskId
@@ -860,7 +854,7 @@ export function registerHandlers(
           tags.push(`subtasks:${current.parentTaskId}`);
         if (tags.length)
           bb.rpc.experimental_invalidate([tags[0]!, ...tags.slice(1)]);
-        if (result.systemCommentsWritten > 0) {
+        if (!context && result.systemCommentsWritten > 0) {
           publishCommentsChanged(bb, result.task.id);
         }
         return { ok: true, task: result.task };
@@ -901,7 +895,7 @@ export function registerHandlers(
         nextCursor: page.nextCursor,
       };
     },
-    boardMove(input) {
+    boardMove(input, context) {
       const current = store.tasks.getTask(input.taskId);
       if (!current) throw new Error(`Task not found: ${input.taskId}`);
       const result = store.transaction(() => {
@@ -918,15 +912,13 @@ export function registerHandlers(
         }
         return { task: apiTask(store, moved), statusChanged };
       });
-      bb.realtime.publish("tasks:changed", {
-        taskId: result.task.id,
-        projectId: result.task.projectId,
-      });
-      bb.rpc.experimental_invalidate([
-        ...taskRowTags(result.task),
-        ...taskMembershipTags(result.task).map((scope) => `${scope}:status`),
-      ]);
-      if (result.statusChanged) publishCommentsChanged(bb, result.task.id);
+      if (!context) {
+        bb.rpc.experimental_invalidate([
+          ...taskRowTags(result.task),
+          ...taskMembershipTags(result.task).map((scope) => `${scope}:status`),
+        ]);
+        if (result.statusChanged) publishCommentsChanged(bb, result.task.id);
+      }
       return { ok: true, task: result.task };
     },
     moveTaskToProject(input) {

@@ -6,7 +6,7 @@ import {
 import { createStore, registerTasksApi } from "../api";
 import { tasksRpcContract } from "../shared/contract";
 import { listTasksQuery } from "../views/list/data.js";
-import { listAllTasks, type TasksRpc } from "./data.js";
+import type { TasksRpc } from "./data.js";
 
 const harnesses: FakePluginHarness[] = [];
 
@@ -50,8 +50,8 @@ describe("listTasksQuery", () => {
       liveStatus: "working",
     });
 
-    const tasks = await listAllTasks(
-      rpc,
+    const { tasks } = await rpc.call(
+      "listTasks",
       listTasksQuery(null, true, {
         statuses: [],
         priorities: [],
