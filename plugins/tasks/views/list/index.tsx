@@ -126,7 +126,11 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
     priorities: filters.priorities,
     labelIds,
   });
-  const { mutate: updateTask, isPending: updatingTask } = useTaskUpdateMutation(
+  const {
+    mutate: updateTask,
+    isPending: updatingTask,
+    pendingInputs,
+  } = useTaskUpdateMutation(
     (taskId) => tasksQuery.data?.find((task) => task.id === taskId)?.key,
   );
   const editTask = useCallback(
@@ -289,6 +293,10 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
             <TaskRow
               key={task.id}
               task={task}
+              pending={
+                updatingTask &&
+                pendingInputs.some((input) => input.taskId === task.id)
+              }
               meta={meta.data?.get(task.id)}
               project={projectsById.get(task.projectId)}
               showProject={showProject}

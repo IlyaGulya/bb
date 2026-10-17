@@ -197,6 +197,11 @@ describe("inline row editing", () => {
     expect(
       slot.getByRole("region", { name: "Tasks" }).getAttribute("aria-busy"),
     ).toBe("true");
+    expect(editedRow().getAttribute("aria-busy")).toBe("true");
+    expect(editedRow().classList.contains("opacity-70")).toBe(true);
+    const otherRow = await rowFor(slot, "TSK-2");
+    expect(otherRow.hasAttribute("aria-busy")).toBe(false);
+    expect(otherRow.classList.contains("opacity-70")).toBe(false);
     expect(
       within(await rowFor(slot, "TSK-2")).getByRole("button", {
         name: /Change status, currently Todo/,
@@ -211,6 +216,8 @@ describe("inline row editing", () => {
       ),
     );
     await slot.findByText("Write rejected");
+    expect(editedRow().hasAttribute("aria-busy")).toBe(false);
+    expect(editedRow().classList.contains("opacity-70")).toBe(false);
     expect(
       slot.getByRole("region", { name: "Tasks" }).hasAttribute("aria-busy"),
     ).toBe(false);

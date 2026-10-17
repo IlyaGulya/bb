@@ -397,6 +397,11 @@ it("shows the server's destination order after accepting a list status edit", as
       slot.getByRole("region", { name: "Tasks" }).hasAttribute("aria-busy"),
     ).toBe(false),
   );
+  const savedRow = slot.container.querySelector(
+    `[data-task-key="${first.key}"]`,
+  );
+  expect(savedRow?.hasAttribute("aria-busy")).toBe(false);
+  expect(savedRow?.classList.contains("opacity-70")).toBe(false);
   await act(async () => {
     await server.write("deleteTask", { taskId: first.id });
   });

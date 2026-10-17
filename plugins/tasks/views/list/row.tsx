@@ -91,6 +91,7 @@ function LabelChips({
 
 interface TaskRowProps {
   task: Task;
+  pending: boolean;
   meta: TaskRowMeta | undefined;
   project: Project | undefined;
   showProject: boolean;
@@ -104,6 +105,7 @@ interface TaskRowProps {
 
 export const TaskRow = memo(function TaskRow({
   task,
+  pending,
   meta,
   project,
   showProject,
@@ -126,9 +128,11 @@ export const TaskRow = memo(function TaskRow({
     >
       <div
         data-task-key={task.key}
+        aria-busy={pending || undefined}
         className={cn(
           "relative grid w-full grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 border-b border-border-hairline px-3.5 py-1.5 text-left transition-opacity hover:bg-state-hover",
           "@md:flex @md:h-[34px] @md:py-0",
+          pending && "opacity-70",
         )}
       >
         <button
