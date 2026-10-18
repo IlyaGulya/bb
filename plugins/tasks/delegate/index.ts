@@ -188,9 +188,22 @@ type SpawnEnvironment = Parameters<
 async function presetSpawnEnvironment(
   bb: BbPluginApi,
   preset: Preset,
+  projectId: string,
 ): Promise<SpawnEnvironment> {
   if (preset.environmentKind === "project-default") {
-    return { type: "project-default" };
+    const project = await bb.sdk.projects.get({ projectId });
+    const source = project.sources.find((candidate) => candidate.isDefault);
+    if (!source) {
+      throw new DelegationError(
+        "spawn_target_invalid",
+        "Could not dispatch task because the linked bb project has no default local-path source",
+      );
+    }
+    return {
+      type: "host",
+      hostId: source.hostId,
+      workspace: { type: "unmanaged", path: source.path },
+    };
   }
 
   const hostId =
@@ -325,7 +338,11 @@ export function handlers(
         extraInstructions: input.extraInstructions,
       });
 
-      const environment = await presetSpawnEnvironment(bb, preset);
+      const environment = await presetSpawnEnvironment(
+        bb,
+        preset,
+        linkedBbProjectId,
+      );
       const thread = await bb.sdk.threads
         .spawn({
           projectId: linkedBbProjectId,

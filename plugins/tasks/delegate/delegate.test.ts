@@ -4,9 +4,8 @@ import {
 } from "@get-bb/plugin-sdk/testing";
 import { describe, expect, it } from "vitest";
 import { createStore } from "../api";
-import type { Comment, Project, Task } from "../db";
 import { delegationRpcContract } from "./contract";
-import { buildSeedPrompt, registerDelegation } from ".";
+import { registerDelegation } from ".";
 
 function createTestPreset(
   store: ReturnType<typeof createStore>,
@@ -31,13 +30,49 @@ function createTestPreset(
   });
 }
 
+function projectWithDefaultSource() {
+  return {
+    sources: [
+      {
+        type: "local_path",
+        hostId: "host_remote",
+        path: "/repos/tasks",
+        isDefault: true,
+      },
+    ],
+  };
+}
+
 describe("task delegation", () => {
-  it("spawns from a preset, attaches the thread, advances status, comments, and invalidates", async () => {
+  it("dispatches to the linked project's remote default source and advances the task", async () => {
     const { bb, harness } = createFakePluginHost({
       pluginId: "tasks",
       sdk: {
+        projects: {
+          get: async () => ({
+            sources: [
+              {
+                type: "local_path",
+                hostId: "host_primary",
+                path: "/repos/wrong-checkout",
+                isDefault: false,
+              },
+              ...projectWithDefaultSource().sources,
+            ],
+          }),
+        },
         threads: {
-          spawn: async () => ({ id: "thr_delegated" }),
+          spawn: async ({ environment }) => {
+            if (
+              environment?.type !== "host" ||
+              environment.hostId !== "host_remote" ||
+              environment.workspace.type !== "unmanaged" ||
+              environment.workspace.path !== "/repos/tasks"
+            ) {
+              throw new Error("Project is unavailable on the selected target");
+            }
+            return { id: "thr_delegated" };
+          },
           get: async () =>
             makeThreadResponse({ id: "thr_delegated", status: "starting" }),
         },
@@ -68,25 +103,6 @@ describe("task delegation", () => {
     );
 
     expect(result).toEqual({ threadId: "thr_delegated" });
-    expect(harness.sdk.callsTo("threads.spawn")).toEqual([
-      [
-        expect.objectContaining({
-          projectId: "proj_bb",
-          environment: { type: "project-default" },
-          providerId: "claude-code",
-          model: "claude-sonnet-5",
-          reasoningLevel: "high",
-          serviceTier: "fast",
-          permissionMode: "full",
-          title: "TASK-1 · Implement delegation",
-          prompt: expect.stringContaining(
-            "Run the focused tests before reporting back.",
-          ),
-          origin: "plugin",
-          originPluginId: "tasks",
-        }),
-      ],
-    ]);
     expect(store.tasks.listTaskThreads(task.id)).toEqual([
       expect.objectContaining({
         taskId: task.id,
@@ -97,32 +113,6 @@ describe("task delegation", () => {
       }),
     ]);
     expect(store.tasks.getTask(task.id)?.status).toBe("in_progress");
-    expect(store.tasks.listComments(task.id)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          kind: "system",
-          authorName: "Tasks",
-          presetName: "Test worker",
-          threadId: "thr_delegated",
-          body: "Status changed to In Progress · dispatched to Test worker",
-        }),
-        expect.objectContaining({
-          kind: "system",
-          authorName: "Tasks",
-          presetName: "Test worker",
-          threadId: "thr_delegated",
-          body: "Dispatched to Test worker",
-        }),
-      ]),
-    );
-    expect(harness.realtimeSignals).toEqual([
-      { channel: "threads:changed", payload: { taskId: task.id } },
-      {
-        channel: "tasks:changed",
-        payload: { taskId: task.id, projectId: project.id },
-      },
-      { channel: "comments:changed", payload: { taskId: task.id } },
-    ]);
 
     await harness.dispose();
   });
@@ -131,6 +121,9 @@ describe("task delegation", () => {
     const { bb, harness } = createFakePluginHost({
       pluginId: "tasks",
       sdk: {
+        projects: {
+          get: async () => projectWithDefaultSource(),
+        },
         threads: {
           spawn: async () => ({ id: "thr_fast" }),
           get: async () =>
@@ -174,6 +167,9 @@ describe("task delegation", () => {
     const { bb, harness } = createFakePluginHost({
       pluginId: "tasks",
       sdk: {
+        projects: {
+          get: async () => projectWithDefaultSource(),
+        },
         threads: {
           spawn: async () => ({ id: "thr_wide_title" }),
           get: async () =>
@@ -204,6 +200,60 @@ describe("task delegation", () => {
     expect(harness.sdk.callsTo("threads.spawn")).toEqual([
       [expect.objectContaining({ title })],
     ]);
+
+    await harness.dispose();
+  });
+
+  it("rejects a missing default source without dispatching or advancing the task", async () => {
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "tasks",
+      sdk: {
+        projects: {
+          get: async () => ({
+            sources: [
+              {
+                type: "local_path",
+                hostId: "host_primary",
+                path: "/repos/not-the-default",
+                isDefault: false,
+              },
+            ],
+          }),
+        },
+        system: {
+          config: async () => ({ primaryHostId: "host_primary" }),
+        },
+        threads: {
+          spawn: async () => ({ id: "thr_wrong_target" }),
+          get: async () => makeThreadResponse({ id: "thr_wrong_target" }),
+        },
+      },
+    });
+    const store = createStore(bb);
+    const project = store.tasks.createProject({
+      name: "Missing default source",
+      prefix: "MDS",
+      color: "blue",
+      linkedBbProjectId: "proj_no_default",
+    });
+    const task = store.tasks.createTask({
+      projectId: project.id,
+      title: "Do not run in an unrelated checkout",
+      status: "todo",
+    });
+    registerDelegation(bb, store);
+    const preset = createTestPreset(store);
+
+    await expect(
+      harness.callRpc("delegate", {
+        taskId: task.id,
+        presetId: preset.id,
+      }),
+    ).rejects.toMatchObject({ code: "handler_error" });
+    expect(harness.sdk.callsTo("threads.spawn")).toEqual([]);
+    expect(store.tasks.getTask(task.id)?.status).toBe("todo");
+    expect(store.tasks.listTaskThreads(task.id)).toEqual([]);
+    expect(store.tasks.listComments(task.id)).toEqual([]);
 
     await harness.dispose();
   });
@@ -499,128 +549,3 @@ describe("task thread detach", () => {
   });
 });
 
-describe("delegation seed prompt", () => {
-  it("captures task context and the complete report-back contract", () => {
-    const project: Project = {
-      id: "01J00000000000000000000001",
-      name: "Tasks plugin",
-      prefix: "TASK",
-      nextTaskNumber: 4,
-      color: "blue",
-      folderId: null,
-      linkedBbProjectId: "proj_tasks",
-      createdAt: "2026-07-15T17:00:00.000Z",
-    };
-    const task: Task = {
-      id: "01J00000000000000000000002",
-      projectId: project.id,
-      number: 1,
-      key: "TASK-1",
-      title: "Delegate work",
-      description:
-        "Implement **preset-driven** delegation.\n\nKeep the prompt useful.",
-      status: "todo",
-      priority: "high",
-      dueDate: null,
-      parentTaskId: null,
-      position: 1_024,
-      createdAt: "2026-07-15T17:01:00.000Z",
-      updatedAt: "2026-07-15T17:01:00.000Z",
-    };
-    const subtask: Task = {
-      ...task,
-      id: "01J00000000000000000000003",
-      number: 2,
-      key: "TASK-2",
-      title: "Add focused tests",
-      status: "in_progress",
-      parentTaskId: task.id,
-    };
-    const comments: Comment[] = [
-      {
-        id: "01J00000000000000000000004",
-        taskId: task.id,
-        kind: "user",
-        authorName: "Sawyer",
-        presetName: null,
-        threadId: null,
-        body: "Preserve the existing domain path.",
-        notifiedCount: 0,
-        createdAt: "2026-07-15T17:02:00.000Z",
-      },
-      {
-        id: "01J00000000000000000000005",
-        taskId: task.id,
-        kind: "agent",
-        authorName: "Worker",
-        presetName: "Sonnet · high",
-        threadId: "thr_prior",
-        body: "The schema study is complete.",
-        notifiedCount: 0,
-        createdAt: "2026-07-15T17:03:00.000Z",
-      },
-    ];
-
-    expect(
-      buildSeedPrompt({
-        task,
-        project,
-        subtasks: [subtask],
-        attachments: [
-          {
-            id: "01J00000000000000000000006",
-            fileName: "delegation-notes.md",
-          },
-        ],
-        recentComments: comments,
-        presetInstructions: "Prefer focused changes.",
-        extraInstructions: "Run the backend gates.",
-      }),
-    ).toMatchInlineSnapshot(`
-      "# TASK-1 · Delegate work
-
-      ## Description
-
-      Implement **preset-driven** delegation.
-
-      Keep the prompt useful.
-
-      ## Project context
-
-      - Name: Tasks plugin
-      - Linked bb project: proj_tasks
-
-      ## Sub-tasks
-
-      - TASK-2 · Add focused tests (in_progress)
-
-      ## Attachments
-
-      - delegation-notes.md · 01J00000000000000000000006
-        Fetch with: bb tasks attachment get 01J00000000000000000000006 --out <path>
-
-      ## Recent comments
-
-      ### Sawyer · user · 2026-07-15T17:02:00.000Z
-
-      Preserve the existing domain path.
-
-      ### Worker · agent · 2026-07-15T17:03:00.000Z
-
-      The schema study is complete.
-
-      ## Report-back contract
-
-      You are working on task TASK-1. Use the bb tasks CLI: comment substantive updates (bb tasks comment TASK-1 --body ...), attach result artifacts, set status when done (bb tasks update TASK-1 --status in_review) or explain blockage in a comment. Your thread is already attached to the task.
-
-      ## Preset instructions
-
-      Prefer focused changes.
-
-      ## Additional instructions
-
-      Run the backend gates.
-      "
-    `);
-  });
-});

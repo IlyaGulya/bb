@@ -116,6 +116,19 @@ defines the provider, model, reasoning level, optional service tier, permission
 mode, and reusable instructions. Presets are user-defined, so create the worker profiles your team
 uses repeatedly before dispatching work.
 
+With the **Project default** environment, delegation uses the linked bb
+project's default local-path source: both its machine and its directory.
+It does not route through the server's primary machine or pick the first
+source. Set the default with
+`bb project source update <project-id> <source-id> --default`.
+Without a default source, dispatch fails before starting a thread or changing
+the task's status.
+
+For isolated work, choose **New worktree** and configure its machine and base
+branch, or use `bb tasks preset create --environment worktree --machine
+<machine-id> --base-branch <branch>` with the other required preset options.
+This creates a separate worktree; Project default uses the existing checkout.
+
 Delegation creates a worker thread in the linked bb project, attaches that
 thread to the task, and advances a `backlog` or `todo` task to `in_progress`.
 The worker receives the task description, subtasks, attachments, recent
