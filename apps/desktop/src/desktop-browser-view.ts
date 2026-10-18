@@ -179,6 +179,9 @@ interface BrowserViewEntry {
   threadId: string;
   generation: string;
   lastErrorText: string | null;
+  pendingNavigationUrl: string | null;
+  faviconUrl: string | null;
+  faviconUrls: string[];
   desiredBounds: BbDesktopBrowserViewBounds;
   popupTimestamps: number[];
   popupWindows: Set<BrowserWindow>;
@@ -403,7 +406,7 @@ function buildBrowserState(
   entry: BrowserViewEntry,
 ): BbDesktopBrowserState {
   const webContents = entry.webContents;
-  const url = webContents.getURL();
+  const url = entry.pendingNavigationUrl ?? webContents.getURL();
   const rawTitle = webContents.getTitle();
   const title = rawTitle.length > 0 && rawTitle !== url ? rawTitle : null;
   return {
@@ -413,6 +416,8 @@ function buildBrowserState(
       title === null
         ? null
         : truncate(title, BB_DESKTOP_BROWSER_MAX_TITLE_LENGTH),
+    faviconUrl: entry.faviconUrl,
+    faviconUrls: entry.faviconUrls,
     isLoading: webContents.isLoadingMainFrame(),
     canGoBack: webContents.navigationHistory.canGoBack(),
     canGoForward: webContents.navigationHistory.canGoForward(),
@@ -421,6 +426,17 @@ function buildBrowserState(
         ? null
         : truncate(entry.lastErrorText, BB_DESKTOP_BROWSER_MAX_TITLE_LENGTH),
   };
+}
+
+function faviconOrigin(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? parsed.origin
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function microphoneOrigin(url: string): string | null {
@@ -446,6 +462,10 @@ export function createDesktopBrowserViewManager(
   const pagePreloadPath = args.pagePreloadPath;
   let entries = new Map<string, BrowserViewEntry>();
   const serverEntries = new Map<string, Map<string, BrowserViewEntry>>();
+  const faviconCaches = new WeakMap<
+    Map<string, BrowserViewEntry>,
+    Map<string, string[]>
+  >();
   let serverOrigin: string | null = null;
   let parkingWindow: BaseWindow | null = null;
   const automationTabListeners = new Set<() => void>();
@@ -956,16 +976,86 @@ export function createDesktopBrowserViewManager(
       refresh();
     });
     webContents.on("did-start-loading", refresh);
-    webContents.on("did-stop-loading", refresh);
+    webContents.on("did-stop-loading", () => {
+      if (entry.lastErrorText === null) entry.pendingNavigationUrl = null;
+      refresh();
+    });
+    let pageFaviconOrigin: string | null = null;
+    let faviconCache = faviconCaches.get(entry.registry);
+    if (faviconCache === undefined) {
+      faviconCache = new Map<string, string[]>();
+      faviconCaches.set(entry.registry, faviconCache);
+    }
+    const originFavicons = faviconCache;
     webContents.on("did-navigate", () => {
+      entry.pendingNavigationUrl = null;
+      const origin = faviconOrigin(webContents.getURL());
+      if (origin === null || origin !== pageFaviconOrigin) {
+        entry.faviconUrls =
+          origin === null ? [] : (originFavicons.get(origin) ?? []);
+        entry.faviconUrl = entry.faviconUrls[0] ?? null;
+        if (origin !== null && entry.faviconUrls.length > 0) {
+          originFavicons.delete(origin);
+          originFavicons.set(origin, entry.faviconUrls);
+        }
+      }
+      pageFaviconOrigin = origin;
       entry.lastErrorText = null;
       refresh();
     });
-    webContents.on("did-navigate-in-page", () => {
+    webContents.on("did-navigate-in-page", (_event, _url, isMainFrame) => {
+      if (isMainFrame) entry.pendingNavigationUrl = null;
       refresh();
     });
-    webContents.on("did-start-navigation", () => {
+    webContents.on("did-start-navigation", (event) => {
+      if (!event.isMainFrame) return;
+      entry.pendingNavigationUrl = event.url;
       entry.lastErrorText = null;
+      refresh();
+    });
+    webContents.on("did-redirect-navigation", (event) => {
+      if (!event.isMainFrame) return;
+      entry.pendingNavigationUrl = event.url;
+      refresh();
+    });
+    webContents.on("page-favicon-updated", (_event, favicons) => {
+      if (favicons.length === 0) return;
+      const origin = faviconOrigin(webContents.getURL());
+      const previousUrls =
+        origin !== null && origin === pageFaviconOrigin
+          ? entry.faviconUrls
+          : [];
+      pageFaviconOrigin = origin;
+      entry.faviconUrls = [...new Set(favicons.slice(0, 64))]
+        .filter((url) => {
+          if (url.length > BB_DESKTOP_BROWSER_MAX_URL_LENGTH) return false;
+          try {
+            const protocol = new URL(url).protocol;
+            return (
+              protocol === "https:" ||
+              protocol === "http:" ||
+              protocol === "data:"
+            );
+          } catch {
+            return false;
+          }
+        })
+        .slice(0, 8);
+      if (entry.faviconUrls.length > 0) {
+        entry.faviconUrls = [
+          ...new Set([...entry.faviconUrls, ...previousUrls]),
+        ].slice(0, 8);
+      }
+      entry.faviconUrl = entry.faviconUrls[0] ?? null;
+      if (pageFaviconOrigin !== null) {
+        originFavicons.delete(pageFaviconOrigin);
+        if (entry.faviconUrls.length > 0)
+          originFavicons.set(pageFaviconOrigin, entry.faviconUrls);
+        if (originFavicons.size > 40) {
+          const oldest = originFavicons.keys().next().value;
+          if (oldest !== undefined) originFavicons.delete(oldest);
+        }
+      }
       refresh();
     });
     webContents.on("page-title-updated", refresh);
@@ -975,6 +1065,7 @@ export function createDesktopBrowserViewManager(
         if (!isMainFrame || errorCode === ERR_ABORTED) {
           return;
         }
+        entry.pendingNavigationUrl = validatedURL;
         entry.lastErrorText =
           errorDescription.length > 0
             ? errorDescription
@@ -1001,6 +1092,9 @@ export function createDesktopBrowserViewManager(
       threadId: args.threadId,
       generation: randomUUID(),
       lastErrorText: null,
+      pendingNavigationUrl: null,
+      faviconUrl: null,
+      faviconUrls: [],
       desiredBounds: args.desiredBounds,
       popupTimestamps: [],
       popupWindows: new Set(),
@@ -1528,6 +1622,7 @@ export function createDesktopBrowserViewManager(
       popupWindows.clear();
       for (const registry of new Set([entries, ...serverEntries.values()])) {
         for (const [key, entry] of [...registry]) disposeEntry(key, entry);
+        faviconCaches.delete(registry);
       }
       serverEntries.clear();
     },

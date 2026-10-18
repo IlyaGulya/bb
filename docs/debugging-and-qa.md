@@ -6,7 +6,7 @@
 - `pnpm start:worktree` builds production artifacts and serves the optimized app bundle from the checkout-specific dev server URL, while keeping the same dev data directory and deterministic server/host-daemon ports. It has no Vite dev server or hot reload.
 - `pnpm start:worktree-remote` is the trusted-network variant of `pnpm start:worktree`; it binds that server to all IPv4 interfaces.
 - `pnpm desktop` packages the Electron app and launches it against the installed data directory, ports and Electron user-data directory, the same targets a released build uses. It shares the single-instance lock with an installed bb: quit that first, or the launch focuses it instead of starting your build.
-- `pnpm desktop:worktree` packages and launches it against this checkout's data directory and deterministic ports, the same instance `pnpm start:worktree` uses, with Electron's user-data directory at `$BB_DATA_DIR/desktop` (override with `BB_DESKTOP_USER_DATA_DIR`). It refuses to start when the server or host-daemon port is busy, so a stale server cannot answer for your build. Set `BB_DESKTOP_OPEN_DEVTOOLS=1` to open DevTools. Both desktop commands always repackage first; machines without a Developer ID identity produce unsigned artifacts.
+- `pnpm desktop:worktree` packages and launches it against this checkout's data directory and deterministic ports, the same instance `pnpm start:worktree` uses, with Electron's user-data directory at `$BB_DATA_DIR/desktop` (override with `BB_DESKTOP_USER_DATA_DIR`). Like `pnpm start:worktree`, it skips first-run setup unless `BB_SKIP_ONBOARDING=0`. It refuses to start when the server or host-daemon port is busy, so a stale server cannot answer for your build. Set `BB_DESKTOP_OPEN_DEVTOOLS=1` to open DevTools. Both desktop commands always repackage first; machines without a Developer ID identity produce unsigned artifacts.
 - The packaged app defaults to server/frontend `:38886`, host daemon `:38887`, data dir `~/.bb/`, and logs under `~/.bb/logs/`.
 - `bb-app` (including `pnpm start`), `bb-server`, and `bb-host-daemon` capture service stdout and stderr in `logs/server-stdio.log` and `logs/host-daemon-stdio.log` under the selected data directory. These append across restarts and are separate from rotating application logs. Use `tail -F` on these files for console output and early startup errors; service output is not forwarded to the launcher's terminal.
 - Entity IDs in URLs (`proj_*`, `thr_*`) are primary keys. Query them directly against the active data dir: `sqlite3 <data>/bb.db "SELECT * FROM threads WHERE id = 'thr_xxx';"`.
@@ -52,6 +52,21 @@ Inspect the persisted owner with
 with `bb browser instances --host <hostId> --json` or
 `sdk.experimental_desktopBrowsers.listInstances`. Recovery uses the existing
 native snapshot and browser APIs; no daemon wire fields change.
+
+Browser tab favicons retain their candidates across same-origin navigation. The
+native desktop manager caches candidates for the 40 most recently used HTTP(S)
+origins per connected server; returning to an origin or reopening its tab can
+reuse those candidates. Same-origin candidate updates retain earlier candidates as fallbacks, and empty
+updates leave the known icon intact. Crossing to an uncached origin clears the
+previous icon. The cache is in memory and ends with the desktop process.
+
+The preload browser `onState` subscription immediately replays the latest
+validated state for up to 100 recently updated tabs before forwarding live
+updates. This lets remounted tab headers recover without waiting for a new
+favicon event. Renderer image-size measurements are also bounded and reused
+so remounts retain the appropriate Retina candidate. Image bytes still load
+through the renderer's browser cache; authenticated icon fetching through the
+embedded browser session is not implemented by this cache.
 
 ## Log Fields
 
@@ -663,6 +678,37 @@ Responses support a single HTTP byte range and carry
 response headers are sent returns retryable `409 file_changed`; a change after
 streaming starts aborts the body. Revision routes ignore Range and keep the
 daemon's 25 MB non-image limit.
+
+Working-tree, host, thread-storage, leased-preview, and uploaded-attachment
+responses share `services/files/file-stream-response.ts`. It owns ranges,
+conditional requests, HEAD, bounded streaming, backpressure, and cancellation.
+The local reader opens a file handle only when bytes are needed and closes it
+on completion, cancellation, or failure. The daemon reader uses the existing
+chunk RPC and passes cancellation through to pending calls. Both readers
+validate file consistency; failures before headers return an error and failures
+after streaming begins terminate the body.
+
+Routes explicitly choose content type, cache policy, and security headers.
+Daemon files retain weak revision ETags and their sandbox/nosniff policy;
+HTML remains `no-store`. Attachments retain their immutable private cache policy
+and strong ETags. Weak validators never authorize `If-Range`; attachment ranges
+can use an exact strong ETag or Last-Modified match. Git revision reads remain
+on the separate whole-file path described above.
+
+Uploaded attachments use `GET /api/v1/projects/:id/attachments/content?path=<stored-path>`.
+This route streams single byte ranges from disk, including open-ended and suffix
+ranges, with `206`, `Accept-Ranges: bytes`, and `Content-Range`. Unsatisfiable
+ranges return `416`; malformed or multipart ranges fall back to the full `200`
+response. `If-None-Match` takes precedence over ranges. `If-Range` must match the
+strong ETag or Last-Modified value exactly; otherwise the full file is returned.
+HEAD returns full-file headers without reading the body. To check partial reads,
+use `curl -D - -H 'Range: bytes=0-1023' '<attachment-url>' -o /tmp/attachment-part`.
+
+Skill detail reads and file listings resolve symlinked skill directories on
+their owning host. The server opts into `followRootSymlink` for
+`host.read_file_relative` and `host.list_files`; other callers pass `false`.
+Relative skill reads remain confined to the resolved directory and deny dotfiles,
+and listings skip nested symlinks. Linked skills remain read-only in bb.
 
 ## Prepared Worktree Restarts
 

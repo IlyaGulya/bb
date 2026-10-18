@@ -138,7 +138,7 @@ export function PromptStackChevron({ isExpanded }: { isExpanded: boolean }) {
 
 export function PromptStackCountSlot({
   count,
-  prefix = "+",
+  prefix = "",
 }: {
   count: number;
   prefix?: "+" | "";

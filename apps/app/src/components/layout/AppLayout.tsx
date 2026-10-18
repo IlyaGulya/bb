@@ -76,6 +76,8 @@ import {
   getBbDesktopInfo,
   MACOS_CHROME_CONTROL_AXIS_CLASS,
   MACOS_CHROME_CONTROL_NO_DRAG_CLASS,
+  MACOS_TITLE_BAR_CONTROL_AXIS_CLASS,
+  MACOS_TITLE_BAR_CONTROL_SIZE_CLASS,
   MACOS_TRAFFIC_LIGHT_RESERVE_OFFSET_CLASS,
   MACOS_TRAFFIC_LIGHT_RESERVE_PADDING_CLASS,
   MACOS_WINDOW_DRAG_CLASS,
@@ -105,8 +107,8 @@ import { dispatchBrowserViewBoundsSync } from "@/lib/browser-view-bounds-sync";
 import { useFaviconBadge } from "@/lib/favicon-color-preference";
 import { shouldShowFaviconAttentionDot } from "./faviconAttentionDot";
 import { AppLayoutSidebar } from "./AppLayoutSidebar";
-import { WindowRightPanelToggle } from "./WindowRightPanelToggle";
 import { NAV_RAIL_COLLAPSED_SIDEBAR_WIDTH } from "@/components/sidebar/navRailWidth";
+import { useSidebarNavigationPlacement } from "@/components/sidebar/sidebarNavigationProvider";
 import { SidebarHistoryNavigationControls } from "@/components/sidebar/SidebarHistoryNavigationControls";
 import {
   useAppCommandHandler,
@@ -179,15 +181,19 @@ const sidebarOpenAtom = atomWithStorage<boolean>(
 );
 
 interface SidebarStateBridgeProps {
-  framed: boolean;
+  usesDesktopChrome: boolean;
   children: ReactNode;
 }
 
 type SidebarResizeMouseEvent = ReactMouseEvent<HTMLDivElement>;
 type SidebarOpenChangeHandler = (open: boolean) => void;
 
-function SidebarStateBridge({ framed, children }: SidebarStateBridgeProps) {
+function SidebarStateBridge({
+  usesDesktopChrome,
+  children,
+}: SidebarStateBridgeProps) {
   const [open, setOpen] = useAtom(sidebarOpenAtom);
+  const hasRail = useSidebarNavigationPlacement() === "rail";
   const sidebarWidth = useAtomValue(sidebarWidthAtom);
   const sidebarLiveWidth = useAtomValue(sidebarLiveWidthAtom);
   const handleOpenChange = useCallback<SidebarOpenChangeHandler>(
@@ -204,8 +210,10 @@ function SidebarStateBridge({ framed, children }: SidebarStateBridgeProps) {
   return (
     <SidebarProvider
       width={`${sidebarLiveWidth ?? sidebarWidth}px`}
-      collapsedRailWidth={NAV_RAIL_COLLAPSED_SIDEBAR_WIDTH}
-      framed={framed}
+      collapsedRailWidth={
+        hasRail ? NAV_RAIL_COLLAPSED_SIDEBAR_WIDTH : undefined
+      }
+      framed={usesDesktopChrome}
       data-testid="app-layout-root"
       open={open}
       onOpenChange={handleOpenChange}
@@ -251,21 +259,22 @@ function SidebarTriggerOverlay({
         data-testid="app-window-title-bar"
         style={{ zIndex: APP_OVERLAY_LAYER.sidebarTrigger }}
         className={cn(
-          "fixed inset-x-0 top-0 pr-[calc(var(--bb-window-frame-lip)_+_var(--bb-panel-chrome-padding)_+_1px)]",
-          "flex h-(--bb-window-title-bar-height) items-center [--bb-macos-chrome-control-y:calc(26px_-_var(--bb-window-title-bar-height)/2)]",
+          "pointer-events-none fixed top-0 left-0",
+          "flex h-(--bb-window-title-bar-height) items-center",
+          MACOS_TITLE_BAR_CONTROL_AXIS_CLASS,
+          MACOS_TITLE_BAR_CONTROL_SIZE_CLASS,
           reserveMacosTrafficLights
             ? MACOS_TRAFFIC_LIGHT_RESERVE_PADDING_CLASS
             : BROWSER_SIDEBAR_TRIGGER_INSET_CLASS,
-          MACOS_WINDOW_DRAG_CLASS,
         )}
       >
         <div
           className={cn(
-            "flex items-center gap-(--bb-chrome-control-gap)",
+            "pointer-events-auto flex items-center gap-(--bb-title-bar-sidebar-toggle-gap)",
             MACOS_CHROME_CONTROL_NO_DRAG_CLASS,
           )}
         >
-          <SidebarHistoryNavigationControls />
+          <SidebarHistoryNavigationControls className="gap-0" />
           <div className="relative flex items-center">
             <SidebarTrigger {...triggerProps} />
             <AppCommandShortcutHint
@@ -274,9 +283,6 @@ function SidebarTriggerOverlay({
             />
           </div>
         </div>
-        <WindowRightPanelToggle
-          className={cn("ml-auto", MACOS_CHROME_CONTROL_NO_DRAG_CLASS)}
-        />
       </div>
     );
   }
@@ -295,6 +301,7 @@ function SidebarTriggerOverlay({
             ? MACOS_TRAFFIC_LIGHT_RESERVE_OFFSET_CLASS
             : ["left-0", BROWSER_SIDEBAR_TRIGGER_INSET_CLASS],
           MACOS_WINDOW_DRAG_CLASS,
+          MACOS_TITLE_BAR_CONTROL_SIZE_CLASS,
         )}
       >
         <SidebarTrigger
@@ -822,7 +829,7 @@ export function AppLayout({ children }: AppLayoutProps) {
         <ProjectActionsProvider>
           <ThreadTitleMentionResourcesProvider {...titleMentionResources}>
             <ThreadActionsProvider>
-              <SidebarStateBridge framed={usesDesktopChrome}>
+              <SidebarStateBridge usesDesktopChrome={usesDesktopChrome}>
                 {backToAppRoutePath !== null && !isSidebarResizing ? (
                   <BackToAppCommandHandler routePath={backToAppRoutePath} />
                 ) : null}
@@ -840,6 +847,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                   onResizeMouseDown={handleResizeMouseDown}
                   isResizing={isSidebarResizing}
                   settingsRoutePath={settingsRoutePath}
+                  backToAppRoutePath={backToAppRoutePath}
                 />
                 <SidebarInset>
                   <div

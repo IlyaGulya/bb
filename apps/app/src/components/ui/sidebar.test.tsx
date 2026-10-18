@@ -405,18 +405,40 @@ describe("framed desktop sidebar", () => {
     const body = screen.getByTestId("body");
     expect(screen.getByTestId("framed-probe").textContent).toBe("true");
     expect(screen.getByTestId("wrapper").dataset.framed).toBe("");
-    expect(body.classList.contains("rounded-tl-xl")).toBe(true);
-    expect(body.classList.contains("rounded-bl-xl")).toBe(true);
-    expect(inset.classList.contains("rounded-tl-xl")).toBe(false);
-    expect(inset.classList.contains("rounded-bl-xl")).toBe(false);
+    expect(
+      screen
+        .getByTestId("wrapper")
+        .classList.contains("pl-(--bb-window-frame-leading-lip)"),
+    ).toBe(false);
+    expect(
+      screen
+        .getByTestId("wrapper")
+        .style.getPropertyValue("--bb-window-card-collapsed-left"),
+    ).toBe("52px");
+    expect(body.classList.contains("rounded-tl-(--bb-frame-card-radius)")).toBe(
+      true,
+    );
+    expect(body.classList.contains("rounded-bl-(--bb-frame-card-radius)")).toBe(
+      true,
+    );
+    expect(
+      inset.classList.contains("before:rounded-tl-(--bb-frame-card-radius)"),
+    ).toBe(false);
+    expect(
+      inset.classList.contains("before:rounded-bl-(--bb-frame-card-radius)"),
+    ).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
 
-    expect(inset.classList.contains("rounded-tl-xl")).toBe(true);
-    expect(inset.classList.contains("rounded-bl-xl")).toBe(true);
+    expect(
+      inset.classList.contains("before:rounded-tl-(--bb-frame-card-radius)"),
+    ).toBe(true);
+    expect(
+      inset.classList.contains("before:rounded-bl-(--bb-frame-card-radius)"),
+    ).toBe(true);
   });
 
-  it("keeps a lip of window frame beside and below the card", () => {
+  it("keeps a lip of window frame on both sides of and below the card", () => {
     render(
       <CompactViewportOverrideProvider isCompactViewport={false}>
         <SidebarProvider framed data-testid="wrapper">
@@ -430,12 +452,31 @@ describe("framed desktop sidebar", () => {
     const inset = screen.getByTestId("inset");
     expect(wrapper.classList.contains("pr-(--bb-window-frame-lip)")).toBe(true);
     expect(wrapper.classList.contains("pb-(--bb-window-frame-lip)")).toBe(true);
+    expect(
+      wrapper.classList.contains("pl-(--bb-window-frame-leading-lip)"),
+    ).toBe(true);
+    expect(
+      wrapper.style.getPropertyValue("--bb-window-card-collapsed-left"),
+    ).toBe("var(--bb-window-frame-leading-lip)");
+    expect(screen.getByTestId("panel").className).toContain(
+      "left-(--bb-window-frame-leading-lip)",
+    );
     expect(screen.getByTestId("panel").className).toContain(
       "var(--bb-shell-height)_-_var(--bb-window-frame-top)_-_var(--bb-window-frame-lip)",
     );
-    for (const edge of ["rounded-tr-xl", "rounded-br-xl", "border-r"]) {
+    for (const edge of [
+      "before:rounded-tr-(--bb-frame-card-radius)",
+      "before:rounded-br-(--bb-frame-card-radius)",
+      "before:border-r",
+      "px-px",
+      "pb-px",
+    ]) {
       expect(inset.classList.contains(edge)).toBe(true);
     }
+    expect(inset.classList.contains("-mt-(--bb-window-title-bar-height)")).toBe(
+      true,
+    );
+    expect(screen.getByTestId("window-title-bar-drag-region")).toBeTruthy();
   });
 
   it("leaves compact viewports and unframed sidebars as they were", () => {

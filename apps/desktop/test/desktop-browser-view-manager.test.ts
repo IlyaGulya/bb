@@ -172,7 +172,18 @@ interface FakeWebContentsEventMap {
   "media-started-playing": FakeVoidWebContentsListener;
   "did-navigate": FakeDidNavigateListener;
   "did-navigate-in-page": FakeDidNavigateInPageListener;
-  "did-start-navigation": FakeVoidWebContentsListener;
+  "did-start-navigation": (event: {
+    url: string;
+    isMainFrame: boolean;
+  }) => void;
+  "did-redirect-navigation": (event: {
+    url: string;
+    isMainFrame: boolean;
+  }) => void;
+  "page-favicon-updated": (
+    event: FakeWebContentsEvent,
+    favicons: string[],
+  ) => void;
   "page-title-updated": FakePageTitleUpdatedListener;
   "did-fail-load": FakeDidFailLoadListener;
   "context-menu": FakeContextMenuListener;
@@ -432,6 +443,8 @@ const electronMock = vi.hoisted(() => {
       "did-navigate": [],
       "did-navigate-in-page": [],
       "did-start-navigation": [],
+      "did-redirect-navigation": [],
+      "page-favicon-updated": [],
       "page-title-updated": [],
       "did-fail-load": [],
       "context-menu": [],
@@ -533,8 +546,18 @@ const electronMock = vi.hoisted(() => {
       if (index !== -1) this.listeners[eventName].splice(index, 1);
     }
 
-    emitDidStartNavigation(): void {
-      for (const listener of this.listeners["did-start-navigation"]) listener();
+    emitDidStartNavigation(url = this.url, isMainFrame = true): void {
+      for (const listener of this.listeners["did-start-navigation"])
+        listener({ url, isMainFrame });
+    }
+
+    emitDidRedirectNavigation(url: string, isMainFrame = true): void {
+      for (const listener of this.listeners["did-redirect-navigation"])
+        listener({ url, isMainFrame });
+    }
+
+    emitDidStopLoading(): void {
+      for (const listener of this.listeners["did-stop-loading"]) listener();
     }
 
     reload(): void {
@@ -649,6 +672,12 @@ const electronMock = vi.hoisted(() => {
       this.url = url;
       for (const listener of this.listeners["did-navigate-in-page"]) {
         listener(fakeWebContentsEvent, url, true);
+      }
+    }
+
+    emitPageFaviconUpdated(favicons: string[]): void {
+      for (const listener of this.listeners["page-favicon-updated"]) {
+        listener(fakeWebContentsEvent, favicons);
       }
     }
 
@@ -1690,6 +1719,53 @@ describe("DesktopBrowserCdpAdapter", () => {
     ]);
     page.detach();
   });
+
+  it.each(["", "https://example.com/original"])(
+    "reports the destination before navigation commits from %s",
+    (initialUrl) => {
+      const { hostWindow, view } = createRendererRecoveryFixture(91);
+      void view.webContents.loadURL(initialUrl);
+      const expectUrl = (url: string) =>
+        expect(hostWindow.webContents.sentPayloads.at(-1)).toMatchObject({
+          url,
+        });
+
+      view.webContents.emitDidStartNavigation("https://example.com/next");
+      expectUrl("https://example.com/next");
+      view.webContents.emitDidStartNavigation("https://frame.example", false);
+      expectUrl("https://example.com/next");
+      view.webContents.emitDidRedirectNavigation(
+        "https://example.com/redirect",
+      );
+      expectUrl("https://example.com/redirect");
+      view.webContents.emitDidRedirectNavigation(
+        "https://frame.example/redirect",
+        false,
+      );
+      expectUrl("https://example.com/redirect");
+      view.webContents.emitDidNavigate("https://example.com/final");
+      expectUrl("https://example.com/final");
+      view.webContents.emitDidStartNavigation("https://example.com/cancelled");
+      expectUrl("https://example.com/cancelled");
+      view.webContents.emitDidStopLoading();
+      expectUrl("https://example.com/final");
+      view.webContents.emitDidStartNavigation("https://unreachable.example");
+      view.webContents.emitDidFailLoad({
+        errorCode: -105,
+        errorDescription: "ERR_NAME_NOT_RESOLVED",
+        validatedURL: "https://unreachable.example",
+        isMainFrame: true,
+      });
+      view.webContents.emitDidStopLoading();
+      expectUrl("https://unreachable.example");
+      view.webContents.emitDidStartNavigation("https://example.com/recovered");
+      view.webContents.emitDidNavigate("https://example.com/recovered");
+      expect(hostWindow.webContents.sentPayloads.at(-1)).toMatchObject({
+        url: "https://example.com/recovered",
+        errorText: null,
+      });
+    },
+  );
 
   it("routes lifecycle callbacks only for registered scoped tabs and forwards manager notifications", async () => {
     const { manager, adapter, scope, view, createTab, activateTab, closeTab } =
@@ -2831,6 +2907,136 @@ describe("DesktopBrowserViewManager", () => {
         threadId: "thread-1",
       }),
     ).toEqual([]);
+  });
+
+  it("publishes favicons, retains them within an origin, and restores cached icons when returning", () => {
+    const manager = createDesktopBrowserViewManager();
+    const hostWindow = new FakeHostWindow({
+      contentBounds: { width: 700, height: 450 },
+      webContentsId: 91,
+    });
+    attachBrowserTab({
+      manager,
+      hostWindow,
+      tabId: "browser:a",
+      url: "https://example.com",
+    });
+    const view = requireFakeView(0);
+    const favicon = () =>
+      hostWindow.webContents.sentPayloads
+        .slice()
+        .reverse()
+        .find((payload) => "faviconUrl" in payload);
+    view.webContents.emitPageFaviconUpdated([
+      "file:///private/icon.png",
+      "https://example.com/icon.png",
+      "https://example.com/icon-large.png",
+    ]);
+    expect(favicon()).toMatchObject({
+      tabId: "browser:a",
+      faviconUrl: "https://example.com/icon.png",
+      faviconUrls: [
+        "https://example.com/icon.png",
+        "https://example.com/icon-large.png",
+      ],
+    });
+    view.webContents.emitDidNavigate("https://example.com");
+    expect(favicon()).toMatchObject({
+      faviconUrl: "https://example.com/icon.png",
+    });
+    view.webContents.emitDidNavigateInPage("https://example.com/#section");
+    expect(favicon()).toMatchObject({
+      faviconUrl: "https://example.com/icon.png",
+    });
+    view.webContents.emitDidNavigate("https://example.com/another-page");
+    expect(favicon()).toMatchObject({
+      faviconUrl: "https://example.com/icon.png",
+    });
+    view.webContents.emitPageFaviconUpdated([]);
+    expect(favicon()).toMatchObject({
+      faviconUrl: "https://example.com/icon.png",
+    });
+    view.webContents.emitPageFaviconUpdated([
+      "https://example.com/favicon.ico",
+    ]);
+    expect(favicon()).toMatchObject({
+      faviconUrls: [
+        "https://example.com/favicon.ico",
+        "https://example.com/icon.png",
+        "https://example.com/icon-large.png",
+      ],
+    });
+    view.webContents.emitPageFaviconUpdated(["https://example.com/icon.png"]);
+    view.webContents.emitDidNavigate("https://other.example");
+    expect(favicon()).toMatchObject({ faviconUrl: null });
+    view.webContents.emitDidNavigate("https://example.com/return");
+    expect(favicon()).toMatchObject({
+      faviconUrl: "https://example.com/icon.png",
+    });
+    attachBrowserTab({
+      manager,
+      hostWindow,
+      tabId: "browser:reopened",
+      url: "https://example.com/reopened",
+    });
+    requireFakeView(1).webContents.emitDidNavigate(
+      "https://example.com/reopened",
+    );
+    expect(favicon()).toMatchObject({
+      tabId: "browser:reopened",
+      faviconUrl: "https://example.com/icon.png",
+    });
+
+    view.webContents.emitPageFaviconUpdated(["javascript:alert(1)"]);
+    expect(favicon()).toMatchObject({ faviconUrl: null });
+  });
+
+  it("bounds cached favicon origins and isolates them between servers", () => {
+    const manager = createDesktopBrowserViewManager();
+    manager.setServerOrigin("https://server-a.example");
+    const hostWindow = new FakeHostWindow({
+      contentBounds: { width: 700, height: 450 },
+      webContentsId: 91,
+    });
+    attachBrowserTab({
+      manager,
+      hostWindow,
+      tabId: "browser:cache",
+      url: "https://site-0.example",
+    });
+    const view = requireFakeView(0);
+    for (let index = 0; index <= 40; index++) {
+      view.webContents.emitDidNavigate(`https://site-${index}.example`);
+      view.webContents.emitPageFaviconUpdated([
+        `https://site-${index}.example/icon.png`,
+      ]);
+    }
+    const latest = () =>
+      hostWindow.webContents.sentPayloads
+        .slice()
+        .reverse()
+        .find((payload) => "faviconUrl" in payload);
+    view.webContents.emitDidNavigate("https://site-0.example");
+    expect(latest()).toMatchObject({ faviconUrl: null, faviconUrls: [] });
+    view.webContents.emitDidNavigate("https://site-40.example");
+    expect(latest()).toMatchObject({
+      faviconUrl: "https://site-40.example/icon.png",
+    });
+    manager.setServerOrigin("https://server-b.example");
+    attachBrowserTab({
+      manager,
+      hostWindow,
+      tabId: "browser:cache",
+      url: "https://site-40.example",
+    });
+    requireFakeView(1).webContents.emitDidNavigate("https://site-40.example");
+    expect(latest()).toMatchObject({ faviconUrl: null, faviconUrls: [] });
+    manager.setServerOrigin("https://server-a.example");
+    view.webContents.emitDidNavigate("https://site-39.example");
+    expect(latest()).toMatchObject({
+      faviconUrl: "https://site-39.example/icon.png",
+    });
+    manager.destroyAll();
   });
 
   it("notifies subscribers of native creation and hidden navigation until unsubscribed", () => {

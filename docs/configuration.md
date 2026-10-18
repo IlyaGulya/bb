@@ -186,6 +186,7 @@ change the host-daemon protocol.
 | `BB_HOST_DAEMON_PORT`          | `bb-app env`, environment, or `--host-daemon-port` | Startup-only            | Local host-daemon API port. Defaults to `38887`.                                                                                                                                                                             |
 | `BB_LOG_LEVEL`                 | `bb-app config`                                    | Startup-only debugging  | `trace`, `debug`, `info`, `warn`, `error`, or `fatal`.                                                                                                                                                                       |
 | `BB_TELEMETRY`                 | `bb-app env`, or environment                       | Startup-only            | `false` always disables anonymous usage telemetry, overriding the `telemetryEnabled` setting.                                                                                                                                |
+| `BB_SKIP_ONBOARDING`           | Environment                                        | Startup-only            | Default false. `1` marks first-run setup completed at startup when it is not yet, so the setup screen is skipped. Settings → General can still replay it. `pnpm dev`, `pnpm start:worktree`, and `pnpm desktop:worktree` default it to `1`; an explicit `0` retains setup. |
 | `BB_PERF_DIAGNOSTICS`          | `bb-app env`, environment, or `--perf-diagnostics` | Startup-only            | Default false. Permits the `performanceDiagnostics` experiment; see [Experiments](#experiments).                                                                                                                             |
 | `BB_CLI_ERROR_LOG`             | Environment of the `bb` process                    | Optional                | `0` stops the CLI recording failed invocations (command path, error code, no argument values) to `<dataDir>/logs/cli-errors.jsonl`. See `bb guide overview`.                                                                 |
 | `BB_ACCOUNT_POOL_PARENT_URL`   | Set automatically by a parent bb server            | Nested bb servers       | Account Pooler hub of the bb server whose thread launched this one. When present the Account Pooler plugin is enabled on first run and proxies to that parent; `bb pool parent isolate` opts out. Not a `bb-app config` key. |
@@ -687,27 +688,45 @@ list|get|set|reset` or `sdk.system.uiPreferences` (see
 | Key                           | Value                                                                                                                                                  |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `sidebar.threadListProvider`  | Plugin key or `__automatic__` (default): the first installed thread list plugin other than the bundled `thread-list/thread-list`, else the bundled one |
-| `sidebar.pluginPanelOrder`    | Rail destination order                                                                                                                                 |
-| `sidebar.visiblePluginPanels` | Rail destinations shown, or `null` for every destination                                                                                               |
+| `sidebar.navigationProvider`  | Plugin key or `__automatic__` (default): the first navigation from a plugin other than the bundled Navigation plugin, else its `navigation/rail`       |
+| `sidebar.pluginPanelOrder`    | Navigation destination order                                                                                                                           |
+| `sidebar.visiblePluginPanels` | Navigation destinations shown, or `null` for every destination                                                                                         |
 | `sidebar.footerOrder`         | Footer action order                                                                                                                                    |
 | `sidebar.hiddenFooterItems`   | Footer actions moved into More                                                                                                                         |
 | `infoPanel.collapsedSections` | Collapsed thread Info panel sections (`commits`, `uncommittedChanges`, `childThreads`, `forks`, `threadStorage`)                                       |
 
 A legacy `__builtin__` thread list selection resolves to the bundled plugin.
-Footer IDs are `builtin:mobile`, `builtin:report-bug`, and
+Footer IDs are `builtin:settings` (top list layout only), `builtin:mobile`,
+`builtin:report-bug`, and
 `plugin:<encoded pluginId>/<encoded registrationId>`; unknown and
 disabled-plugin IDs are retained, and new actions default to visible. The
 footer can also be edited from its More menu or Settings → Appearance → Sidebar
 footer.
 
-A vertical rail on the left edge of the sidebar holds Home (the last thread),
+The bundled Navigation plugin draws the navigation. Its default layout,
+`navigation/rail`, is a vertical rail on the left edge of the sidebar that holds Home (the last thread),
 the visible destinations (Plugins, Skills, plugin panels), More (hidden
-destinations and Customize rail), and Settings at the bottom. New thread sits
-in the sidebar header and cannot be hidden. The list beside the rail swaps
+destinations and Customize navigation), and Settings at the bottom. New thread sits
+in the sidebar header and cannot be hidden from the rail. The list beside the rail swaps
 between the thread list, Plugins, Skills, and Settings; collapsing the sidebar
 leaves only the rail. On narrow windows and phones the rail sits inside the
 drawer. In the macOS desktop app, wide windows add a title bar with the window
 controls, Back and Forward, and the sidebar toggle.
+
+With `sidebar.navigationProvider` set to `navigation/top-list` (Settings →
+Appearance → Navigation), there is no rail. The visible destinations, New
+thread among them, and More (hidden destinations and Customize navigation) are
+labeled rows above the thread list, with plugin panel badges at the end of
+their row. New thread can be reordered and hidden like any other row.
+Settings is a footer action, and the Settings, Plugins, and Skills lists start
+with a Back to app row. Collapsing hides the whole sidebar, and the macOS
+desktop app keeps the window controls over the sidebar instead of a separate
+title bar. A navigation plugin gets the rail or list layout its registration
+declares, and a list navigation can bring its own controls beside the sidebar
+toggle; legacy `__builtin__` and `navigation/navigation` read as
+`__automatic__`. Disabling the Navigation plugin with no other navigation
+plugin installed leaves the list layout with no destinations; Settings stays
+in the footer.
 
 The layout keys `sidebar.organizationMode`, `sidebar.threadGrouping.environment`,
 `sidebar.chronologicalSort`, `sidebar.sortDirection`, the three section-order
@@ -1122,9 +1141,12 @@ For source development only, `pnpm dev`, `pnpm start:worktree`,
   directory plus a short hash. The server and Vite bind to loopback; an
   explicit `BB_DEV_APP_HOST` overrides the Vite listener, and remote HTTP dev
   through it also needs `BB_SERVER_BIND_HOST=0.0.0.0` for realtime updates.
+  It defaults `BB_SKIP_ONBOARDING` to `1`, so new instances skip the first-run
+  setup screen; set `BB_SKIP_ONBOARDING=0` to retain setup or replay it from Settings.
 - `pnpm start:worktree` loads the same cascade and checkout-specific data
   directory and ports, builds production artifacts, and serves the bundle from
-  the main server (no Vite or hot reload). Telemetry stays disabled. Its data
+  the main server (no Vite or hot reload). Telemetry stays disabled and
+  first-run setup is skipped, as with `pnpm dev`. Its data
   directory, ports, inherited skills, listener host, and telemetry policy take
   precedence over that instance's `config.json` or `env.json`.
 - `pnpm start:worktree-remote` does the same but binds the main server to
