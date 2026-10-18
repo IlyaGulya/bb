@@ -276,7 +276,16 @@ export function ModelReasoningMenu({
                       LIST_HOVER_TRANSITION,
                     )}
                   >
-                    {option.label}
+                    {option.label === "Medium" || option.label === "Extra High" ? (
+                      <>
+                        <span className="max-[360px]:hidden">{option.label}</span>
+                        <span className="hidden max-[360px]:inline">
+                          {option.label === "Medium" ? "Med" : "XHigh"}
+                        </span>
+                      </>
+                    ) : (
+                      option.label
+                    )}
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
