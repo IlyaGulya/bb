@@ -263,7 +263,7 @@ export function ModelReasoningMenu({
                   if (option) onReasoningSelect(option.value);
                 }}
                 disabled={selectionBlocked}
-                className="no-scrollbar flex flex-nowrap justify-start gap-1 overflow-x-auto [contain:inline-size]"
+                className="flex gap-1"
               >
                 {reasoningOptions.map((option) => (
                   <ToggleGroupItem
@@ -276,9 +276,7 @@ export function ModelReasoningMenu({
                       LIST_HOVER_TRANSITION,
                     )}
                   >
-                    <span className="min-w-0 truncate" title={option.label}>
-                      {option.label}
-                    </span>
+                    {option.label}
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
