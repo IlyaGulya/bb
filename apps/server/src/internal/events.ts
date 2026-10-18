@@ -491,7 +491,8 @@ async function applyEventEffects(
         const continuation =
           event.status === "completed" &&
           turnCompleted.nextStatus === "idle" &&
-          turnCompleted.isRootTurnCompletion
+          turnCompleted.isRootTurnCompletion &&
+          !wasTurnManuallyStopped(deps, { threadId: entry.threadId, turnId })
             ? findEnvironmentDirectoryContinuation(deps, {
                 threadId: entry.threadId,
                 turnId,
@@ -538,18 +539,19 @@ async function applyEventEffects(
           event.status === "completed" &&
           turnCompleted.nextStatus === "idle"
         ) {
-          if (continuation) {
-            followUps.push({
-              kind: "environment-directory-continuation",
-              continuation,
-              parentNotification: deferredParentNotifications[0] ?? null,
-              threadId: entry.threadId,
-            });
-          }
-          followUps.push({
-            kind: "queued-message-dispatch",
-            wake: { kind: "thread-ready", threadId: entry.threadId },
-          });
+          followUps.push(
+            continuation
+              ? {
+                  kind: "environment-directory-continuation",
+                  continuation,
+                  parentNotification: deferredParentNotifications[0] ?? null,
+                  threadId: entry.threadId,
+                }
+              : {
+                  kind: "queued-message-dispatch",
+                  wake: { kind: "thread-ready", threadId: entry.threadId },
+                },
+          );
         }
         continue;
       }
@@ -619,6 +621,10 @@ async function executeEventFollowUpBestEffort(
         await runQueuedMessageDispatch(deps, followUp.wake);
         return;
       case "environment-directory-continuation": {
+        await runQueuedMessageDispatch(deps, {
+          kind: "thread-ready",
+          threadId: followUp.threadId,
+        });
         let continued = false;
         try {
           continued = await continueAfterEnvironmentDirectoryUpdate(deps, {

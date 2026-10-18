@@ -71,6 +71,12 @@ export async function continueAfterEnvironmentDirectoryUpdate(
   ) {
     return false;
   }
+  if (thread.status === "starting" || thread.status === "active") {
+    return true;
+  }
+  if (thread.status !== "idle") {
+    return false;
+  }
   return queueParentSystemMessage(deps, {
     parentThreadId: thread.id,
     input: [

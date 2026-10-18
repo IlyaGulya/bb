@@ -7,6 +7,7 @@ import {
   closeSession,
   events,
   getEnvironment,
+  getLatestThreadSequence,
   getThread,
   listEnvironments,
   listQueuedThreadMessages,
@@ -31,11 +32,13 @@ import {
   waitForQueuedCommand,
 } from "../helpers/commands.js";
 import { readJson } from "../helpers/json.js";
+import { textInput } from "../helpers/prompt-input.js";
 import {
   seedEvent,
   seedEnvironment,
   seedHostSession,
   seedProjectWithSource,
+  seedQueuedMessage,
   seedThread,
   seedThreadFixture,
   seedThreadRuntimeState,
@@ -1112,11 +1115,41 @@ describe("internal event and tool-call routes", () => {
   });
 
   it.each([
-    { status: "completed" as const, continues: true },
-    { status: "interrupted" as const, continues: false },
+    {
+      name: "completed",
+      status: "completed" as const,
+      manualStop: false,
+      queuedMessage: false,
+      continues: true,
+      submits: 1,
+    },
+    {
+      name: "interrupted",
+      status: "interrupted" as const,
+      manualStop: false,
+      queuedMessage: false,
+      continues: false,
+      submits: 0,
+    },
+    {
+      name: "manually stopped",
+      status: "completed" as const,
+      manualStop: true,
+      queuedMessage: false,
+      continues: false,
+      submits: 0,
+    },
+    {
+      name: "user message queued",
+      status: "completed" as const,
+      manualStop: false,
+      queuedMessage: true,
+      continues: false,
+      submits: 1,
+    },
   ])(
-    "starts the follow-up turn in the new directory only when the directory-switch turn completes ($status)",
-    async ({ status, continues }) => {
+    "starts the follow-up turn in the new directory only when the directory-switch turn completes on its own ($name)",
+    async ({ status, manualStop, queuedMessage, continues, submits }) => {
       await withChildThreadNotificationClock(async (harness) => {
         const { host, session } = seedHostSession(harness.deps);
         const { project } = seedProjectWithSource(harness.deps, {
@@ -1167,6 +1200,24 @@ describe("internal event and tool-call routes", () => {
         expect(getThread(harness.db, thread.id)?.environmentId).toBe(
           targetEnvironment.id,
         );
+        if (manualStop) {
+          seedEvent(harness.deps, {
+            threadId: thread.id,
+            environmentId: targetEnvironment.id,
+            providerThreadId: null,
+            sequence:
+              getLatestThreadSequence(harness.db, { threadId: thread.id }) + 1,
+            type: "system/thread/interrupted",
+            scope: threadScope(),
+            data: { reason: "manual-stop" },
+          });
+        }
+        if (queuedMessage) {
+          seedQueuedMessage(harness.deps, {
+            content: textInput("Check the README before continuing"),
+            threadId: thread.id,
+          });
+        }
 
         const response = await postEventBatch({
           harness,
@@ -1197,14 +1248,19 @@ describe("internal event and tool-call routes", () => {
               event.type === "client/turn/requested" &&
               event.data.includes('"environment-directory-updated"'),
           );
-        const submits = listQueuedThreadCommands(
+        const submitted = listQueuedThreadCommands(
           harness,
           "turn.submit",
           thread.id,
         );
+        expect(submitted).toHaveLength(submits);
+        if (queuedMessage) {
+          expect(JSON.stringify(submitted[0])).toContain(
+            "Check the README before continuing",
+          );
+        }
         if (!continues) {
           expect(continuationRequests).toHaveLength(0);
-          expect(submits).toHaveLength(0);
           return;
         }
         expect(continuationRequests).toHaveLength(1);
@@ -1219,7 +1275,6 @@ describe("internal event and tool-call routes", () => {
         expect(continuationRequests[0]!.environmentId).toBe(
           targetEnvironment.id,
         );
-        expect(submits).toHaveLength(1);
       });
     },
   );
