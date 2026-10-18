@@ -518,6 +518,21 @@ describe("TimelineWindowedItems", () => {
     expect(scrollElement.scrollTop).toBe(3_104);
   });
 
+  it("leaves a shrinking row to the scroll root while pinned to the end", async () => {
+    clampScrollTopToContentHeight(readSpacerHeight);
+    renderWindowedItems({ pinnedToEnd: true });
+    await waitFor(() => expect(screen.getByTestId("content-98")).toBeTruthy());
+    scrollElement.scrollTop = 3_104;
+
+    itemHeights.set(98, 12);
+    act(() => {
+      reportItemResize(screen.getByTestId("wrapper-98"), 12);
+    });
+
+    expect(readSpacerHeight()).toBe(3_180);
+    expect(scrollElement.scrollTop).toBe(3_104);
+  });
+
   it("renders everything when its scrollport has no usable geometry", async () => {
     renderWindowedItems({ clientHeight: 0 });
 
