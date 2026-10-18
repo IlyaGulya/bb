@@ -238,10 +238,12 @@ export function TimelineWindowedItems({
   useLayoutEffect(() => {
     virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (
       item,
-      _delta,
+      delta,
       instance,
     ) => {
-      if (pinnedToEnd) return item.index < instance.options.count - 1;
+      if (pinnedToEnd) {
+        return delta > 0 && item.index < instance.options.count - 1;
+      }
       const scrollTop = resolvedGetScrollElement()?.scrollTop ?? 0;
       if (item.start >= scrollTop) return false;
       if (!instance.itemSizeCache.has(item.key)) return true;
