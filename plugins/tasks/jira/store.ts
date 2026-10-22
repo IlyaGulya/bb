@@ -4,6 +4,7 @@ import {
   jiraPreviewSchema,
   jiraProposalSchema,
   jiraSnapshotSchema,
+  type JiraLink,
   type JiraOperation,
   type JiraPreview,
   type JiraProposal,
@@ -89,6 +90,27 @@ export class JiraStore {
       )
       .get(connectionId, issueId);
     return row ? this.source(row.task_id) : null;
+  }
+
+  links(
+    connectionId: string,
+    issueIds: string[],
+    projectIds: string[],
+  ): JiraLink[] {
+    if (issueIds.length === 0 || projectIds.length === 0) return [];
+    return this.db
+      .prepare<string[], JiraLink>(
+        `SELECT s.issue_id AS issueId, t.id AS taskId,
+          p.prefix || '-' || t.number AS taskKey, t.project_id AS projectId
+        FROM jira_sources s
+        JOIN tasks t ON t.id = s.task_id
+        JOIN projects p ON p.id = t.project_id
+        WHERE s.connection_id = ?
+          AND s.issue_id IN (${issueIds.map(() => "?").join(",")})
+          AND t.project_id IN (${projectIds.map(() => "?").join(",")})
+        ORDER BY s.issue_id`,
+      )
+      .all(connectionId, ...issueIds, ...projectIds);
   }
 
   fingerprint(taskId: string): string | null {

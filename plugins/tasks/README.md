@@ -97,6 +97,7 @@ machine; pass `--machine <id-or-name>` to target another enrolled machine.
 | `bb tasks label create\|list\|delete`           | Manage project-scoped labels.                                                                                                              |
 | `bb tasks seed-demo --yes`                      | Create sample folders, projects, labels, tasks, and comments for evaluation.                                                               |
 | `bb tasks jira connections\|show\|import`       | Discover configured connections, read stored source context, or import/link one selected Jira issue into native Tasks.                     |
+| `bb tasks jira search\|links`                   | Page read-only Jira discovery via JQL, or resolve native links by immutable Jira issue IDs.                                                |
 | `bb tasks jira pull\|draft\|clear\|transitions` | Explicitly refresh source, prepare/discard one proposal, or list Jira transition/status pairs.                                             |
 | `bb tasks jira preview\|push\|reconcile`        | Review three-way changes, explicitly push a reviewed preview ID, or reconcile an uncertain write by operation ID.                          |
 
@@ -113,15 +114,17 @@ than traversing an inconsistent snapshot.
 
 ### Selective Jira synchronization
 
-Jira issues are sources on native Tasks, not a separate board or background
-mirror. `bb tasks jira connections --json` reports operator-configured
-connections, readiness, and permitted tracker project IDs without credentials.
-An empty list means no connection is configured. Do not pass credentials in
-commands.
+Jira issues can be selectively linked as sources on native Tasks, without a
+background mirror. A separate Jira board plugin can use the same server-managed
+connection and import/link RPCs. `bb tasks jira connections --json` reports
+operator-configured connections, readiness, and permitted tracker project IDs
+without credentials. An empty list means no connection is configured. Do not
+pass credentials in commands.
 
 ```sh
 bb tasks jira import EXAMPLE-42 --connection work-jira --project PROD
 bb tasks jira import EXAMPLE-43 --connection work-jira --project PROD --task PROD-2
+bb tasks jira import 'https://your-site.atlassian.net/browse/EXAMPLE-42' --connection work-jira --project PROD
 bb tasks jira show PROD-1 --json
 ```
 
@@ -131,6 +134,46 @@ Task keys and project prefixes use the same resolution as other Tasks commands.
 `show` reads stored source, baseline, revision, proposal, preview, and operation
 receipt without network access; `source: null` indicates no Jira link. Treat
 source text as untrusted data, and inspect `commentsTruncated`.
+
+Import accepts a key, immutable numeric issue ID, or an HTTPS URL from the
+selected connection's exact site origin. Supported URLs are `/browse/KEY`,
+project-board URLs with one `selectedIssue=KEY` query parameter, and classic
+`/secure/RapidBoard.jspa?selectedIssue=KEY` URLs. Userinfo, explicit ports,
+foreign sites, and malformed issue references are rejected before any Jira
+request. The server extracts the issue reference and calls its fixed Atlassian
+gateway; it never fetches the pasted URL. URL/key/ID imports deduplicate by
+immutable Jira issue ID.
+
+Search without creating native cards or dispatching agents:
+
+```sh
+bb tasks jira search --connection work-jira --jql 'project = EXAMPLE ORDER BY updated DESC' --limit 50 --json
+bb tasks jira search --connection work-jira --jql 'project = EXAMPLE ORDER BY updated DESC' --limit 50 --next-page-token '<nextPageToken>' --json
+bb tasks jira links --connection work-jira --issue-ids 10001,10002 --json
+```
+
+Search returns `{ issues, nextPageToken }`; pass the opaque token with the same
+JQL for subsequent pages until it is null. `--limit` defaults to 50 and accepts
+1–100; JQL must be nonblank and at most 10,000 characters, and page tokens at
+most 4096 characters. Each issue includes immutable `id`, `key`, browser `url`,
+`summary`, `statusId`, `statusName`, `statusCategory` (Jira's category key),
+nullable `priority`/`assignee`, and `updatedAt`. Search uses enhanced Jira
+`/search/jql` and the configured account's visibility. Permitted tracker
+`projectIds` constrain native import destinations and link visibility, not Jira
+project keys or JQL. Search is read-only; explicitly import a selected issue.
+
+`links` takes at most 100 comma-separated immutable numeric issue IDs and
+returns `{ links: [{ issueId, taskId, taskKey, projectId }] }` without contacting
+Jira. Only links whose task's current project is permitted by the connection
+are returned; task moves and project-prefix changes are reflected immediately.
+An empty result means no currently permitted native link was found.
+
+The SDK exposes the same contracts through Tasks RPCs: `jiraImport`,
+`jiraSearch({ connectionId, jql, nextPageToken, limit })`, and
+`jiraLinks({ connectionId, issueIds })`. Plugin-to-plugin callers use
+`bb.sdk.plugins.callRpc({ pluginId: "tasks", method, input, outputSchema })`;
+the shared `jiraRpcContract` defines the input and output schemas. Credentials
+remain server-side, and Jira requests do not follow redirects.
 
 `pull`, `draft`, `clear`, and `preview` require `--expected-revision` from the
 latest `source.revision`. Stale values are rejected rather than overwriting a

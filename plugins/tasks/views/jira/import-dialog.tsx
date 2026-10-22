@@ -149,12 +149,12 @@ export function JiraImportDialog({
           </p>
         ) : null}
         <label className="space-y-1 text-sm">
-          Jira issue key or ID
+          Jira issue key, ID or URL
           <input
             className={JIRA_INPUT}
             value={issue}
             onChange={(event) => setIssue(event.target.value)}
-            placeholder="PROJECT-123"
+            placeholder="PROJECT-123 or https://your-site.atlassian.net/browse/PROJECT-123"
             disabled={busy}
           />
         </label>

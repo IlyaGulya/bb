@@ -7,7 +7,11 @@ import { z } from "zod";
 import { createStore } from "../api/index.js";
 import { initializeTasksSchema } from "../db/schema.js";
 import { registerTasksCli } from "../cli/index.js";
-import type { JiraProposal, JiraSource } from "../shared/jira-contract.js";
+import {
+  jiraRpcContract,
+  type JiraProposal,
+  type JiraSource,
+} from "../shared/jira-contract.js";
 import { registerJiraSync } from "./index.js";
 import { textDocument } from "./client.js";
 import { JiraStore, storedJiraContext } from "./store.js";
@@ -104,6 +108,12 @@ function setup(requiredResolution = false) {
       fields: Extract<JiraProposal, { kind: "transition" }>["fields"];
     }>,
     requestedFields: [] as string[][],
+    searchResponse: null as unknown,
+    searchQueries: [] as Array<{
+      jql: string | null;
+      limit: string | null;
+      token: string | null;
+    }>,
   };
   const http: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
@@ -120,6 +130,39 @@ function setup(requiredResolution = false) {
           { errorMessages: ["Never exposed internal fixture body"] },
           { status: state.readStatus },
         );
+      if (url.pathname.endsWith("/search/jql")) {
+        state.searchQueries.push({
+          jql: url.searchParams.get("jql"),
+          limit: url.searchParams.get("maxResults"),
+          token: url.searchParams.get("nextPageToken"),
+        });
+        expect(url.pathname).toBe(
+          `/ex/jira/${config.cloudId}/rest/api/3/search/jql`,
+        );
+        expect(url.searchParams.get("fields")).toBe(
+          "summary,status,priority,assignee,updated",
+        );
+        return Response.json(
+          state.searchResponse ?? {
+            issues: [
+              {
+                ...issue,
+                fields: {
+                  ...issue.fields,
+                  status: {
+                    ...issue.fields.status,
+                    statusCategory: { key: "new" },
+                  },
+                },
+              },
+            ],
+            isLast: url.searchParams.has("nextPageToken"),
+            ...(url.searchParams.has("nextPageToken")
+              ? {}
+              : { nextPageToken: "opaque+page/2=" }),
+          },
+        );
+      }
       if (url.pathname.endsWith("/transitions")) {
         expect(url.searchParams.get("expand")).toBe("transitions.fields");
         return Response.json({
@@ -329,6 +372,298 @@ function setup(requiredResolution = false) {
 }
 
 describe("native Tasks Jira connector", () => {
+  it("imports same-site issue URLs by immutable identity without fetching the pasted URL", async () => {
+    const fixture = setup();
+    const first = await fixture.jira.jiraImport({
+      connectionId: fixture.config.id,
+      issue: `${fixture.config.siteUrl}/browse/${fixture.issue.key}?focusedCommentId=1`,
+      projectId: fixture.project.id,
+      taskId: null,
+    });
+    expect(first.created).toBe(true);
+    for (const issue of [
+      fixture.issue.key,
+      fixture.issue.id,
+      `${fixture.config.siteUrl}/jira/software/c/projects/DEMO/boards/5?selectedIssue=${fixture.issue.key}`,
+      `${fixture.config.siteUrl}/jira/software/projects/DEMO/boards/5/backlog?selectedIssue=${fixture.issue.key}`,
+      `${fixture.config.siteUrl}/secure/RapidBoard.jspa?rapidView=5&selectedIssue=${fixture.issue.key}`,
+    ]) {
+      const duplicate = await fixture.jira.jiraImport({
+        connectionId: fixture.config.id,
+        issue,
+        projectId: fixture.project.id,
+        taskId: null,
+      });
+      expect(duplicate.created).toBe(false);
+      expect(duplicate.source.taskId).toBe(first.source.taskId);
+    }
+    expect(fixture.state.writes).toBe(0);
+  });
+
+  it("rejects foreign tenants, credentials, ports and malformed references before HTTP", async () => {
+    const fixture = setup();
+    for (const issue of [
+      "https://foreign.atlassian.net/browse/DEMO-1",
+      "https://synthetic.atlassian.net.attacker.invalid/browse/DEMO-1",
+      "https://synthetic.atlassian.net@attacker.invalid/browse/DEMO-1",
+      "https://user:password@synthetic.atlassian.net/browse/DEMO-1",
+      "https://synthetic.atlassian.net:443/browse/DEMO-1",
+      "https://synthetic.atlassian.net:8443/browse/DEMO-1",
+      "http://synthetic.atlassian.net/browse/DEMO-1",
+      "https://synthetic.atlassian.net/browse/DEMO-1/extra",
+      "https://synthetic.atlassian.net/browse/DEMO-%31",
+      "https://synthetic.atlassian.net/elsewhere?selectedIssue=DEMO-1",
+      "https://synthetic.atlassian.net/jira/software/projects/DEMO/boards/5?selectedIssue=DEMO-1&selectedIssue=DEMO-2",
+      "https://synthetic.atlassian.net/jira/software/projects/DEMO/boards/5?selectedIssue=bad/key",
+      "https://synthetic.atlassian.net\\@attacker.invalid/browse/DEMO-1",
+      "DEMO-1/other",
+      "DEMO",
+    ]) {
+      await expect(
+        fixture.jira.jiraImport({
+          connectionId: fixture.config.id,
+          issue,
+          projectId: fixture.project.id,
+          taskId: null,
+        }),
+      ).rejects.toThrow("Use a Jira issue key");
+    }
+    expect(fixture.state.reads).toBe(0);
+    expect(fixture.state.writes).toBe(0);
+  });
+
+  it("pages Jira discovery through RPC and CLI without changing native records", async () => {
+    const fixture = setup();
+    registerTasksCli(
+      fixture.bb,
+      fixture.store,
+      { name: "tasks", version: "test" },
+      fixture.jira,
+    );
+    const db = fixture.bb.storage.database();
+    const before = db.prepare("SELECT total_changes() AS changes").get();
+    const input = {
+      connectionId: fixture.config.id,
+      jql: "project = EXTERNAL ORDER BY updated DESC",
+      limit: 50,
+      nextPageToken: null,
+    };
+    const first = jiraRpcContract.jiraSearch.output.parse(
+      await fixture.harness.callRpc("jiraSearch", input),
+    );
+    expect(first).toEqual({
+      issues: [
+        {
+          id: fixture.issue.id,
+          key: fixture.issue.key,
+          url: `${fixture.config.siteUrl}/browse/${fixture.issue.key}`,
+          summary: fixture.issue.fields.summary,
+          statusId: "open",
+          statusName: "Open",
+          statusCategory: "new",
+          priority: "Medium",
+          assignee: null,
+          updatedAt: fixture.issue.fields.updated,
+        },
+      ],
+      nextPageToken: "opaque+page/2=",
+    });
+    const second = await fixture.harness.runCli([
+      "jira",
+      "search",
+      "--connection",
+      fixture.config.id,
+      "--jql",
+      input.jql,
+      "--limit",
+      "50",
+      "--next-page-token",
+      first.nextPageToken!,
+      "--json",
+    ]);
+    expect(second, second.stderr).toMatchObject({ exitCode: 0, stderr: "" });
+    expect(JSON.parse(second.stdout)).toEqual({
+      issues: first.issues,
+      nextPageToken: null,
+    });
+    expect(fixture.state.searchQueries).toEqual([
+      { jql: input.jql, limit: "50", token: null },
+      { jql: input.jql, limit: "50", token: first.nextPageToken },
+    ]);
+    expect(db.prepare("SELECT total_changes() AS changes").get()).toEqual(
+      before,
+    );
+    expect(fixture.state.writes).toBe(0);
+  });
+
+  it("validates search inputs and sanitizes rejected or malformed Jira pages", async () => {
+    const fixture = setup();
+    const input = {
+      connectionId: fixture.config.id,
+      jql: "project = DEMO",
+      limit: 50,
+      nextPageToken: null,
+    };
+    for (const invalid of [
+      { ...input, jql: " " },
+      { ...input, jql: "x".repeat(10001) },
+      { ...input, limit: 0 },
+      { ...input, limit: 101 },
+      { ...input, limit: 1.5 },
+      { ...input, nextPageToken: "" },
+      { ...input, nextPageToken: "x".repeat(4097) },
+      { ...input, connectionId: "missing" },
+    ])
+      await expect(fixture.jira.jiraSearch(invalid)).rejects.toThrow();
+    expect(fixture.state.reads).toBe(0);
+    for (const status of [400, 401, 403, 429, 500]) {
+      fixture.state.readStatus = status;
+      await expect(fixture.jira.jiraSearch(input)).rejects.toThrow(
+        `Jira HTTP ${status}`,
+      );
+      await expect(fixture.jira.jiraSearch(input)).rejects.not.toThrow(
+        "Never exposed",
+      );
+    }
+    fixture.state.readStatus = 200;
+    for (const response of [
+      { issues: [], isLast: false },
+      { issues: [{ secret: "synthetic-test-only" }], isLast: true },
+      { issues: [], isLast: false, nextPageToken: "same" },
+      { issues: [], isLast: false, nextPageToken: "x".repeat(4097) },
+      { issues: [], isLast: "yes" },
+    ]) {
+      fixture.state.searchResponse = response;
+      await expect(
+        fixture.jira.jiraSearch({ ...input, nextPageToken: "same" }),
+      ).rejects.toThrow("supported search API format");
+    }
+    fixture.state.searchResponse = { issues: [], isLast: true };
+    await expect(fixture.jira.jiraSearch(input)).resolves.toEqual({
+      issues: [],
+      nextPageToken: null,
+    });
+    fixture.state.searchResponse = {
+      issues: Array.from({ length: 2 }, () => ({
+        ...fixture.issue,
+        fields: {
+          ...fixture.issue.fields,
+          status: {
+            ...fixture.issue.fields.status,
+            statusCategory: { key: "new" },
+          },
+        },
+      })),
+      isLast: true,
+    };
+    await expect(
+      fixture.jira.jiraSearch({ ...input, limit: 1 }),
+    ).rejects.toThrow("supported search API format");
+    expect(fixture.state.writes).toBe(0);
+  });
+
+  it("exposes agent search defaults and rejects malformed CLI pagination before HTTP", async () => {
+    const fixture = setup();
+    registerTasksCli(
+      fixture.bb,
+      fixture.store,
+      { name: "tasks", version: "test" },
+      fixture.jira,
+    );
+    const base = [
+      "jira",
+      "search",
+      "--connection",
+      fixture.config.id,
+      "--jql",
+      "project = DEMO",
+    ];
+    for (const args of [
+      ["--limit", "0"],
+      ["--limit", "101"],
+      ["--limit", "2.5"],
+      ["--limit", "NaN"],
+      ["--next-page-token", ""],
+    ]) {
+      const result = await fixture.harness.runCli([...base, ...args, "--json"]);
+      expect(result.exitCode).toBe(1);
+    }
+    expect(fixture.state.reads).toBe(0);
+    const result = await fixture.harness.runCli([...base, "--json"]);
+    expect(result, result.stderr).toMatchObject({ exitCode: 0, stderr: "" });
+    expect(fixture.state.searchQueries).toEqual([
+      { jql: "project = DEMO", limit: "50", token: null },
+    ]);
+  });
+
+  it("resolves links by immutable issue ID and current permitted project after moves", async () => {
+    const fixture = setup();
+    const { source } = await fixture.importIssue();
+    const input = {
+      connectionId: fixture.config.id,
+      issueIds: [fixture.issue.id, "99999"],
+    };
+    expect(await fixture.jira.jiraLinks(input)).toEqual({
+      links: [
+        {
+          issueId: fixture.issue.id,
+          taskId: source.taskId,
+          taskKey: source.taskKey,
+          projectId: fixture.project.id,
+        },
+      ],
+    });
+    const reads = fixture.state.reads;
+    fixture.store.tasks.moveTaskToProject(source.taskId, fixture.other.id);
+    expect(await fixture.jira.jiraLinks(input)).toEqual({ links: [] });
+    fixture.config.projectIds.push(fixture.other.id);
+    const moved = fixture.store.tasks.getTask(source.taskId)!;
+    expect(await fixture.jira.jiraLinks(input)).toEqual({
+      links: [
+        {
+          issueId: fixture.issue.id,
+          taskId: source.taskId,
+          taskKey: moved.key,
+          projectId: fixture.other.id,
+        },
+      ],
+    });
+    fixture.store.tasks.updateProject(fixture.other.id, { prefix: "NEW" });
+    registerTasksCli(
+      fixture.bb,
+      fixture.store,
+      { name: "tasks", version: "test" },
+      fixture.jira,
+    );
+    const lookup = await fixture.harness.runCli([
+      "jira",
+      "links",
+      "--connection",
+      fixture.config.id,
+      "--issue-ids",
+      fixture.issue.id,
+      "--json",
+    ]);
+    expect(lookup, lookup.stderr).toMatchObject({ exitCode: 0, stderr: "" });
+    expect(JSON.parse(lookup.stdout)).toMatchObject({
+      links: [
+        {
+          issueId: fixture.issue.id,
+          taskId: source.taskId,
+          taskKey: "NEW-1",
+          projectId: fixture.other.id,
+        },
+      ],
+    });
+    await expect(
+      fixture.jira.jiraLinks({ ...input, issueIds: Array(101).fill("1") }),
+    ).rejects.toThrow();
+    await expect(
+      fixture.jira.jiraLinks({ ...input, issueIds: ["DEMO-1"] }),
+    ).rejects.toThrow();
+    expect(fixture.state.reads).toBe(reads);
+  });
+
   it("round-trips transition JSON through the CLI and rejects malformed or misplaced fields", async () => {
     const fixture = setup(true);
     registerTasksCli(

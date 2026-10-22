@@ -145,6 +145,46 @@ export const jiraSourceSchema = z
   })
   .strict();
 
+export const jiraSearchInputSchema = z
+  .object({
+    connectionId: nonBlank,
+    jql: nonBlank.max(10_000),
+    nextPageToken: z.string().min(1).max(4096).nullable(),
+    limit: z.number().int().min(1).max(100),
+  })
+  .strict();
+
+export const jiraSearchIssueSchema = z
+  .object({
+    id: z.string().regex(/^[0-9]+$/),
+    key: z.string().regex(/^[A-Za-z][A-Za-z0-9_]*-[0-9]+$/),
+    url: z.url(),
+    summary: z.string(),
+    statusId: nonBlank,
+    statusName: z.string(),
+    statusCategory: nonBlank,
+    priority: z.string().nullable(),
+    assignee: z.string().nullable(),
+    updatedAt: nonBlank,
+  })
+  .strict();
+
+export const jiraSearchResultSchema = z
+  .object({
+    issues: z.array(jiraSearchIssueSchema).max(100),
+    nextPageToken: z.string().min(1).max(4096).nullable(),
+  })
+  .strict();
+
+export const jiraLinkSchema = z
+  .object({
+    issueId: z.string().regex(/^[0-9]+$/),
+    taskId: idSchema,
+    taskKey: nonBlank,
+    projectId: idSchema,
+  })
+  .strict();
+
 const sourceResult = z.object({ source: jiraSourceSchema }).strict();
 const operationResult = sourceResult.extend({ operation: jiraOperationSchema });
 
@@ -152,6 +192,19 @@ export const jiraRpcContract = defineRpcContract({
   jiraConnections: {
     input: z.object({}).strict(),
     output: z.object({ connections: z.array(jiraConnectionSchema) }).strict(),
+  },
+  jiraSearch: {
+    input: jiraSearchInputSchema,
+    output: jiraSearchResultSchema,
+  },
+  jiraLinks: {
+    input: z
+      .object({
+        connectionId: nonBlank,
+        issueIds: z.array(z.string().regex(/^[0-9]+$/)).max(100),
+      })
+      .strict(),
+    output: z.object({ links: z.array(jiraLinkSchema).max(100) }).strict(),
   },
   jiraSource: {
     input: taskInput,
@@ -201,3 +254,6 @@ export type JiraChange = z.infer<typeof jiraChangeSchema>;
 export type JiraPreview = z.infer<typeof jiraPreviewSchema>;
 export type JiraOperation = z.infer<typeof jiraOperationSchema>;
 export type JiraSource = z.infer<typeof jiraSourceSchema>;
+export type JiraSearchInput = z.infer<typeof jiraSearchInputSchema>;
+export type JiraSearchResult = z.infer<typeof jiraSearchResultSchema>;
+export type JiraLink = z.infer<typeof jiraLinkSchema>;

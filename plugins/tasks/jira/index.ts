@@ -214,7 +214,7 @@ export function registerJiraSync(
   repository.recoverInterrupted();
   const configuration = options.configuration ?? loadJiraConfiguration;
 
-  function connection(id: string, projectId: string) {
+  function configuredConnection(id: string) {
     const config = configuration();
     if (config.error) throw new Error(config.error);
     const result = config.connections.find((candidate) => candidate.id === id);
@@ -222,6 +222,11 @@ export function registerJiraSync(
       throw new Error(
         "Jira connection is not configured; ask the operator to check the connections file",
       );
+    return result;
+  }
+
+  function connection(id: string, projectId: string) {
+    const result = configuredConnection(id);
     if (!result.projectIds.includes(projectId))
       throw new Error(
         "This Jira connection is not enabled for the task's current project",
@@ -354,6 +359,25 @@ export function registerJiraSync(
       const config = configuration();
       if (config.error) throw new Error(config.error);
       return { connections: config.connections.map(publicConnection) };
+    },
+
+    async jiraSearch(input) {
+      const parsed = jiraRpcContract.jiraSearch.input.parse(input);
+      const config = configuredConnection(parsed.connectionId);
+      try {
+        return await new JiraClient(config, options.fetch).search(parsed);
+      } catch (error) {
+        throw new Error(safeError(error));
+      }
+    },
+
+    async jiraLinks(input) {
+      const { connectionId, issueIds } =
+        jiraRpcContract.jiraLinks.input.parse(input);
+      const config = configuredConnection(connectionId);
+      return {
+        links: repository.links(connectionId, issueIds, config.projectIds),
+      };
     },
 
     async jiraSource(input) {

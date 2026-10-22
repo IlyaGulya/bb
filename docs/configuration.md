@@ -208,6 +208,20 @@ dispatch an agent, or write Jira when a local card moves. See the
 [Tasks command guide](../plugins/tasks/README.md#selective-jira-synchronization)
 for the matching CLI and task-card actions.
 
+Discovery is separate from import. The paginated `bb tasks jira search` command
+reads issues matching explicit JQL without creating local cards. Results reflect
+the Jira account's permissions; `projectIds` below restrict native Tasks
+destinations, not the set of Jira project keys visible to that account.
+Import accepts an issue key, immutable numeric ID, or issue URL from the
+configured tenant. URLs are parsed locally and never fetched as request targets.
+
+The separate Jira overview can reuse the same server connection through the
+AgentOS Jira-plugin fork's `tasksConnectionId` setting. It reads the mounted
+credential per action and does not copy the token into plugin settings. Its
+board remains a view of Jira; importing selected issues creates or opens native
+Tasks cards. Existing direct Jira editing controls remain distinct from the
+Tasks proposal/preview/push flow.
+
 Set `BB_TASKS_JIRA_CONNECTIONS_FILE` in the **server process environment**, not
 an executor's provider environment. The value must be an absolute path to JSON:
 

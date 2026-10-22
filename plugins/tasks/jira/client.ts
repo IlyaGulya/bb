@@ -2,11 +2,17 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type {
   JiraProposal,
+  JiraSearchInput,
+  JiraSearchResult,
   JiraSnapshot,
   JiraTransition,
   JiraTransitionField,
 } from "../shared/jira-contract.js";
-import { jiraTransitionFieldsSchema } from "../shared/jira-contract.js";
+import {
+  jiraSearchInputSchema,
+  jiraSearchResultSchema,
+  jiraTransitionFieldsSchema,
+} from "../shared/jira-contract.js";
 import { jiraAuthorization, type JiraConnectionConfig } from "./config.js";
 
 const named = z.object({ id: z.string(), name: z.string() });
@@ -45,6 +51,67 @@ const issueSchema = z.object({
     })
     .catchall(z.json()),
 });
+const searchIssueSchema = z.object({
+  id: z.string().regex(/^[0-9]+$/),
+  key: z.string().regex(/^[A-Za-z][A-Za-z0-9_]*-[0-9]+$/),
+  fields: z.object({
+    summary: z.string(),
+    status: named.extend({
+      statusCategory: z.object({ key: z.string().min(1) }),
+    }),
+    priority: z.object({ name: z.string() }).nullable().optional(),
+    assignee: user.optional(),
+    updated: z.string().min(1),
+  }),
+});
+const searchPageSchema = z.object({
+  issues: z.array(searchIssueSchema).max(100),
+  isLast: z.boolean(),
+  nextPageToken: z.string().min(1).max(4096).optional(),
+});
+const issueReferencePattern = /^(?:[0-9]+|[A-Za-z][A-Za-z0-9_]*-[0-9]+)$/;
+const issueKeyPattern = /^[A-Za-z][A-Za-z0-9_]*-[0-9]+$/;
+
+export function normalizeIssueReference(
+  input: string,
+  siteUrl: string,
+): string {
+  const issue = input.trim();
+  if (issueReferencePattern.test(issue)) return issue;
+  const invalid = () =>
+    new Error(
+      "Use a Jira issue key, numeric ID, or HTTPS issue URL from the selected connection's site",
+    );
+  if (issue.length > 4096 || /[\s\\]/.test(issue)) throw invalid();
+  const authority = /^https:\/\/([^/?#]+)/i.exec(issue)?.[1];
+  if (!authority || /[@:%]/.test(authority)) throw invalid();
+  let url: URL;
+  try {
+    url = new URL(issue);
+  } catch {
+    throw invalid();
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.origin !== new URL(siteUrl).origin ||
+    url.username ||
+    url.password ||
+    url.port
+  )
+    throw invalid();
+  const browse = /^\/browse\/([A-Za-z][A-Za-z0-9_]*-[0-9]+)\/?$/.exec(
+    url.pathname,
+  );
+  if (browse) return browse[1]!;
+  const board =
+    /^\/jira\/(?:software|core)\/(?:c\/)?projects\/[A-Za-z][A-Za-z0-9_]*\/boards\/[0-9]+(?:\/(?:backlog|timeline))?\/?$/.test(
+      url.pathname,
+    ) || url.pathname === "/secure/RapidBoard.jspa";
+  const selected = url.searchParams.getAll("selectedIssue");
+  if (!board || selected.length !== 1 || !issueKeyPattern.test(selected[0]!))
+    throw invalid();
+  return selected[0]!;
+}
 const transitionFieldSchema = z.object({
   required: z.boolean(),
   name: z.string(),
@@ -308,12 +375,49 @@ export class JiraClient {
     }
   }
 
+  async search(input: JiraSearchInput): Promise<JiraSearchResult> {
+    const { jql, nextPageToken, limit } = jiraSearchInputSchema.parse(input);
+    const query = new URLSearchParams({
+      jql,
+      maxResults: String(limit),
+      fields: "summary,status,priority,assignee,updated",
+    });
+    if (nextPageToken !== null) query.set("nextPageToken", nextPageToken);
+    const page = searchPageSchema.safeParse(
+      await this.request(`/search/jql?${query}`),
+    );
+    if (
+      !page.success ||
+      page.data.issues.length > limit ||
+      (!page.data.isLast &&
+        (!page.data.nextPageToken || page.data.nextPageToken === nextPageToken))
+    )
+      throw new JiraRequestError(
+        "Jira returned data that does not match the supported search API format",
+        true,
+      );
+    return jiraSearchResultSchema.parse({
+      issues: page.data.issues.map((issue) => ({
+        id: issue.id,
+        key: issue.key,
+        url: `${new URL(this.connection.siteUrl).origin}/browse/${encodeURIComponent(issue.key)}`,
+        summary: issue.fields.summary,
+        statusId: issue.fields.status.id,
+        statusName: issue.fields.status.name,
+        statusCategory: issue.fields.status.statusCategory.key,
+        priority: issue.fields.priority?.name ?? null,
+        assignee: issue.fields.assignee?.displayName ?? null,
+        updatedAt: issue.fields.updated,
+      })),
+      nextPageToken: page.data.isLast ? null : page.data.nextPageToken,
+    });
+  }
+
   async snapshot(
     issue: string,
     selectedFields: string[] = [],
   ): Promise<JiraSnapshot> {
-    if (!/^(?:[0-9]+|[A-Za-z][A-Za-z0-9_]*-[0-9]+)$/.test(issue))
-      throw new Error("Use a Jira issue key or immutable numeric ID");
+    issue = normalizeIssueReference(issue, this.connection.siteUrl);
     const transitions = await this.transitions(issue);
     const requested = [
       ...new Set([

@@ -685,9 +685,11 @@ export function registerTasksCli(
       commands: {
         jira: groupCommand(
           "jira",
-          "Selectively link, pull, draft, preview, and explicitly push Jira sources",
+          "Search, import, link, pull, review, and explicitly push Jira sources",
           [
             ["connections", "List configured connections and allowed projects"],
+            ["search", "Search Jira with explicit JQL and pagination"],
+            ["links", "Find native cards by immutable Jira issue IDs"],
             ["show", "Read stored source and synchronization state"],
             ["import", "Import an issue or link an existing task"],
             ["pull", "Refresh source without overwriting local planning"],
