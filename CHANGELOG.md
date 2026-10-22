@@ -1,5 +1,18 @@
 # Changelog
 
+## AgentOS fork — unreleased
+
+- **Tasks 0.1.3:** selectively link or import Jira issues into native task cards.
+  Explicit pull, proposals, three-way preview, push, and reconciliation are
+  available through the task UI and `bb tasks jira`.
+- Preserve local planning fields and attached threads independently of Jira;
+  board moves never publish changes. Draft baselines, revision checks, unique
+  source mappings, and durable write receipts protect against stale edits and
+  duplicate requests. Delegated agents receive the stored source snapshot.
+- Configure server-side Jira connections with a separately mounted credential
+  file, including project restrictions and Compose/Kubernetes-compatible paths.
+  Rich-text source content is retained; replacing a description is explicit.
+
 ## 0.46.1
 
 Connect MCP clients to bb, install the bb CLI from Settings, search Settings, and answer child threads' questions without leaving the parent.

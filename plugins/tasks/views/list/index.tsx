@@ -5,6 +5,7 @@ import { useProjects, useTasksRpc } from "../../shell/data.js";
 import { useTasksNavigation } from "../../shell/routes.js";
 import { NewTaskDialog } from "../manage/new-task-dialog.js";
 import { DetailToasts, useDetailToasts } from "../detail/toast.js";
+import { JiraImportDialog } from "../jira/import-dialog.js";
 import { EmptyState } from "../../components/empty-state.js";
 import { Button } from "@/components/ui/button";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
@@ -102,6 +103,7 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
     });
   };
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [jiraImportOpen, setJiraImportOpen] = useState(false);
 
   const labelProjectIds = useMemo(
     () =>
@@ -324,6 +326,15 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      <div className="flex justify-end border-b border-border-hairline px-3.5 py-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setJiraImportOpen(true)}
+        >
+          Import Jira task
+        </Button>
+      </div>
       <ListFilterBar
         filters={filters}
         onChange={setFilters}
@@ -341,6 +352,11 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
       <NewTaskDialog
         open={newTaskOpen}
         onOpenChange={setNewTaskOpen}
+        projectId={projectId}
+      />
+      <JiraImportDialog
+        open={jiraImportOpen}
+        onOpenChange={setJiraImportOpen}
         projectId={projectId}
       />
       <DetailToasts toasts={toasts} onDismiss={dismiss} />

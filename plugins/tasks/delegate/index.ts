@@ -23,6 +23,7 @@ import {
 import { errorMessage } from "../shared/errors";
 import { truncateToWidth } from "../shared/text-measure";
 import { delegationRpcContract } from "./contract";
+import { storedJiraContext } from "../jira/store";
 
 const MAX_DELEGATED_THREAD_TITLE_WIDTH = 120;
 const SYSTEM_AUTHOR_NAME = "Tasks";
@@ -58,6 +59,7 @@ interface SeedPromptInput {
   recentComments: readonly Comment[];
   presetInstructions: string;
   extraInstructions?: string;
+  jiraContext?: string | null;
 }
 
 function markdownSection(title: string, body: string): string {
@@ -113,6 +115,10 @@ export function buildSeedPrompt(input: SeedPromptInput): string {
       `You are working on task ${input.task.key}. Use the bb tasks CLI: comment substantive updates (bb tasks comment ${input.task.key} --body ...), attach result artifacts, set status when done (bb tasks update ${input.task.key} --status in_review) or explain blockage in a comment. Your thread is already attached to the task.`,
     ),
   ];
+
+  if (input.jiraContext) {
+    sections.push(markdownSection("Jira source snapshot", input.jiraContext));
+  }
 
   if (input.presetInstructions.trim()) {
     sections.push(
@@ -336,6 +342,7 @@ export function handlers(
         recentComments,
         presetInstructions: preset.instructions,
         extraInstructions: input.extraInstructions,
+        jiraContext: storedJiraContext(bb, task.id),
       });
 
       const environment = await presetSpawnEnvironment(

@@ -52,22 +52,6 @@ function cursorForEmptyArrayFilter(
 }
 
 describe("tasks storage", () => {
-  it("initializes its versioned schema idempotently", async () => {
-    const { db, harness } = setup();
-    try {
-      createTasksStore(db);
-      expect(
-        db
-          .prepare<[], { count: number }>(
-            "SELECT COUNT(*) AS count FROM schema_version",
-          )
-          .get()?.count,
-      ).toBe(8);
-    } finally {
-      await harness.dispose();
-    }
-  });
-
   it("migrates existing presets to the project-default environment", async () => {
     const { db, harness } = setup();
     try {

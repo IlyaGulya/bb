@@ -190,6 +190,7 @@ change the host-daemon protocol.
 | `BB_CLI_ERROR_LOG`             | Environment of the `bb` process                    | Optional                | `0` stops the CLI recording failed invocations (command path, error code, no argument values) to `<dataDir>/logs/cli-errors.jsonl`. See `bb guide overview`.                                                                 |
 | `BB_ACCOUNT_POOL_PARENT_URL`   | Set automatically by a parent bb server            | Nested bb servers       | Account Pooler hub of the bb server whose thread launched this one. When present the Account Pooler plugin is enabled on first run and proxies to that parent; `bb pool parent isolate` opts out. Not a `bb-app config` key. |
 | `BB_ACCOUNT_POOL_PARENT_TOKEN` | Set automatically by a parent bb server            | Nested bb servers       | Machine token this nested server presents to the parent hub. Both parent variables must be well formed or proxying stays off.                                                                                                |
+| `BB_TASKS_JIRA_CONNECTIONS_FILE` | Environment of the bb server process | Startup-only path | Absolute path to the operator-owned selective Jira connector configuration. File contents and credentials are read per action; see [Tasks Jira connections](#tasks-jira-connections). |
 
 BB accepts request hosts that are `localhost`, IP addresses (including LAN and
 Tailscale IPs), or the hostname in `BB_APP_URL`. For a custom DNS name or
@@ -198,6 +199,75 @@ connecting, including from the CLI or SDK; a matching `Host`/`Origin` or
 `X-Forwarded-Host` cannot authorize an unconfigured name. A proxy can preserve
 the configured host or forward to localhost. bb connect needs no additional
 configuration.
+
+## Tasks Jira connections
+
+The AgentOS fork's Tasks plugin supports explicit Jira import/link, pull, draft,
+preview, push, and reconciliation. It does not mirror a Jira board, poll Jira,
+dispatch an agent, or write Jira when a local card moves. See the
+[Tasks command guide](../plugins/tasks/README.md#selective-jira-synchronization)
+for the matching CLI and task-card actions.
+
+Set `BB_TASKS_JIRA_CONNECTIONS_FILE` in the **server process environment**, not
+an executor's provider environment. The value must be an absolute path to JSON:
+
+```json
+{
+  "connections": [
+    {
+      "id": "work-jira",
+      "label": "Work Jira",
+      "siteUrl": "https://example.atlassian.net",
+      "cloudId": "12345678-1234-4123-8123-123456789abc",
+      "credentialFile": "/run/secrets/jira-work.env",
+      "projectIds": ["01ARZ3NDEKTSV4RRFFQ69G5FAV"]
+    }
+  ]
+}
+```
+
+Use tracker project ULIDs from `bb tasks project list --json`, not native
+`proj_...` IDs or Jira project IDs. Each action checks the configured projects,
+including after an existing linked card moves. These routing restrictions are
+not a hard tenant boundary against a trusted bb administrator or host access.
+
+The separately mounted credential file uses dotenv syntax:
+
+```dotenv
+JIRA_ACCOUNT_EMAIL=you@example.com
+JIRA_API_TOKEN=your-scoped-api-token
+```
+
+Keep it out of Git, images, command arguments, task text, and provider
+environments. Grant only the Jira permissions and scoped-token permissions
+needed: `read:jira-work` for reads, and `write:jira-work` for explicit writes
+(or their appropriate granular equivalents). A readable credential file is
+not proof that Jira granted these permissions. Requests use the fixed
+`api.atlassian.com/ex/jira/<cloudId>/rest/api/3` gateway; the configured
+`*.atlassian.net` HTTPS origin is used for human-facing issue links.
+
+Missing or invalid configuration leaves ordinary Tasks available. Jira actions
+report an actionable error instead of starting an authentication flow.
+Connection IDs are durable source identities: do not repoint an existing ID
+to a different Jira tenant. Create a new ID instead.
+
+For Compose, mount the JSON read-only and use a separate file-backed secret at
+`credentialFile`; ensure the non-root server UID can read it. For Kubernetes,
+the same JSON can be a ConfigMap and the credentials a separately provisioned
+Secret, mounted at the same paths. Do not put token bytes in deployment
+manifests. Back up the Tasks database and provision the external secret
+separately; moving the bb data volume alone does not migrate the credentials.
+File contents are re-read per action. Replacing a bind-mounted host file
+atomically may require recreating the container; Kubernetes secret updates
+should use a projected volume rather than a `subPath` mount.
+
+Each source preserves the original Jira description document and a bounded
+plain-text snapshot of the latest 50 comments. Explicit description proposals
+replace rich text; leaving that field unselected preserves it. Draft baselines
+survive pulls, and changed fields or stale previews require review. Jira does
+not provide strict compare-and-swap for these writes: a remote edit can still
+race the final check. Durable operation receipts, readback, and explicit
+reconciliation expose uncertain outcomes without blindly replaying writes.
 
 ## General settings
 

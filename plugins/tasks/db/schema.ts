@@ -242,6 +242,34 @@ const MIGRATIONS = [
     ALTER TABLE presets DROP COLUMN service_tier;
     ALTER TABLE presets RENAME COLUMN service_tier_open TO service_tier;
   `,
+  `
+    CREATE TABLE jira_sources (
+      task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+      connection_id TEXT NOT NULL,
+      issue_id TEXT NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+      baseline_json TEXT NOT NULL,
+      remote_json TEXT NOT NULL,
+      proposal_json TEXT,
+      preview_json TEXT,
+      preview_fingerprint TEXT,
+      operation_id TEXT,
+      last_error TEXT,
+      UNIQUE (connection_id, issue_id)
+    );
+    CREATE TABLE jira_operations (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES jira_sources(task_id) ON DELETE CASCADE,
+      preview_id TEXT NOT NULL UNIQUE,
+      proposal_json TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('prepared', 'sending', 'applied', 'uncertain', 'failed')),
+      created_at TEXT NOT NULL,
+      finished_at TEXT,
+      message TEXT,
+      external_comment_id TEXT
+    );
+    CREATE INDEX idx_jira_operations_task ON jira_operations(task_id);
+  `,
 ] as const;
 
 export function initializeTasksSchema(db: PluginDatabase): void {

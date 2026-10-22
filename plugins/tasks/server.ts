@@ -7,9 +7,10 @@ import { registerTasksCli } from "./cli";
 import { registerDelegation } from "./delegate";
 import { registerLifecycle } from "./lifecycle";
 import { registerMentions } from "./mentions";
+import { registerJiraSync } from "./jira";
 
 const TASKS_PLUGIN_NAME = "Tasks";
-export const TASKS_PLUGIN_VERSION = "0.1.2";
+export const TASKS_PLUGIN_VERSION = "0.1.3";
 
 const tasksRpcContract = defineRpcContract({
   ping: {
@@ -28,7 +29,8 @@ export default async function plugin(bb: BbPluginApi) {
   const store = createStore(bb);
   registerTasksApi(bb, store);
   registerAttachments(bb, store.tasks);
-  registerTasksCli(bb, store, statusPayload());
+  const jiraHandlers = registerJiraSync(bb, store);
+  registerTasksCli(bb, store, statusPayload(), jiraHandlers);
   registerDelegation(bb, store);
   registerMentions(bb, store);
   await registerLifecycle(bb, store);

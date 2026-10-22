@@ -28,6 +28,7 @@ import {
 } from "./rail.js";
 import { ThreadsSection } from "./threads.js";
 import { DetailToasts, useDetailToasts } from "./toast.js";
+import { JiraSourcePanel } from "../jira/source-panel.js";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -508,6 +509,7 @@ function TaskDetail({ task }: { task: Task }) {
               />
             </div>
           ) : null}
+          <JiraSourcePanel key={task.id} task={task} />
 
           <div className="mt-1">
             <TaskActivity taskId={task.id} />

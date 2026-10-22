@@ -19,6 +19,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createStore } from "../api";
 import plugin from "../server";
 import { registerTasksCli } from "./index";
+import { registerJiraSync } from "../jira";
 
 vi.mock("../attachments", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../attachments")>();
@@ -982,7 +983,12 @@ describe("bb tasks CLI", () => {
         },
       },
     };
-    registerTasksCli(bb, racingStore, { name: "tasks", version: "test" });
+    registerTasksCli(
+      bb,
+      racingStore,
+      { name: "tasks", version: "test" },
+      registerJiraSync(bb, racingStore),
+    );
     const folder = store.tasks.createFolder({ name: "Racing" });
 
     const plain = await harness.runCli(["folder", "delete", "Racing"]);

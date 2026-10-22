@@ -47,6 +47,8 @@ import {
 import { bytes, detail, oneLine, table } from "./format";
 import { allocatePrefix } from "./prefix";
 import { seedDemo } from "./seed";
+import type { JiraHandlers } from "../jira";
+import { jiraCommands } from "./jira";
 
 const TASK_KEY_PATTERN = /^([A-Z][A-Z0-9]{0,9})-(\d+)$/;
 const BB_PROJECT_ID_PATTERN = /^proj_[A-Za-z0-9_-]+$/;
@@ -670,6 +672,7 @@ export function registerTasksCli(
   bb: BbPluginApi,
   store: TasksApiStore,
   status: PluginStatus,
+  jiraHandlers: JiraHandlers,
 ): void {
   const domain = registerHandlers(bb, store);
   bb.cli.register(
@@ -680,6 +683,28 @@ export function registerTasksCli(
       description:
         "Tasks are addressed by key (ABC-12) or ULID. --project takes a tracker project prefix or id, never a bb project id (proj_...).",
       commands: {
+        jira: groupCommand(
+          "jira",
+          "Selectively link, pull, draft, preview, and explicitly push Jira sources",
+          [
+            ["connections", "List configured connections and allowed projects"],
+            ["show", "Read stored source and synchronization state"],
+            ["import", "Import an issue or link an existing task"],
+            ["pull", "Refresh source without overwriting local planning"],
+            ["draft", "Prepare one explicit Jira operation"],
+            ["clear", "Discard a proposal"],
+            ["transitions", "List currently available Jira transitions"],
+            ["preview", "Review fresh three-way changes and conflicts"],
+            ["push", "Explicitly send a reviewed preview by ID"],
+            ["reconcile", "Read back an uncertain operation without replay"],
+          ],
+        ),
+        ...jiraCommands(
+          jiraHandlers,
+          (address) => resolveTask(domain, address),
+          (address) => resolveProject(domain, address),
+          guard,
+        ),
         status: cliCommand({
           summary: "Show the Tasks plugin name and version",
           description:
