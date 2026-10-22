@@ -2,7 +2,7 @@
 
 ## AgentOS fork — unreleased
 
-- **Tasks 0.1.3:** selectively link or import Jira issues into native task cards.
+- **Tasks 0.1.4:** selectively link or import Jira issues into native task cards.
   Explicit pull, proposals, three-way preview, push, and reconciliation are
   available through the task UI and `bb tasks jira`.
 - Preserve local planning fields and attached threads independently of Jira;
@@ -12,6 +12,8 @@
 - Configure server-side Jira connections with a separately mounted credential
   file, including project restrictions and Compose/Kubernetes-compatible paths.
   Rich-text source content is retained; replacing a description is explicit.
+- Jira comment receipts use object-valued entity properties accepted by Jira
+  Cloud; rejected writes keep their receipt and require a fresh reviewed preview.
 
 ## 0.46.1
 

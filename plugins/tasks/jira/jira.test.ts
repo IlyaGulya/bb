@@ -142,14 +142,23 @@ function setup() {
     const body: unknown = JSON.parse(String(init?.body));
     let commentId: string | null = null;
     if (url.pathname.endsWith("/comment")) {
-      const payload = z
+      const parsed = z
         .object({
           body: z.unknown(),
           properties: z.array(
-            z.object({ key: z.string(), value: z.unknown() }),
+            z.object({
+              key: z.string(),
+              value: z.record(z.string(), z.unknown()),
+            }),
           ),
         })
-        .parse(body);
+        .safeParse(body);
+      if (!parsed.success)
+        return Response.json(
+          { errorMessages: ["Comment properties require JSON objects"] },
+          { status: 400 },
+        );
+      const payload = parsed.data;
       commentId = String(200 + comments.length);
       comments.unshift({
         id: commentId,

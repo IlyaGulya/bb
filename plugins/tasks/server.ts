@@ -10,7 +10,7 @@ import { registerMentions } from "./mentions";
 import { registerJiraSync } from "./jira";
 
 const TASKS_PLUGIN_NAME = "Tasks";
-export const TASKS_PLUGIN_VERSION = "0.1.3";
+export const TASKS_PLUGIN_VERSION = "0.1.4";
 
 const tasksRpcContract = defineRpcContract({
   ping: {

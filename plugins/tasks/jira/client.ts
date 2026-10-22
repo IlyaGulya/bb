@@ -44,6 +44,20 @@ const transitionsSchema = z.object({
   ),
 });
 const COMMENT_PROPERTY = "bb.tasks.operation";
+const operationPropertySchema = z.object({ operationId: z.string() });
+
+function commentHasOperation(
+  comment: z.infer<typeof commentSchema>,
+  operationId: string,
+): boolean {
+  return (
+    comment.properties?.some((property) => {
+      if (property.key !== COMMENT_PROPERTY) return false;
+      const value = operationPropertySchema.safeParse(property.value);
+      return value.success && value.data.operationId === operationId;
+    }) ?? false
+  );
+}
 
 export class JiraRequestError extends Error {
   constructor(
@@ -262,14 +276,12 @@ export class JiraClient {
       updatedAt: result.fields.updated,
       fetchedAt: new Date().toISOString(),
       commentCount: page.total,
-      comments: page.comments
-        .slice(0, 50)
-        .map((comment) => ({
-          id: comment.id,
-          body: adfText(comment.body).replace(/\n$/, ""),
-          author: comment.author?.displayName ?? null,
-          updatedAt: comment.updated,
-        })),
+      comments: page.comments.slice(0, 50).map((comment) => ({
+        id: comment.id,
+        body: adfText(comment.body).replace(/\n$/, ""),
+        author: comment.author?.displayName ?? null,
+        updatedAt: comment.updated,
+      })),
       commentsTruncated: page.total > Math.min(page.comments.length, 50),
     };
   }
@@ -311,7 +323,7 @@ export class JiraClient {
     const result = z.object({ id: z.string() }).parse(
       await this.request(`${path}/comment`, "POST", {
         body: textDocument(proposal.body),
-        properties: [{ key: COMMENT_PROPERTY, value: operationId }],
+        properties: [{ key: COMMENT_PROPERTY, value: { operationId } }],
       }),
     );
     return result.id;
@@ -329,13 +341,7 @@ export class JiraClient {
           `${path}/${encodeURIComponent(knownId)}?expand=properties`,
         ),
       );
-      if (
-        comment.properties?.some(
-          (property) =>
-            property.key === COMMENT_PROPERTY && property.value === operationId,
-        )
-      )
-        return comment.id;
+      if (commentHasOperation(comment, operationId)) return comment.id;
     }
     for (let start = 0; start < 500; start += 100) {
       const page = commentsSchema.parse(
@@ -344,10 +350,7 @@ export class JiraClient {
         ),
       );
       const found = page.comments.find((comment) =>
-        comment.properties?.some(
-          (property) =>
-            property.key === COMMENT_PROPERTY && property.value === operationId,
-        ),
+        commentHasOperation(comment, operationId),
       );
       if (found) return found.id;
       if (
