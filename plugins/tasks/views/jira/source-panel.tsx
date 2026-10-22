@@ -12,6 +12,11 @@ import { useTasksQuery } from "../../shell/data.js";
 import { STATUS_LABELS } from "../list/lib.js";
 import { Button } from "@/components/ui/button";
 import { JIRA_INPUT, JiraImportDialog } from "./import-dialog.js";
+import {
+  seedTransitionFields,
+  transitionFieldError,
+  TransitionFieldEditor,
+} from "./transition-fields.js";
 
 function displayTime(value: string) {
   const date = new Date(value);
@@ -41,6 +46,9 @@ export function JiraSourcePanel({ task }: { task: Task }) {
   }, []);
   const [transitions, setTransitions] = useState<JiraTransition[]>([]);
   const [transitionsLoaded, setTransitionsLoaded] = useState(false);
+  const [fieldInputs, setFieldInputs] = useState<
+    Record<string, { raw: string; error?: string }>
+  >({});
   useEffect(() => {
     if (query.data) accept(query.data);
   }, [query.data, accept]);
@@ -48,6 +56,7 @@ export function JiraSourcePanel({ task }: { task: Task }) {
     if (source && !dirty) {
       setProposal(source.proposal);
       setEditorRevision(source.revision);
+      setFieldInputs({});
     }
   }, [source, dirty]);
   const run = async (label: string, action: () => Promise<void>) => {
@@ -75,6 +84,33 @@ export function JiraSourcePanel({ task }: { task: Task }) {
     source?.operation?.state === "uncertain" ||
     source?.operation?.state === "sending";
   const disabled = busy !== null || unresolved;
+  const selectedTransition =
+    proposal?.kind === "transition" && transitionsLoaded
+      ? transitions.find(
+          (transition) =>
+            transition.id === proposal.transitionId &&
+            transition.toStatusId === proposal.toStatusId,
+        )
+      : undefined;
+  const transitionError =
+    proposal?.kind !== "transition"
+      ? null
+      : !transitionsLoaded
+        ? "Load supported transitions to validate the saved required fields. Stored values are preserved."
+        : !selectedTransition
+          ? "Choose an available transition. The saved transition may no longer be available; pull and review before changing it."
+          : Object.keys(proposal.fields).some(
+                (id) =>
+                  !selectedTransition.fields.some((field) => field.id === id),
+              )
+            ? "This draft contains fields no longer required by this transition. Review and reselect the transition to prepare its current fields."
+            : (selectedTransition.fields
+                .map(
+                  (field) =>
+                    fieldInputs[field.id]?.error ??
+                    transitionFieldError(field, proposal.fields[field.id]),
+                )
+                .find(Boolean) ?? null);
   const validProposal =
     proposal !== null &&
     (proposal.kind === "fields"
@@ -82,7 +118,7 @@ export function JiraSourcePanel({ task }: { task: Task }) {
         (proposal.summary === null || proposal.summary.trim().length > 0)
       : proposal.kind === "comment"
         ? proposal.body.trim().length > 0
-        : proposal.transitionId.length > 0);
+        : proposal.transitionId.length > 0 && transitionError === null);
   const save = () =>
     run("Saving proposal", async () => {
       if (!source || !validProposal || stale) return;
@@ -296,6 +332,7 @@ export function JiraSourcePanel({ task }: { task: Task }) {
                 value={proposal?.kind ?? ""}
                 disabled={disabled}
                 onChange={(event) => {
+                  setFieldInputs({});
                   if (event.target.value === "fields")
                     edit({
                       kind: "fields",
@@ -309,6 +346,7 @@ export function JiraSourcePanel({ task }: { task: Task }) {
                       kind: "transition",
                       transitionId: "",
                       toStatusId: "",
+                      fields: {},
                     });
                 }}
               >
@@ -424,12 +462,25 @@ export function JiraSourcePanel({ task }: { task: Task }) {
                       const transition = transitions.find(
                         (item) => item.id === event.target.value,
                       );
-                      if (transition)
-                        edit({
-                          kind: "transition",
-                          transitionId: transition.id,
-                          toStatusId: transition.toStatusId,
-                        });
+                      setFieldInputs({});
+                      edit(
+                        transition
+                          ? {
+                              kind: "transition",
+                              transitionId: transition.id,
+                              toStatusId: transition.toStatusId,
+                              fields: seedTransitionFields(
+                                transition,
+                                source.remote.transitionFields,
+                              ),
+                            }
+                          : {
+                              kind: "transition",
+                              transitionId: "",
+                              toStatusId: "",
+                              fields: {},
+                            },
+                      );
                     }}
                   >
                     <option value="">Choose a supported transition</option>
@@ -449,6 +500,44 @@ export function JiraSourcePanel({ task }: { task: Task }) {
                     ))}
                   </select>
                 </label>
+                {transitionError ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    {transitionError}
+                  </p>
+                ) : null}
+                {selectedTransition?.fields.map((field) => (
+                  <TransitionFieldEditor
+                    key={field.id}
+                    field={field}
+                    value={proposal.fields[field.id]}
+                    raw={fieldInputs[field.id]?.raw}
+                    parseError={fieldInputs[field.id]?.error}
+                    disabled={disabled}
+                    onChange={(value, raw, error) => {
+                      const fields = { ...proposal.fields };
+                      if (value === undefined) delete fields[field.id];
+                      else fields[field.id] = value;
+                      setFieldInputs((previous) => {
+                        const next = { ...previous };
+                        if (raw === undefined) delete next[field.id];
+                        else next[field.id] = { raw, error };
+                        return next;
+                      });
+                      edit({ ...proposal, fields });
+                    }}
+                  />
+                ))}
+                {!selectedTransition && Object.keys(proposal.fields).length ? (
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">
+                      Retained draft fields (load supported transitions to
+                      edit):
+                    </p>
+                    <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs">
+                      {JSON.stringify(proposal.fields, null, 2)}
+                    </pre>
+                  </div>
+                ) : null}
               </div>
             ) : null}
             {dirty ? (
@@ -538,7 +627,14 @@ export function JiraSourcePanel({ task }: { task: Task }) {
                   className="space-y-2 rounded-md border border-border p-3"
                 >
                   <p className="text-sm font-medium">
-                    {change.field}
+                    {selectedTransition?.fields.find(
+                      (field) => field.id === change.field,
+                    )?.name ?? change.field}
+                    {selectedTransition?.fields.some(
+                      (field) => field.id === change.field,
+                    )
+                      ? ` (${change.field})`
+                      : ""}
                     {change.conflict ? " — conflict" : " — no conflict"}
                   </p>
                   <div className="grid gap-3 sm:grid-cols-3">
@@ -554,7 +650,7 @@ export function JiraSourcePanel({ task }: { task: Task }) {
                           {label}
                         </h4>
                         <p className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-sm">
-                          {value ?? "Not applicable"}
+                          {value ?? "Not captured/applicable"}
                         </p>
                       </div>
                     ))}
@@ -588,6 +684,7 @@ export function JiraSourcePanel({ task }: { task: Task }) {
                 disabled={
                   disabled ||
                   dirty ||
+                  !validProposal ||
                   source.preview.revision !== source.revision ||
                   !source.preview.canPush ||
                   source.preview.changes.some((change) => change.conflict)

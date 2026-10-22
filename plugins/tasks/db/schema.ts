@@ -270,6 +270,22 @@ const MIGRATIONS = [
     );
     CREATE INDEX idx_jira_operations_task ON jira_operations(task_id);
   `,
+  `
+    UPDATE jira_sources
+    SET baseline_json = json_insert(baseline_json, '$.transitionFields', json('{}')),
+        remote_json = json_insert(remote_json, '$.transitionFields', json('{}')),
+        proposal_json = CASE
+          WHEN json_extract(proposal_json, '$.kind') = 'transition'
+          THEN json_insert(proposal_json, '$.fields', json('{}'))
+          ELSE proposal_json
+        END,
+        preview_json = NULL,
+        preview_fingerprint = NULL,
+        revision = revision + 1;
+    UPDATE jira_operations
+    SET proposal_json = json_insert(proposal_json, '$.fields', json('{}'))
+    WHERE json_extract(proposal_json, '$.kind') = 'transition';
+  `,
 ] as const;
 
 export function initializeTasksSchema(db: PluginDatabase): void {

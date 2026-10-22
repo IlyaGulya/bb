@@ -77,28 +77,28 @@ also accept one comma-separated list. File paths (`--file`, `--attach`,
 inside an agent thread that is the thread's machine, otherwise the server's
 machine; pass `--machine <id-or-name>` to target another enrolled machine.
 
-| Command                                        | Purpose                                                                                                                                    |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `bb tasks status`                              | Show the installed Tasks plugin name and version. Task workflow status lives on `bb tasks list --status` and `bb tasks update --status`.   |
-| `bb tasks project create\|list\|show\|update`  | Manage tracker projects, folders, colors, prefixes, and bb-project links.                                                                  |
-| `bb tasks folder create\|list\|update\|delete` | Organize tracker projects into nested folders. Deleting a folder moves its projects and subfolders to the top level; no tasks are deleted. |
-| `bb tasks create`                              | Create a task with description, priority, labels, due date, optional parent, and file attachments (repeatable `--attach <path>`).          |
-| `bb tasks list`                                | Page/filter tasks by project, status, priority, label, active agents, or search text; supports `--sort`, `--limit`, and `--cursor`.        |
-| `bb tasks show <key-or-id>`                    | Show the complete task record, including comments, attachments, subtasks, and attached threads.                                            |
-| `bb tasks update <key-or-id>`                  | Update status, priority, title, description, due date, or labels.                                                                          |
-| `bb tasks move <key-or-id>`                    | Move a task and its sub-tasks to `--project`. Moved tasks get new keys; old keys keep resolving, and labels are matched by name.           |
-| `bb tasks comment <key-or-id>`                 | Add a Markdown comment from inline text or a file; optionally notify the latest responding task agent.                                     |
-| `bb tasks attachment add\|get\|list\|remove`   | Add, fetch, list, or remove attachments. Referenced attachments require `remove --remove-references`.                                      |
-| `bb tasks preset list\|create\|update\|delete` | Manage reusable agent execution presets.                                                                                                   |
-| `bb tasks delegate <key>`                      | Start and attach a new agent thread using a preset.                                                                                        |
-| `bb tasks attach <key-or-id>`                  | Attach the current bb thread to a task when it was not delegated from Tasks.                                                               |
-| `bb tasks detach <key-or-id>`                  | Detach the current bb thread (or `--thread <id>`) from a task, for example a dead predecessor after a respawn.                             |
-| `bb tasks threads <key>`                       | List the bb threads attached to a task: live threads first, newest first.                                                                  |
-| `bb tasks label create\|list\|delete`          | Manage project-scoped labels.                                                                                                              |
-| `bb tasks seed-demo --yes`                     | Create sample folders, projects, labels, tasks, and comments for evaluation.                                                               |
-| `bb tasks jira connections\|show\|import`      | Discover configured connections, read stored source context, or import/link one selected Jira issue into native Tasks.                      |
-| `bb tasks jira pull\|draft\|clear\|transitions` | Explicitly refresh source, prepare/discard one proposal, or list Jira transition/status pairs.                                               |
-| `bb tasks jira preview\|push\|reconcile`       | Review three-way changes, explicitly push a reviewed preview ID, or reconcile an uncertain write by operation ID.                           |
+| Command                                         | Purpose                                                                                                                                    |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bb tasks status`                               | Show the installed Tasks plugin name and version. Task workflow status lives on `bb tasks list --status` and `bb tasks update --status`.   |
+| `bb tasks project create\|list\|show\|update`   | Manage tracker projects, folders, colors, prefixes, and bb-project links.                                                                  |
+| `bb tasks folder create\|list\|update\|delete`  | Organize tracker projects into nested folders. Deleting a folder moves its projects and subfolders to the top level; no tasks are deleted. |
+| `bb tasks create`                               | Create a task with description, priority, labels, due date, optional parent, and file attachments (repeatable `--attach <path>`).          |
+| `bb tasks list`                                 | Page/filter tasks by project, status, priority, label, active agents, or search text; supports `--sort`, `--limit`, and `--cursor`.        |
+| `bb tasks show <key-or-id>`                     | Show the complete task record, including comments, attachments, subtasks, and attached threads.                                            |
+| `bb tasks update <key-or-id>`                   | Update status, priority, title, description, due date, or labels.                                                                          |
+| `bb tasks move <key-or-id>`                     | Move a task and its sub-tasks to `--project`. Moved tasks get new keys; old keys keep resolving, and labels are matched by name.           |
+| `bb tasks comment <key-or-id>`                  | Add a Markdown comment from inline text or a file; optionally notify the latest responding task agent.                                     |
+| `bb tasks attachment add\|get\|list\|remove`    | Add, fetch, list, or remove attachments. Referenced attachments require `remove --remove-references`.                                      |
+| `bb tasks preset list\|create\|update\|delete`  | Manage reusable agent execution presets.                                                                                                   |
+| `bb tasks delegate <key>`                       | Start and attach a new agent thread using a preset.                                                                                        |
+| `bb tasks attach <key-or-id>`                   | Attach the current bb thread to a task when it was not delegated from Tasks.                                                               |
+| `bb tasks detach <key-or-id>`                   | Detach the current bb thread (or `--thread <id>`) from a task, for example a dead predecessor after a respawn.                             |
+| `bb tasks threads <key>`                        | List the bb threads attached to a task: live threads first, newest first.                                                                  |
+| `bb tasks label create\|list\|delete`           | Manage project-scoped labels.                                                                                                              |
+| `bb tasks seed-demo --yes`                      | Create sample folders, projects, labels, tasks, and comments for evaluation.                                                               |
+| `bb tasks jira connections\|show\|import`       | Discover configured connections, read stored source context, or import/link one selected Jira issue into native Tasks.                     |
+| `bb tasks jira pull\|draft\|clear\|transitions` | Explicitly refresh source, prepare/discard one proposal, or list Jira transition/status pairs.                                             |
+| `bb tasks jira preview\|push\|reconcile`        | Review three-way changes, explicitly push a reviewed preview ID, or reconcile an uncertain write by operation ID.                          |
 
 Statuses are `backlog`, `todo`, `in_progress`, `in_review`, `done`, and
 `canceled`. Priorities are `urgent`, `high`, `medium`, `low`, and `none`.
@@ -149,6 +149,30 @@ Description is an explicit whole-field plain-text replacement; omit the flag
 to preserve Jira rich text, or pass an empty string to clear it.
 `bb tasks jira clear PROD-1 --expected-revision <revision>` discards the draft.
 Native task edits never implicitly become Jira proposals.
+
+Transitions expose required field metadata, allowed values, and supported
+operations. `show` exposes captured values in `transitionFields`. Pull before
+drafting so required-field baselines are captured; a missing baseline is not a
+Jira null and blocks overwrites. Clear an existing draft, pull, and review again
+if the baseline was not captured. Supply required values with
+`--transition-fields <json>` (only with `--transition` and `--to-status`); omitted
+JSON defaults to `{}` and only works when no fields are required. For example,
+with synthetic IDs returned by `transitions`:
+
+```sh
+bb tasks jira transitions PROD-1 --json
+bb tasks jira pull PROD-1 --expected-revision <revision>
+bb tasks jira draft PROD-1 --expected-revision <revision> --transition finish --to-status done --transition-fields '{"summary":"Reviewed synthetic work","resolution":{"id":"fixed"}}'
+bb tasks jira preview PROD-1 --expected-revision <revision> --json
+```
+
+Use your workflow's actual IDs and allowed values, not these example IDs.
+Only the selected transition's required fields are accepted. Fields without a
+`set` operation or a supported option format must be completed in Jira; an
+`unsupportedReason` blocks only the affected transition, not import or pull.
+Push sends status
+and supplied fields atomically in one transition request, detects conflicts
+per field, and verifies every supplied field plus the target status by readback.
 
 Review the preview's `changes`, `canPush`, and `reason`, then explicitly run
 `bb tasks jira push PROD-1 --preview-id <reviewed-preview-id>` only with approval

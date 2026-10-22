@@ -18,6 +18,8 @@ export const jiraConnectionSchema = z
   })
   .strict();
 
+export const jiraTransitionFieldsSchema = z.record(nonBlank, z.json());
+
 export const jiraSnapshotSchema = z
   .object({
     id: nonBlank,
@@ -44,6 +46,7 @@ export const jiraSnapshotSchema = z
         .strict(),
     ),
     commentsTruncated: z.boolean(),
+    transitionFields: jiraTransitionFieldsSchema,
   })
   .strict();
 
@@ -64,9 +67,25 @@ export const jiraProposalSchema = z.discriminatedUnion("kind", [
       kind: z.literal("transition"),
       transitionId: nonBlank,
       toStatusId: nonBlank,
+      fields: jiraTransitionFieldsSchema,
     })
     .strict(),
 ]);
+
+export const jiraTransitionFieldSchema = z
+  .object({
+    id: nonBlank,
+    name: z.string(),
+    type: z.string(),
+    items: z.string().nullable(),
+    operations: z.array(z.string()),
+    allowedValues: z.array(
+      z.object({ label: z.string(), value: z.json() }).strict(),
+    ),
+    defaultValue: z.json(),
+    unsupportedReason: z.string().nullable(),
+  })
+  .strict();
 
 export const jiraTransitionSchema = z
   .object({
@@ -74,12 +93,13 @@ export const jiraTransitionSchema = z
     name: z.string(),
     toStatusId: nonBlank,
     toStatusName: z.string(),
+    fields: z.array(jiraTransitionFieldSchema),
   })
   .strict();
 
 export const jiraChangeSchema = z
   .object({
-    field: z.enum(["summary", "description", "status", "comment"]),
+    field: nonBlank,
     base: z.string().nullable(),
     current: z.string().nullable(),
     proposed: z.string(),
@@ -176,6 +196,7 @@ export type JiraConnection = z.infer<typeof jiraConnectionSchema>;
 export type JiraSnapshot = z.infer<typeof jiraSnapshotSchema>;
 export type JiraProposal = z.infer<typeof jiraProposalSchema>;
 export type JiraTransition = z.infer<typeof jiraTransitionSchema>;
+export type JiraTransitionField = z.infer<typeof jiraTransitionFieldSchema>;
 export type JiraChange = z.infer<typeof jiraChangeSchema>;
 export type JiraPreview = z.infer<typeof jiraPreviewSchema>;
 export type JiraOperation = z.infer<typeof jiraOperationSchema>;

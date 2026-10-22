@@ -5,6 +5,8 @@ import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createStore } from "../api/index.js";
+import { initializeTasksSchema } from "../db/schema.js";
+import { registerTasksCli } from "../cli/index.js";
 import type { JiraProposal, JiraSource } from "../shared/jira-contract.js";
 import { registerJiraSync } from "./index.js";
 import { textDocument } from "./client.js";
@@ -16,7 +18,7 @@ afterEach(async () => {
   for (const dispose of cleanup.splice(0)) await dispose();
 });
 
-function setup() {
+function setup(requiredResolution = false) {
   const { bb, harness } = createFakePluginHost({
     pluginId: "jira-behavior-test",
   });
@@ -53,9 +55,11 @@ function setup() {
       summary: string;
       description: unknown;
       status: { id: string; name: string };
-      priority: { name: string };
-      assignee: null;
+      priority: { name: string; id?: string };
+      assignee: { displayName: string; accountId?: string } | null;
       updated: string;
+      resolution?: { id: string; name?: string; self?: string } | null;
+      [key: string]: unknown;
     };
   } = {
     id: "10001",
@@ -67,6 +71,7 @@ function setup() {
       priority: { name: "Medium" },
       assignee: null,
       updated: "2026-01-01T00:00:00.000Z",
+      resolution: null,
     },
   };
   const comments: Array<{
@@ -88,6 +93,17 @@ function setup() {
       | "readback",
     transitionAvailable: true,
     commentTotal: 0,
+    requiredResolution,
+    requiredOperations: ["set"],
+    hideTransitionsAfterWrite: false,
+    omitResolutionWrite: false,
+    transitionMetadata: null as Record<string, unknown> | null,
+    transitionReadback: {} as Record<string, unknown>,
+    transitionPosts: [] as Array<{
+      transition: { id: string };
+      fields: Extract<JiraProposal, { kind: "transition" }>["fields"];
+    }>,
+    requestedFields: [] as string[][],
   };
   const http: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
@@ -104,7 +120,8 @@ function setup() {
           { errorMessages: ["Never exposed internal fixture body"] },
           { status: state.readStatus },
         );
-      if (url.pathname.endsWith("/transitions"))
+      if (url.pathname.endsWith("/transitions")) {
+        expect(url.searchParams.get("expand")).toBe("transitions.fields");
         return Response.json({
           transitions: state.transitionAvailable
             ? [
@@ -112,10 +129,38 @@ function setup() {
                   id: "finish",
                   name: "Finish",
                   to: { id: "done", name: "Done" },
+                  fields:
+                    state.transitionMetadata ??
+                    (state.requiredResolution
+                      ? {
+                          summary: {
+                            required: true,
+                            name: "Summary",
+                            schema: { type: "string" },
+                            operations: ["set"],
+                          },
+                          resolution: {
+                            required: true,
+                            name: "Resolution",
+                            schema: { type: "resolution" },
+                            operations: state.requiredOperations,
+                            allowedValues: [
+                              {
+                                id: "fixed",
+                                name: "Fixed",
+                                self: "https://synthetic.invalid/resolution/fixed",
+                              },
+                              { id: "duplicate", name: "Duplicate" },
+                            ],
+                            defaultValue: { id: "fixed", name: "Fixed" },
+                          },
+                        }
+                      : {}),
                 },
               ]
             : [],
         });
+      }
       if (/\/comment\/[^/]+$/.test(url.pathname)) {
         const comment = comments.find((candidate) =>
           url.pathname.endsWith(`/${candidate.id}`),
@@ -132,7 +177,16 @@ function setup() {
             Number(url.searchParams.get("maxResults") ?? 50),
           ),
         });
-      return Response.json(issue);
+      const requested = (url.searchParams.get("fields") ?? "").split(",");
+      state.requestedFields.push(requested);
+      return Response.json({
+        ...issue,
+        fields: Object.fromEntries(
+          Object.entries(issue.fields).filter(([field]) =>
+            requested.includes(field),
+          ),
+        ),
+      });
     }
     state.writes += 1;
     if (state.writeMode === "reject")
@@ -168,6 +222,33 @@ function setup() {
         updated: issue.fields.updated,
       });
     } else if (url.pathname.endsWith("/transitions")) {
+      expect(method).toBe("POST");
+      const payload = z
+        .object({
+          transition: z.object({ id: z.string() }).strict(),
+          fields: z.record(z.string(), z.json()),
+        })
+        .strict()
+        .parse(body);
+      state.transitionPosts.push(payload);
+      if (
+        state.requiredResolution &&
+        (typeof payload.fields.summary !== "string" ||
+          !z
+            .object({ id: z.enum(["fixed", "duplicate"]) })
+            .safeParse(payload.fields.resolution).success)
+      )
+        return Response.json({}, { status: 400 });
+      if (typeof payload.fields.summary === "string")
+        issue.fields.summary = payload.fields.summary;
+      if (payload.fields.resolution !== undefined && !state.omitResolutionWrite)
+        issue.fields.resolution = {
+          ...z.object({ id: z.string() }).parse(payload.fields.resolution),
+          name: "Jira display label",
+          self: "https://synthetic.invalid/resolution",
+        };
+      Object.assign(issue.fields, state.transitionReadback);
+      if (state.hideTransitionsAfterWrite) state.transitionAvailable = false;
       issue.fields.status = { id: "done", name: "Done" };
     } else {
       const payload = z
@@ -232,6 +313,7 @@ function setup() {
   }
   return {
     bb,
+    harness,
     store,
     project,
     other,
@@ -247,6 +329,599 @@ function setup() {
 }
 
 describe("native Tasks Jira connector", () => {
+  it("round-trips transition JSON through the CLI and rejects malformed or misplaced fields", async () => {
+    const fixture = setup(true);
+    registerTasksCli(
+      fixture.bb,
+      fixture.store,
+      { name: "tasks", version: "test" },
+      fixture.jira,
+    );
+    const { source } = await fixture.importIssue();
+    const base = [
+      "jira",
+      "draft",
+      source.taskKey,
+      "--expected-revision",
+      String(source.revision),
+    ];
+    for (const args of [
+      ["--transition-fields", "{}"],
+      ["--comment", "Comment", "--transition-fields", "{}"],
+      [
+        "--transition",
+        "finish",
+        "--to-status",
+        "done",
+        "--transition-fields",
+        "{invalid",
+      ],
+      [
+        "--transition",
+        "finish",
+        "--to-status",
+        "done",
+        "--transition-fields",
+        "[]",
+      ],
+    ]) {
+      const rejected = await fixture.harness.runCli([
+        ...base,
+        ...args,
+        "--json",
+      ]);
+      expect(rejected.exitCode).toBe(1);
+    }
+    const fields = {
+      summary: "Completed through CLI",
+      resolution: { id: "fixed" },
+    };
+    const draft = await fixture.harness.runCli([
+      ...base,
+      "--transition",
+      "finish",
+      "--to-status",
+      "done",
+      "--transition-fields",
+      JSON.stringify(fields),
+      "--json",
+    ]);
+    expect(draft, draft.stderr).toMatchObject({ exitCode: 0, stderr: "" });
+    const saved = (await fixture.jira.jiraSource({ taskId: source.taskId }))
+      .source!;
+    expect(saved.proposal).toEqual({
+      kind: "transition",
+      transitionId: "finish",
+      toStatusId: "done",
+      fields,
+    });
+    const noFields = await fixture.harness.runCli([
+      "jira",
+      "draft",
+      source.taskKey,
+      "--expected-revision",
+      String(saved.revision),
+      "--transition",
+      "finish",
+      "--to-status",
+      "done",
+      "--json",
+    ]);
+    expect(noFields, noFields.stderr).toMatchObject({
+      exitCode: 0,
+      stderr: "",
+    });
+    expect(
+      (await fixture.jira.jiraSource({ taskId: source.taskId })).source
+        ?.proposal,
+    ).toMatchObject({ fields: {} });
+    expect(fixture.state.writes).toBe(0);
+  });
+
+  it("captures required fields before drafting and atomically verifies Resolution after transitions disappear", async () => {
+    const fixture = setup(true);
+    const { source } = await fixture.importIssue();
+    expect(source.baseline.transitionFields).toEqual({
+      summary: "Remote summary",
+      resolution: null,
+    });
+    const fields = {
+      summary: "Completed synthetic work",
+      resolution: { id: "fixed" },
+    };
+    const preview = await fixture.preview(source, {
+      kind: "transition",
+      transitionId: "finish",
+      toStatusId: "done",
+      fields,
+    });
+    expect(preview.preview.canPush).toBe(true);
+    expect(
+      preview.preview.changes.find((change) => change.field === "resolution"),
+    ).toMatchObject({
+      base: "null",
+      current: "null",
+      proposed: '{"id":"fixed"}',
+      conflict: false,
+    });
+    fixture.state.hideTransitionsAfterWrite = true;
+    const result = await fixture.jira.jiraPush({
+      taskId: source.taskId,
+      previewId: preview.preview.id,
+    });
+    expect(result.operation.state).toBe("applied");
+    expect(result.source.remote.transitionFields.resolution).toMatchObject({
+      id: "fixed",
+    });
+    expect(fixture.state.transitionPosts).toEqual([
+      { transition: { id: "finish" }, fields },
+    ]);
+    expect(fixture.state.writes).toBe(1);
+    expect(fixture.state.requestedFields.at(-1)).toContain("resolution");
+    const replay = await fixture.jira.jiraPush({
+      taskId: source.taskId,
+      previewId: preview.preview.id,
+    });
+    expect(replay.operation).toEqual(result.operation);
+    const pulled = await fixture.jira.jiraPull({
+      taskId: source.taskId,
+      expectedRevision: result.source.revision,
+    });
+    expect(pulled.source.remote.transitionFields.resolution).toMatchObject({
+      id: "fixed",
+    });
+    expect(fixture.state.writes).toBe(1);
+    const comment = await fixture.preview(pulled.source, {
+      kind: "comment",
+      body: "A comment after the issue was closed",
+    });
+    const commented = await fixture.jira.jiraPush({
+      taskId: source.taskId,
+      previewId: comment.preview.id,
+    });
+    expect(commented.source.remote.transitionFields.resolution).toMatchObject({
+      id: "fixed",
+    });
+    expect(commented.source.baseline.transitionFields.resolution).toMatchObject(
+      { id: "fixed" },
+    );
+    const ambiguous = await fixture.preview(commented.source, {
+      kind: "comment",
+      body: "An uncertain comment after closure",
+    });
+    fixture.state.writeMode = "timeout";
+    const uncertain = await fixture.jira.jiraPush({
+      taskId: source.taskId,
+      previewId: ambiguous.preview.id,
+    });
+    expect(uncertain.operation.state).toBe("uncertain");
+    const reconciled = await fixture.jira.jiraReconcile({
+      taskId: source.taskId,
+      operationId: uncertain.operation.id,
+    });
+    expect(reconciled.operation.state).toBe("applied");
+    expect(reconciled.source.remote.transitionFields.resolution).toMatchObject({
+      id: "fixed",
+    });
+    expect(fixture.state.writes).toBe(3);
+  });
+
+  it("refuses missing, empty, unknown, and disallowed required fields without partial writes", async () => {
+    const fixture = setup(true);
+    let { source } = await fixture.importIssue();
+    const invalidFields: Array<
+      Extract<JiraProposal, { kind: "transition" }>["fields"]
+    > = [
+      {},
+      { summary: "Changed" },
+      { summary: "", resolution: { id: "fixed" } },
+      { summary: "Changed", resolution: null },
+      { summary: "Changed", resolution: {} },
+      { summary: "Changed", resolution: { id: "unlisted" } },
+      {
+        summary: "Changed",
+        resolution: { id: "fixed" },
+        priority: { id: "high" },
+      },
+    ];
+    for (const fields of invalidFields) {
+      const preview = await fixture.preview(source, {
+        kind: "transition",
+        transitionId: "finish",
+        toStatusId: "done",
+        fields,
+      });
+      expect(preview.preview.canPush).toBe(false);
+      await expect(
+        fixture.jira.jiraPush({
+          taskId: source.taskId,
+          previewId: preview.preview.id,
+        }),
+      ).rejects.toThrow("conflicted");
+      source = preview.source;
+    }
+    fixture.state.requiredOperations = ["add"];
+    const unsupported = await fixture.preview(source, {
+      kind: "transition",
+      transitionId: "finish",
+      toStatusId: "done",
+      fields: { summary: "Changed", resolution: { id: "fixed" } },
+    });
+    expect(unsupported.preview.reason).toContain("does not support set");
+    expect(fixture.state.writes).toBe(0);
+    expect(fixture.issue.fields.summary).toBe("Remote summary");
+    expect(fixture.issue.fields.status.id).toBe("open");
+    expect(fixture.issue.fields.resolution).toBeNull();
+  });
+
+  it("blocks changed and uncaptured baselines rather than rebasing required fields", async () => {
+    const fixture = setup(true);
+    const { source } = await fixture.importIssue();
+    fixture.issue.fields.resolution = { id: "duplicate" };
+    const proposal: JiraProposal = {
+      kind: "transition",
+      transitionId: "finish",
+      toStatusId: "done",
+      fields: { summary: "Remote summary", resolution: { id: "fixed" } },
+    };
+    const changed = await fixture.preview(source, proposal);
+    expect(
+      changed.preview.changes.find((change) => change.field === "resolution")
+        ?.conflict,
+    ).toBe(true);
+    expect(changed.preview.canPush).toBe(false);
+    delete fixture.issue.fields.resolution;
+    const missing = await fixture.preview(changed.source, proposal);
+    expect(missing.source.remote.transitionFields).not.toHaveProperty(
+      "resolution",
+    );
+    expect(
+      missing.preview.changes.find((change) => change.field === "resolution"),
+    ).toMatchObject({ base: "null", current: null, conflict: true });
+    const uncapturedFixture = setup();
+    const imported = await uncapturedFixture.importIssue();
+    uncapturedFixture.state.requiredResolution = true;
+    const uncaptured = await uncapturedFixture.preview(
+      imported.source,
+      proposal,
+    );
+    expect(
+      uncaptured.preview.changes.find(
+        (change) => change.field === "resolution",
+      ),
+    ).toMatchObject({ base: null, current: "null", conflict: true });
+    expect(uncaptured.preview.reason).toContain("clear the proposal, pull");
+    const cleared = await uncapturedFixture.jira.jiraDraft({
+      taskId: imported.source.taskId,
+      expectedRevision: uncaptured.source.revision,
+      proposal: null,
+    });
+    const pulled = await uncapturedFixture.jira.jiraPull({
+      taskId: imported.source.taskId,
+      expectedRevision: cleared.source.revision,
+    });
+    const reviewed = await uncapturedFixture.preview(pulled.source, proposal);
+    expect(reviewed.preview.canPush).toBe(true);
+    expect(fixture.state.writes + uncapturedFixture.state.writes).toBe(0);
+  });
+
+  it("rechecks required metadata at claim and verifies every field during reconciliation without replay", async () => {
+    const fixture = setup(true);
+    const { source } = await fixture.importIssue();
+    const preview = await fixture.preview(source, {
+      kind: "transition",
+      transitionId: "finish",
+      toStatusId: "done",
+      fields: { summary: "Completed", resolution: { id: "fixed" } },
+    });
+    fixture.state.requiredOperations = ["add"];
+    await expect(
+      fixture.jira.jiraPush({
+        taskId: source.taskId,
+        previewId: preview.preview.id,
+      }),
+    ).rejects.toThrow("does not support set");
+    expect(fixture.state.writes).toBe(0);
+    fixture.state.requiredOperations = ["set"];
+    const current = (await fixture.jira.jiraSource({ taskId: source.taskId }))
+      .source!;
+    const reviewed = await fixture.jira.jiraPreview({
+      taskId: source.taskId,
+      expectedRevision: current.revision,
+    });
+    fixture.state.omitResolutionWrite = true;
+    fixture.state.hideTransitionsAfterWrite = true;
+    const result = await fixture.jira.jiraPush({
+      taskId: source.taskId,
+      previewId: reviewed.preview.id,
+    });
+    expect(result.operation.state).toBe("uncertain");
+    expect(result.source.remote.statusId).toBe("done");
+    const unresolved = await fixture.jira.jiraReconcile({
+      taskId: source.taskId,
+      operationId: result.operation.id,
+    });
+    expect(unresolved.operation.state).toBe("uncertain");
+    fixture.issue.fields.resolution = { id: "fixed", name: "Fixed" };
+    fixture.issue.fields.summary = "Divergent summary";
+    const summaryMismatch = await fixture.jira.jiraReconcile({
+      taskId: source.taskId,
+      operationId: result.operation.id,
+    });
+    expect(summaryMismatch.operation.state).toBe("uncertain");
+    fixture.issue.fields.summary = "Completed";
+    const reconciled = await fixture.jira.jiraReconcile({
+      taskId: source.taskId,
+      operationId: result.operation.id,
+    });
+    expect(reconciled.operation.state).toBe("applied");
+    expect(fixture.state.requestedFields.at(-1)).toContain("resolution");
+    expect(fixture.state.writes).toBe(1);
+  });
+
+  it("keeps ordinary source reads and comments usable when one transition option is unsupported", async () => {
+    const fixture = setup();
+    fixture.state.transitionMetadata = {
+      team: {
+        required: true,
+        name: "Team",
+        schema: { type: "group" },
+        operations: ["set"],
+        allowedValues: [{ groupId: "synthetic-team", name: "Synthetic team" }],
+      },
+    };
+    fixture.issue.fields.team = {
+      groupId: "synthetic-team",
+      name: "Synthetic team",
+    };
+    const { source } = await fixture.importIssue();
+    const comment = await fixture.preview(source, {
+      kind: "comment",
+      body: "Read-only metadata must not block comments",
+    });
+    const result = await fixture.jira.jiraPush({
+      taskId: source.taskId,
+      previewId: comment.preview.id,
+    });
+    expect(result.operation.state).toBe("applied");
+    const blocked = await fixture.preview(result.source, {
+      kind: "transition",
+      transitionId: "finish",
+      toStatusId: "done",
+      fields: { team: { groupId: "synthetic-team" } },
+    });
+    expect(blocked.preview.canPush).toBe(false);
+    await expect(
+      fixture.jira.jiraPush({
+        taskId: source.taskId,
+        previewId: blocked.preview.id,
+      }),
+    ).rejects.toThrow();
+    expect(fixture.state.writes).toBe(1);
+    expect(fixture.issue.fields.status.id).toBe("open");
+  });
+
+  it("verifies required assignee and priority identifiers from Jira readback", async () => {
+    const fixture = setup();
+    fixture.state.transitionMetadata = {
+      assignee: {
+        required: true,
+        name: "Assignee",
+        schema: { type: "user" },
+        operations: ["set"],
+      },
+      priority: {
+        required: true,
+        name: "Priority",
+        schema: { type: "priority" },
+        operations: ["set"],
+      },
+    };
+    fixture.issue.fields.assignee = {
+      accountId: "previous-user",
+      displayName: "Previous user",
+    };
+    fixture.issue.fields.priority = { id: "medium", name: "Medium" };
+    fixture.state.transitionReadback = {
+      assignee: { accountId: "next-user", displayName: "Next user" },
+      priority: { id: "high", name: "High" },
+    };
+    const { source } = await fixture.importIssue();
+    const preview = await fixture.preview(source, {
+      kind: "transition",
+      transitionId: "finish",
+      toStatusId: "done",
+      fields: {
+        assignee: { accountId: "next-user" },
+        priority: { id: "high" },
+      },
+    });
+    const result = await fixture.jira.jiraPush({
+      taskId: source.taskId,
+      previewId: preview.preview.id,
+    });
+    expect(result.operation.state).toBe("applied");
+    expect(result.source.remote.transitionFields.assignee).toMatchObject({
+      accountId: "next-user",
+    });
+    expect(result.source.remote.transitionFields.priority).toMatchObject({
+      id: "high",
+    });
+    expect(fixture.state.writes).toBe(1);
+  });
+
+  it("detects nested reference conflicts before overwriting a selected field", async () => {
+    const fixture = setup();
+    fixture.state.transitionMetadata = {
+      choice: {
+        required: true,
+        name: "Choice",
+        schema: { type: "any" },
+        operations: ["set"],
+      },
+    };
+    fixture.issue.fields.choice = { id: "parent", child: { id: "initial" } };
+    const { source } = await fixture.importIssue();
+    fixture.issue.fields.choice = {
+      id: "parent",
+      child: { id: "external-edit" },
+    };
+    const preview = await fixture.preview(source, {
+      kind: "transition",
+      transitionId: "finish",
+      toStatusId: "done",
+      fields: { choice: { id: "parent", child: { id: "requested" } } },
+    });
+    expect(preview.preview.canPush).toBe(false);
+    expect(
+      preview.preview.changes.find((change) => change.field === "choice")
+        ?.conflict,
+    ).toBe(true);
+    await expect(
+      fixture.jira.jiraPush({
+        taskId: source.taskId,
+        previewId: preview.preview.id,
+      }),
+    ).rejects.toThrow();
+    expect(fixture.state.writes).toBe(0);
+  });
+
+  it("does not confirm a reference until every explicitly requested nested value matches", async () => {
+    const fixture = setup();
+    fixture.state.transitionMetadata = {
+      choice: {
+        required: true,
+        name: "Choice",
+        schema: { type: "any" },
+        operations: ["set"],
+      },
+    };
+    fixture.issue.fields.choice = { id: "parent", child: { id: "initial" } };
+    const { source } = await fixture.importIssue();
+    const preview = await fixture.preview(source, {
+      kind: "transition",
+      transitionId: "finish",
+      toStatusId: "done",
+      fields: { choice: { id: "parent", child: { id: "requested" } } },
+    });
+    const result = await fixture.jira.jiraPush({
+      taskId: source.taskId,
+      previewId: preview.preview.id,
+    });
+    expect(result.operation.state).toBe("uncertain");
+    const unresolved = await fixture.jira.jiraReconcile({
+      taskId: source.taskId,
+      operationId: result.operation.id,
+    });
+    expect(unresolved.operation.state).toBe("uncertain");
+    fixture.issue.fields.choice = {
+      id: "parent",
+      name: "Parent label",
+      child: { id: "requested", name: "Child label" },
+    };
+    const resolved = await fixture.jira.jiraReconcile({
+      taskId: source.taskId,
+      operationId: result.operation.id,
+    });
+    expect(resolved.operation.state).toBe("applied");
+    expect(fixture.state.writes).toBe(1);
+  });
+
+  it("does not treat missing or empty required values as a converged transition", async () => {
+    const cases: Array<{
+      available: boolean;
+      fields: Extract<JiraProposal, { kind: "transition" }>["fields"];
+    }> = [
+      { available: true, fields: { summary: "Remote summary" } },
+      {
+        available: true,
+        fields: { summary: "Remote summary", resolution: null },
+      },
+      { available: false, fields: { resolution: null } },
+    ];
+    for (const testCase of cases) {
+      const fixture = setup(true);
+      fixture.issue.fields.status = { id: "done", name: "Done" };
+      fixture.state.transitionAvailable = testCase.available;
+      const { source } = await fixture.importIssue();
+      const preview = await fixture.preview(source, {
+        kind: "transition",
+        transitionId: "finish",
+        toStatusId: "done",
+        fields: testCase.fields,
+      });
+      expect(preview.preview.canPush).toBe(false);
+      await expect(
+        fixture.jira.jiraPush({
+          taskId: source.taskId,
+          previewId: preview.preview.id,
+        }),
+      ).rejects.toThrow();
+      expect(fixture.state.writes).toBe(0);
+    }
+  });
+
+  it("migrates persisted historical snapshots, drafts, and journal without losing receipts or native data", async () => {
+    const fixture = setup();
+    const { source } = await fixture.importIssue();
+    const taskBefore = fixture.store.tasks.getTask(source.taskId);
+    const preview = await fixture.preview(source, {
+      kind: "transition",
+      transitionId: "finish",
+      toStatusId: "done",
+      fields: {},
+    });
+    fixture.state.writeMode = "timeout";
+    const result = await fixture.jira.jiraPush({
+      taskId: source.taskId,
+      previewId: preview.preview.id,
+    });
+    const db = fixture.bb.storage.database();
+    db.exec(`
+      DELETE FROM schema_version WHERE version = 10;
+      UPDATE jira_sources SET
+        baseline_json = json_remove(baseline_json, '$.transitionFields'),
+        remote_json = json_remove(remote_json, '$.transitionFields'),
+        proposal_json = json_remove(proposal_json, '$.fields'),
+        preview_fingerprint = 'old-fingerprint';
+      UPDATE jira_operations SET proposal_json = json_remove(proposal_json, '$.fields');
+    `);
+    db.prepare<[string]>("UPDATE jira_sources SET preview_json = ?").run(
+      JSON.stringify(preview.preview),
+    );
+    initializeTasksSchema(db);
+    const migrated = (await fixture.jira.jiraSource({ taskId: source.taskId }))
+      .source!;
+    expect(migrated.revision).toBe(result.source.revision + 1);
+    expect(migrated.baseline.transitionFields).toEqual({});
+    expect(migrated.remote.transitionFields).toEqual({});
+    expect(migrated.proposal).toEqual({
+      kind: "transition",
+      transitionId: "finish",
+      toStatusId: "done",
+      fields: {},
+    });
+    expect(migrated.preview).toBeNull();
+    expect(migrated.operation).toEqual(result.operation);
+    const repository = new JiraStore(db, fixture.store);
+    expect(repository.fingerprint(source.taskId)).toBeNull();
+    expect(repository.operation(result.operation.id)?.proposal).toEqual(
+      migrated.proposal,
+    );
+    expect(fixture.store.tasks.getTask(source.taskId)).toEqual(taskBefore);
+    const replay = await fixture.jira.jiraPush({
+      taskId: source.taskId,
+      previewId: preview.preview.id,
+    });
+    expect(replay.operation).toEqual(result.operation);
+    const reconciled = await fixture.jira.jiraReconcile({
+      taskId: source.taskId,
+      operationId: result.operation.id,
+    });
+    expect(reconciled.operation.state).toBe("applied");
+    expect(fixture.state.writes).toBe(1);
+  });
+
   it("atomically imports concurrent requests and persists unique source mappings", async () => {
     const fixture = setup();
     const results = await Promise.all([
@@ -744,6 +1419,7 @@ describe("native Tasks Jira connector", () => {
       kind: "transition",
       transitionId: "finish",
       toStatusId: "done",
+      fields: {},
     });
     const result = await fixture.jira.jiraPush({
       taskId: source.taskId,
@@ -837,6 +1513,7 @@ describe("native Tasks Jira connector", () => {
       kind: "transition",
       transitionId: "finish",
       toStatusId: "done",
+      fields: {},
     });
     fixture.state.transitionAvailable = false;
     await expect(

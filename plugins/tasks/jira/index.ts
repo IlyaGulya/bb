@@ -10,7 +10,13 @@ import {
   type JiraProposal,
   type JiraSnapshot,
   type JiraSource,
+  type JiraTransition,
 } from "../shared/jira-contract.js";
+import {
+  fieldValuesEqual,
+  fieldValuesMatch,
+  hasRequiredFieldValue,
+} from "../shared/jira-fields.js";
 import {
   JiraClient,
   JiraRequestError,
@@ -32,6 +38,69 @@ export type JiraHandlers = {
 export interface JiraSyncOptions {
   configuration?: () => JiraConfiguration;
   fetch?: typeof fetch;
+}
+function selectedFields(proposal: JiraProposal | null): string[] {
+  return proposal?.kind === "transition" ? Object.keys(proposal.fields) : [];
+}
+
+function transitionProblem(
+  transitions: JiraTransition[],
+  proposal: Extract<JiraProposal, { kind: "transition" }>,
+  converged: boolean,
+): string | null {
+  for (const [id, value] of Object.entries(proposal.fields)) {
+    if (!hasRequiredFieldValue(value))
+      return `Supply a non-empty value for required Jira field ${id} before pushing`;
+  }
+  const transition = transitions.find(
+    (candidate) =>
+      candidate.id === proposal.transitionId &&
+      candidate.toStatusId === proposal.toStatusId,
+  );
+  if (!transition)
+    return converged
+      ? null
+      : "The selected Jira transition is no longer available; pull and review again";
+  for (const id of Object.keys(proposal.fields)) {
+    if (!transition.fields.some((field) => field.id === id))
+      return `Field ${id} is not a required field of the selected transition`;
+  }
+  for (const field of transition.fields) {
+    if (field.unsupportedReason) return field.unsupportedReason;
+    if (!field.operations.includes("set"))
+      return `Required Jira field ${field.name} (${field.id}) does not support set; complete this transition in Jira`;
+    const value = proposal.fields[field.id];
+    if (!hasRequiredFieldValue(value))
+      return `Supply required Jira field ${field.name} (${field.id}) before pushing`;
+    if (
+      ((field.type === "string" ||
+        field.type === "date" ||
+        field.type === "datetime") &&
+        typeof value !== "string") ||
+      (field.type === "number" && typeof value !== "number") ||
+      (field.type === "integer" &&
+        (typeof value !== "number" || !Number.isInteger(value))) ||
+      (field.type === "boolean" && typeof value !== "boolean") ||
+      (field.type === "array" && !Array.isArray(value)) ||
+      (field.type === "object" &&
+        (typeof value !== "object" || Array.isArray(value)))
+    )
+      return `Supply a ${field.type} value for Jira field ${field.name} (${field.id})`;
+    if (field.allowedValues.length > 0) {
+      const values =
+        field.type === "array" && Array.isArray(value) ? value : [value];
+      if (
+        values.some(
+          (item) =>
+            !field.allowedValues.some((allowed) =>
+              fieldValuesEqual(item, allowed.value),
+            ),
+        )
+      )
+        return `Choose an allowed value for Jira field ${field.name} (${field.id})`;
+    }
+  }
+  return null;
 }
 
 function changesFor(
@@ -60,6 +129,19 @@ function changesFor(
           remote.statusId !== base.statusId &&
           remote.statusId !== proposal.toStatusId,
       },
+      ...Object.entries(proposal.fields).map(([field, value]) => {
+        const baseline = base.transitionFields[field];
+        const current = remote.transitionFields[field];
+        return {
+          field,
+          base: baseline === undefined ? null : JSON.stringify(baseline),
+          current: current === undefined ? null : JSON.stringify(current),
+          proposed: JSON.stringify(value),
+          conflict:
+            !fieldValuesMatch(current, value) &&
+            !fieldValuesMatch(current, baseline),
+        };
+      }),
     ];
   const changes: JiraChange[] = [];
   if (proposal.summary !== null)
@@ -87,7 +169,12 @@ function changesFor(
 function matches(remote: JiraSnapshot, proposal: JiraProposal): boolean {
   if (proposal.kind === "comment") return false;
   if (proposal.kind === "transition")
-    return remote.statusId === proposal.toStatusId;
+    return (
+      remote.statusId === proposal.toStatusId &&
+      Object.entries(proposal.fields).every(([field, value]) =>
+        fieldValuesMatch(remote.transitionFields[field], value),
+      )
+    );
   return (
     (proposal.summary === null || proposal.summary === remote.summary) &&
     (proposal.description === null ||
@@ -196,7 +283,10 @@ export function registerJiraSync(
 
   async function readRemote(source: JiraSource): Promise<JiraSnapshot> {
     try {
-      return await clientFor(source).snapshot(source.remote.id);
+      return await clientFor(source).snapshot(source.remote.id, [
+        ...Object.keys(source.remote.transitionFields),
+        ...selectedFields(source.proposal),
+      ]);
     } catch (error) {
       rememberError(source, error);
       throw new Error(safeError(error));
@@ -398,22 +488,17 @@ export function registerJiraSync(
       const remote = await readRemote(source);
       const changes = changesFor(source.baseline, remote, source.proposal);
       let reason: string | null = changes.some((change) => change.conflict)
-        ? "Jira changed the content or rich-text structure of a selected field since the proposal baseline; discard or resolve the proposal before pushing"
+        ? "A selected Jira field changed or its baseline was not captured; clear the proposal, pull, and review before preparing it again"
         : null;
-      if (
-        proposal.kind === "transition" &&
-        remote.statusId !== proposal.toStatusId
-      ) {
+      if (proposal.kind === "transition") {
         try {
           const transitions = await clientFor(source).transitions(remote.id);
-          if (
-            !transitions.some(
-              (transition) =>
-                transition.id === proposal.transitionId &&
-                transition.toStatusId === proposal.toStatusId,
-            )
-          )
-            reason = "The selected Jira transition is no longer available";
+          reason =
+            transitionProblem(
+              transitions,
+              proposal,
+              matches(remote, proposal),
+            ) ?? reason;
         } catch (error) {
           rememberError(source, error);
           throw new Error(safeError(error));
@@ -473,22 +558,15 @@ export function registerJiraSync(
           "Jira changed after preview; review a fresh preview before pushing",
         );
       }
-      if (
-        proposal.kind === "transition" &&
-        remote.statusId !== proposal.toStatusId
-      ) {
+      if (proposal.kind === "transition") {
         try {
           const transitions = await client.transitions(remote.id);
-          if (
-            !transitions.some(
-              (transition) =>
-                transition.id === proposal.transitionId &&
-                transition.toStatusId === proposal.toStatusId,
-            )
-          )
-            throw new Error(
-              "The selected Jira transition is no longer available; preview again",
-            );
+          const problem = transitionProblem(
+            transitions,
+            proposal,
+            matches(remote, proposal),
+          );
+          if (problem) throw new Error(problem);
         } catch (error) {
           rememberError(source, error);
           throw new Error(safeError(error));
@@ -537,7 +615,10 @@ export function registerJiraSync(
         } else {
           writeAccepted = true;
         }
-        const readback = await client.snapshot(remote.id);
+        const readback = await client.snapshot(remote.id, [
+          ...Object.keys(remote.transitionFields),
+          ...selectedFields(proposal),
+        ]);
         const commentId =
           proposal.kind === "comment"
             ? await client.findComment(
@@ -598,7 +679,10 @@ export function registerJiraSync(
         };
       const client = clientFor(source);
       try {
-        const remote = await client.snapshot(source.remote.id);
+        const remote = await client.snapshot(source.remote.id, [
+          ...Object.keys(source.remote.transitionFields),
+          ...selectedFields(stored.proposal),
+        ]);
         const commentId =
           stored.proposal.kind === "comment"
             ? await client.findComment(

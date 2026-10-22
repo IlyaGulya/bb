@@ -4,11 +4,16 @@ import type {
   JiraProposal,
   JiraSnapshot,
   JiraTransition,
+  JiraTransitionField,
 } from "../shared/jira-contract.js";
+import { jiraTransitionFieldsSchema } from "../shared/jira-contract.js";
 import { jiraAuthorization, type JiraConnectionConfig } from "./config.js";
 
 const named = z.object({ id: z.string(), name: z.string() });
-const user = z.object({ displayName: z.string() }).nullable();
+const user = z
+  .object({ displayName: z.string() })
+  .catchall(z.json())
+  .nullable();
 const commentSchema = z.object({
   id: z.string(),
   body: z.unknown(),
@@ -25,14 +30,28 @@ const commentsSchema = z.object({
 const issueSchema = z.object({
   id: z.string(),
   key: z.string(),
-  fields: z.object({
-    summary: z.string(),
-    description: z.unknown(),
-    status: named,
-    priority: z.object({ name: z.string() }).nullable().optional(),
-    assignee: user.optional(),
-    updated: z.string(),
-  }),
+  fields: z
+    .object({
+      summary: z.string(),
+      description: z.unknown(),
+      status: named,
+      priority: z
+        .object({ name: z.string() })
+        .catchall(z.json())
+        .nullable()
+        .optional(),
+      assignee: user.optional(),
+      updated: z.string(),
+    })
+    .catchall(z.json()),
+});
+const transitionFieldSchema = z.object({
+  required: z.boolean(),
+  name: z.string(),
+  schema: z.object({ type: z.string(), items: z.string().optional() }),
+  operations: z.array(z.string()),
+  allowedValues: z.array(z.json()).optional(),
+  defaultValue: z.json().optional(),
 });
 const transitionsSchema = z.object({
   transitions: z.array(
@@ -40,11 +59,54 @@ const transitionsSchema = z.object({
       id: z.string(),
       name: z.string(),
       to: named,
+      fields: z.record(z.string().min(1), transitionFieldSchema),
     }),
   ),
 });
 const COMMENT_PROPERTY = "bb.tasks.operation";
 const operationPropertySchema = z.object({ operationId: z.string() });
+const REFERENCE_KEYS = ["accountId", "id", "value"];
+
+type FieldValue = z.infer<typeof jiraTransitionFieldsSchema>[string];
+
+function wireValue(value: FieldValue): FieldValue {
+  if (Array.isArray(value)) return value.map(wireValue);
+  if (value !== null && typeof value === "object") {
+    for (const key of REFERENCE_KEYS) {
+      const identifier = value[key];
+      if (typeof identifier === "string" || typeof identifier === "number")
+        return { [key]: identifier };
+    }
+  }
+  return value;
+}
+
+function allowedValue(
+  value: FieldValue,
+): JiraTransitionField["allowedValues"][number] | null {
+  if (Array.isArray(value)) return null;
+  const normalized = wireValue(value);
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    normalized === value
+  )
+    return null;
+  const label =
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value.name ??
+        value.displayName ??
+        value.value ??
+        value.id ??
+        value.accountId ??
+        JSON.stringify(value))
+      : value;
+  return {
+    label: typeof label === "string" ? label : JSON.stringify(label),
+    value: normalized,
+  };
+}
 
 function commentHasOperation(
   comment: z.infer<typeof commentSchema>,
@@ -246,12 +308,35 @@ export class JiraClient {
     }
   }
 
-  async snapshot(issue: string): Promise<JiraSnapshot> {
+  async snapshot(
+    issue: string,
+    selectedFields: string[] = [],
+  ): Promise<JiraSnapshot> {
     if (!/^(?:[0-9]+|[A-Za-z][A-Za-z0-9_]*-[0-9]+)$/.test(issue))
       throw new Error("Use a Jira issue key or immutable numeric ID");
+    const transitions = await this.transitions(issue);
+    const requested = [
+      ...new Set([
+        ...transitions.flatMap((transition) =>
+          transition.fields.map((field) => field.id),
+        ),
+        ...selectedFields,
+      ]),
+    ].sort();
+    const fields = [
+      ...new Set([
+        "summary",
+        "description",
+        "status",
+        "priority",
+        "assignee",
+        "updated",
+        ...requested,
+      ]),
+    ].join(",");
     const result = issueSchema.parse(
       await this.request(
-        `/issue/${encodeURIComponent(issue)}?fields=summary,description,status,priority,assignee,updated`,
+        `/issue/${encodeURIComponent(issue)}?${new URLSearchParams({ fields })}`,
       ),
     );
     const page = commentsSchema.parse(
@@ -283,18 +368,45 @@ export class JiraClient {
         updatedAt: comment.updated,
       })),
       commentsTruncated: page.total > Math.min(page.comments.length, 50),
+      transitionFields: Object.fromEntries(
+        requested
+          .filter((field) => Object.hasOwn(result.fields, field))
+          .map((field) => [field, z.json().parse(result.fields[field])]),
+      ),
     };
   }
 
   async transitions(issueId: string): Promise<JiraTransition[]> {
     const result = transitionsSchema.parse(
-      await this.request(`/issue/${encodeURIComponent(issueId)}/transitions`),
+      await this.request(
+        `/issue/${encodeURIComponent(issueId)}/transitions?expand=transitions.fields`,
+      ),
     );
     return result.transitions.map((transition) => ({
       id: transition.id,
       name: transition.name,
       toStatusId: transition.to.id,
       toStatusName: transition.to.name,
+      fields: Object.entries(transition.fields)
+        .filter(([, field]) => field.required)
+        .map(([id, field]) => {
+          const choices = (field.allowedValues ?? []).map(allowedValue);
+          return {
+            id,
+            name: field.name,
+            type: field.schema.type,
+            items: field.schema.items ?? null,
+            operations: field.operations,
+            allowedValues: choices.filter((choice) => choice !== null),
+            defaultValue:
+              field.defaultValue === undefined
+                ? null
+                : wireValue(field.defaultValue),
+            unsupportedReason: choices.some((choice) => choice === null)
+              ? `Jira field ${field.name} (${id}) uses unsupported option values; complete this transition in Jira, then pull`
+              : null,
+          };
+        }),
     }));
   }
 
@@ -317,6 +429,7 @@ export class JiraClient {
     if (proposal.kind === "transition") {
       await this.request(`${path}/transitions`, "POST", {
         transition: { id: proposal.transitionId },
+        fields: proposal.fields,
       });
       return null;
     }

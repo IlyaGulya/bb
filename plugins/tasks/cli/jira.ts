@@ -4,7 +4,11 @@ import {
   type PluginCliResult,
 } from "@get-bb/plugin-sdk";
 import type { JiraHandlers } from "../jira";
-import { jiraRpcContract, type JiraProposal } from "../shared/jira-contract";
+import {
+  jiraRpcContract,
+  jiraTransitionFieldsSchema,
+  type JiraProposal,
+} from "../shared/jira-contract";
 import type { Project, Task } from "../shared/contract";
 
 const jsonOption = {
@@ -163,7 +167,7 @@ export function jiraCommands(
       summary:
         "Draft one Jira operation: fields, appended comment, or transition",
       description:
-        "Choose --summary and/or --description, OR --comment, OR --transition with --to-status. No Jira write occurs. Description is an explicit plain-text replacement (empty clears it); omitted fields are unchanged. Native task edits do not become Jira proposals.",
+        "Choose --summary and/or --description, OR --comment, OR --transition with --to-status and optional --transition-fields JSON. Pull first to capture required-field baselines. No Jira write occurs. Description is an explicit plain-text replacement (empty clears it); omitted fields are unchanged. Native task edits do not become Jira proposals.",
       positionals: [taskPositional],
       options: {
         ...revisionOptions,
@@ -182,6 +186,12 @@ export function jiraCommands(
           description:
             "Destination status ID paired with the selected transition",
         },
+        "transition-fields": {
+          type: "string",
+          placeholder: "json",
+          description:
+            "JSON object of required transition field values from jira transitions; only with --transition and --to-status",
+        },
       },
       run(input) {
         return guard(async () => {
@@ -191,7 +201,8 @@ export function jiraCommands(
           const comment = options.comment !== undefined;
           const transition =
             options.transition !== undefined ||
-            options["to-status"] !== undefined;
+            options["to-status"] !== undefined ||
+            options["transition-fields"] !== undefined;
           if (Number(fields) + Number(comment) + Number(transition) !== 1) {
             throw new PluginCliError(
               "Choose exactly one operation: --summary/--description, --comment, or --transition with --to-status. Use jira clear to discard a draft.",
@@ -219,6 +230,11 @@ export function jiraCommands(
               kind: "transition",
               transitionId: options.transition,
               toStatusId: options["to-status"],
+              fields: jiraTransitionFieldsSchema.parse(
+                options["transition-fields"] === undefined
+                  ? {}
+                  : JSON.parse(options["transition-fields"]),
+              ),
             };
           }
           return render(
@@ -257,7 +273,7 @@ export function jiraCommands(
     }),
     "jira transitions": cliCommand({
       summary:
-        "Fetch currently available Jira transitions and destination status IDs",
+        "Fetch available Jira transitions, destination IDs, and required field metadata",
       positionals: [taskPositional],
       options: taskOptions,
       run(input) {

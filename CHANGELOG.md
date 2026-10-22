@@ -2,7 +2,7 @@
 
 ## AgentOS fork — unreleased
 
-- **Tasks 0.1.4:** selectively link or import Jira issues into native task cards.
+- **Tasks 0.1.5:** selectively link or import Jira issues into native task cards.
   Explicit pull, proposals, three-way preview, push, and reconciliation are
   available through the task UI and `bb tasks jira`.
 - Preserve local planning fields and attached threads independently of Jira;
@@ -14,6 +14,9 @@
   Rich-text source content is retained; replacing a description is explicit.
 - Jira comment receipts use object-valued entity properties accepted by Jira
   Cloud; rejected writes keep their receipt and require a fresh reviewed preview.
+- Jira transitions expose required workflow fields, including Resolution.
+  Their values are captured for conflict review and sent atomically with the
+  transition; readback verifies both status and the requested field values.
 
 ## 0.46.1
 

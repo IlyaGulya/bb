@@ -168,6 +168,29 @@ content, or pass an empty string to clear it. Get valid transition/status pairs
 with `bb tasks jira transitions PROD-1`. Discard a draft with
 `bb tasks jira clear PROD-1 --expected-revision <revision>`.
 
+`transitions --json` includes each transition's required fields, operations,
+allowed values, and defaults; `show --json` includes captured current values in
+`transitionFields`. Pull before drafting a transition to capture baselines.
+Supply every required field with `--transition-fields <json>`, allowed only
+with `--transition` and `--to-status`. Omitting it sends `{}`, not inferred
+values. A synthetic Summary + Resolution example (replace IDs and revisions
+with the actual returned values):
+
+```sh
+bb tasks jira transitions PROD-1 --json
+bb tasks jira pull PROD-1 --expected-revision <revision>
+bb tasks jira draft PROD-1 --expected-revision <revision> --transition finish --to-status done --transition-fields '{"summary":"Reviewed synthetic work","resolution":{"id":"fixed"}}'
+bb tasks jira preview PROD-1 --expected-revision <revision> --json
+```
+
+Missing baselines are not Jira null values: clear the draft, pull, and review
+again rather than silently rebasing. Only required fields of that transition
+are writable. Check `unsupportedReason`; unsupported operations or option
+formats require completing that transition in Jira, without blocking source
+reads or unrelated operations. Status and
+fields are sent in one atomic transition request. Readback and reconciliation
+must verify every supplied field and target status before reporting applied.
+
 Review `preview.changes`, conflicts, `canPush`, and `reason`. Only after explicit
 approval of the exact external write, invoke
 `bb tasks jira push PROD-1 --preview-id <reviewed-preview-id>`. A read-only
