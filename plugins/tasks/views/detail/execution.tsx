@@ -164,7 +164,7 @@ export function ExecutionTargetControl({
         contentClassName="max-w-xl"
       >
         <form
-          className="space-y-4 p-4"
+          className="flex-auto min-h-0 space-y-4 overflow-y-auto p-4"
           onSubmit={(event) => {
             event.preventDefault();
             if (!canSave) return;
@@ -444,7 +444,7 @@ export function ContinuationDialog({
       contentClassName="max-w-xl"
     >
       <form
-        className="space-y-4 p-4"
+        className="flex-auto min-h-0 space-y-4 overflow-y-auto p-4"
         onSubmit={(event) => {
           event.preventDefault();
           void submit();

@@ -8,6 +8,8 @@
   attached session; keep the source visible and make the target current.
 - Allow explicit continuation file paths beneath collapsed ignored directories
   without enumerating or copying entire dependency trees.
+- Keep task execution and continuation forms scrollable inside bounded drawers
+  so their actions remain reachable on shorter viewports.
 - Observe server exits while host-daemon startup is retrying or waiting for
   readiness. Cancel and drain pending daemon recovery before server restart,
   moved-mode handover or healthy-port takeover.
