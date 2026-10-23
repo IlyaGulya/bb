@@ -110,3 +110,76 @@ Sources:
 
   A live project must retain at least one source; a project pending deletion
   may remove its last source.
+
+Machine preparation and workspace transfer:
+
+  bb project prepare-machine --project <id> --host <id> --target-path <path>
+    --source-host <id>                    Source machine for explicit copies
+    --copy-path <path...>                 Relative files to copy; repeatable
+  bb project preview-workspace-transfer --project <id>
+    --source-environment <id> --host <id>  Inspect source and target readiness
+  bb project transfer-workspace --project <id> --source-environment <id>
+    --host <id> --target-path <path>       Create a new target environment
+    --branch <name>                       Explicit target branch
+    --include-path <path...>              Extra files or secret consent; repeatable
+  bb project get-workspace-transfer --operation-id <id>
+                                          Query the durable operation journal
+
+  All four commands support --json and print the complete SDK result. Host flags
+  take machine IDs. Preparation returns source, copiedFiles with SHA-256 hashes,
+  and readiness {ready, checks: [{name, ok, detail}]}; inspect actual failed checks
+  rather than assuming the machine is ready. Copies require an explicit source
+  host and relative paths; no .env or credentials are copied by default.
+  Target paths must be canonical absolute paths: no ~, dot segments or trailing
+  slash. Copies land only in the project source checkout; isolated new worktrees
+  do not inherit copied untracked/ignored files.
+
+  Preview lists HEAD, branch, file selections/exclusions and active thread IDs.
+  Transfer requires an idle source environment and idle threads, refuses source
+  changes during capture, and requires a new target path. It preserves the source,
+  local-only commits, staged and unstaged tracked changes/deletes, binary bytes
+  and modes. Untracked/ignored files require explicit --include-path selection.
+  Tracked secret paths require explicit consent, not silent omission.
+  Preview kind sensitive-tracked marks ordinary files requiring explicit consent;
+  unsupported file types are hard refusals, not selectable exclusions.
+  A shared private remote login is not required: unpublished commits travel in
+  a Git bundle. The target is a new environment of the same project.
+  No origin access is needed; Git config, remote configuration and authentication
+  are not automatically transferred.
+
+  Checkpoints support at most 64 MiB combined decoded bytes, counting the bundle,
+  changed staged-index blobs, changed tracked working files and selected extras.
+  Unchanged tracked file bytes do not count; the same changed file can count
+  twice for index and working state. Preparation copy batches share the 64 MiB
+  combined limit; index metadata and previews support at most 10,000 entries.
+  Base64 RPC JSON can reach approximately 85.4 MiB plus metadata; no chunking.
+  Each checkpoint/copy batch must also fit 96 MiB UTF-8 JSON, including base64
+  and path/index metadata. Both limits apply; oversized capture/copy reads fail
+  before returning data and restore/copy writes fail before target mutation.
+  Oversize payloads fail, never truncate. Symlinks, submodules/gitlinks, sparse checkout/index,
+  unmerged entries, skip-worktree, assume-unchanged, in-progress Git operations
+  and custom non-LFS clean/smudge filters are refused explicitly.
+  Shallow/partial/promisor clones, grafts and replacement refs are also refused.
+  Only exact ordinary files can be selected, including explicit nested relative
+  paths. Ignored directories appear excluded in preview; selection does not
+  recursively copy directories.
+  Ordinary transfers need Node and Git. Materialized Git LFS bytes and pointer
+  index entries are preserved; unresolved pointer-only working files are refused.
+  Fetch/materialize actual source bytes before retrying.
+  LFS paths require git-lfs installed on the target. Transfer configures only
+  standard local LFS filters, not network/authentication. Effective filter=lfs
+  paths must match; select required untracked/ignored .gitattributes explicitly.
+  Source-only info attributes or target attribute mismatches fail actionably.
+
+  Transfer returns operationId, status ready, environmentId, hostId, rootPath,
+  head, branch and handoff only after verification. Durable status is pending,
+  capturing, transferring, verifying, ready, failed or interrupted; query by
+  operation ID after a disconnected request. Failure includes an error.
+  Ready query results can include continuationThreadId. Continue with:
+    bb thread spawn --project <id> --environment <returned-environmentId>
+      --transfer-operation-id <operationId> --prompt "Continue from the handoff"
+  The server validates the ready target and idle source, records the continuation
+  thread and returns it on retry. A durable source/target active-dispatch fence
+  persists across restart. This starts a new native session, not live-session
+  migration. Agent/auth/MCP directories and whole-home archives are not copied
+  automatically.

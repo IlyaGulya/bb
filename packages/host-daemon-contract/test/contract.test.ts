@@ -502,6 +502,11 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
       },
     ],
   },
+  "workspace.transferPreview": { head: "a".repeat(40), branch: "main", files: [], activeThreadIds: [], maxPayloadBytes: 67108864 },
+  "workspace.capture": { checkpoint: { version: 1, head: "a".repeat(40), branch: "main", bundleBase64: "", bundleSha256: "b".repeat(64), lfsPaths: [], index: [], worktree: [], extraFiles: [], filePermissions: [] } },
+  "workspace.restore": { rootPath: "/tmp/restored-workspace", head: "a".repeat(40), branch: "main" },
+  "workspace.copyRead": { files: [] },
+  "workspace.copyWrite": { files: [] },
   "workspace.status": WORKSPACE_UNAVAILABLE_RESULT,
   "workspace.diff": {
     outcome: "unavailable",
@@ -799,6 +804,12 @@ function terminalDataBase64(byteLength: number): string {
 }
 
 const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
+  "hostDaemonOnlineRpcCommandSchema.branch":
+    "workspace.restore inherits the captured branch unless the caller explicitly selects a new branch.",
+  "hostDaemonOnlineRpcCommandSchema.checkpoint.index.contentBase64":
+    "unchanged index blobs are already present in the bundled HEAD and omit duplicate content.",
+  "hostDaemonOnlineRpcCommandSchema.checkpoint.index.sha256":
+    "an index content SHA-256 exists exactly when changed blob content is carried.",
   "hostDaemonCommandSchema.resolution.description":
     "the interaction.resolve command's resolution is the persisted union, so it also admits the plugin_submitted arm and the description a plugin's describeSubmission returned. It never reaches the wire: a plugin interaction is settled in the server against its waiting requestInput promise and never queues a daemon command, so an older daemon never sees the field.",
   "hostDaemonCommandSchema.resolution.description.detail":
@@ -1253,7 +1264,7 @@ describe("host-daemon command schemas", () => {
   });
 
   it("uses the current host-daemon protocol version", () => {
-    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(237);
+    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(238);
     expect(HOST_ARTIFACT_MAX_BYTES).toBe(256 * 1024 * 1024);
   });
 

@@ -49,6 +49,7 @@ interface ThreadSpawnCommandOptions {
   json?: boolean;
   project?: string;
   environment?: string;
+  transferOperationId?: string;
   newEnvironment?: string;
   environmentProvider?: string;
   environmentInputs?: string;
@@ -341,6 +342,10 @@ export function registerSpawnCommand(
       "Existing environment ID or unmanaged workspace path",
     )
     .option(
+      "--transfer-operation-id <id>",
+      "Ready workspace transfer to continue in its existing target environment",
+    )
+    .option(
       "--new-environment <kind>",
       "Create a fresh environment of the given kind (personal or worktree)",
     )
@@ -594,6 +599,9 @@ export function registerSpawnCommand(
           thread = await sdk.threads.spawn({
             origin: "cli",
             projectId,
+            ...(opts.transferOperationId !== undefined
+              ? { transferOperationId: opts.transferOperationId }
+              : {}),
             ...(providerId ? { providerId } : {}),
             ...(opts.model ? { model: opts.model } : {}),
             input,

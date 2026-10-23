@@ -91,6 +91,9 @@ machine; pass `--machine <id-or-name>` to target another enrolled machine.
 | `bb tasks attachment add\|get\|list\|remove`    | Add, fetch, list, or remove attachments. Referenced attachments require `remove --remove-references`.                                      |
 | `bb tasks preset list\|create\|update\|delete`  | Manage reusable agent execution presets.                                                                                                   |
 | `bb tasks delegate <key>`                       | Start and attach a new agent thread using a preset.                                                                                        |
+| `bb tasks execution get\|set\|clear <key>`       | Inspect, persist, or clear task execution routing independently of tracker defaults. |
+| `bb tasks execution environments --bb-project <id>` | List existing environments, optionally filtered by `--machine`. |
+| `bb tasks continue preview\|start\|list <key>` | Preview, start, or inspect durable idle-workspace continuations into new native sessions. |
 | `bb tasks attach <key-or-id>`                   | Attach the current bb thread to a task when it was not delegated from Tasks.                                                               |
 | `bb tasks detach <key-or-id>`                   | Detach the current bb thread (or `--thread <id>`) from a task, for example a dead predecessor after a respawn.                             |
 | `bb tasks threads <key>`                        | List the bb threads attached to a task: live threads first, newest first.                                                                  |
@@ -231,6 +234,73 @@ receipt. An uncertain result must not be blindly retried; use
 without replay. Unknown outcomes remain visible and may remain uncertain.
 All commands support `--json`; human output presents the same state as indented
 JSON. `bb tasks jira --help` lists the complete command group.
+
+## Task execution routing and native continuation
+
+```sh
+bb tasks execution set PROD-1 --bb-project proj_code --machine laptop \
+  --workspace managed-worktree --base-branch main --preset "Codex high"
+bb tasks execution get PROD-1 --json
+bb tasks delegate PROD-1
+bb tasks execution environments --bb-project proj_code --machine laptop --json
+bb tasks execution clear PROD-1
+bb tasks continue preview PROD-1 --thread thr_source --machine workstation --json
+bb tasks continue start PROD-1 --thread thr_source --machine workstation \
+  --target-path /work/new-task --preset "Codex high" \
+  --include-path notes.txt --include-path assets/sample.bin \
+  --instructions "Finish the acceptance criteria" --branch task-continuation --json
+bb tasks continue list PROD-1 --json
+```
+
+`execution set` requires `--bb-project`, `--machine`, `--workspace`, and `--preset`.
+Workspace choices are `managed-worktree` (optional `--base-branch`),
+`project-checkout`, and `existing-environment` (required `--environment <id>`).
+The code-project id is not a Tasks tracker prefix. Machine and preset arguments
+accept names or ids. `execution get` accepts optional `--preset` to resolve an
+invocation profile. A persisted task override wins over inheritance; an explicit
+dispatch `--preset` selects the invocation profile. `delegate` is an alias of
+`dispatch`; both work without `--preset` when a saved target supplies it.
+Clearing removes the task override and restores tracker-project/profile routing.
+`dispatch` and `delegate` also accept `--execution-target '<json>'` for an
+invocation-only target with `bbProjectId`, `hostId`, `workspace`, and `presetId`
+using exact ids, validated by the same shared RPC schema; this does not persist it.
+
+Continuation is not a live session move. Preview reports the source environment,
+host, HEAD, branch, active threads, and files with default selections and exclusion
+reasons. Only an idle source can transfer; the source thread remains attached.
+All tracked changes transfer according to core safety policy; repeat
+`--include-path` for explicitly selected relative untracked/ignored files, or to
+consent to an exact tracked file whose preview kind is `sensitive-tracked`.
+Sensitive tracked files block continuation until each is explicitly selected or
+resolved at the source; they are never silently dropped. Review warnings before
+selecting secrets or `.env` files; none are selected implicitly. The target path must be new and
+is never overwritten. A successful transfer starts a new native session with task
+and stored Jira context plus verified code handoff; it does not complete the task
+or write to external Jira. The retained source is labeled as the previous executor;
+continue further work from the new attached executor, not from that source again.
+
+`continue list` exposes durable `ready`, `spawning`, and `started` records.
+If spawning fails after transfer, a `ready` record and `lastError` remain.
+Retry `continue start` with the same task/source/target/profile arguments and
+`--operation <operationId>` to reuse that prepared environment without overwriting
+or retransferring it. The original selected files and branch are retained; omit
+`--include-path` and `--branch` on this explicit operation retry. A `spawning`
+record means the outcome needs reconciliation; retry queries the operation's
+thread metadata before creating another session.
+
+The validated delegation RPCs are `getTaskExecution`, `setTaskExecution`
+(`target: null` clears), `listTaskExecutionEnvironments`,
+`previewTaskContinuation`, `continueTask`, and `getTaskContinuations`, alongside
+`delegate` (optional `presetId` and optional invocation `executionTarget`).
+Continuation uses the shared core `projects.previewWorkspaceTransfer`,
+`projects.transferWorkspace`, and `projects.getWorkspaceTransfer` APIs;
+machine preparation uses `projects.prepareMachine`. These are not alternate
+Tasks-specific filesystem operations.
+
+The target native spawn supplies `transferOperationId` so core atomically checks
+the ready transfer and source idleness during target creation. Source and target
+dispatch are mutually gated while the counterpart is running; this is not a
+permanent source-session freeze.
 
 ## Agents, delegation, and presets
 

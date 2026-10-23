@@ -18,6 +18,13 @@ export type {
   ExistingThreadExecutionInputSources,
   UnmanagedBranchSpec,
   WorkspaceArgs,
+  PrepareMachineRequest,
+  PrepareMachineResponse,
+  PreviewWorkspaceTransferRequest,
+  PreviewWorkspaceTransferResponse,
+  TransferWorkspaceRequest,
+  TransferWorkspaceResponse,
+  WorkspaceTransferOperation,
 } from "@bb/server-contract";
 
 export type * from "./realtime.js";

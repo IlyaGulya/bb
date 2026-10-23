@@ -11,6 +11,12 @@ and report the outcome where the work is tracked.
 For task dispatch and execution presets, read
 [references/delegation.md](references/delegation.md).
 
+Task-specific routing is available through `bb tasks execution get|set|clear`
+and `execution environments`. Idle workspace continuation uses
+`bb tasks continue preview|start|list`; use `continue start`, not a bare
+`continue`, to avoid command-prefix ambiguity. Read the delegation reference
+for required flags, safe ready-operation retry, and RPC equivalents.
+
 ## Work a task
 
 1. Find and read the task before acting:

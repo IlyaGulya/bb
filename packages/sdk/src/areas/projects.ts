@@ -23,6 +23,13 @@ import type {
   UploadedPromptAttachment,
   WorkspacePathListResponse,
   WorkspaceFileListResponse,
+  PrepareMachineRequest,
+  PrepareMachineResponse,
+  PreviewWorkspaceTransferRequest,
+  PreviewWorkspaceTransferResponse,
+  TransferWorkspaceRequest,
+  TransferWorkspaceResponse,
+  WorkspaceTransferOperation,
 } from "@bb/server-contract";
 import { uploadedPromptAttachmentSchema } from "@bb/server-contract";
 import type { ProjectExecutionDefaults, ProjectSource } from "@bb/domain";
@@ -199,7 +206,16 @@ export interface ProjectAttachmentsArea {
   ): Promise<ProjectAttachmentUploadResult>;
 }
 
+export type ProjectPrepareMachineArgs = PrepareMachineRequest & { projectId: string; signal?: AbortSignal };
+export type ProjectPreviewWorkspaceTransferArgs = PreviewWorkspaceTransferRequest & { projectId: string; signal?: AbortSignal };
+export type ProjectTransferWorkspaceArgs = TransferWorkspaceRequest & { projectId: string; signal?: AbortSignal };
+export interface ProjectGetWorkspaceTransferArgs { operationId: string; signal?: AbortSignal }
+
 export interface ProjectsArea {
+  prepareMachine(args: ProjectPrepareMachineArgs): Promise<PrepareMachineResponse>;
+  previewWorkspaceTransfer(args: ProjectPreviewWorkspaceTransferArgs): Promise<PreviewWorkspaceTransferResponse>;
+  transferWorkspace(args: ProjectTransferWorkspaceArgs): Promise<TransferWorkspaceResponse>;
+  getWorkspaceTransfer(args: ProjectGetWorkspaceTransferArgs): Promise<WorkspaceTransferOperation>;
   machineEnvironment(args: {
     projectId: string;
   }): Promise<ProjectMachineEnvironmentList>;
@@ -450,6 +466,29 @@ export function createProjectsArea(args: CreateSdkAreaArgs): ProjectsArea {
   };
 
   return {
+    async prepareMachine(input) {
+      const { projectId, signal, ...json } = input;
+      return transport.readJson(transport.api.v1.projects[":id"]["prepare-machine"].$post(
+        { param: { id: projectId }, json }, ...signalRequestArgs(signal),
+      ));
+    },
+    async previewWorkspaceTransfer(input) {
+      const { projectId, signal, ...json } = input;
+      return transport.readJson(transport.api.v1.projects[":id"]["preview-workspace-transfer"].$post(
+        { param: { id: projectId }, json }, ...signalRequestArgs(signal),
+      ));
+    },
+    async transferWorkspace(input) {
+      const { projectId, signal, ...json } = input;
+      return transport.readJson(transport.api.v1.projects[":id"]["transfer-workspace"].$post(
+        { param: { id: projectId }, json }, ...signalRequestArgs(signal),
+      ));
+    },
+    async getWorkspaceTransfer(input) {
+      return transport.readJson(transport.api.v1["workspace-transfers"][":operationId"].$get(
+        { param: { operationId: input.operationId } }, ...signalRequestArgs(input.signal),
+      ));
+    },
     attachments,
     async branches(input) {
       const { projectId, signal, ...query } = input;

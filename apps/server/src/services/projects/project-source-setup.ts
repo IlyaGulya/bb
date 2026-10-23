@@ -66,16 +66,31 @@ export function registerProjectSourceOnHost(
   return source;
 }
 
+interface CloneProjectSourceArgs {
+  projectId: string;
+  projectName: string;
+  hostId: string;
+  remoteUrl: string | null;
+  targetPath?: string;
+  report?: PluginEnvironmentProviderProgress;
+}
+
 export async function cloneProjectSourceOnHost(
   deps: CommandResultSideEffectsDeps,
-  args: {
-    projectId: string;
-    projectName: string;
-    hostId: string;
-    remoteUrl: string | null;
-    targetPath?: string;
-    report?: PluginEnvironmentProviderProgress;
-  },
+  args: CloneProjectSourceArgs,
+) {
+  const resolved = await cloneProjectCheckoutOnHost(deps, args);
+  return registerProjectSourceOnHost(deps, {
+    projectId: args.projectId,
+    hostId: args.hostId,
+    ...resolved,
+    ownsPath: true,
+  });
+}
+
+export async function cloneProjectCheckoutOnHost(
+  deps: CommandResultSideEffectsDeps,
+  args: CloneProjectSourceArgs,
 ) {
   if (!args.remoteUrl) {
     throw new ApiError(
@@ -114,12 +129,7 @@ export async function cloneProjectSourceOnHost(
           : {}),
       },
     });
-    return registerProjectSourceOnHost(deps, {
-      projectId: args.projectId,
-      hostId: args.hostId,
-      ...resolved,
-      ownsPath: true,
-    });
+    return resolved;
   } finally {
     unregister?.();
     progress?.dispose();

@@ -27,6 +27,7 @@ import {
   type TaskPropertyUpdate,
 } from "./rail.js";
 import { ThreadsSection } from "./threads.js";
+import { type TaskExecution } from "../../shared/execution.js";
 import { DetailToasts, useDetailToasts } from "./toast.js";
 import { JiraSourcePanel } from "../jira/source-panel.js";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
@@ -266,6 +267,12 @@ function TaskDetail({ task }: { task: Task }) {
     async (query) => (await query.call("listPresets")).presets,
     ["projects:changed"],
   );
+  const execution = useTasksQuery<TaskExecution>(
+    async () => delegationRpc.call("getTaskExecution", { taskId: task.id }),
+    ["tasks:changed", "projects:changed"],
+    [task.id],
+    { relevantTaskIds: [task.id] },
+  );
   const pullRequests = useTasksQuery(
     async (query) => query.call("listTaskPullRequests", { taskId: task.id }),
     ["threads:changed"],
@@ -421,6 +428,9 @@ function TaskDetail({ task }: { task: Task }) {
             projects={projects.data}
             labels={labels.data}
             presets={presets.data}
+            execution={execution.data}
+            executionError={execution.error}
+            onExecutionChange={execution.refresh}
             onUpdate={(update) => void updateTask(update)}
             onMoveToProject={(projectId) => void moveToProject(projectId)}
             onError={(message) => push(message)}
@@ -489,9 +499,10 @@ function TaskDetail({ task }: { task: Task }) {
             onCreate={createSubtask}
           />
 
-          {(threads.data ?? []).length > 0 ? (
             <div className="mt-6">
               <ThreadsSection
+                taskId={task.id}
+                onContinued={() => { threads.refresh(); pullRequests.refresh(); }}
                 threads={threads.data ?? []}
                 pullRequests={pullRequests.data?.pullRequests}
                 unavailableThreadIds={
@@ -508,7 +519,6 @@ function TaskDetail({ task }: { task: Task }) {
                 onError={(message) => push(message)}
               />
             </div>
-          ) : null}
           <JiraSourcePanel key={task.id} task={task} />
 
           <div className="mt-1">
@@ -523,6 +533,9 @@ function TaskDetail({ task }: { task: Task }) {
           labels={labels.data}
           threads={threads.data ?? []}
           presets={presets.data}
+          execution={execution.data}
+          executionError={execution.error}
+          onExecutionChange={execution.refresh}
           onUpdate={(update) => void updateTask(update)}
           onMoveToProject={(projectId) => void moveToProject(projectId)}
           onError={(message) => push(message)}

@@ -1,0 +1,1321 @@
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { constants } from "node:fs";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  realpath,
+  rm,
+  rmdir,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { devNull, tmpdir } from "node:os";
+import path from "node:path";
+import {
+  WORKSPACE_TRANSFER_MAX_BYTES,
+  WORKSPACE_TRANSFER_MAX_FILES,
+  WORKSPACE_TRANSFER_MAX_SERIALIZED_BYTES,
+  workspaceCheckpointSchema,
+  workspaceTransferFileSchema,
+  workspaceTransferPathSchema,
+  type WorkspaceCheckpoint,
+  type WorkspaceTransferFile,
+  type WorkspaceTransferPreviewResult,
+} from "@bb/host-daemon-contract";
+
+type GitEntry = { path: string; mode: "100644" | "100755"; oid: string };
+type FileIdentity = {
+  oid: string;
+  mode: "100644" | "100755";
+  permissions: number;
+  stamp: string;
+} | null;
+type TransferOptions = {
+  shellEnv?: Record<string, string>;
+  activeThreadIds?: () => string[];
+  acquireCapture?: () => () => void;
+};
+const transfers = new Set<string>();
+const sizeError =
+  "Workspace transfer exceeds the supported 64 MiB decoded payload (bundle + changed index/worktree files + selected files). Commit large changes or transfer large artifacts separately, then retry with fewer selected files.";
+const sha256 = (data: Buffer | string) =>
+  createHash("sha256").update(data).digest("hex");
+function budget() {
+  let used = 0;
+  return (bytes: number) => {
+    used += bytes;
+    if (used > WORKSPACE_TRANSFER_MAX_BYTES) throw new Error(sizeError);
+  };
+}
+export function assertWorkspaceTransferSerializedSize(
+  payload: WorkspaceCheckpoint | { files: WorkspaceTransferFile[] },
+  maxBytes = WORKSPACE_TRANSFER_MAX_SERIALIZED_BYTES,
+) {
+  if (Buffer.byteLength(JSON.stringify(payload), "utf8") > maxBytes) {
+    throw new Error(
+      "Workspace transfer exceeds the supported 96 MiB serialized JSON payload limit (base64 plus path/index metadata). Select fewer files or reduce workspace path/index metadata before retrying.",
+    );
+  }
+}
+
+function uniquePaths(paths: string[]) {
+  if (paths.length > WORKSPACE_TRANSFER_MAX_FILES)
+    throw new Error(
+      "Workspace transfer supports at most 10,000 files per list; narrow the selection.",
+    );
+  const result = paths.map((value) => workspaceTransferPathSchema.parse(value));
+  if (new Set(result).size !== result.length)
+    throw new Error("Duplicate workspace file paths are not allowed.");
+  const folded = new Set<string>();
+  for (const value of result) {
+    const key = value.normalize("NFC").toLowerCase();
+    if (folded.has(key))
+      throw new Error(
+        `Workspace paths collide on a case-insensitive filesystem: ${value}`,
+      );
+    folded.add(key);
+  }
+  return result;
+}
+function git(
+  root: string,
+  args: string[],
+  options: TransferOptions,
+  input?: Buffer,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const env = { ...process.env, ...options.shellEnv };
+    for (const key of Object.keys(env))
+      if (key.startsWith("GIT_")) delete env[key];
+    Object.assign(env, {
+      GIT_OPTIONAL_LOCKS: "0",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: devNull,
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_ATTR_NOSYSTEM: "1",
+      GIT_NO_LAZY_FETCH: "1",
+    });
+    const child = spawn(
+      "git",
+      [
+        "-c",
+        `core.hooksPath=${devNull}`,
+        "-c",
+        `core.attributesFile=${devNull}`,
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.filemode=true",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "maintenance.auto=false",
+        "-C",
+        root,
+        ...args,
+      ],
+      { env, stdio: ["pipe", "pipe", "pipe"] },
+    );
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let bytes = 0;
+    let failure: Error | null = null;
+    const timer = setTimeout(() => {
+      failure = new Error(
+        "Git workspace transfer exceeded 120 seconds; reduce repository/selection size and retry.",
+      );
+      child.kill("SIGKILL");
+    }, 120_000);
+    child.stdout.on("data", (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > WORKSPACE_TRANSFER_MAX_BYTES) {
+        failure = new Error(sizeError);
+        child.kill("SIGKILL");
+      } else stdout.push(chunk);
+    });
+    let errorBytes = 0;
+    child.stderr.on("data", (chunk: Buffer) => {
+      errorBytes += chunk.length;
+      if (errorBytes <= 65536) stderr.push(chunk);
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.stdin.on("error", () => {});
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (failure) reject(failure);
+      else if (code !== 0)
+        reject(
+          new Error(
+            `git ${args[0]} failed: ${Buffer.concat(stderr).toString("utf8").trim()}`,
+          ),
+        );
+      else resolve(Buffer.concat(stdout));
+    });
+    child.stdin.end(input);
+  });
+}
+async function rootDirectory(rootPath: string) {
+  const resolved = path.resolve(rootPath);
+  if ((await lstat(resolved)).isSymbolicLink())
+    throw new Error(`Workspace root must not be a symlink: ${rootPath}`);
+  const root = await realpath(resolved);
+  if (!(await stat(root)).isDirectory())
+    throw new Error(`Workspace root is not a directory: ${rootPath}`);
+  return root;
+}
+async function confined(root: string, relative: string, createParents = false) {
+  workspaceTransferPathSchema.parse(relative);
+  const parts = relative.split("/");
+  let current = root;
+  for (const part of parts.slice(0, -1)) {
+    current = path.join(current, part);
+    if (createParents)
+      await mkdir(current).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "EEXIST") throw error;
+      });
+    const info = await lstat(current);
+    if (info.isSymbolicLink())
+      throw new Error(`Unsafe workspace path component: ${relative}`);
+    if (!info.isDirectory())
+      throw Object.assign(
+        new Error(`Workspace path component is not a directory: ${relative}`),
+        { code: "ENOTDIR" },
+      );
+  }
+  return path.join(root, ...parts);
+}
+async function readOrdinary(
+  root: string,
+  relative: string,
+  charge: (bytes: number) => void,
+): Promise<WorkspaceTransferFile> {
+  const absolute = await confined(root, relative);
+  const handle = await open(
+    absolute,
+    constants.O_RDONLY | constants.O_NOFOLLOW,
+  );
+  try {
+    const before = await handle.stat();
+    if (!before.isFile())
+      throw new Error(`Only ordinary files can be transferred: ${relative}`);
+    charge(before.size);
+    if (before.size > WORKSPACE_TRANSFER_MAX_BYTES) throw new Error(sizeError);
+    const content = Buffer.allocUnsafe(before.size);
+    let offset = 0;
+    while (offset < content.length) {
+      const { bytesRead } = await handle.read(
+        content,
+        offset,
+        content.length - offset,
+        offset,
+      );
+      if (bytesRead === 0)
+        throw new Error(
+          `Source changed during capture: ${relative}; stop writers and retry.`,
+        );
+      offset += bytesRead;
+    }
+    const probe = Buffer.allocUnsafe(1);
+    const extraBytes = (await handle.read(probe, 0, 1, content.length))
+      .bytesRead;
+    const after = await handle.stat();
+    if (
+      before.size !== after.size ||
+      before.mtimeMs !== after.mtimeMs ||
+      before.ctimeMs !== after.ctimeMs ||
+      extraBytes !== 0
+    )
+      throw new Error(
+        `Source changed during capture: ${relative}; stop writers and retry.`,
+      );
+    return {
+      path: relative,
+      mode: before.mode & 0o100 ? "100755" : "100644",
+      permissions: before.mode & 0o777,
+      contentBase64: content.toString("base64"),
+      sha256: sha256(content),
+    };
+  } finally {
+    await handle.close();
+  }
+}
+async function fileIdentity(
+  root: string,
+  relative: string,
+  objectFormat: "sha1" | "sha256",
+): Promise<FileIdentity> {
+  let absolute: string;
+  try {
+    absolute = await confined(root, relative);
+  } catch (error) {
+    if (isMissing(error)) return null;
+    throw error;
+  }
+  let info;
+  try {
+    info = await lstat(absolute);
+  } catch (error) {
+    if (isMissing(error)) return null;
+    throw error;
+  }
+  if (info.isDirectory()) return null;
+  if (!info.isFile() || info.isSymbolicLink())
+    throw new Error(
+      `Symlinks and non-ordinary files cannot be transferred: ${relative}`,
+    );
+  const hash = createHash(objectFormat).update(`blob ${info.size}\0`);
+  const handle = await open(
+    absolute,
+    constants.O_RDONLY | constants.O_NOFOLLOW,
+  );
+  try {
+    for await (const chunk of handle.createReadStream({ autoClose: false }))
+      hash.update(chunk);
+  } finally {
+    await handle.close();
+  }
+  const after = await lstat(absolute);
+  if (
+    info.size !== after.size ||
+    info.mtimeMs !== after.mtimeMs ||
+    info.ctimeMs !== after.ctimeMs ||
+    info.ino !== after.ino
+  )
+    throw new Error(
+      `Source changed during capture: ${relative}; stop writers and retry.`,
+    );
+  return {
+    oid: hash.digest("hex"),
+    mode: info.mode & 0o100 ? ("100755" as const) : ("100644" as const),
+    permissions: info.mode & 0o777,
+    stamp: `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`,
+  };
+}
+function isMissing(error: unknown) {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error.code === "ENOENT" || error.code === "ENOTDIR")
+  );
+}
+function secretReason(relative: string) {
+  const parts = relative.toLowerCase().split("/");
+  if (
+    parts.some((part) =>
+      [
+        ".ssh",
+        ".aws",
+        ".azure",
+        ".gnupg",
+        ".kube",
+        ".codex",
+        ".claude",
+        ".config",
+        ".mcp",
+        ".bb",
+        "secrets",
+        "credentials",
+      ].includes(part),
+    ) ||
+    parts.some(
+      (part) =>
+        /^\.env(?:\.|$)/u.test(part) ||
+        /(?:^|[._-])(?:credentials|secrets?|tokens?)(?:[._-]|$)/u.test(part) ||
+        /\.(?:pem|key|p12|pfx|keystore)$/u.test(part),
+    )
+  )
+    return "Sensitive configuration/auth/session path; select this exact ordinary file explicitly to consent to copying it.";
+  return undefined;
+}
+function gitPaths(output: Buffer) {
+  const text = output.toString("utf8");
+  if (!Buffer.from(text, "utf8").equals(output))
+    throw new Error(
+      "Workspace paths must be valid UTF-8 for portable transfer; rename unsupported paths before retrying.",
+    );
+  return text.split("\0").filter(Boolean);
+}
+
+async function metadataFingerprint(gitDirectory: string) {
+  return Promise.all(
+    ["HEAD", "index"].map(async (name) => {
+      try {
+        const hash = createHash("sha256");
+        const handle = await open(
+          path.join(gitDirectory, name),
+          constants.O_RDONLY | constants.O_NOFOLLOW,
+        );
+        try {
+          for await (const chunk of handle.createReadStream({
+            autoClose: false,
+          }))
+            hash.update(chunk);
+        } finally {
+          await handle.close();
+        }
+        return hash.digest("hex");
+      } catch (error) {
+        if (isMissing(error)) return null;
+        throw error;
+      }
+    }),
+  );
+}
+
+function parseEntries(output: Buffer, tree: boolean): GitEntry[] {
+  const entries = gitPaths(output).map((record): GitEntry => {
+    const match = tree
+      ? /^(\d{6}) (\w+) ([a-f0-9]+)\t([\s\S]+)$/u.exec(record)
+      : /^(\d{6}) ([a-f0-9]+) (\d)\t([\s\S]+)$/u.exec(record);
+    if (!match)
+      throw new Error("Git returned an unsupported index/tree entry.");
+    const mode = match[1];
+    const relative = match[4]!;
+    workspaceTransferPathSchema.parse(relative);
+    if (mode !== "100644" && mode !== "100755")
+      throw new Error(
+        `Symlinks, gitlinks, and submodules are unsupported: ${relative}`,
+      );
+    if (!tree && match[3] !== "0")
+      throw new Error(
+        `Unmerged index entry: ${relative}; resolve conflicts before transfer.`,
+      );
+    if (
+      relative.split("/").some((part) => part.toLowerCase() === ".gitmodules")
+    )
+      throw new Error(
+        `Submodule metadata is unsupported: ${relative}; remove submodules before transfer.`,
+      );
+    return { path: relative, mode, oid: (tree ? match[3] : match[2])! };
+  });
+  uniquePaths(entries.map((entry) => entry.path));
+  return entries;
+}
+async function ensureNoGitOperation(root: string, options: TransferOptions) {
+  for (const name of [
+    "MERGE_HEAD",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "REBASE_HEAD",
+    "rebase-apply",
+    "rebase-merge",
+    "sequencer",
+    "BISECT_START",
+    "index.lock",
+    "HEAD.lock",
+    "shallow",
+    "info/grafts",
+  ]) {
+    const value = (await git(root, ["rev-parse", "--git-path", name], options))
+      .toString("utf8")
+      .trim();
+    try {
+      await lstat(path.resolve(root, value));
+    } catch (error) {
+      if (isMissing(error)) continue;
+      throw error;
+    }
+    throw new Error(
+      `Workspace has an in-progress Git operation or unsupported history state (${name}); finish/abort the operation, unshallow the repository, or remove grafts before transfer.`,
+    );
+  }
+}
+async function inspect(root: string, options: TransferOptions) {
+  const top = (await git(root, ["rev-parse", "--show-toplevel"], options))
+    .toString("utf8")
+    .trim();
+  if ((await realpath(top)) !== root)
+    throw new Error(
+      "Workspace transfer requires the repository/worktree root, not a nested directory.",
+    );
+  const configNames = (
+    await git(root, ["config", "--name-only", "--list"], options)
+  )
+    .toString("utf8")
+    .split("\n");
+  for (const name of configNames)
+    if (
+      /^remote\..*\.promisor$/iu.test(name) &&
+      (await git(root, ["config", "--bool", "--get", name], options))
+        .toString("utf8")
+        .trim() === "true"
+    )
+      throw new Error(
+        "Partial/promisor clones cannot be captured without modifying source object storage; fully materialize repository history before transfer.",
+      );
+  if (
+    (
+      await git(
+        root,
+        [
+          "config",
+          "--bool",
+          "--default",
+          "false",
+          "--get",
+          "core.sparseCheckout",
+        ],
+        options,
+      )
+    )
+      .toString("utf8")
+      .trim() === "true" ||
+    (
+      await git(
+        root,
+        ["config", "--bool", "--default", "false", "--get", "index.sparse"],
+        options,
+      )
+    )
+      .toString("utf8")
+      .trim() === "true"
+  )
+    throw new Error(
+      "Sparse checkouts/indexes cannot be transferred exactly; disable sparse checkout and expand the index before transfer.",
+    );
+  if (
+    (
+      await git(
+        root,
+        ["for-each-ref", "--format=%(refname)", "refs/replace/"],
+        options,
+      )
+    ).length
+  )
+    throw new Error(
+      "Git replacement refs are unsupported; remove replacement refs before transfer.",
+    );
+  await ensureNoGitOperation(root, options);
+  const head = (
+    await git(root, ["rev-parse", "--verify", "HEAD^{commit}"], options)
+  )
+    .toString("utf8")
+    .trim();
+  const branchValue = (
+    await git(root, ["rev-parse", "--abbrev-ref", "HEAD"], options)
+  )
+    .toString("utf8")
+    .trim();
+  const headEntries = parseEntries(
+    await git(root, ["ls-tree", "-rz", "--full-tree", "HEAD"], options),
+    true,
+  );
+  const indexEntries = parseEntries(
+    await git(root, ["ls-files", "--stage", "-z"], options),
+    false,
+  );
+  const flags = (await git(root, ["ls-files", "-v", "-z"], options))
+    .toString("utf8")
+    .split("\0")
+    .filter(Boolean);
+  for (const value of flags)
+    if (value[0] !== "H")
+      throw new Error(
+        `Unsupported index flag (assume-unchanged/skip-worktree): ${value.slice(2)}; clear it before transfer.`,
+      );
+  const untracked = gitPaths(
+    await git(
+      root,
+      ["ls-files", "--others", "--exclude-standard", "-z"],
+      options,
+    ),
+  );
+  const ignored = gitPaths(
+    await git(
+      root,
+      [
+        "ls-files",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "--directory",
+        "-z",
+      ],
+      options,
+    ),
+  ).map((value) => value.replace(/\/$/u, ""));
+  uniquePaths([
+    ...new Set([
+      ...headEntries.map((entry) => entry.path),
+      ...indexEntries.map((entry) => entry.path),
+      ...untracked,
+      ...ignored,
+    ]),
+  ]);
+  const trackedPaths = [
+    ...new Set([...headEntries, ...indexEntries].map((entry) => entry.path)),
+  ];
+  const attributes = (
+    await git(
+      root,
+      ["check-attr", "-z", "--stdin", "filter"],
+      options,
+      Buffer.from(trackedPaths.map((relative) => `${relative}\0`).join("")),
+    )
+  )
+    .toString("utf8")
+    .split("\0");
+  const lfsPaths: string[] = [];
+  for (let index = 0; index + 2 < attributes.length; index += 3) {
+    const relative = attributes[index]!;
+    const filter = attributes[index + 2]!;
+    if (filter === "unspecified" || filter === "unset") continue;
+    if (filter !== "lfs")
+      throw new Error(
+        `Custom Git clean/smudge filter '${filter}' is unsupported for ${relative}; materialize ordinary files and remove the filter before transfer.`,
+      );
+    lfsPaths.push(relative);
+    let absolute: string;
+    try {
+      absolute = await confined(root, relative);
+    } catch (error) {
+      if (isMissing(error)) continue;
+      throw error;
+    }
+    let handle;
+    try {
+      handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch (error) {
+      if (isMissing(error)) continue;
+      throw error;
+    }
+    try {
+      if (!(await handle.stat()).isFile())
+        throw new Error(`LFS path is not an ordinary file: ${relative}`);
+      const prefix = Buffer.alloc(200);
+      const { bytesRead } = await handle.read(prefix, 0, prefix.length, 0);
+      if (
+        prefix
+          .subarray(0, bytesRead)
+          .toString("utf8")
+          .startsWith("version https://git-lfs.github.com/spec/v1")
+      )
+        throw new Error(
+          `Git LFS content is missing for ${relative}; fetch/materialize its actual bytes before transfer.`,
+        );
+    } finally {
+      await handle.close();
+    }
+  }
+  const visible = new Set(
+    (
+      await git(
+        root,
+        [
+          "diff",
+          "--no-ext-diff",
+          "--no-textconv",
+          "--cached",
+          "--name-only",
+          "-z",
+          "--ita-visible-in-index",
+          "HEAD",
+          "--",
+        ],
+        options,
+      )
+    )
+      .toString("utf8")
+      .split("\0")
+      .filter(Boolean),
+  );
+  const invisible = new Set(
+    (
+      await git(
+        root,
+        [
+          "diff",
+          "--no-ext-diff",
+          "--no-textconv",
+          "--cached",
+          "--name-only",
+          "-z",
+          "--ita-invisible-in-index",
+          "HEAD",
+          "--",
+        ],
+        options,
+      )
+    )
+      .toString("utf8")
+      .split("\0")
+      .filter(Boolean),
+  );
+  const intentPaths = [...visible].filter((value) => !invisible.has(value));
+  return {
+    head,
+    branch: branchValue === "HEAD" ? null : branchValue,
+    headEntries,
+    indexEntries,
+    untracked,
+    ignored,
+    intentPaths,
+    lfsPaths,
+  };
+}
+export async function previewWorkspaceTransfer(
+  rootPath: string,
+  options: TransferOptions = {},
+): Promise<WorkspaceTransferPreviewResult> {
+  const root = await rootDirectory(rootPath);
+  const state = await inspect(root, options);
+  const tracked = new Set(
+    [...state.headEntries, ...state.indexEntries].map((entry) => entry.path),
+  );
+  const files: WorkspaceTransferPreviewResult["files"] = [];
+  for (const relative of [...tracked].sort()) {
+    await fileIdentity(
+      root,
+      relative,
+      state.head.length === 64 ? "sha256" : "sha1",
+    );
+    const excludedReason = secretReason(relative);
+    files.push({
+      path: relative,
+      kind: excludedReason ? "sensitive-tracked" : "tracked",
+      tracked: true,
+      selectedByDefault: !excludedReason,
+      ...(excludedReason ? { excludedReason } : {}),
+    });
+  }
+  for (const [kind, paths] of [
+    ["untracked", state.untracked],
+    ["ignored", state.ignored],
+  ] as const)
+    for (const relative of paths) {
+      if (tracked.has(relative)) continue;
+      const excludedReason =
+        secretReason(relative) ??
+        (state.ignored.includes(relative)
+          ? "Ignored path; select exact ordinary files explicitly, not directories."
+          : "Not copied unless explicitly selected.");
+      files.push({
+        path: relative,
+        kind,
+        tracked: false,
+        selectedByDefault: false,
+        excludedReason,
+      });
+    }
+  return {
+    head: state.head,
+    branch: state.branch,
+    files,
+    activeThreadIds: options.activeThreadIds?.() ?? [],
+    maxPayloadBytes: WORKSPACE_TRANSFER_MAX_BYTES,
+  };
+}
+export async function captureWorkspace(
+  rootPath: string,
+  includePaths: string[],
+  options: TransferOptions = {},
+): Promise<{ checkpoint: WorkspaceCheckpoint }> {
+  const root = await rootDirectory(rootPath);
+  if (transfers.has(root))
+    throw new Error(
+      "A workspace operation is already in progress for this source.",
+    );
+  transfers.add(root);
+  let release: (() => void) | undefined;
+  let temporary: string | undefined;
+  try {
+    release = options.acquireCapture?.();
+    if (options.activeThreadIds?.().length)
+      throw new Error(
+        "Workspace has active local sessions; stop them before capture.",
+      );
+    const gitDirectory = (
+      await git(root, ["rev-parse", "--absolute-git-dir"], options)
+    )
+      .toString("utf8")
+      .trim();
+    const originalMetadata = await metadataFingerprint(gitDirectory);
+    const selection = new Set(uniquePaths(includePaths));
+    const state = await inspect(root, options);
+    const tracked = new Set(
+      [...state.headEntries, ...state.indexEntries].map((entry) => entry.path),
+    );
+    for (const relative of tracked)
+      if (secretReason(relative) && !selection.has(relative))
+        throw new Error(
+          `Tracked sensitive path ${relative} cannot be silently omitted. Explicitly include this exact path to consent, or remove it from the workspace before transfer.`,
+        );
+    const charge = budget();
+    const objectFormat = state.head.length === 64 ? "sha256" : "sha1";
+    const headByPath = new Map(
+      state.headEntries.map((entry) => [entry.path, entry]),
+    );
+    const intents = new Set(state.intentPaths);
+    const index: WorkspaceCheckpoint["index"] = [];
+    for (const entry of state.indexEntries) {
+      const intentToAdd = intents.has(entry.path);
+      if (headByPath.get(entry.path)?.oid === entry.oid)
+        index.push({ ...entry, intentToAdd });
+      else {
+        const content = await git(
+          root,
+          ["cat-file", "blob", entry.oid],
+          options,
+        );
+        charge(content.length);
+        index.push({
+          ...entry,
+          intentToAdd,
+          contentBase64: content.toString("base64"),
+          sha256: sha256(content),
+        });
+      }
+    }
+    const identities = new Map<string, FileIdentity>();
+    const worktree: WorkspaceCheckpoint["worktree"] = [];
+    const filePermissions: WorkspaceCheckpoint["filePermissions"] = [];
+    for (const relative of [...tracked].sort()) {
+      const identity = await fileIdentity(root, relative, objectFormat);
+      identities.set(relative, identity);
+      if (identity)
+        filePermissions.push({
+          path: relative,
+          permissions: identity.permissions,
+        });
+      const base = headByPath.get(relative);
+      if (!identity) {
+        if (base) worktree.push({ path: relative, file: null });
+      } else if (identity.oid !== base?.oid || identity.mode !== base?.mode)
+        worktree.push({
+          path: relative,
+          file: await readOrdinary(root, relative, charge),
+        });
+    }
+    const extraFiles: WorkspaceTransferFile[] = [];
+    for (const relative of selection)
+      if (!tracked.has(relative)) {
+        identities.set(
+          relative,
+          await fileIdentity(root, relative, objectFormat),
+        );
+        extraFiles.push(await readOrdinary(root, relative, charge));
+      }
+    temporary = await mkdtemp(path.join(tmpdir(), "bb-workspace-capture-"));
+    const bundlePath = path.join(temporary, "workspace.bundle");
+    await git(root, ["bundle", "create", bundlePath, "HEAD"], options);
+    charge((await stat(bundlePath)).size);
+    const bundle = await readFile(bundlePath);
+    if (JSON.stringify(state) !== JSON.stringify(await inspect(root, options)))
+      throw new Error(
+        "Source Git state changed during capture; stop writers and retry.",
+      );
+    for (const [relative, identity] of identities)
+      if (
+        JSON.stringify(identity) !==
+        JSON.stringify(await fileIdentity(root, relative, objectFormat))
+      )
+        throw new Error(
+          `Source changed during capture: ${relative}; stop writers and retry.`,
+        );
+    if (
+      JSON.stringify(originalMetadata) !==
+        JSON.stringify(await metadataFingerprint(gitDirectory)) ||
+      (await git(root, ["rev-parse", "HEAD"], options))
+        .toString("utf8")
+        .trim() !== state.head
+    )
+      throw new Error(
+        "Source Git state changed during capture; stop writers and retry.",
+      );
+    if (
+      !(await git(root, ["bundle", "list-heads", bundlePath, "HEAD"], options))
+        .toString("utf8")
+        .startsWith(`${state.head} HEAD`)
+    )
+      throw new Error(
+        "Source HEAD changed while creating the Git bundle; stop writers and retry.",
+      );
+    if (options.activeThreadIds?.().length)
+      throw new Error(
+        "A local session became active during capture; stop it and retry.",
+      );
+    const checkpoint: WorkspaceCheckpoint = {
+      version: 1,
+      head: state.head,
+      branch: state.branch,
+      bundleBase64: bundle.toString("base64"),
+      bundleSha256: sha256(bundle),
+      lfsPaths: state.lfsPaths,
+      index,
+      worktree,
+      extraFiles,
+      filePermissions,
+    };
+    assertWorkspaceTransferSerializedSize(checkpoint);
+    return { checkpoint };
+  } finally {
+    try {
+      if (temporary) await rm(temporary, { recursive: true, force: true });
+    } finally {
+      transfers.delete(root);
+      release?.();
+    }
+  }
+}
+function decodedFile(
+  file: Pick<WorkspaceTransferFile, "path" | "contentBase64" | "sha256">,
+  charge: (bytes: number) => void,
+) {
+  const content = Buffer.from(file.contentBase64, "base64");
+  charge(content.length);
+  if (sha256(content) !== file.sha256)
+    throw new Error(`File SHA-256 mismatch: ${file.path}`);
+  return content;
+}
+async function writeOrdinary(
+  root: string,
+  file: WorkspaceTransferFile,
+  content: Buffer,
+  replace = false,
+) {
+  const absolute = await confined(root, file.path, true);
+  if (replace) {
+    try {
+      const info = await lstat(absolute);
+      if (!info.isFile() || info.isSymbolicLink())
+        throw new Error(`Unsafe restore path: ${file.path}`);
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+    }
+  }
+  const handle = await open(
+    absolute,
+    constants.O_RDWR |
+      constants.O_CREAT |
+      constants.O_NOFOLLOW |
+      (replace ? constants.O_TRUNC : constants.O_EXCL),
+    0o600,
+  );
+  try {
+    await handle.writeFile(content);
+    const hash = createHash("sha256");
+    for await (const chunk of handle.createReadStream({
+      start: 0,
+      autoClose: false,
+    }))
+      hash.update(chunk);
+    if (hash.digest("hex") !== file.sha256)
+      throw new Error(`Target binary verification failed: ${file.path}`);
+    await handle.chmod(file.permissions);
+    if (((await handle.stat()).mode & 0o777) !== file.permissions)
+      throw new Error(`Target permissions verification failed: ${file.path}`);
+  } finally {
+    await handle.close();
+  }
+}
+export async function copyWorkspaceRead(rootPath: string, paths: string[]) {
+  const root = await rootDirectory(rootPath);
+  const charge = budget();
+  const files: WorkspaceTransferFile[] = [];
+  for (const relative of uniquePaths(paths))
+    files.push(await readOrdinary(root, relative, charge));
+  assertWorkspaceTransferSerializedSize({ files });
+  return { files };
+}
+export async function copyWorkspaceWrite(
+  rootPath: string,
+  inputFiles: WorkspaceTransferFile[],
+) {
+  assertWorkspaceTransferSerializedSize({ files: inputFiles });
+  const root = await rootDirectory(rootPath);
+  const files = inputFiles.map((file) =>
+    workspaceTransferFileSchema.parse(file),
+  );
+  uniquePaths(files.map((file) => file.path));
+  const charge = budget();
+  const contents = files.map((file) => decodedFile(file, charge));
+  for (const file of files) {
+    try {
+      const absolute = await confined(root, file.path);
+      await lstat(absolute);
+    } catch (error) {
+      if (isMissing(error)) continue;
+      throw error;
+    }
+    throw new Error(`Refusing to overwrite target file: ${file.path}`);
+  }
+  for (let index = 0; index < files.length; index++)
+    await writeOrdinary(root, files[index]!, contents[index]!);
+  return {
+    files: files.map(({ path: relative, sha256: hash }) => ({
+      path: relative,
+      sha256: hash,
+    })),
+  };
+}
+export async function restoreWorkspace(
+  targetPath: string,
+  inputCheckpoint: WorkspaceCheckpoint,
+  branchOverride?: string,
+  options: TransferOptions = {},
+) {
+  assertWorkspaceTransferSerializedSize(inputCheckpoint);
+  const checkpoint = workspaceCheckpointSchema.parse(inputCheckpoint);
+  const charge = budget();
+  const bundle = Buffer.from(checkpoint.bundleBase64, "base64");
+  charge(bundle.length);
+  if (sha256(bundle) !== checkpoint.bundleSha256)
+    throw new Error("Workspace bundle SHA-256 mismatch.");
+  uniquePaths(checkpoint.index.map((entry) => entry.path));
+  uniquePaths(checkpoint.worktree.map((entry) => entry.path));
+  uniquePaths(checkpoint.extraFiles.map((entry) => entry.path));
+  uniquePaths(checkpoint.filePermissions.map((entry) => entry.path));
+  for (const entry of checkpoint.index)
+    if (entry.contentBase64 !== undefined)
+      decodedFile(
+        {
+          path: entry.path,
+          contentBase64: entry.contentBase64,
+          sha256: entry.sha256!,
+        },
+        charge,
+      );
+  for (const entry of checkpoint.worktree)
+    if (entry.file) {
+      if (entry.path !== entry.file.path)
+        throw new Error("Worktree entry path does not match file path.");
+      decodedFile(entry.file, charge);
+    }
+  for (const file of checkpoint.extraFiles) decodedFile(file, charge);
+  const requested = path.resolve(targetPath);
+  await mkdir(path.dirname(requested), { recursive: true });
+  const root = path.join(
+    await realpath(path.dirname(requested)),
+    path.basename(requested),
+  );
+  if (transfers.has(root))
+    throw new Error(
+      "A workspace operation is already in progress for this target.",
+    );
+  transfers.add(root);
+  let created = false;
+  let temporary: string | undefined;
+  try {
+    await mkdir(root).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "EEXIST")
+        throw new Error(`Refusing to overwrite existing target path: ${root}`);
+      throw error;
+    });
+    created = true;
+    temporary = await mkdtemp(path.join(tmpdir(), "bb-workspace-restore-"));
+    const bundlePath = path.join(temporary, "workspace.bundle");
+    await writeFile(bundlePath, bundle, { flag: "wx", mode: 0o600 });
+    await git(
+      root,
+      [
+        "init",
+        "-q",
+        ...(checkpoint.head.length === 64 ? ["--object-format=sha256"] : []),
+      ],
+      options,
+    );
+    const branch = branchOverride ?? checkpoint.branch;
+    if (branch !== null)
+      await git(root, ["check-ref-format", "--branch", branch], options);
+    await git(root, ["fetch", "--no-tags", bundlePath, "HEAD"], options);
+    const fetched = (
+      await git(root, ["rev-parse", "FETCH_HEAD^{commit}"], options)
+    )
+      .toString("utf8")
+      .trim();
+    if (fetched !== checkpoint.head)
+      throw new Error("Bundle HEAD does not match the checkpoint HEAD.");
+    const headEntries = parseEntries(
+      await git(
+        root,
+        ["ls-tree", "-rz", "--full-tree", checkpoint.head],
+        options,
+      ),
+      true,
+    );
+    const trackedPaths = new Set(
+      [...headEntries, ...checkpoint.index].map((entry) => entry.path),
+    );
+    uniquePaths([
+      ...trackedPaths,
+      ...checkpoint.extraFiles.map((file) => file.path),
+    ]);
+    for (const entry of checkpoint.worktree)
+      if (!trackedPaths.has(entry.path))
+        throw new Error(`Worktree delta is not a tracked path: ${entry.path}`);
+    for (const file of checkpoint.extraFiles)
+      if (trackedPaths.has(file.path))
+        throw new Error(`Extra file conflicts with tracked path: ${file.path}`);
+    await git(root, ["checkout", "--detach", checkpoint.head], options);
+    for (const entry of headEntries) {
+      const identity = await fileIdentity(
+        root,
+        entry.path,
+        checkpoint.head.length === 64 ? "sha256" : "sha1",
+      );
+      if (identity?.oid !== entry.oid || identity.mode !== entry.mode) {
+        const content = await git(
+          root,
+          ["cat-file", "blob", entry.oid],
+          options,
+        );
+        await writeOrdinary(
+          root,
+          {
+            path: entry.path,
+            mode: entry.mode,
+            permissions: entry.mode === "100755" ? 0o755 : 0o644,
+            contentBase64: content.toString("base64"),
+            sha256: sha256(content),
+          },
+          content,
+          true,
+        );
+      }
+    }
+    if (branch !== null) {
+      await git(
+        root,
+        ["update-ref", `refs/heads/${branch}`, checkpoint.head],
+        options,
+      );
+      await git(
+        root,
+        ["symbolic-ref", "HEAD", `refs/heads/${branch}`],
+        options,
+      );
+    }
+    await git(root, ["read-tree", "--empty"], options);
+    const headByPath = new Map(headEntries.map((entry) => [entry.path, entry]));
+    for (const entry of checkpoint.index) {
+      if (entry.contentBase64 !== undefined) {
+        const oid = (
+          await git(
+            root,
+            ["hash-object", "-w", "--stdin"],
+            options,
+            Buffer.from(entry.contentBase64, "base64"),
+          )
+        )
+          .toString("utf8")
+          .trim();
+        if (oid !== entry.oid)
+          throw new Error(`Index blob object hash mismatch: ${entry.path}`);
+      } else if (headByPath.get(entry.path)?.oid !== entry.oid)
+        throw new Error(`Missing changed index blob: ${entry.path}`);
+    }
+    const indexInfo = checkpoint.index
+      .filter((entry) => !entry.intentToAdd)
+      .map((entry) => `${entry.mode} ${entry.oid}\t${entry.path}\0`)
+      .join("");
+    await git(
+      root,
+      ["update-index", "-z", "--index-info"],
+      options,
+      Buffer.from(indexInfo),
+    );
+    for (const entry of checkpoint.worktree)
+      if (!entry.file) {
+        try {
+          const absolute = await confined(root, entry.path);
+          const info = await lstat(absolute);
+          if (!info.isFile() || info.isSymbolicLink())
+            throw new Error(`Unsafe deletion path: ${entry.path}`);
+          await rm(absolute);
+          let parent = path.dirname(absolute);
+          while (parent !== root) {
+            try {
+              await rmdir(parent);
+            } catch {
+              break;
+            }
+            parent = path.dirname(parent);
+          }
+        } catch (error) {
+          if (!isMissing(error)) throw error;
+        }
+      }
+    for (const entry of checkpoint.worktree)
+      if (entry.file)
+        await writeOrdinary(
+          root,
+          entry.file,
+          Buffer.from(entry.file.contentBase64, "base64"),
+          true,
+        );
+    for (const file of checkpoint.extraFiles)
+      await writeOrdinary(
+        root,
+        file,
+        Buffer.from(file.contentBase64, "base64"),
+      );
+    if (checkpoint.lfsPaths.length) {
+      try {
+        await git(root, ["lfs", "version"], options);
+      } catch {
+        throw new Error(
+          "This checkpoint contains materialized Git LFS files. Install Git LFS on the target machine, then retry; no target files were registered and no remote authentication is needed for this restore.",
+        );
+      }
+      for (const [key, value] of [
+        ["clean", "git-lfs clean -- %f"],
+        ["smudge", "git-lfs smudge -- %f"],
+        ["process", "git-lfs filter-process"],
+        ["required", "true"],
+      ]) {
+        await git(
+          root,
+          ["config", "--local", `filter.lfs.${key}`, value!],
+          options,
+        );
+      }
+    }
+    for (const entry of checkpoint.index)
+      if (entry.intentToAdd) {
+        const absolute = await confined(root, entry.path, true);
+        let originalMode: number | null = null;
+        try {
+          originalMode = (await lstat(absolute)).mode;
+        } catch (error) {
+          if (!isMissing(error)) throw error;
+        }
+        if (originalMode === null)
+          await writeFile(absolute, Buffer.alloc(0), { flag: "wx" });
+        const handle = await open(
+          absolute,
+          constants.O_RDONLY | constants.O_NOFOLLOW,
+        );
+        try {
+          await handle.chmod(entry.mode === "100755" ? 0o755 : 0o644);
+        } finally {
+          await handle.close();
+        }
+        await git(
+          root,
+          ["add", "--force", "--intent-to-add", "--", entry.path],
+          options,
+        );
+        if (originalMode === null) await rm(absolute);
+        else {
+          const restored = await open(
+            absolute,
+            constants.O_RDONLY | constants.O_NOFOLLOW,
+          );
+          try {
+            await restored.chmod(originalMode & 0o777);
+          } finally {
+            await restored.close();
+          }
+        }
+      }
+    const actualIndex = parseEntries(
+      await git(root, ["ls-files", "--stage", "-z"], options),
+      false,
+    );
+    const expectedIndex = checkpoint.index
+      .map(({ path: relative, mode, oid }) => ({ path: relative, mode, oid }))
+      .sort((a, b) => a.path.localeCompare(b.path));
+    if (
+      JSON.stringify(
+        actualIndex.sort((a, b) => a.path.localeCompare(b.path)),
+      ) !== JSON.stringify(expectedIndex)
+    )
+      throw new Error("Restored index verification failed.");
+    const restoredState = await inspect(root, options);
+    if (
+      JSON.stringify(restoredState.lfsPaths.sort()) !==
+      JSON.stringify([...checkpoint.lfsPaths].sort())
+    )
+      throw new Error(
+        "Restored LFS attributes differ from the source. Explicitly include the applicable .gitattributes files; source-only .git/info/attributes must be migrated into .gitattributes before transfer.",
+      );
+    const restoredIntents = restoredState.intentPaths.sort();
+    if (
+      JSON.stringify(restoredIntents) !==
+      JSON.stringify(
+        checkpoint.index
+          .filter((entry) => entry.intentToAdd)
+          .map((entry) => entry.path)
+          .sort(),
+      )
+    )
+      throw new Error(
+        "Restored intent-to-add index flags failed verification.",
+      );
+    const expectedWorktree = new Map<
+      string,
+      { oid: string; mode: GitEntry["mode"]; permissions: number | null }
+    >(
+      headEntries.map((entry) => [
+        entry.path,
+        { oid: entry.oid, mode: entry.mode, permissions: null },
+      ]),
+    );
+    for (const entry of checkpoint.worktree) {
+      if (!entry.file) expectedWorktree.delete(entry.path);
+      else
+        expectedWorktree.set(entry.path, {
+          oid: createHash(checkpoint.head.length === 64 ? "sha256" : "sha1")
+            .update(
+              `blob ${Buffer.byteLength(entry.file.contentBase64, "base64")}\0`,
+            )
+            .update(Buffer.from(entry.file.contentBase64, "base64"))
+            .digest("hex"),
+          mode: entry.file.mode,
+          permissions: null,
+        });
+    }
+    if (checkpoint.filePermissions.length !== expectedWorktree.size)
+      throw new Error(
+        "Checkpoint must preserve permissions for every present tracked file.",
+      );
+    for (const entry of checkpoint.filePermissions) {
+      const expected = expectedWorktree.get(entry.path);
+      if (!expected)
+        throw new Error(
+          `Permissions do not belong to a present tracked file: ${entry.path}`,
+        );
+      expected.permissions = entry.permissions;
+      const handle = await open(
+        await confined(root, entry.path),
+        constants.O_RDONLY | constants.O_NOFOLLOW,
+      );
+      try {
+        await handle.chmod(entry.permissions);
+      } finally {
+        await handle.close();
+      }
+    }
+    for (const relative of trackedPaths) {
+      const actual = await fileIdentity(
+        root,
+        relative,
+        checkpoint.head.length === 64 ? "sha256" : "sha1",
+      );
+      const expected = expectedWorktree.get(relative);
+      if (
+        actual?.oid !== expected?.oid ||
+        actual?.mode !== expected?.mode ||
+        actual?.permissions !== expected?.permissions
+      )
+        throw new Error(`Restored worktree verification failed: ${relative}`);
+    }
+    return { rootPath: root, head: checkpoint.head, branch };
+  } catch (error) {
+    if (created) await rm(root, { recursive: true, force: true });
+    throw error;
+  } finally {
+    try {
+      if (temporary) await rm(temporary, { recursive: true, force: true });
+    } finally {
+      transfers.delete(root);
+    }
+  }
+}

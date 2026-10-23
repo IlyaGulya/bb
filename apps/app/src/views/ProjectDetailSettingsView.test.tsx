@@ -28,6 +28,7 @@ vi.mock("@/lib/sdk", () => ({
     projects: {
       defaultExecutionOptions: vi.fn(),
       delete: vi.fn(),
+      prepareMachine: vi.fn(),
       sources: { add: vi.fn(), delete: vi.fn(), update: vi.fn() },
       update: vi.fn(),
     },

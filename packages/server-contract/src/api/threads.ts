@@ -95,6 +95,7 @@ export type ExistingThreadExecutionInputSources = z.infer<
 export const createThreadRequestSchema = z
   .object({
     projectId: z.string().min(1),
+    transferOperationId: z.string().min(1).optional(),
     providerId: z.string().min(1).optional(),
     origin: threadCreateOriginSchema,
     originPluginId: z.string().min(1).optional(),

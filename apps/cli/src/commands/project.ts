@@ -62,6 +62,25 @@ interface ProjectDiscoveryCommandOptions {
   query?: string;
 }
 
+interface ProjectPrepareMachineCommandOptions {
+  project: string;
+  host: string;
+  targetPath: string;
+  sourceHost?: string;
+  copyPath?: string[];
+  json?: boolean;
+}
+
+interface ProjectWorkspaceTransferCommandOptions {
+  project: string;
+  host: string;
+  sourceEnvironment: string;
+  targetPath: string;
+  branch?: string;
+  includePath?: string[];
+  json?: boolean;
+}
+
 function addProjectWorkspaceRoutingOptions(command: Command): Command {
   return command
     .option("--machine <id-or-name>", "Project source machine")
@@ -254,6 +273,88 @@ export function registerProjectCommands(
   const attachment = project
     .command("attachment")
     .description("Upload and download server-managed project attachments");
+
+  project
+    .command("prepare-machine")
+    .description("Prepare a project source and report actual machine readiness")
+    .requiredOption("--project <id>", "Project ID")
+    .requiredOption("--host <id>", "Target machine ID")
+    .requiredOption("--target-path <path>", "Project path on the target machine")
+    .option("--source-host <id>", "Project source machine for selected file copies")
+    .option("--copy-path <path...>", "Explicit relative files to copy; repeatable")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (opts: ProjectPrepareMachineCommandOptions) => {
+        const result = await createCliBbSdk(getUrl()).projects.prepareMachine({
+          projectId: opts.project,
+          hostId: opts.host,
+          targetPath: opts.targetPath,
+          ...(opts.sourceHost ? { sourceHostId: opts.sourceHost } : {}),
+          ...(opts.copyPath ? { copyPaths: opts.copyPath } : {}),
+        });
+        if (outputJson(opts, result)) return;
+        console.log(JSON.stringify(result, null, 2));
+      }),
+    );
+
+  project
+    .command("preview-workspace-transfer")
+    .description("Inspect an idle workspace before selecting extra files to transfer")
+    .requiredOption("--project <id>", "Project ID")
+    .requiredOption("--source-environment <id>", "Source environment ID")
+    .requiredOption("--host <id>", "Target machine ID")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (opts: Pick<ProjectWorkspaceTransferCommandOptions, "project" | "host" | "sourceEnvironment" | "json">) => {
+        const result = await createCliBbSdk(getUrl()).projects.previewWorkspaceTransfer({
+          projectId: opts.project,
+          sourceEnvironmentId: opts.sourceEnvironment,
+          targetHostId: opts.host,
+        });
+        if (outputJson(opts, result)) return;
+        console.log(JSON.stringify(result, null, 2));
+      }),
+    );
+
+  project
+    .command("transfer-workspace")
+    .description("Copy an idle workspace to a new path without moving live sessions")
+    .requiredOption("--project <id>", "Project ID")
+    .requiredOption("--source-environment <id>", "Source environment ID")
+    .requiredOption("--host <id>", "Target machine ID")
+    .requiredOption("--target-path <path>", "New workspace path on the target machine")
+    .option("--branch <name>", "Explicit target branch")
+    .option("--include-path <path...>", "Explicit untracked or ignored files; repeatable")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (opts: ProjectWorkspaceTransferCommandOptions) => {
+        const result = await createCliBbSdk(getUrl()).projects.transferWorkspace({
+          projectId: opts.project,
+          sourceEnvironmentId: opts.sourceEnvironment,
+          targetHostId: opts.host,
+          targetPath: opts.targetPath,
+          includePaths: opts.includePath ?? [],
+          ...(opts.branch ? { branch: opts.branch } : {}),
+        });
+        if (outputJson(opts, result)) return;
+        console.log(JSON.stringify(result, null, 2));
+      }),
+    );
+
+  project
+    .command("get-workspace-transfer")
+    .description("Query durable workspace transfer status by operation ID")
+    .requiredOption("--operation-id <id>", "Workspace transfer operation ID")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (opts: { operationId: string; json?: boolean }) => {
+        const result = await createCliBbSdk(getUrl()).projects.getWorkspaceTransfer({
+          operationId: opts.operationId,
+        });
+        if (outputJson(opts, result)) return;
+        console.log(JSON.stringify(result, null, 2));
+      }),
+    );
 
   attachment
     .command("upload <id>")

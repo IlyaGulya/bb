@@ -1,3 +1,4 @@
+import { createWorkspaceContinuationThread } from "../../services/projects/workspace-transfer.js";
 import { countUnarchivedThreadDescendants } from "../../services/threads/thread-archive.js";
 import { cancelAbandonedProviderCreations } from "../../services/threads/thread-environment-providers.js";
 import {
@@ -385,10 +386,11 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
     if (payload.sectionId) {
       requireThreadSection(deps, payload.sectionId);
     }
-    const thread = await createThreadFromRequest(deps, {
-      ...payload,
+    const { transferOperationId, ...request } = payload;
+    const thread = await createWorkspaceContinuationThread(deps, { projectId: payload.projectId, environment: payload.environment, transferOperationId }, () => createThreadFromRequest(deps, {
+      ...request,
       origin: payload.origin,
-    });
+    }));
     return context.json(toThreadResponseFromThread(deps, { thread }), 201);
   });
 

@@ -1,3 +1,5 @@
+import { assertWorkspaceContinuationAdmission } from "../projects/workspace-transfer-admission.js";
+import { assertWorkspaceTransferAdmission } from "../projects/workspace-transfer-locks.js";
 import { emitPluginTerminalInput } from "../plugins/plugin-thread-events.js";
 import { resolveHostEnvironment } from "../hosts/host-environment.js";
 import { randomUUID } from "node:crypto";
@@ -747,6 +749,9 @@ export class TerminalSessionLifecycle {
     args: CreateTerminalForTargetArgs,
   ): Promise<TerminalSession> {
     const launchTarget = this.resolveTerminalLaunchTarget(args.target);
+    assertWorkspaceTransferAdmission(this.options.db, launchTarget.environmentId);
+    await assertWorkspaceContinuationAdmission(this.options, launchTarget.environmentId);
+    assertWorkspaceTransferAdmission(this.options.db, launchTarget.environmentId);
     const daemonSession = requireConnectedHostSession(
       this.options,
       launchTarget.hostId,

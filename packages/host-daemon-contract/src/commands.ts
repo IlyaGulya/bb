@@ -1,3 +1,4 @@
+import { workspaceTransferCommandSchemas, workspaceTransferResultSchemas } from "./workspace-transfer.js";
 import {
   desktopBrowserCommandSchemas,
   desktopBrowserResultSchemas,
@@ -1419,6 +1420,51 @@ function defineHostDaemonCommandDescriptor<
 }
 
 export const hostDaemonCommandRegistry = {
+  "workspace.transferPreview": defineHostDaemonCommandDescriptor({
+    type: "workspace.transferPreview",
+    schema: workspaceTransferCommandSchemas["workspace.transferPreview"],
+    resultSchema: workspaceTransferResultSchemas["workspace.transferPreview"],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "workspace.capture": defineHostDaemonCommandDescriptor({
+    type: "workspace.capture",
+    schema: workspaceTransferCommandSchemas["workspace.capture"],
+    resultSchema: workspaceTransferResultSchemas["workspace.capture"],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "workspace.restore": defineHostDaemonCommandDescriptor({
+    type: "workspace.restore",
+    schema: workspaceTransferCommandSchemas["workspace.restore"],
+    resultSchema: workspaceTransferResultSchemas["workspace.restore"],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "workspace.copyRead": defineHostDaemonCommandDescriptor({
+    type: "workspace.copyRead",
+    schema: workspaceTransferCommandSchemas["workspace.copyRead"],
+    resultSchema: workspaceTransferResultSchemas["workspace.copyRead"],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "workspace.copyWrite": defineHostDaemonCommandDescriptor({
+    type: "workspace.copyWrite",
+    schema: workspaceTransferCommandSchemas["workspace.copyWrite"],
+    resultSchema: workspaceTransferResultSchemas["workspace.copyWrite"],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
   "desktop.browser.list_instances": defineHostDaemonCommandDescriptor({
     type: "desktop.browser.list_instances",
     schema: desktopBrowserCommandSchemas["desktop.browser.list_instances"],

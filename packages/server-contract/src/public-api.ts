@@ -94,6 +94,18 @@ import type {
   PathThreadAndQueuedMessage,
   PathTerminal,
 } from "./common.js";
+import {
+  prepareMachineRequestSchema,
+  previewWorkspaceTransferRequestSchema,
+  transferWorkspaceRequestSchema,
+  type PrepareMachineRequest,
+  type PrepareMachineResponse,
+  type PreviewWorkspaceTransferRequest,
+  type PreviewWorkspaceTransferResponse,
+  type TransferWorkspaceRequest,
+  type TransferWorkspaceResponse,
+  type WorkspaceTransferOperation,
+} from "./api/workspace-transfer.js";
 import type {
   CloseTerminalRequest,
   CommandListResponse,
@@ -542,6 +554,30 @@ export const publicApiRoutes = {
         promptHistoryQuerySchema,
       ),
       response: jsonResponse<PromptHistoryResponse>(),
+    }),
+    prepareMachine: defineRoute({
+      path: "/projects/:id/prepare-machine",
+      method: "post",
+      request: jsonRequest<PathProjectId, PrepareMachineRequest>(prepareMachineRequestSchema),
+      response: jsonResponse<PrepareMachineResponse>(),
+    }),
+    previewWorkspaceTransfer: defineRoute({
+      path: "/projects/:id/preview-workspace-transfer",
+      method: "post",
+      request: jsonRequest<PathProjectId, PreviewWorkspaceTransferRequest>(previewWorkspaceTransferRequestSchema),
+      response: jsonResponse<PreviewWorkspaceTransferResponse>(),
+    }),
+    transferWorkspace: defineRoute({
+      path: "/projects/:id/transfer-workspace",
+      method: "post",
+      request: jsonRequest<PathProjectId, TransferWorkspaceRequest>(transferWorkspaceRequestSchema),
+      response: jsonResponse<TransferWorkspaceResponse>(),
+    }),
+    getWorkspaceTransfer: defineRoute({
+      path: "/workspace-transfers/:operationId",
+      method: "get",
+      request: noRequest<{ param: { operationId: string } }>(),
+      response: jsonResponse<WorkspaceTransferOperation>(),
     }),
     createSource: defineRoute({
       path: "/projects/:id/sources",

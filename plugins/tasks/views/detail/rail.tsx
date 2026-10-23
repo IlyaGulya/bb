@@ -9,8 +9,8 @@ import type {
 } from "../../shared/contract.js";
 import { TASK_PRIORITIES, TASK_STATUSES } from "../../shared/contract.js";
 import type { Preset } from "../../shared/contract.js";
-import { errorMessage } from "../../shared/errors.js";
-import { useTasksQuery, useTasksRpc } from "../../shell/data.js";
+import { useTasksRpc } from "../../shell/data.js";
+import { ExecutionTargetControl, type ExecutionControlProps } from "./execution.js";
 import {
   PriorityIcon,
   StatusIcon,
@@ -25,8 +25,6 @@ import {
 } from "../list/lib.js";
 import { DispatchControl } from "./threads.js";
 import { DEFAULT_COLOR } from "../manage/shared.js";
-import { BbProjectLinkPicker } from "../manage/bb-project-link.js";
-import type { BbProjectOption } from "../../shared/contract.js";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -390,103 +388,6 @@ function ProjectMenu({
   );
 }
 
-function DispatchTargetMenu({
-  project,
-  bbProjects,
-  onError,
-  triggerClassName,
-}: {
-  project: Project;
-  bbProjects: readonly BbProjectOption[];
-  onError: (message: string) => void;
-  triggerClassName: string;
-}) {
-  const rpc = useTasksRpc();
-  const [open, setOpen] = useState(false);
-  const [selection, setSelection] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const linkedBbProjectId = project.linkedBbProjectId;
-  const linkedName = bbProjects.find(
-    (candidate) => candidate.id === linkedBbProjectId,
-  )?.name;
-
-  const save = async (linkedId: string | null) => {
-    if (saving) return;
-    setSaving(true);
-    try {
-      await rpc.call("updateProject", {
-        projectId: project.id,
-        linkedBbProjectId: linkedId,
-      });
-      setOpen(false);
-    } catch (saveError) {
-      onError(errorMessage(saveError));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        if (next) setSelection(linkedBbProjectId);
-        setOpen(next);
-      }}
-    >
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label="Edit dispatch target"
-          className={triggerClassName}
-        >
-          <Icon name="ArrowUpRight" className="size-3.5 shrink-0" />
-          {linkedBbProjectId !== null ? (
-            <span className="truncate" title={linkedBbProjectId}>
-              {linkedName ?? linkedBbProjectId}
-            </span>
-          ) : (
-            <span className="truncate text-muted-foreground">
-              Link a bb project…
-            </span>
-          )}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-64 p-3">
-        <BbProjectLinkPicker
-          value={selection}
-          onChange={setSelection}
-          bbProjects={bbProjects}
-          noneLabel={linkedBbProjectId !== null ? "Unlink" : "Not linked"}
-        />
-        <div className="mt-2.5 flex items-center justify-between gap-2">
-          {linkedBbProjectId !== null ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-muted-foreground"
-              disabled={saving}
-              onClick={() => void save(null)}
-            >
-              <Icon name="X" className="size-3.5" />
-              Unlink
-            </Button>
-          ) : (
-            <span />
-          )}
-          <Button
-            size="sm"
-            className="h-7"
-            disabled={saving}
-            onClick={() => void save(selection)}
-          >
-            Save
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
 
 const RAIL_ROW_CLASS =
   "-mx-1.5 flex w-[calc(100%+0.75rem)] items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm hover:bg-state-hover";
@@ -498,11 +399,14 @@ export function PropertiesRail({
   labels,
   threads,
   presets,
+  execution,
+  executionError,
+  onExecutionChange,
   onUpdate,
   onMoveToProject,
   onError,
   className,
-}: TaskPropertiesProps & {
+}: TaskPropertiesProps & ExecutionControlProps & {
   presets: Preset[] | undefined;
   onError: (message: string) => void;
   className?: string;
@@ -511,10 +415,6 @@ export function PropertiesRail({
     task.labelIds.includes(label.id),
   );
   const active = threads.filter(isActiveThread);
-  const bbProjects = useTasksQuery(
-    async (query) => (await query.call("listBbProjects")).bbProjects,
-    ["projects:changed"],
-  );
   return (
     <aside className={cn("w-56 shrink-0 py-10 pl-2 pr-6", className)}>
       <h2 className="mb-1.5 text-xs font-semibold text-muted-foreground">
@@ -566,23 +466,15 @@ export function PropertiesRail({
       />
 
       <div className="mb-1 mt-3 text-2xs font-semibold text-muted-foreground">
-        Dispatch target
+        Execution target
       </div>
-      {project !== undefined ? (
-        <DispatchTargetMenu
-          project={project}
-          bbProjects={bbProjects.data ?? []}
-          onError={onError}
-          triggerClassName={RAIL_ROW_CLASS}
-        />
-      ) : (
-        <div className="py-0.5 text-sm text-muted-foreground">…</div>
-      )}
+      <ExecutionTargetControl taskId={task.id} presets={presets} execution={execution} executionError={executionError} onExecutionChange={onExecutionChange} />
 
       <div className="mt-2.5 py-0.5">
         <DispatchControl
           taskId={task.id}
           presets={presets}
+          execution={execution}
           onError={onError}
           align="start"
           className="w-full"
@@ -626,11 +518,14 @@ export function InlineProperties({
   projects,
   labels,
   presets,
+  execution,
+  executionError,
+  onExecutionChange,
   onUpdate,
   onMoveToProject,
   onError,
   className,
-}: Omit<TaskPropertiesProps, "threads"> & {
+}: Omit<TaskPropertiesProps, "threads"> & ExecutionControlProps & {
   presets: Preset[] | undefined;
   onError: (message: string) => void;
   className?: string;
@@ -674,9 +569,11 @@ export function InlineProperties({
           <Icon name="Plus" className="size-3" />
         </button>
       </LabelsMenu>
+      <ExecutionTargetControl taskId={task.id} presets={presets} execution={execution} executionError={executionError} onExecutionChange={onExecutionChange} />
       <DispatchControl
         taskId={task.id}
         presets={presets}
+        execution={execution}
         onError={onError}
         className="ml-auto max-w-56"
       />

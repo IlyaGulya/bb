@@ -38,6 +38,7 @@ Spawning:
     --model <model>                Model override
     --reasoning-level <level>      Reasoning level id the model lists: low, medium, high, xhigh, max, or a provider-specific id
     --environment <id-or-path>     Attach to an existing environment (ID or workspace path)
+    --transfer-operation-id <id>   Continue a ready transfer in its existing target environment
     --new-environment <kind>       Create a fresh personal workspace or managed worktree
     --base-branch <branch>         Exact Git ref for a new managed worktree
                                    (--new-environment worktree only; an
@@ -112,6 +113,13 @@ Handoff:
   thread that references the source. From the CLI, run bb thread spawn with
   --provider, --model, --environment and --prompt 'Continue from
   @thread:THREAD_ID ...'; SDK callers pass the same fields to threads.spawn.
+  For a workspace transfer, pass --transfer-operation-id <operationId> with
+  --project <same-project> and --environment <returned-environmentId>. The server
+  validates the ready transfer, checks and locks the idle source during creation,
+  and records continuationThreadId. Retrying the same operation returns its
+  linked thread rather than creating a duplicate. A durable source/target
+  execution fence prevents simultaneous active dispatch across server restarts.
+  This starts a new native session; it does not migrate a live session.
 
 Forking:
 

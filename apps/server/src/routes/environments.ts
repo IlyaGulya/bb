@@ -1,3 +1,4 @@
+import { assertWorkspaceTransferAdmission } from "../services/projects/workspace-transfer-locks.js";
 import { joinHostPathSegments } from "../services/lib/host-path.js";
 import { cleanupEnvironment } from "../services/environments/environment-engine.js";
 import { parsePaginationQuery } from "../services/lib/validation.js";
@@ -287,6 +288,7 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
   const routes = publicApiRoutes.environments;
   post(routes.cleanup, (context) => {
     const environment = requireEnvironment(deps.db, context.req.param("id"));
+    assertWorkspaceTransferAdmission(deps.db, environment.id);
     if (
       countLiveThreadsInEnvironment(deps.db, {
         environmentId: environment.id,
@@ -334,6 +336,7 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
 
   del(routes.delete, (context) => {
     const environment = requireEnvironment(deps.db, context.req.param("id"));
+    assertWorkspaceTransferAdmission(deps.db, environment.id);
     if (
       countLiveThreadsInEnvironment(deps.db, {
         environmentId: environment.id,

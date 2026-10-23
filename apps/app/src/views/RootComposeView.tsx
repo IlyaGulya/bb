@@ -1401,9 +1401,10 @@ function RootComposeSurface({
         gitRemoteUrl: currentProjectGitRemoteUrl,
         hostId: setupHost.id,
         hostName: setupHost.name,
+        sources: currentProject?.sources ?? [],
       });
     },
-    [currentProjectGitRemoteUrl, currentProjectName, projectId],
+    [currentProject, currentProjectGitRemoteUrl, currentProjectName, projectId],
   );
   const handleMachineSetupComplete = useCallback(
     ({ hostId: setUpHostId }: ProjectMachineSetupCompletion) => {

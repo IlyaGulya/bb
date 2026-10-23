@@ -6,7 +6,9 @@ import {
   installTestPluginRuntime,
   renderSlot,
 } from "@get-bb/plugin-sdk/testing/app";
-import { makeTask, rpcInput } from "../../test-fixtures.js";
+import { makeTask } from "../../test-fixtures.js";
+import type { Preset } from "../../shared/contract.js";
+import type { ExecutionTarget } from "../../shared/execution.js";
 
 if (!globalThis.ResizeObserver) {
   globalThis.ResizeObserver = class {
@@ -79,6 +81,28 @@ const HOME_PROJECT = {
   prefix: "HOME",
   color: "purple",
 };
+const PROFILE: Preset = {
+  id: "01HZZZZZZZZZZZZZZZZZZZZZS1",
+  name: "Code profile",
+  providerId: "codex",
+  modelId: "gpt-5",
+  reasoningLevel: "medium",
+  serviceTier: null,
+  permissionMode: "auto",
+  environmentKind: "project-default",
+  baseBranch: null,
+  machineId: null,
+  instructions: "",
+  builtin: false,
+  createdAt: "2026-07-15T00:00:00.000Z",
+};
+const TARGET: ExecutionTarget = {
+  bbProjectId: BB_PROJECT_ID,
+  hostId: "host_target",
+  workspace: { kind: "project-checkout" },
+  presetId: PROFILE.id,
+};
+const EXECUTION = { override: TARGET, resolved: TARGET, inherited: false, summary: "bb monorepo · Target machine · Project checkout · Code profile" };
 
 function railProps(
   linkedBbProjectId: string | null,
@@ -116,69 +140,41 @@ describe("project rail control", () => {
   });
 });
 
-describe("dispatch target rail control", () => {
-  it("links a discovered bb project", async () => {
-    const updateCalls: Array<Record<string, unknown>> = [];
-    const slot = renderSlot({ component: RailHarness }, railProps(null), {
+describe("task execution rail control", () => {
+
+  it("keeps routing errors visible in the editor", async () => {
+    const slot = renderSlot({ component: RailHarness }, { ...railProps(null), presets: [PROFILE], execution: EXECUTION }, {
       rpc: {
-        listBbProjects: () => ({
-          bbProjects: [{ id: BB_PROJECT_ID, name: "bb monorepo" }],
-        }),
-        updateProject: (raw: unknown) => {
-          const input = rpcInput(raw);
-          updateCalls.push(input);
-          return {
-            project: {
-              ...projectRow(input.linkedBbProjectId as string | null),
-            },
-          };
-        },
+        listBbProjects: () => ({ bbProjects: [{ id: BB_PROJECT_ID, name: "bb monorepo" }] }),
+        listMachines: () => ({ machines: [{ id: "host_target", name: "Target machine" }] }),
+        setTaskExecution: () => { throw new Error("Target provider unavailable"); },
       },
     });
-    fireEvent.click(slot.getByRole("button", { name: "Edit dispatch target" }));
-    fireEvent.click(await slot.findByLabelText("Linked bb project"));
-    fireEvent.click(await slot.findByRole("option", { name: "bb monorepo" }));
-    fireEvent.click(slot.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(updateCalls).toHaveLength(1));
-    expect(updateCalls[0]).toEqual({
-      projectId: PROJECT_ID,
-      linkedBbProjectId: BB_PROJECT_ID,
-    });
+    fireEvent.click(slot.getByRole("button", { name: "Configure task execution" }));
+    fireEvent.click(await slot.findByRole("button", { name: "Save execution target" }));
+    expect(await slot.findByRole("alert")).toHaveProperty("textContent", "Target provider unavailable");
+    expect(slot.getByRole("combobox", { name: "Code project" })).toBeTruthy();
   });
+});
 
-  it("shows the linked bb project's name and unlinks it", async () => {
-    const updateCalls: Array<Record<string, unknown>> = [];
-    const slot = renderSlot(
-      { component: RailHarness },
-      railProps(BB_PROJECT_ID),
-      {
-        rpc: {
-          listBbProjects: () => ({
-            bbProjects: [{ id: BB_PROJECT_ID, name: "bb monorepo" }],
-          }),
-          updateProject: (raw: unknown) => {
-            const input = rpcInput(raw);
-            updateCalls.push(input);
-            return {
-              project: {
-                ...projectRow(input.linkedBbProjectId as string | null),
-              },
-            };
-          },
-        },
+describe("task workspace execution modes", () => {
+  it.each([
+    { kind: "managed-worktree", baseBranch: "release" },
+    { kind: "project-checkout" },
+  ] as const)("saves $kind without changing the existing profile", async (workspace) => {
+    const slot = renderSlot({ component: RailHarness }, { ...railProps(null), presets: [PROFILE], execution: EXECUTION }, {
+      rpc: {
+        listBbProjects: () => ({ bbProjects: [{ id: BB_PROJECT_ID, name: "bb monorepo" }] }),
+        listMachines: () => ({ machines: [{ id: "host_target", name: "Target machine" }] }),
+        setTaskExecution: () => EXECUTION,
       },
-    );
-    const trigger = slot.getByRole("button", {
-      name: "Edit dispatch target",
     });
-    await slot.findByText("bb monorepo");
-
-    fireEvent.click(trigger);
-    fireEvent.click(await slot.findByRole("button", { name: "Unlink" }));
-    await waitFor(() => expect(updateCalls).toHaveLength(1));
-    expect(updateCalls[0]).toEqual({
-      projectId: PROJECT_ID,
-      linkedBbProjectId: null,
-    });
+    fireEvent.click(slot.getByRole("button", { name: "Configure task execution" }));
+    fireEvent.change(await slot.findByRole("combobox", { name: "Workspace" }), { target: { value: workspace.kind } });
+    if (workspace.kind === "managed-worktree") {
+      fireEvent.change(slot.getByRole("textbox", { name: "Base branch (optional)" }), { target: { value: workspace.baseBranch } });
+    }
+    fireEvent.click(slot.getByRole("button", { name: "Save execution target" }));
+    await waitFor(() => expect(slot.rpcCalls).toContainEqual({ method: "setTaskExecution", input: { taskId: task.id, target: { ...TARGET, workspace } } }));
   });
 });

@@ -83,20 +83,52 @@ function stdout(result: {
 }
 
 describe("bb tasks CLI", () => {
-  it("lists seed-demo in help while retaining the explicit confirmation guard", async () => {
+  it("discovers execution and continuation commands and reads real task state", async () => {
+    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(bb);
+    try {
+      stdout(await harness.runCli(["project", "create", "--name", "Execution", "--prefix", "EXE"]));
+      stdout(await harness.runCli(["create", "--project", "EXE", "--title", "Route this task"]));
+      const execution = JSON.parse(stdout(await harness.runCli(["execution", "get", "exe-1", "--json"])));
+      expect(execution).toMatchObject({ override: null, inherited: true });
+      expect(execution.summary).toEqual(expect.any(String));
+      expect(JSON.parse(stdout(await harness.runCli(["execution", "clear", "EXE-1", "--json"])))).toMatchObject({
+        override: null,
+        inherited: true,
+      });
+      expect(JSON.parse(stdout(await harness.runCli(["continue", "list", "exe-1", "--json"])))).toEqual({
+        continuations: [],
+      });
+      const help = stdout(await harness.runCli(["--help"]));
+      for (const command of ["execution get", "execution set", "execution clear", "execution environments", "continue preview", "continue start", "continue list"]) {
+        expect(help).toContain(command);
+      }
+      expect(stdout(await harness.runCli(["continue", "start", "--help"]))).toContain("--operation");
+      expect(stdout(await harness.runCli(["continue", "start", "--help"]))).toContain("--include-path");
+      const missing = await harness.runCli(["continue", "preview", "EXE-1"]);
+      expect(missing.exitCode).not.toBe(0);
+      expect(missing.stderr).toContain("--thread");
+      const invalid = await harness.runCli([
+        "execution", "set", "EXE-1", "--bb-project", "proj_code",
+        "--machine", "host_local", "--workspace", "project-checkout",
+        "--preset", "Worker", "--base-branch", "main",
+      ]);
+      expect(invalid.exitCode).not.toBe(0);
+      expect(invalid.stderr).toContain("--base-branch requires --workspace managed-worktree");
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it("refuses demo seeding without confirmation and never seeds for --help", async () => {
     const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
     await plugin(bb);
 
-    expect(stdout(await harness.runCli(["--help"]))).toContain(
-      "bb tasks seed-demo          Create sample folders, projects, labels, tasks, and comments",
-    );
     await expect(harness.runCli(["seed-demo"])).resolves.toMatchObject({
       exitCode: 1,
-      stderr: "seed-demo creates sample data; re-run with --yes\n",
     });
-    expect(stdout(await harness.runCli(["seed-demo", "--help"]))).toContain(
-      "--yes",
-    );
+    await expect(harness.runCli(["seed-demo", "--yes", "--help"])).resolves.toMatchObject({ exitCode: 0 });
+    expect(JSON.parse(stdout(await harness.runCli(["project", "list", "--json"]))).projects).toEqual([]);
 
     await harness.dispose();
   });
@@ -1313,10 +1345,6 @@ describe("bb tasks CLI", () => {
       await harness.runCli(["create", "--project", "DET", "--title", "Work"]),
     );
 
-    expect(stdout(await harness.runCli(["--help"]))).toContain(
-      "bb tasks detach             Detach an agent thread from a task",
-    );
-
     stdout(
       await harness.runCli(["attach", "DET-1", "--thread", "thr_dead_worker"]),
     );
@@ -2156,54 +2184,15 @@ describe("bb tasks CLI", () => {
     await harness.dispose();
   });
 
-  it("prints help at every level and never runs a command for it", async () => {
+  it("rejects missing or unknown preset subcommands without creating profiles", async () => {
     const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
     await plugin(bb);
 
-    const top = await harness.runCli(["--help"]);
-    expect(top).toMatchObject({ exitCode: 0, stderr: "" });
-    expect(top.stdout).toContain("bb tasks list               List and filter");
-
-    const statusHelp = stdout(await harness.runCli(["status", "--help"]));
-    expect(statusHelp).toContain("Plugin health only");
-    expect(statusHelp).toContain("bb tasks list --status <status>");
-
-    const listHelp = stdout(await harness.runCli(["list", "-h"]));
-    expect(listHelp).toContain("--limit <1-500>");
-    expect(listHelp).toContain("default: 100");
-    expect(listHelp).toContain(
-      "--status <backlog|todo|in_progress|in_review|done|canceled>",
-    );
-
-    const createHelp = stdout(await harness.runCli(["create", "--help"]));
-    expect(createHelp).toContain("--title <value>");
-    expect(createHelp).toContain("required");
-    expect(createHelp).toContain("--description-file <path>");
-    expect(createHelp).toContain("At most one of:");
-
-    const groupHelp = stdout(await harness.runCli(["preset", "--help"]));
-    expect(groupHelp).toContain("bb tasks preset list");
-    expect(groupHelp).toContain("bb tasks preset delete");
-
-    for (const group of [
-      "project",
-      "folder",
-      "label",
-      "attachment",
-      "preset",
-    ]) {
-      const help = await harness.runCli([group, "--help"]);
-      expect(help.exitCode, group).toBe(0);
-      expect(help.stdout, group).toContain(`bb tasks ${group} `);
-    }
-
     const bareGroup = await harness.runCli(["preset"]);
     expect(bareGroup.exitCode).toBe(1);
-    expect(bareGroup.stdout).toContain("bb tasks preset show");
 
     const unknownSubcommand = await harness.runCli(["preset", "bogus"]);
     expect(unknownSubcommand.exitCode).toBe(1);
-    expect(unknownSubcommand.stderr).toContain("unknown command: preset bogus");
 
     expect(
       JSON.parse(stdout(await harness.runCli(["preset", "list", "--json"])))

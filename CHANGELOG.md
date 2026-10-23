@@ -2,6 +2,24 @@
 
 ## AgentOS fork — unreleased
 
+- **Tasks 0.2.0:** configure a task's code project, execution machine, workspace
+  and agent preset independently of its tracker project. Continue an idle task
+  on another machine with explicit file selection, a verified handoff and a new
+  attached session; keep the source visible and make the target current.
+- Observe server exits while host-daemon startup is retrying or waiting for
+  readiness. Cancel and drain pending daemon recovery before server restart,
+  moved-mode handover or healthy-port takeover.
+- Preserve ordinary-file POSIX `rwx` permissions during explicit copies and
+  workspace transfers, including private permissions on Git-unchanged files.
+- Prepare project sources on another machine with explicit file copies and
+  actual readiness checks. Preview and transfer idle workspaces to new paths
+  within the same project, preserving unpublished commits and staged/working
+  changes without shared private-remote credentials. Query durable transfer
+  status by operation ID through the SDK and `bb project` commands; continuation
+  uses a new native session, not live-session migration.
+- Continue ready workspace transfers through `bb thread spawn
+  --transfer-operation-id`, with idempotent continuation-thread linking and a
+  durable source/target execution fence.
 - **Tasks 0.1.6:** selectively link or import Jira issues into native task cards.
   Explicit pull, proposals, three-way preview, push, and reconciliation are
   available through the task UI and `bb tasks jira`.

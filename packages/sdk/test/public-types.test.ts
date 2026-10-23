@@ -339,6 +339,10 @@ type ExpectedPluginInstallJobsKey = "cancel" | "get" | "list";
 type ExpectedExperimentalPromptHistoryKey = "list";
 
 type ExpectedProjectsKey =
+  | "prepareMachine"
+  | "previewWorkspaceTransfer"
+  | "transferWorkspace"
+  | "getWorkspaceTransfer"
   | "machineEnvironment"
   | "replaceMachineEnvironment"
   | "setMachineEnvironmentVariable"

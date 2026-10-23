@@ -287,6 +287,7 @@ export function ProjectDetailSettingsView() {
         gitRemoteUrl: project.gitRemoteUrl,
         hostId: host.id,
         hostName: host.name,
+        sources: project.sources,
       });
     },
     [localSourcePicker, pickerHostId, project],

@@ -2597,6 +2597,179 @@ export function registerTasksCli(
           },
         }),
 
+        "execution get": cliCommand({
+          summary: "Show the saved and resolved task execution target",
+          positionals: [KEY_POSITIONAL],
+          options: {
+            preset: { type: "string", description: "Optional invocation profile name or id" },
+            json: JSON_OPTION,
+          },
+          run(input) {
+            return guard(async () => {
+              const task = await resolveTask(domain, input.positionals["key-or-id"]);
+              const presetId = input.options.preset === undefined ? undefined : resolvePreset(await listPresets(domain), input.options.preset).id;
+              const result = delegationRpcContract.getTaskExecution.output.parse(
+                await delegationHandlers(bb, store).getTaskExecution(
+                  delegationRpcContract.getTaskExecution.input.parse({ taskId: task.id, presetId }),
+                ),
+              );
+              return input.options.json ? JSON.stringify(result) : result.summary;
+            });
+          },
+        }),
+        "execution set": cliCommand({
+          summary: "Save a task-specific code project, machine, workspace, and profile",
+          positionals: [KEY_POSITIONAL],
+          options: {
+            "bb-project": { type: "string", required: true, description: "Code project id (proj_...), not tracker project prefix" },
+            machine: { type: "string", required: true, description: "Enrolled machine name or id" },
+            workspace: { type: "enum", values: ["managed-worktree", "project-checkout", "existing-environment"], required: true, description: "Workspace routing policy" },
+            environment: { type: "string", description: "Existing environment id; required for existing-environment" },
+            "base-branch": { type: "string", description: "Optional managed-worktree base branch" },
+            preset: { type: "string", required: true, description: "Execution profile name or id" },
+            json: JSON_OPTION,
+          },
+          run(input) {
+            return guard(async () => {
+              const task = await resolveTask(domain, input.positionals["key-or-id"]);
+              if (input.options.environment !== undefined && input.options.workspace !== "existing-environment") throw new CliError("--environment requires --workspace existing-environment");
+              if (input.options["base-branch"] !== undefined && input.options.workspace !== "managed-worktree") throw new CliError("--base-branch requires --workspace managed-worktree");
+              const workspace = input.options.workspace === "managed-worktree"
+                ? { kind: input.options.workspace, baseBranch: input.options["base-branch"] }
+                : input.options.workspace === "existing-environment"
+                  ? { kind: input.options.workspace, environmentId: input.options.environment }
+                  : { kind: input.options.workspace };
+              const result = delegationRpcContract.setTaskExecution.output.parse(
+                await delegationHandlers(bb, store).setTaskExecution(
+                  delegationRpcContract.setTaskExecution.input.parse({
+                    taskId: task.id,
+                    target: {
+                      bbProjectId: input.options["bb-project"],
+                      hostId: await resolveMachineId(domain, input.options.machine),
+                      workspace,
+                      presetId: resolvePreset(await listPresets(domain), input.options.preset).id,
+                    },
+                  }),
+                ),
+              );
+              return input.options.json ? JSON.stringify(result) : result.summary;
+            });
+          },
+        }),
+        "execution clear": cliCommand({
+          summary: "Restore inherited tracker-project and profile execution routing",
+          positionals: [KEY_POSITIONAL],
+          options: { json: JSON_OPTION },
+          run(input) {
+            return guard(async () => {
+              const task = await resolveTask(domain, input.positionals["key-or-id"]);
+              const result = delegationRpcContract.setTaskExecution.output.parse(
+                await delegationHandlers(bb, store).setTaskExecution(
+                  delegationRpcContract.setTaskExecution.input.parse({ taskId: task.id, target: null }),
+                ),
+              );
+              return input.options.json ? JSON.stringify(result) : result.summary;
+            });
+          },
+        }),
+        "execution environments": cliCommand({
+          summary: "List existing code-project environments for execution routing",
+          options: {
+            "bb-project": { type: "string", required: true, description: "Code project id (proj_...)" },
+            machine: { type: "string", description: "Optional machine name or id" },
+            json: JSON_OPTION,
+          },
+          run(input) {
+            return guard(async () => {
+              const result = delegationRpcContract.listTaskExecutionEnvironments.output.parse(
+                await delegationHandlers(bb, store).listTaskExecutionEnvironments(
+                  delegationRpcContract.listTaskExecutionEnvironments.input.parse({
+                    bbProjectId: input.options["bb-project"],
+                    hostId: input.options.machine === undefined ? undefined : await resolveMachineId(domain, input.options.machine),
+                  }),
+                ),
+              );
+              return JSON.stringify(result, null, input.options.json ? undefined : 2);
+            });
+          },
+        }),
+        "continue preview": cliCommand({
+          summary: "Preview idle workspace continuation into a new native session",
+          positionals: [KEY_POSITIONAL],
+          options: {
+            thread: { type: "string", required: true, description: "Attached source thread id" },
+            machine: { type: "string", required: true, description: "Target machine name or id" },
+            json: JSON_OPTION,
+          },
+          run(input) {
+            return guard(async () => {
+              const task = await resolveTask(domain, input.positionals["key-or-id"]);
+              const result = delegationRpcContract.previewTaskContinuation.output.parse(
+                await delegationHandlers(bb, store).previewTaskContinuation(
+                  delegationRpcContract.previewTaskContinuation.input.parse({
+                    taskId: task.id,
+                    sourceThreadId: input.options.thread,
+                    targetHostId: await resolveMachineId(domain, input.options.machine),
+                  }),
+                ),
+              );
+              return JSON.stringify(result, null, input.options.json ? undefined : 2);
+            });
+          },
+        }),
+        "continue start": cliCommand({
+          summary: "Transfer idle task work and start a new native session",
+          positionals: [KEY_POSITIONAL],
+          options: {
+            thread: { type: "string", required: true, description: "Attached source thread id; source remains attached" },
+            machine: { type: "string", required: true, description: "Target machine name or id" },
+            "target-path": { type: "string", required: true, description: "New target directory; never overwritten" },
+            preset: { type: "string", required: true, description: "Target execution profile name or id" },
+            "include-path": { type: "string", repeatable: true, description: "Explicit relative untracked/ignored file selection or consent for a sensitive-tracked file; repeat each exact path" },
+            instructions: { type: "string", description: "Next-operation instructions for the new session" },
+            branch: { type: "string", description: "Optional target branch" },
+            operation: { type: "string", description: "Retry an existing ready continuation without transferring again" },
+            json: JSON_OPTION,
+          },
+          run(input) {
+            return guard(async () => {
+              const task = await resolveTask(domain, input.positionals["key-or-id"]);
+              const result = delegationRpcContract.continueTask.output.parse(
+                await delegationHandlers(bb, store).continueTask(
+                  delegationRpcContract.continueTask.input.parse({
+                    taskId: task.id,
+                    sourceThreadId: input.options.thread,
+                    targetHostId: await resolveMachineId(domain, input.options.machine),
+                    targetPath: input.options["target-path"],
+                    presetId: resolvePreset(await listPresets(domain), input.options.preset).id,
+                    includePaths: input.options["include-path"] ?? [],
+                    extraInstructions: input.options.instructions,
+                    branch: input.options.branch,
+                    operationId: input.options.operation,
+                  }),
+                ),
+              );
+              return input.options.json ? JSON.stringify(result) : result.threadId;
+            });
+          },
+        }),
+        "continue list": cliCommand({
+          summary: "List durable continuation operations and retryable errors",
+          positionals: [KEY_POSITIONAL],
+          options: { json: JSON_OPTION },
+          run(input) {
+            return guard(async () => {
+              const task = await resolveTask(domain, input.positionals["key-or-id"]);
+              const result = delegationRpcContract.getTaskContinuations.output.parse(
+                await delegationHandlers(bb, store).getTaskContinuations(
+                  delegationRpcContract.getTaskContinuations.input.parse({ taskId: task.id }),
+                ),
+              );
+              return JSON.stringify(result, null, input.options.json ? undefined : 2);
+            });
+          },
+        }),
+
         dispatch: cliCommand({
           summary: "Dispatch a task to a new agent thread",
           aliases: ["delegate"],
@@ -2605,10 +2778,15 @@ export function registerTasksCli(
           options: {
             preset: {
               type: "string",
-              required: true,
+              required: false,
               placeholder: "name-or-id",
               description:
                 "Dispatch preset name or id; run bb tasks preset list to see them",
+            },
+            "execution-target": {
+              type: "string",
+              placeholder: "json",
+              description: "Invocation-only execution target JSON: bbProjectId, hostId, workspace, presetId",
             },
             instructions: {
               type: "string",
@@ -2624,15 +2802,17 @@ export function registerTasksCli(
                 domain,
                 input.positionals["key-or-id"],
               );
-              const preset = resolvePreset(
-                await listPresets(domain),
-                input.options.preset,
-              );
+              const preset = input.options.preset === undefined
+                ? undefined
+                : resolvePreset(await listPresets(domain), input.options.preset);
               const result = delegationRpcContract.delegate.output.parse(
                 await delegationHandlers(bb, store).delegate(
                   delegationRpcContract.delegate.input.parse({
                     taskId: task.id,
-                    presetId: preset.id,
+                    presetId: preset?.id,
+                    executionTarget: input.options["execution-target"] === undefined
+                      ? undefined
+                      : JSON.parse(input.options["execution-target"]),
                     extraInstructions: input.options.instructions,
                   }),
                 ),

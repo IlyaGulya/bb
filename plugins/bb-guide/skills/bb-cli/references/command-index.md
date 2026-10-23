@@ -62,6 +62,10 @@ This index lists every command path that the core CLI registers, including alias
 - `bb project show`
 - `bb project update`
 - `bb project delete`
+- `bb project prepare-machine`
+- `bb project preview-workspace-transfer`
+- `bb project transfer-workspace`
+- `bb project get-workspace-transfer`
 
 ## prompt-history
 

@@ -1,11 +1,17 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  type UseMutationResult,
+} from "@tanstack/react-query";
 import type {
   CreateProjectRequest,
   CreateProjectSourceRequest,
+  PrepareMachineResponse,
   ReorderProjectRequest,
   UpdateProjectRequest,
   UploadedPromptAttachment,
 } from "@bb/server-contract";
+import type { ProjectPrepareMachineArgs } from "@bb/sdk/browser";
 import { sdk } from "@/lib/sdk";
 import { registerLocalAttachmentPreview } from "@/lib/attachment-local-previews";
 import {
@@ -149,6 +155,30 @@ export function useAddProjectSource() {
     },
     mutationFn: ({ projectId, request }: AddProjectSourceMutationRequest) =>
       sdk.projects.sources.add({ projectId, ...request }),
+    onSuccess: (_data, variables) => {
+      invalidateProjectSourceQueries({
+        projectId: variables.projectId,
+        queryClient,
+      });
+    },
+  });
+}
+
+export type PrepareProjectMachineMutation = UseMutationResult<
+  PrepareMachineResponse,
+  Error,
+  ProjectPrepareMachineArgs
+>;
+
+export function usePrepareProjectMachine(): PrepareProjectMachineMutation {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    meta: {
+      showErrorToast: false,
+    },
+    mutationFn: (request: ProjectPrepareMachineArgs) =>
+      sdk.projects.prepareMachine(request),
     onSuccess: (_data, variables) => {
       invalidateProjectSourceQueries({
         projectId: variables.projectId,

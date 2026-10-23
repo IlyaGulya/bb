@@ -16,8 +16,20 @@ import {
 import { Icon } from "@bb/shared-ui/icon";
 import { Input } from "@bb/shared-ui/input";
 import { cn } from "@bb/shared-ui/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@bb/shared-ui/select";
+import { Textarea } from "@bb/shared-ui/textarea";
 import { RemotePathBrowser } from "@/components/dialogs/RemotePathBrowser";
-import { useAddProjectSource } from "@/hooks/mutations/project-mutations";
+import {
+  useAddProjectSource,
+  usePrepareProjectMachine,
+  type PrepareProjectMachineMutation,
+} from "@/hooks/mutations/project-mutations";
 import {
   isHostPathMissing,
   useHostPathExistence,
@@ -32,6 +44,7 @@ export interface ProjectMachineSetupDialogTarget {
   gitRemoteUrl: string | null;
   hostId: string;
   hostName: string;
+  sources: ProjectSource[];
 }
 
 export interface ProjectMachineSetupCompletion {
@@ -51,16 +64,19 @@ export function ProjectMachineSetupDialog({
   onComplete,
 }: ProjectMachineSetupDialogProps) {
   const addSource = useAddProjectSource();
+  const prepareMachine = usePrepareProjectMachine();
   const targetKey = target ? `${target.projectId}:${target.hostId}` : null;
   const resetAddSource = addSource.reset;
+  const resetPreparation = prepareMachine.reset;
   useEffect(() => {
     resetAddSource();
-  }, [resetAddSource, targetKey]);
+    resetPreparation();
+  }, [resetAddSource, resetPreparation, targetKey]);
   return (
     <Dialog
       open={target !== null}
       onOpenChange={(open) => {
-        if (!open && addSource.isPending) return;
+        if (!open && (addSource.isPending || prepareMachine.isPending)) return;
         onOpenChange(open);
       }}
     >
@@ -70,6 +86,7 @@ export function ProjectMachineSetupDialog({
             key={targetKey}
             target={target}
             addSource={addSource}
+            prepareMachine={prepareMachine}
             onOpenChange={onOpenChange}
             onComplete={onComplete}
           />
@@ -84,6 +101,7 @@ type SetupOption = "clone" | "folder";
 interface ProjectMachineSetupDialogContentProps {
   target: ProjectMachineSetupDialogTarget;
   addSource: ReturnType<typeof useAddProjectSource>;
+  prepareMachine: PrepareProjectMachineMutation;
   onOpenChange: (open: boolean) => void;
   onComplete: (completion: ProjectMachineSetupCompletion) => void;
 }
@@ -91,6 +109,7 @@ interface ProjectMachineSetupDialogContentProps {
 function ProjectMachineSetupDialogContent({
   target,
   addSource,
+  prepareMachine,
   onOpenChange,
   onComplete,
 }: ProjectMachineSetupDialogContentProps) {
@@ -102,6 +121,12 @@ function ProjectMachineSetupDialogContent({
   const [isEditingClonePath, setIsEditingClonePath] = useState(false);
   const [clonePathDraft, setClonePathDraft] = useState("");
   const [folderPath, setFolderPath] = useState<string | null>(null);
+  const [sourceHostId, setSourceHostId] = useState("");
+  const [copyPathsInput, setCopyPathsInput] = useState("");
+  const copySources = target.sources.filter(
+    (source) =>
+      source.projectId === target.projectId && source.hostId !== target.hostId,
+  );
   const [validationMessage, setValidationMessage] = useState<string | null>(
     null,
   );
@@ -118,7 +143,7 @@ function ProjectMachineSetupDialogContent({
     folderPath !== null ? [folderPath] : [],
   );
 
-  const pending = addSource.isPending;
+  const pending = addSource.isPending || prepareMachine.isPending;
 
   const selectOption = (nextOption: SetupOption) => {
     if (pending || option === nextOption) return;
@@ -126,6 +151,7 @@ function ProjectMachineSetupDialogContent({
     setValidationMessage(null);
     setIsEditingClonePath(false);
     addSource.reset();
+    prepareMachine.reset();
   };
 
   const commitClonePathEdit = () => {
@@ -135,6 +161,7 @@ function ProjectMachineSetupDialogContent({
     setCustomClonePath(normalized);
     setValidationMessage(null);
     addSource.reset();
+    prepareMachine.reset();
   };
 
   const submit = (request: Parameters<typeof addSource.mutate>[0]) => {
@@ -151,21 +178,49 @@ function ProjectMachineSetupDialogContent({
     setValidationMessage(null);
 
     if (option === "clone") {
-      if (customClonePath !== null) {
-        const pathValidationMessage =
-          getProjectPathValidationMessage(customClonePath);
-        if (pathValidationMessage) {
-          setValidationMessage(pathValidationMessage);
-          return;
-        }
+      if (clonePath === null) return;
+      const pathValidationMessage = getProjectPathValidationMessage(clonePath);
+      if (pathValidationMessage) {
+        setValidationMessage(pathValidationMessage);
+        return;
       }
-      submit({
+      const copyPaths = [
+        ...new Set(
+          copyPathsInput
+            .split(/\r?\n/u)
+            .map((path) => path.trim())
+            .filter(Boolean),
+        ),
+      ];
+      if (
+        copyPaths.length > 0 &&
+        !copySources.some((source) => source.hostId === sourceHostId)
+      ) {
+        setValidationMessage("Choose a source machine for the additional files.");
+        return;
+      }
+      if (
+        copyPaths.some(
+          (path) =>
+            path.startsWith("/") ||
+            path.includes("\\") ||
+            /^[a-z]:/iu.test(path) ||
+            path
+              .split("/")
+              .some((part) => part === ".." || part === "." || part === ""),
+        )
+      ) {
+        setValidationMessage(
+          "Enter file paths relative to the source project folder, without . or .. segments.",
+        );
+        return;
+      }
+      prepareMachine.mutate({
         projectId: target.projectId,
-        request: {
-          type: "clone",
-          hostId: target.hostId,
-          ...(customClonePath !== null ? { targetPath: customClonePath } : {}),
-        },
+        hostId: target.hostId,
+        targetPath: clonePath,
+        ...(sourceHostId ? { sourceHostId } : {}),
+        ...(copyPaths.length > 0 ? { copyPaths } : {}),
       });
       return;
     }
@@ -186,15 +241,16 @@ function ProjectMachineSetupDialogContent({
     });
   };
 
-  const errorMessage = addSource.isError
+  const activeMutation = option === "clone" ? prepareMachine : addSource;
+  const errorMessage = activeMutation.isError
     ? getMutationErrorMessage({
-        error: addSource.error,
+        error: activeMutation.error,
         fallbackMessage: `Couldn't set up ${target.projectName} on ${target.hostName}.`,
       })
     : null;
   const isTargetNotEmptyError =
-    addSource.error instanceof BbHttpError &&
-    addSource.error.code === "target_not_empty";
+    activeMutation.error instanceof BbHttpError &&
+    activeMutation.error.code === "target_not_empty";
 
   const submitDisabled =
     pending || (option === "clone" ? clonePath === null : folderPath === null);
@@ -247,6 +303,76 @@ function ProjectMachineSetupDialogContent({
       </button>
     </p>
   );
+
+  const preparation = prepareMachine.data;
+  if (preparation) {
+    return (
+      <>
+        <DialogHeader>
+          <DialogTitle>
+            {preparation.readiness.ready
+              ? "Project preparation ready"
+              : "Project preparation needs attention"}
+          </DialogTitle>
+          <DialogDescription>
+            {target.projectName} on {target.hostName}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <p className="break-all text-sm">{preparation.source.path}</p>
+          <ul
+            aria-label="Preparation readiness checks"
+            className="space-y-2 text-sm"
+          >
+            {preparation.readiness.checks.map((check, index) => (
+              <li key={`${check.name}:${index}`}>
+                <p className={check.ok ? "text-foreground" : "text-destructive"}>
+                  {check.ok ? "Passed" : "Failed"}: {check.name}
+                </p>
+                <p className="whitespace-pre-wrap break-words text-muted-foreground">
+                  {check.detail}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm">
+            Copied {preparation.copiedFiles.length} additional{" "}
+            {preparation.copiedFiles.length === 1 ? "file" : "files"}.
+          </p>
+          <ul aria-label="Copied file hashes" className="space-y-2 text-xs">
+            {preparation.copiedFiles.map((file) => (
+              <li key={file.path}>
+                <p className="break-all">{file.path}</p>
+                <p className="break-all font-mono text-muted-foreground">
+                  SHA-256: {file.sha256}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+          >
+            Close
+          </Button>
+          <Button
+            type="button"
+            disabled={!preparation.readiness.ready}
+            onClick={() => {
+              if (preparation.readiness.ready) {
+                onComplete({ hostId: target.hostId, source: preparation.source });
+              }
+            }}
+          >
+            Continue
+          </Button>
+        </DialogFooter>
+      </>
+    );
+  }
 
   return (
     <>
@@ -302,10 +428,48 @@ function ProjectMachineSetupDialogContent({
             disabled={pending}
           />
         ) : null}
+        {option === "clone" ? (
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Copy additional files (optional)</p>
+            <Select
+              value={sourceHostId}
+              disabled={pending || copySources.length === 0}
+              onValueChange={setSourceHostId}
+            >
+              <SelectTrigger aria-label="Additional files source machine">
+                <SelectValue placeholder="Choose a project source machine" />
+              </SelectTrigger>
+              <SelectContent>
+                {copySources.map((source) => (
+                  <SelectItem key={source.id} value={source.hostId}>
+                    {source.hostId}: {source.path}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Textarea
+              aria-label="Additional file relative paths"
+              value={copyPathsInput}
+              disabled={pending || copySources.length === 0}
+              onChange={(event) => setCopyPathsInput(event.target.value)}
+              placeholder="One relative file path per line"
+              className="text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              Only the files you list are copied from that project's source
+              folder. No files, including .env files, are selected by default.
+              {" "}Copies land in this registered source checkout only. New isolated
+              Git worktrees do not automatically inherit untracked or ignored files.
+              {copySources.length === 0
+                ? " This project has no source on another machine."
+                : ""}
+            </p>
+          </div>
+        ) : null}
         {pending && option === "clone" ? (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <Icon name="Spinner" className="size-4 shrink-0 animate-spin" />
-            Cloning onto {target.hostName}… This can take a while.
+            Preparing the project on {target.hostName}… This can take a while.
           </p>
         ) : null}
         {validationMessage ? (
@@ -334,7 +498,7 @@ function ProjectMachineSetupDialogContent({
             Cancel
           </Button>
           <Button type="submit" disabled={submitDisabled}>
-            {option === "clone" ? "Clone & continue" : "Use folder & continue"}
+            {option === "clone" ? "Prepare project" : "Use folder & continue"}
           </Button>
         </DialogFooter>
       </form>

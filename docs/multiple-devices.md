@@ -17,6 +17,87 @@ stop. Settings → Machines badges it `server` once several machines are
 connected, `bb machine list` shows `server` in its Role column, and the server
 machine cannot be removed.
 
+## Prepare or transfer a project workspace
+
+Preparation and workspace transfer are separate from enrolling a machine.
+Use enrolled machine IDs and an existing project:
+
+```bash
+bb project prepare-machine --project proj_example --host host_target --target-path /code/example --json
+bb project preview-workspace-transfer --project proj_example --source-environment env_source --host host_target --json
+bb project transfer-workspace --project proj_example --source-environment env_source --host host_target --target-path /code/example-handoff --include-path notes.txt --branch handoff --json
+bb project get-workspace-transfer --operation-id operation_id --json
+bb thread spawn --project proj_example --environment env_target --transfer-operation-id operation_id --prompt "Continue from the transfer handoff" --json
+```
+
+Preparation returns a project source, copied-file hashes and actual readiness
+checks. Resolve failed checks before dispatching work. To copy specific local
+configuration from a same-project source, pass `--source-host <id>` and explicit
+relative `--copy-path <path>` values; secret files are never selected by default.
+Target paths must be canonical absolute paths, without `~`, dot segments or a
+trailing slash. Preparation copies into the project source checkout only;
+isolated new worktrees do not inherit copied untracked/ignored files.
+
+In the project preparation UI, Clone uses the same preparation API. Select a
+same-project source machine and enter only the relative files you want copied,
+one per line; `.env` is not preselected. The result shows readiness checks and
+copied-file hashes/count, and Continue is enabled only when readiness is true.
+Registering an existing folder remains an explicit local-path source operation.
+
+Preview first, stop source work, then transfer to a new path. All source threads
+must be idle. Transfer keeps the source intact and registers the verified target
+as another environment of the same project. It carries unpublished commits and
+tracked staged/unstaged changes, including binary files and deletes; explicitly
+select extra untracked/ignored files with `--include-path`. Tracked secret files
+require explicit consent. Neither machine needs shared private-remote credentials.
+Preview labels ordinary secret-like tracked files `sensitive-tracked`; explicit
+selection provides consent, but unsupported file types cannot be selected.
+The target comes from the source bundle without origin access; Git config,
+remote configuration and authentication are not automatically copied.
+
+Ordinary-file POSIX `rwx` permissions are retained and verified, including
+private `0600` files whose Git content and executable bit are unchanged.
+Ownership, ACLs, extended attributes and special permission bits are not
+migrated.
+
+The checkpoint limit is 64 MiB combined decoded data, including Git bundle,
+changed staged-index blobs, changed tracked working files and extra files;
+unchanged tracked files travel in the Git bundle rather than duplicate worktree
+blobs. The bundle's compressed bytes still count. Staged and working versions
+of a changed file can count twice. Preparation copy batches have the same limit.
+The encoded RPC can be approximately 85.4 MiB plus metadata. Each checkpoint
+or copy batch must also fit 96 MiB of serialized UTF-8 JSON, including base64
+and path/index metadata. Both limits apply; oversized reads fail before returning
+data and oversized writes fail before target processing or mutation. There is
+no chunking.
+Oversize data fails without truncation. Index metadata and previews allow
+10,000 entries; only exact ordinary files can be selected, not recursively copied
+directories. Ignored directories appear excluded in preview. Unsupported
+symlinks, submodules/gitlinks, sparse checkout/index, special index states, in-progress
+Git operations and custom non-LFS clean/smudge filters are refused.
+Shallow/partial/promisor clones, grafts and replacement refs are also refused
+instead of fetching missing history or changing the source.
+
+Ordinary transfers need Node and Git. Git LFS files must have materialized
+content, not unresolved pointer-only working files: fetch/materialize source
+bytes first. A target with LFS paths
+also needs installed `git-lfs`. The transfer preserves pointer index entries
+and actual file bytes, configures standard local filters, and copies no remote
+authentication. LFS attribute interpretation must match on both sides;
+explicitly select required untracked/ignored `.gitattributes` files. Source-only
+info attributes or mismatched attributes produce actionable failures.
+
+Save the returned operation ID to query durable progress or errors after a
+disconnect. The ready result includes the target environment ID and handoff;
+start a new native session with `--transfer-operation-id` and that existing
+environment ID. The server validates the ready transfer and idle source,
+records `continuationThreadId`, and returns the same thread on retries.
+A durable source/target dispatch fence prevents simultaneous active execution
+across server restarts. This does not move a live process or its native
+session/authentication state. See the
+[API contract and detailed limits](environment-provisioning.md#project-preparation-and-transfer-api)
+and `bb guide projects` for all options.
+
 ## Open bb from another browser
 
 The simplest managed route is **bb connect**. Sign the server in to your bb

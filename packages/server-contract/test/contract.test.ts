@@ -408,6 +408,11 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
+      "Only workspace continuation creation supplies a durable transfer receipt for atomic source-idle fencing and idempotent target creation.",
+    fields: ["createThreadRequestSchema.transferOperationId"],
+  },
+  {
+    reason:
       "Thread creation may omit root-thread presentation and execution fields so the server can resolve project/provider defaults.",
     fields: [
       "createThreadRequestSchema.sectionId",

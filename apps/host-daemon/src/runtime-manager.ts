@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -286,6 +287,7 @@ export class RuntimeManager {
     Map<string, Set<Promise<void>>>
   >();
   private readonly threadControlTails = new Map<string, Promise<void>>();
+  private readonly workspaceCaptures = new Set<string>();
   private providerMaintenanceRuntime: AgentRuntime | null = null;
   private pendingProviderMaintenanceRuntime: PendingProviderMaintenanceRuntime | null =
     null;
@@ -315,6 +317,51 @@ export class RuntimeManager {
       roots.push(args.threadStorageRootPath);
     }
     return [...new Set(roots)];
+  }
+
+  private canonicalWorkspacePath(workspacePath: string): string {
+    try { return realpathSync(workspacePath); } catch { return path.resolve(workspacePath); }
+  }
+
+  private assertWorkspaceNotCapturing(workspacePath: string): void {
+    const resolved = this.canonicalWorkspacePath(workspacePath);
+    for (const root of this.workspaceCaptures) {
+      if (resolved === root || resolved.startsWith(`${root}${path.sep}`) || root.startsWith(`${resolved}${path.sep}`)) {
+        throw new Error("Workspace capture is in progress; wait before starting local sessions or modifying this environment.");
+      }
+    }
+  }
+
+  listWorkspaceActiveThreadIds(workspacePath: string): string[] {
+    const root = this.canonicalWorkspacePath(workspacePath);
+    const ids = new Set<string>();
+    for (const entry of this.entries.values()) {
+      const entryPath = this.canonicalWorkspacePath(entry.path);
+      if (entryPath !== root && !entryPath.startsWith(`${root}${path.sep}`) && !root.startsWith(`${entryPath}${path.sep}`)) continue;
+      for (const threadId of entry.runtime.getLiveThreadIds()) ids.add(threadId);
+      for (const threadId of this.inFlightThreadCommandsByEnvironmentId.get(entry.environmentId)?.keys() ?? []) ids.add(threadId);
+    }
+    return [...ids];
+  }
+
+  acquireWorkspaceCapture(workspacePath: string): () => void {
+    const root = this.canonicalWorkspacePath(workspacePath);
+    this.assertWorkspaceNotCapturing(root);
+    if (this.pendingEnvironmentEnsures.size || this.pendingEntries.size || this.pendingWorkspaceRefreshes.size) {
+      throw new Error("Environment initialization is in progress; wait for it to finish before workspace capture.");
+    }
+    if (this.listWorkspaceActiveThreadIds(root).length) throw new Error("Workspace has active local sessions; stop them before capture.");
+    for (const entry of this.entries.values()) {
+      const entryPath = this.canonicalWorkspacePath(entry.path);
+      if ((entryPath === root || entryPath.startsWith(`${root}${path.sep}`) || root.startsWith(`${entryPath}${path.sep}`)) && entry.runtime.hasOpenBackgroundWork()) {
+        throw new Error("Workspace has active local background work; stop it before capture.");
+      }
+      if ((entryPath === root || entryPath.startsWith(`${root}${path.sep}`) || root.startsWith(`${entryPath}${path.sep}`)) && entry.terminals.size) {
+        throw new Error("Workspace has active local terminals; close them before capture.");
+      }
+    }
+    this.workspaceCaptures.add(root);
+    return () => { this.workspaceCaptures.delete(root); };
   }
 
   get(environmentId: string): RuntimeEntry | undefined {
@@ -423,6 +470,8 @@ export class RuntimeManager {
   }
 
   markTerminalActive(environmentId: string, terminalId: string): void {
+    const entry = this.entries.get(environmentId);
+    if (entry) this.assertWorkspaceNotCapturing(entry.path);
     this.entries.get(environmentId)?.terminals.add(terminalId);
   }
 
@@ -435,6 +484,9 @@ export class RuntimeManager {
     threadId: string,
   ): Promise<() => void> {
     return this.enqueueThreadControl(threadId, () => {
+      const entry = this.entries.get(environmentId);
+      if (entry) this.assertWorkspaceNotCapturing(entry.path);
+      else if (this.workspaceCaptures.size) throw new Error("Workspace capture is in progress; wait before starting local sessions.");
       const commandsByThreadId =
         this.inFlightThreadCommandsByEnvironmentId.get(environmentId) ??
         new Map<string, number>();
@@ -876,6 +928,8 @@ export class RuntimeManager {
   }
 
   async ensureEnvironment(args: EnsureEnvironmentArgs): Promise<RuntimeEntry> {
+    const workspacePath = args.provision?.path ?? args.workspacePath ?? this.entries.get(args.environmentId)?.path;
+    if (workspacePath) this.assertWorkspaceNotCapturing(workspacePath);
     const pending = this.pendingEnvironmentEnsures.get(args.environmentId);
     if (pending) {
       await pending;
@@ -962,6 +1016,7 @@ export class RuntimeManager {
   async refreshEnvironmentWorkspace(
     args: RefreshEnvironmentWorkspaceArgs,
   ): Promise<HostWorkspace> {
+    this.assertWorkspaceNotCapturing(args.workspacePath);
     const pending = this.pendingWorkspaceRefreshes.get(args.environmentId);
     if (pending) {
       return pending;

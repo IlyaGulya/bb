@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { UrlLink, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import type { DelegationRpcContract } from "../../delegate/contract.js";
+import type { TaskExecution, TaskContinuation } from "../../shared/execution.js";
+import { ContinuationDialog } from "./execution.js";
 import type {
   Preset,
   TaskPullRequest,
@@ -18,7 +20,7 @@ import {
   ConfirmDeleteDialog,
   ConfirmDeleteDialogContent,
 } from "@/components/ui/confirm-delete-dialog";
-import { useTasksRpc } from "../../shell/data.js";
+import { useTasksQuery, useTasksRpc } from "../../shell/data.js";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -72,17 +74,23 @@ function ThreadCard({
   pullRequestUnavailable,
   busy,
   onDetach,
+  onContinue,
+  continuedTo,
+  continuedFrom,
 }: {
   thread: TaskThread;
   pullRequest: TaskPullRequest | undefined;
   pullRequestUnavailable: boolean;
   busy: boolean;
   onDetach: () => void;
+  onContinue?: () => void;
+  continuedTo: TaskContinuation | undefined;
+  continuedFrom: TaskContinuation | undefined;
 }) {
   const navigate = useBbNavigate();
   const meta = THREAD_STATUS_META[thread.liveStatus];
   return (
-    <div className="mb-2 flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2 shadow-2xs">
+    <div className="mb-2 flex flex-wrap items-center gap-3 rounded-md border border-border bg-card px-3 py-2 shadow-2xs">
       <span
         className={cn(
           "flex shrink-0 items-center gap-1.5 text-xs font-medium",
@@ -100,11 +108,23 @@ function ThreadCard({
         <div className="text-xs text-muted-foreground">
           {thread.presetName} · attached {formatRelativeTime(thread.attachedAt)}
         </div>
+        {continuedTo ? (
+          <p className="break-words text-xs text-muted-foreground">
+            {`Continued to ${continuedTo.threadId} on ${continuedTo.targetHostId}; previous executor`}
+          </p>
+        ) : continuedFrom ? (
+          <p className="break-words text-xs font-medium">
+            {`Current executor · continued from ${continuedFrom.sourceThreadId}`}
+          </p>
+        ) : null}
       </div>
       <ThreadPullRequestPill
         pullRequest={pullRequest}
         unavailable={pullRequestUnavailable}
       />
+      {thread.liveStatus === "idle" && onContinue && !continuedTo ? (
+        <button type="button" disabled={busy} className="text-xs font-medium underline underline-offset-2" onClick={onContinue}>Continue on another machine</button>
+      ) : null}
       <button
         type="button"
         className="flex shrink-0 items-center gap-1 text-xs font-medium underline decoration-input underline-offset-2 hover:decoration-current"
@@ -146,6 +166,7 @@ function storeLastPresetId(presetId: string): void {
 interface DispatchControlProps {
   taskId: string;
   presets: Preset[] | undefined;
+  execution?: TaskExecution;
   onError: (message: string) => void;
   align?: "start" | "end";
   className?: string;
@@ -154,6 +175,7 @@ interface DispatchControlProps {
 export function DispatchControl({
   taskId,
   presets,
+  execution,
   onError,
   align = "end",
   className,
@@ -164,10 +186,10 @@ export function DispatchControl({
   const [lastPresetId, setLastPresetId] = useState(loadLastPresetId);
   const [createDialogKey, setCreateDialogKey] = useState<number | null>(null);
 
-  const dispatch = async (presetId: string) => {
+  const dispatch = async (presetId?: string) => {
     setDispatching(true);
     try {
-      await rpc.call("delegate", { taskId, presetId });
+      await rpc.call("delegate", { taskId, ...(presetId ? { presetId } : {}) });
     } catch (error) {
       onError(errorMessage(error));
     } finally {
@@ -211,6 +233,7 @@ export function DispatchControl({
   }
 
   const current =
+    presets?.find((preset) => preset.id === execution?.override?.presetId) ??
     presets?.find((preset) => preset.id === lastPresetId) ??
     (presets
       ? [...presets].sort((a, b) => a.name.localeCompare(b.name))[0]
@@ -227,7 +250,8 @@ export function DispatchControl({
             primarySegment,
           )}
           onClick={() => {
-            if (current) pickPreset(current);
+            if (execution?.override) void dispatch();
+            else if (current) pickPreset(current);
           }}
         >
           <span className="truncate">
@@ -272,6 +296,8 @@ export function DispatchControl({
 
 interface ThreadsSectionProps {
   threads: TaskThread[];
+  taskId: string;
+  onContinued: () => void;
   pullRequests: TaskPullRequest[] | undefined;
   unavailableThreadIds: string[];
   onDetach: (thread: TaskThread) => Promise<void>;
@@ -280,6 +306,8 @@ interface ThreadsSectionProps {
 
 export function ThreadsSection({
   threads,
+  taskId,
+  onContinued,
   pullRequests,
   unavailableThreadIds,
   onDetach,
@@ -287,6 +315,11 @@ export function ThreadsSection({
 }: ThreadsSectionProps) {
   const [confirm, setConfirm] = useState<TaskThread | null>(null);
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
+  const rpc = useRpc<DelegationRpcContract>();
+  const continuations = useTasksQuery(async () => (await rpc.call("getTaskContinuations", { taskId })).continuations, ["threads:changed"], [taskId], { relevantTaskIds: [taskId] });
+  const [continuation, setContinuation] = useState<{ thread: TaskThread | null; retry: TaskContinuation | null; key: number } | null>(null);
+  const [continuationOpen, setContinuationOpen] = useState(false);
+  const changed = () => { continuations.refresh(); onContinued(); };
 
   const performDetach = async (thread: TaskThread) => {
     setPending((current) => new Set(current).add(thread.id));
@@ -311,6 +344,13 @@ export function ThreadsSection({
     }
   }
   const unavailable = new Set(unavailableThreadIds);
+  const continuedBySource = new Map<string, TaskContinuation>();
+  const continuedByTarget = new Map<string, TaskContinuation>();
+  for (const entry of continuations.data ?? []) {
+    if (entry.state !== "started" || !entry.threadId) continue;
+    continuedBySource.set(entry.sourceThreadId, entry);
+    continuedByTarget.set(entry.threadId, entry);
+  }
 
   return (
     <section>
@@ -324,12 +364,27 @@ export function ThreadsSection({
         <ThreadCard
           key={thread.id}
           thread={thread}
+          continuedTo={continuedBySource.get(thread.threadId)}
+          continuedFrom={continuedByTarget.get(thread.threadId)}
           pullRequest={pullRequestByThread.get(thread.threadId)}
           pullRequestUnavailable={unavailable.has(thread.threadId)}
           busy={pending.has(thread.id)}
           onDetach={() => setConfirm(thread)}
+          onContinue={continuations.data && !continuations.error && !continuedBySource.has(thread.threadId)
+            ? () => { setContinuation({ thread, retry: null, key: Date.now() }); setContinuationOpen(true); }
+            : undefined}
         />
       ))}
+      {continuations.error ? <p role="alert" className="text-sm text-destructive">{continuations.error}</p> : null}
+      {continuations.data?.map((entry) => (
+        <div key={entry.operationId} className="mb-2 break-words rounded-md border border-border p-3 text-xs">
+          <p>Continuation operation {entry.operationId} · {entry.state}</p>
+          <p>{entry.targetHostId} · {entry.targetPath}</p>
+          {entry.lastError ? <p role="alert" className="text-destructive">{entry.lastError}</p> : null}
+          {entry.state === "ready" ? <Button type="button" size="sm" variant="outline" onClick={() => { setContinuation({ thread: null, retry: entry, key: Date.now() }); setContinuationOpen(true); }}>Retry prepared continuation</Button> : null}
+        </div>
+      ))}
+      {continuation ? <ContinuationDialog key={continuation.key} taskId={taskId} thread={continuation.thread} retry={continuation.retry} open={continuationOpen} onOpenChange={setContinuationOpen} onChanged={changed} /> : null}
       <ConfirmDeleteDialog
         className="max-w-sm"
         open={confirm !== null}

@@ -286,6 +286,44 @@ const MIGRATIONS = [
     SET proposal_json = json_insert(proposal_json, '$.fields', json('{}'))
     WHERE json_extract(proposal_json, '$.kind') = 'transition';
   `,
+  `
+    CREATE TABLE task_execution_targets (
+      task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+      target_json TEXT NOT NULL
+    );
+    CREATE TABLE task_continuations (
+      operation_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      source_thread_id TEXT NOT NULL,
+      bb_project_id TEXT NOT NULL,
+      source_environment_id TEXT NOT NULL,
+      target_host_id TEXT NOT NULL,
+      target_path TEXT NOT NULL,
+      preset_id TEXT NOT NULL,
+      environment_id TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('ready', 'spawning', 'started')),
+      thread_id TEXT,
+      last_error TEXT,
+      request_json TEXT NOT NULL,
+      handoff TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_task_continuations_task ON task_continuations(task_id, created_at);
+    CREATE UNIQUE INDEX idx_task_continuations_pending
+      ON task_continuations(task_id) WHERE state IN ('ready', 'spawning');
+    CREATE TRIGGER task_list_revision_execution_insert
+    AFTER INSERT ON task_execution_targets BEGIN
+      UPDATE task_list_revision SET revision = revision + 1 WHERE id = 1;
+    END;
+    CREATE TRIGGER task_list_revision_execution_update
+    AFTER UPDATE ON task_execution_targets BEGIN
+      UPDATE task_list_revision SET revision = revision + 1 WHERE id = 1;
+    END;
+    CREATE TRIGGER task_list_revision_execution_delete
+    AFTER DELETE ON task_execution_targets BEGIN
+      UPDATE task_list_revision SET revision = revision + 1 WHERE id = 1;
+    END;
+  `,
 ] as const;
 
 export function initializeTasksSchema(db: PluginDatabase): void {

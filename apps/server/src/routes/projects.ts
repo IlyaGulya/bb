@@ -1,3 +1,4 @@
+import { prepareMachine, previewWorkspaceTransfer, transferWorkspace, getWorkspaceTransfer } from "../services/projects/workspace-transfer.js";
 import {
   projectMachineEnvironmentView,
   replaceMachineEnvironment,
@@ -547,6 +548,11 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
     requestProjectDeletionAdvance(deps, { projectId: id });
     return context.json({ ok: true });
   });
+
+  post(routes.prepareMachine, async (context, payload) => context.json(await prepareMachine(deps, context.req.param("id"), payload)));
+  post(routes.previewWorkspaceTransfer, async (context, payload) => context.json(await previewWorkspaceTransfer(deps, context.req.param("id"), payload)));
+  post(routes.transferWorkspace, async (context, payload) => context.json(await transferWorkspace(deps, context.req.param("id"), payload)));
+  get(routes.getWorkspaceTransfer, async (context) => context.json(await getWorkspaceTransfer(deps, context.req.param("operationId"))));
 
   post(routes.createSource, async (context, payload) => {
     const projectId = context.req.param("id");
