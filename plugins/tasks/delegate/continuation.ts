@@ -267,7 +267,18 @@ export function continuationHandlers(
             const file = preview.files.find(
               (candidate) => candidate.path === path,
             );
-            if (!file || (file.tracked && file.kind !== "sensitive-tracked"))
+            const ignoredDescendant =
+              !file &&
+              preview.files.some(
+                (candidate) =>
+                  candidate.kind === "ignored" &&
+                  !candidate.tracked &&
+                  path.startsWith(`${candidate.path}/`),
+              );
+            if (
+              (!file && !ignoredDescendant) ||
+              (file?.tracked && file.kind !== "sensitive-tracked")
+            )
               throw new Error(
                 `Additional file is unavailable or unsafe to transfer: ${path}`,
               );

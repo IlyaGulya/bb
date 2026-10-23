@@ -271,6 +271,11 @@ reasons. Only an idle source can transfer; the source thread remains attached.
 All tracked changes transfer according to core safety policy; repeat
 `--include-path` for explicitly selected relative untracked/ignored files, or to
 consent to an exact tracked file whose preview kind is `sensitive-tracked`.
+Ignored directories remain collapsed in preview so dependency trees are not
+enumerated. To copy a file inside one, enter its exact relative path in the
+dialog's **Additional exact file paths** field or repeat
+`--include-path local-config/settings.json`. Only the named ordinary file is
+captured; directory selection, symlinks and traversal remain forbidden.
 Sensitive tracked files block continuation until each is explicitly selected or
 resolved at the source; they are never silently dropped. Review warnings before
 selecting secrets or `.env` files; none are selected implicitly. The target path must be new and

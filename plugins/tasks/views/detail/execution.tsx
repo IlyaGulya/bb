@@ -351,6 +351,7 @@ export function ContinuationDialog({
   const [branch, setBranch] = useState("");
   const [instructions, setInstructions] = useState("");
   const [includePaths, setIncludePaths] = useState<string[]>([]);
+  const [extraPathsInput, setExtraPathsInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [operationId, setOperationId] = useState<string | null>(null);
@@ -376,11 +377,20 @@ export function ContinuationDialog({
     ["threads:changed"],
     [open, taskId, sourceThreadId, hostId, retry?.operationId],
   );
+  const selectedPaths = [
+    ...new Set([
+      ...includePaths,
+      ...extraPathsInput
+        .split(/\r?\n/u)
+        .map((path) => path.trim())
+        .filter(Boolean),
+    ]),
+  ];
   const blockedFiles = preview.data?.files.some(
     (file) =>
       file.tracked &&
       !file.selectedByDefault &&
-      !includePaths.includes(file.path),
+      !selectedPaths.includes(file.path),
   );
   const active = (preview.data?.activeThreadIds.length ?? 0) > 0;
   const sameHost = preview.data?.sourceHostId === hostId;
@@ -409,15 +419,7 @@ export function ContinuationDialog({
         targetHostId: hostId,
         targetPath: (retry?.targetPath ?? targetPath).trim(),
         presetId: retry?.presetId ?? presetId,
-        includePaths: retry
-          ? []
-          : includePaths.filter((path) =>
-              preview.data?.files.some(
-                (file) =>
-                  file.path === path &&
-                  (!file.tracked || file.kind === "sensitive-tracked"),
-              ),
-            ),
+        includePaths: retry ? [] : selectedPaths,
         extraInstructions: instructions.trim(),
         ...(!retry && branch.trim() ? { branch: branch.trim() } : {}),
         ...(retry ? { operationId: retry.operationId } : {}),
@@ -477,6 +479,7 @@ export function ContinuationDialog({
                   onChange={(event) => {
                     setTargetHostId(event.target.value);
                     setIncludePaths([]);
+                    setExtraPathsInput("");
                     setError(null);
                   }}
                 >
@@ -571,6 +574,22 @@ export function ContinuationDialog({
                       </label>
                     ))}
                   </div>
+                  <label className={fieldClass}>
+                    Additional exact file paths
+                    <Textarea
+                      value={extraPathsInput}
+                      onChange={(event) =>
+                        setExtraPathsInput(event.target.value)
+                      }
+                      placeholder="ignored-folder/config.json"
+                    />
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Ignored directories stay collapsed. List exact files, one
+                    relative path per line. Directories, symlinks, and path
+                    traversal are refused; nothing in a directory is copied
+                    automatically.
+                  </p>
                 </section>
               ) : null}
             </>

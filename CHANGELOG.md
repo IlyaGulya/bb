@@ -6,6 +6,8 @@
   and agent preset independently of its tracker project. Continue an idle task
   on another machine with explicit file selection, a verified handoff and a new
   attached session; keep the source visible and make the target current.
+- Allow explicit continuation file paths beneath collapsed ignored directories
+  without enumerating or copying entire dependency trees.
 - Observe server exits while host-daemon startup is retrying or waiting for
   readiness. Cancel and drain pending daemon recovery before server restart,
   moved-mode handover or healthy-port takeover.

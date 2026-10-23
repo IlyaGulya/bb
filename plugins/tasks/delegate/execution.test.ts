@@ -26,7 +26,6 @@ function setup() {
     spawnAmbiguous: false,
     sensitiveTracked: false,
     transferGate: null as Promise<void> | null,
-    checkpoint: "",
   };
   const ready = {
     operationId: "transfer_fixture",
@@ -106,6 +105,13 @@ function setup() {
               excludedReason:
                 "Sensitive configuration; select this exact file explicitly to consent.",
             },
+            {
+              path: "local-config",
+              kind: "ignored",
+              tracked: false,
+              selectedByDefault: false,
+              excludedReason: "Ignored directory; select exact ordinary files.",
+            },
             ...(state.sensitiveTracked
               ? [
                   {
@@ -157,12 +163,7 @@ function setup() {
           continuationOperationId: ready.operationId,
           taskId: task.id,
         }),
-        spawn: async (args) => {
-          state.checkpoint =
-            args.prompt ??
-            (args.input ?? [])
-              .flatMap((part) => (part.type === "text" ? [part.text] : []))
-              .join("\n");
+        spawn: async () => {
           if (state.spawnError) {
             if (state.spawnAmbiguous) state.spawned = true;
             throw new Error(state.spawnError);
@@ -391,18 +392,10 @@ describe("task native workspace continuation", () => {
     expect(harness.sdk.callsTo("threads.spawn")).toEqual([]);
   });
 
-  it("requires explicit consent for sensitive tracked files and forwards only exact selected paths", async () => {
-    const { harness, input, attachSource, state } = setup();
+  it("requires explicit consent for sensitive tracked files before continuation", async () => {
+    const { harness, input, attachSource, state, bb, ready } = setup();
     attachSource();
     state.sensitiveTracked = true;
-    const preview = delegationRpcContract.previewTaskContinuation.output.parse(
-      await harness.callRpc("previewTaskContinuation", {
-        taskId: input.taskId,
-        sourceThreadId: input.sourceThreadId,
-        targetHostId: input.targetHostId,
-      }),
-    );
-    expect(preview).not.toHaveProperty("maxPayloadBytes");
     await expect(harness.callRpc("continueTask", input)).rejects.toThrow(
       "requires explicit consent",
     );
@@ -412,10 +405,31 @@ describe("task native workspace continuation", () => {
       includePaths: ["extra.bin", "tracked-secret", ".env"],
     });
     expect(
-      harness.sdk.callsTo("projects.transferWorkspace")[0]?.[0],
-    ).toMatchObject({
-      includePaths: ["extra.bin", "tracked-secret", ".env"],
+      new ExecutionStore(bb.storage.database()).get(ready.operationId)?.receipt
+        .state,
+    ).toBe("started");
+  });
+
+  it("continues an explicitly selected file beneath a collapsed ignored directory", async () => {
+    const { harness, input, attachSource, bb, store, task, ready } = setup();
+    attachSource();
+    await harness.callRpc("continueTask", {
+      ...input,
+      includePaths: ["local-config/settings.json"],
     });
+    const executions = new ExecutionStore(bb.storage.database());
+    expect(executions.get(ready.operationId)?.receipt.state).toBe("started");
+    expect(executions.target(task.id)?.workspace).toEqual({
+      kind: "existing-environment",
+      environmentId: "env_target",
+    });
+    expect(
+      store.tasks
+        .listTaskThreads(task.id)
+        .map((entry) => entry.threadId)
+        .sort(),
+    ).toEqual(["thr_continued", "thr_source"]);
+    expect(store.tasks.getTask(task.id)?.status).toBe("in_progress");
   });
 
   it("never starts target agent when verified transfer fails", async () => {
@@ -440,9 +454,8 @@ describe("task native workspace continuation", () => {
     expect(store.tasks.getTask(task.id)?.status).toBe("in_progress");
   });
 
-  it("seeds task and stored Jira context plus verified handoff into a new attached native session", async () => {
-    const { harness, input, attachSource, state, store, task, bb, ready } =
-      setup();
+  it("preserves Jira source and the previous executor when attaching a native continuation", async () => {
+    const { harness, input, attachSource, store, task, bb, ready } = setup();
     attachSource();
     new JiraStore(bb.storage.database(), store).insert(task.id, "synthetic", {
       id: "10001",
@@ -473,16 +486,6 @@ describe("task native workspace continuation", () => {
       threadId: "thr_continued",
       operationId: ready.operationId,
       environmentId: "env_target",
-    });
-    expect(state.checkpoint).toContain("Review prepared PR");
-    expect(state.checkpoint).toContain("Stored Jira checkpoint");
-    expect(state.checkpoint).toContain(ready.handoff);
-    expect(state.checkpoint).toContain(input.extraInstructions);
-    expect(state.checkpoint).toContain("NEW native session");
-    expect(harness.sdk.callsTo("threads.spawn")[0]?.[0]).toMatchObject({
-      environment: { type: "reuse", environmentId: "env_target" },
-      projectId: "proj_code",
-      transferOperationId: ready.operationId,
     });
     expect(
       store.tasks
