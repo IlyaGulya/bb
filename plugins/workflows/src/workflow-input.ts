@@ -1,4 +1,5 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { BbPluginApi, PluginProvidersState } from "@get-bb/plugin-sdk";
+import { requireWorkflowProviderReadiness } from "./provider-readiness.js";
 import {
   resolveWorkflowSource,
   type ResolvedWorkflowSource,
@@ -37,14 +38,25 @@ export async function prepareWorkflowSource(
       return bb.sdk.files.read(input);
     },
   });
+  const providersById = new Map<
+    string,
+    PluginProvidersState["providers"][number]
+  >();
   const validation = await validateWorkflowSource(
     resolved.source,
     resolved.environmentId,
     {
-      listProviders(environmentId) {
-        return bb.sdk.providers.list({ environmentId });
+      async listProviders(environmentId) {
+        const providers = await bb.sdk.providers.list({ environmentId });
+        for (const provider of providers)
+          providersById.set(provider.id, provider);
+        return providers;
       },
-      loadModels(environmentId, providerId) {
+      async loadModels(environmentId, providerId) {
+        const provider = providersById.get(providerId);
+        if (provider === undefined)
+          throw new Error(`Provider ${providerId} is not registered.`);
+        await requireWorkflowProviderReadiness(bb, environmentId, provider);
         return bb.sdk.providers.models({ environmentId, providerId });
       },
     },

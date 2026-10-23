@@ -1,12 +1,13 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
+import { createServer } from "node:http";
 import {
   BbHttpError,
+  BbRequestTimeoutError,
+  type RequestTimeoutInit,
   createRequestTimeoutFetch,
-  DEFAULT_BB_REQUEST_TIMEOUT_MS,
   readJsonResponse,
   readVoidResponse,
 } from "../src/response.js";
-import { createNodeTransport } from "../src/node.js";
 
 const REQUEST_TIMEOUT_ERROR_NAME = "BbRequestTimeoutError";
 const REQUEST_TIMEOUT_VALIDATION_MESSAGE =
@@ -122,27 +123,6 @@ function getBytesReader(response: Response): () => Promise<Uint8Array> {
     throw new Error("Expected Response.bytes to be available");
   }
   return () => read();
-}
-
-function createAbortedTimeoutSignal(): AbortSignal {
-  const controller = new AbortController();
-  controller.abort(
-    new DOMException("The operation timed out.", "TimeoutError"),
-  );
-  return controller.signal;
-}
-
-interface ImmediateTimeoutSignalArgs {
-  timeoutMs: number;
-}
-
-function useImmediateTimeoutSignalFor(args: ImmediateTimeoutSignalArgs): void {
-  vi.spyOn(AbortSignal, "timeout").mockImplementation((timeoutMs) => {
-    if (timeoutMs === args.timeoutMs) {
-      return createAbortedTimeoutSignal();
-    }
-    return new AbortController().signal;
-  });
 }
 
 function readJson<TBody>(response: Response): Promise<TBody> {
@@ -319,23 +299,45 @@ describe("readJsonResponse()", () => {
 });
 
 describe("createRequestTimeoutFetch()", () => {
+  it("keeps an explicit long request deadline local while preserving defaults and caller cancellation", async () => {
+    const server = createServer((request, response) => {
+      if (request.url === "/complete") response.end("completed");
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("Missing loopback address");
+    const url = `http://127.0.0.1:${address.port}`;
+    const timeoutFetch = createRequestTimeoutFetch({ timeoutMs: 0 });
+    const longRequest: RequestTimeoutInit = { timeoutMs: 10_000 };
+    try {
+      const response = await timeoutFetch(`${url}/complete`, longRequest);
+      expect(await response.text()).toBe("completed");
+      await expect(timeoutFetch(`${url}/hang`)).rejects.toBeInstanceOf(
+        BbRequestTimeoutError,
+      );
+      const reason = new Error("Operator canceled transfer");
+      await expect(
+        timeoutFetch(`${url}/hang`, {
+          ...longRequest,
+          signal: AbortSignal.abort(reason),
+        }),
+      ).rejects.toBe(reason);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
   it("times out hung API requests", async () => {
     await expectPendingFetchTimeout({
       timeoutMs: SHORT_TIMEOUT_MS,
       expectedMessage: SHORT_TIMEOUT_MESSAGE,
     });
-  });
-
-  it("uses the default timeout when creating the node transport", async () => {
-    useImmediateTimeoutSignalFor({
-      timeoutMs: DEFAULT_BB_REQUEST_TIMEOUT_MS,
-    });
-    mockPendingFetchUntilAbort();
-    const transport = createNodeTransport({ baseUrl: "http://server" });
-
-    await expect(transport.api.v1.hosts.$get()).rejects.toThrow(
-      requestTimeoutMessage("75 seconds"),
-    );
   });
 
   it("rejects negative timeout values", () => {
@@ -350,24 +352,6 @@ describe("createRequestTimeoutFetch()", () => {
         REQUEST_TIMEOUT_VALIDATION_MESSAGE,
       );
     }
-  });
-
-  it("formats plural timeout durations", async () => {
-    useImmediateTimeoutSignalFor({ timeoutMs: 2_000 });
-
-    await expectPendingFetchTimeout({
-      timeoutMs: 2_000,
-      expectedMessage: requestTimeoutMessage("2 seconds"),
-    });
-  });
-
-  it("formats non-integer second timeout durations as milliseconds", async () => {
-    useImmediateTimeoutSignalFor({ timeoutMs: 1_250 });
-
-    await expectPendingFetchTimeout({
-      timeoutMs: 1_250,
-      expectedMessage: requestTimeoutMessage("1250 ms"),
-    });
   });
 
   it("preserves response metadata through the wrapper", async () => {

@@ -1,4 +1,7 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import {
+  experimental_providerExecutionReadinessBlocker,
+  type BbPluginApi,
+} from "@get-bb/plugin-sdk";
 import type { Preset, Project, TasksStore } from "../db";
 import type { ExecutionTarget, TaskExecution } from "../shared/execution";
 import type { ExecutionStore } from "./execution-store";
@@ -81,16 +84,35 @@ export async function validateProfileAvailability(
   bb: BbPluginApi,
   preset: Preset,
   hostId: string,
+  environmentId?: string,
 ): Promise<void> {
-  const providers = await bb.sdk.providers.list({ hostId });
+  const scope = environmentId ? { environmentId } : { hostId };
+  const providers = await bb.sdk.providers.list({
+    ...scope,
+    providerId: preset.providerId,
+  });
   const provider = providers.find(
     (candidate) => candidate.id === preset.providerId,
   );
-  if (!provider?.available) {
+  if (!provider)
     throw new Error(
-      `Profile "${preset.name}" requires provider ${preset.providerId}, which is unavailable on ${hostId}. Configure that provider on the target machine first.`,
+      `Profile "${preset.name}" requires unregistered provider ${preset.providerId} on ${hostId}. Check provider settings.`,
     );
-  }
+  const states =
+    provider.available && provider.readiness?.verification !== "unsupported"
+      ? await bb.sdk.system.providerStates({
+          ...scope,
+          providerId: preset.providerId,
+        })
+      : null;
+  const blocker = experimental_providerExecutionReadinessBlocker(
+    provider,
+    states?.providers.find(
+      (candidate) => candidate.providerId === preset.providerId,
+    )?.readiness ?? null,
+    environmentId ? "environment" : "host",
+  );
+  if (blocker) throw new Error(`Profile "${preset.name}": ${blocker}`);
 }
 
 export async function targetSpawnEnvironment(
@@ -126,7 +148,12 @@ export async function targetSpawnEnvironment(
     ) {
       throw new Error("Selected workspace has running or pending agent work");
     }
-    await validateProfileAvailability(bb, preset, target.hostId);
+    await validateProfileAvailability(
+      bb,
+      preset,
+      target.hostId,
+      environment.id,
+    );
     return { type: "reuse", environmentId: environment.id };
   }
   const project = await bb.sdk.projects.get({ projectId: target.bbProjectId });

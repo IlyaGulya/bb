@@ -64,7 +64,7 @@ incomplete, and null-result calls are not reusable; the first such call and the
 entire suffix run live. Legacy runs without replay-safety metadata replay
 nothing. A plugin restart applies the same longest-prefix rule.
 
-Each `agent()` call retries transient provider failures twice with bounded
+Each ordinary, non-Task-managed `agent()` call retries transient provider failures twice with bounded
 backoff before surfacing the error to `parallel()`/`pipeline()` or the script.
 Overload, rate-limit, provider 5xx, and recognized network failures retry;
 authentication, configuration, and schema failures do not. The retry count is
@@ -126,12 +126,57 @@ completion-message size are snapshotted per run. `status` is bounded
 to compact progress and call counts. Paged JSONL `history` carries ordered
 call-level execution, cache, child-thread, repair, result, and error details.
 
-Workers are hidden and owned by the workflow plugin across every retry attempt.
-Finished, replaced, cancelled, and unattached workers are stopped and archived
-by maintenance without waiting for history retention. Cleanup retries across
-restarts and survives history expiry. Archiving or deleting an origin cancels
-its outstanding workflows and retires its owned workers while preserving
-retained history. Completion notification becomes `abandoned` for an archived
-or deleted origin; unrelated send conflicts and transient failures retry.
+Ordinary workers are hidden and owned by the workflow plugin across every retry
+attempt. Finished, replaced, cancelled, and unattached ordinary workers are
+stopped and archived by maintenance without waiting for history retention.
+Cleanup retries across restarts and survives history expiry. Archiving or
+deleting an origin cancels its outstanding workflows. Ordinary completion
+notification becomes `abandoned` for an archived or deleted origin; unrelated
+send conflicts and transient failures retry.
 Upgrades recover existing call references; older attempts already missing from
 those references require a separate historical audit.
+
+## Task build/review is not generic resume
+
+Tasks uses the same QuickJS engine, journal, worker calls, and bounded settings,
+but owns a durable task receipt and human review transitions. Inspect with
+`bb tasks workflow list TASK --json`; use the returned native `runId` for
+`bb workflows status` or bounded history, and the `twf_` receipt ID for Tasks
+Accept/Return. The task card links the retained writer and reviewer.
+
+The plan and implementation/smoke calls use one writer thread/provider session.
+The reviewer uses a different allowed provider/runtime or model. Real platform
+smoke is mandatory, with command/output/exit-code evidence and screenshot or
+preview evidence when UI is required. Authoritative branch, commit, and
+clean-tree checks must pass before the result becomes `in_review`.
+
+Launch retries reuse an identical launch key/input. Completion publication is
+once per revision and does not send an origin-agent completion turn. Only an
+explicit human Accept of the exact current revision moves the task to `done`;
+Accept rechecks checkout identity. A reviewer verdict alone is not acceptance.
+
+Return creates a new native journal run in the same group, sends the human
+feedback to the **same retained writer**, and reruns independent review. It
+does not use generic `--resume` to replace that session. Existing writer model,
+permissions, workspace, and provider context must remain unchanged. Idle or
+error-state retained workers can resume; busy, deleted, archived, unavailable,
+or execution-changed workers cannot be silently replaced.
+
+Task-managed calls do not blindly apply generic provider retries to uncertain
+delivery. A lost send acknowledgement fails closed and retains the worker.
+Initial launch reconciliation searches native ownership metadata; uncertainty
+does not authorize another writer. A definitive rejected initial creation is
+recorded separately. If there is no established or uncertain context, repair
+the originally selected execution profiles and Return to retry the first
+writer. The card labels this case separately and can retry a blocked launch
+using its original receipt.
+
+Pending Task review groups pin both worker threads and native journal rows.
+Accept releases the group. Deleting tasks preflights and releases the whole
+deletion set in one native transaction; an active member prevents any member
+from being released. Do not release a group manually to evade human review.
+
+Worker tool permissions remain the selected provider/plugin policy. The
+QuickJS orchestration sandbox, reviewer instructions, and stable commit checks
+do not establish an OS read-only sandbox. Inspect real logs and artifacts
+before making an acceptance decision.

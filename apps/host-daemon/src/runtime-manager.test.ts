@@ -1010,6 +1010,96 @@ describe("RuntimeManager", () => {
     ]);
   });
 
+  it("gives one native runtime write access to every bound Git root and protects each dirty capture", async () => {
+    const primary = await fs.realpath(
+      await initRepo(await makeTempDir("bb-multi-primary-")),
+    );
+    const secondary = await fs.realpath(
+      await initRepo(await makeTempDir("bb-multi-secondary-")),
+    );
+    const options: RuntimeOptionsRef = { current: null };
+    const runtime = createFakeRuntime();
+    const manager = new RuntimeManager({
+      provisionWorkspace,
+      createRuntime: (value) => {
+        options.current = value;
+        return runtime;
+      },
+    });
+    const entry = await manager.ensureEnvironment({
+      environmentId: "env-multi",
+      workspacePath: primary,
+      additionalWorkspacePaths: [secondary],
+    });
+    expect(options.current?.workspacePath).toBe(primary);
+    expect(options.current?.additionalWorkspaceWriteRoots).toContain(secondary);
+    expect(entry.additionalWorkspacePaths).toEqual([secondary]);
+    runtime.setActiveTurn("thread-coherent", "turn-active");
+    expect(manager.listWorkspaceActiveThreadIds(secondary)).toContain(
+      "thread-coherent",
+    );
+    expect(() => manager.acquireWorkspaceCapture(secondary)).toThrow();
+    await expect(
+      manager.ensureEnvironment({
+        environmentId: "env-multi",
+        workspacePath: primary,
+        additionalWorkspacePaths: [],
+      }),
+    ).rejects.toThrow("Cannot change repository bindings");
+  });
+
+  it("does not create a provider runtime when any bound root is missing, overlapping or aliased", async () => {
+    const primary = await fs.realpath(
+      await initRepo(await makeTempDir("bb-multi-boundary-")),
+    );
+    const secondary = await fs.realpath(
+      await initRepo(await makeTempDir("bb-multi-boundary-secondary-")),
+    );
+    const alias = path.join(await makeTempDir("bb-multi-alias-"), "linked");
+    await fs.symlink(secondary, alias);
+    const createRuntime = vi.fn(() => createFakeRuntime());
+    const manager = new RuntimeManager({ provisionWorkspace, createRuntime });
+    for (const root of [path.join(primary, "missing"), primary, alias]) {
+      await expect(
+        manager.ensureEnvironment({
+          environmentId: "env-invalid-multi",
+          workspacePath: primary,
+          additionalWorkspacePaths: [root],
+        }),
+      ).rejects.toThrow();
+    }
+    expect(createRuntime).not.toHaveBeenCalled();
+  });
+
+  it("upgrades an idle single-root environment to a coherent runtime without losing roots on subsequent calls", async () => {
+    const primary = await fs.realpath(
+      await initRepo(await makeTempDir("bb-multi-upgrade-")),
+    );
+    const secondary = await fs.realpath(
+      await initRepo(await makeTempDir("bb-multi-upgrade-secondary-")),
+    );
+    const createRuntime = vi.fn(() => createFakeRuntime());
+    const manager = new RuntimeManager({ provisionWorkspace, createRuntime });
+    const before = await manager.ensureEnvironment({
+      environmentId: "env-upgrade",
+      workspacePath: primary,
+    });
+    expect(before.additionalWorkspacePaths).toEqual([]);
+    const bound = await manager.ensureEnvironment({
+      environmentId: "env-upgrade",
+      workspacePath: primary,
+      additionalWorkspacePaths: [secondary],
+    });
+    expect(bound.runtime).not.toBe(before.runtime);
+    expect(before.runtime.shutdown).toHaveBeenCalledOnce();
+    const reused = await manager.ensureEnvironment({
+      environmentId: "env-upgrade",
+      workspacePath: primary,
+    });
+    expect(reused.runtime).toBe(bound.runtime);
+    expect(reused.additionalWorkspacePaths).toEqual([secondary]);
+  });
+
   it("passes thread storage root to created runtimes as a workspace-write root", async () => {
     const provisionWorkspace = createProvisionWorkspaceMock("/tmp/env-1");
     const runtimeOptions: RuntimeOptionsRef = { current: null };

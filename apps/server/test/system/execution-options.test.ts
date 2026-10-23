@@ -394,7 +394,51 @@ describe("resolveSystemExecutionOptions", () => {
     });
   });
 
-  it("omits installed-only providers that their bridge reports missing", async () => {
+  it("keeps a selected cold provider visible and blocks model execution with retry guidance instead of switching providers", async () => {
+    await withTestHarness({}, async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: (request) =>
+          request.command.type === "provider.health"
+            ? {
+                ok: false,
+                errorCode: "host_unavailable",
+                errorMessage: "Bridge is initializing",
+              }
+            : {
+                ok: true,
+                result: {
+                  models: [availableModelFixture({ model: "chosen-model" })],
+                  selectedOnlyModels: [],
+                },
+              },
+      });
+      const result = await resolveSystemExecutionOptions(harness.deps, {
+        hostId: host.id,
+        providerId: "acp-omp",
+      });
+      expect(
+        result.providers.find((provider) => provider.id === "acp-omp"),
+      ).toMatchObject({
+        available: true,
+        readiness: {
+          status: "initializing",
+          freshness: "unverified",
+          verification: "required",
+        },
+      });
+      expect(result.models).toEqual([]);
+      expect(result.modelLoadError).toMatchObject({
+        providerId: "acp-omp",
+        code: "provider_not_ready",
+        detail: expect.stringContaining("Retry"),
+      });
+    });
+  });
+
+  it("reports confirmed missing installed-only providers without removing their identity", async () => {
     await withTestHarness({}, async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-execution-options-known-acp-missing",
@@ -417,9 +461,13 @@ describe("resolveSystemExecutionOptions", () => {
         hostId: host.id,
       });
 
-      expect(providers.map((provider) => provider.id)).not.toContain(
-        "acp-opencode",
-      );
+      expect(
+        providers.find((provider) => provider.id === "acp-opencode")?.readiness,
+      ).toMatchObject({
+        status: "not_installed",
+        freshness: "fresh",
+        retryAfterMs: null,
+      });
     });
   });
 
@@ -441,16 +489,41 @@ describe("resolveSystemExecutionOptions", () => {
         providerId: "codex",
       });
 
-      expect(response.providers.map((provider) => provider.id)).toEqual([
-        "codex",
-        "claude-code",
-        "pi",
-        "acp-cursor",
-      ]);
+      expect(response.providers.map((provider) => provider.id)).toEqual(
+        harness.deps.providerRegistry.list().map((entry) => entry.info.id),
+      );
+      expect(
+        response.providers.every(
+          (provider) => provider.readiness?.status === "unknown",
+        ),
+      ).toBe(true);
       expect(response.modelLoadError).toEqual({
         providerId: "codex",
         code: "failed",
         detail: "Host is suspended",
+      });
+      harness.deps.providerRegistry.observeReadiness(
+        { hostId: host.id, providerId: "acp-omp" },
+        {
+          verification: "required",
+          scope: "host",
+          status: "ready",
+          freshness: "fresh",
+          checkedAt: 123,
+          retryAfterMs: null,
+          detail: "Prior success",
+        },
+      );
+      const disconnected = await listSystemProviderInfos(harness.deps, {
+        hostId: host.id,
+      });
+      expect(
+        disconnected.find((provider) => provider.id === "acp-omp")?.readiness,
+      ).toMatchObject({
+        status: "ready",
+        freshness: "stale",
+        checkedAt: 123,
+        retryAfterMs: 5_000,
       });
       expect(request).not.toHaveBeenCalled();
       expect(warn).not.toHaveBeenCalled();
@@ -490,9 +563,17 @@ describe("resolveSystemExecutionOptions", () => {
           expect(listQueuedCommands(harness, "provider.health")).toHaveLength(
             6,
           );
-          expect(providers.map((provider) => provider.id)).not.toContain(
-            "acp-opencode",
+          expect(providers).toHaveLength(
+            harness.deps.providerRegistry.list().length,
           );
+          expect(
+            providers.every(
+              (provider) =>
+                provider.readiness?.status === "initializing" &&
+                provider.readiness.freshness === "unverified" &&
+                provider.readiness.checkedAt === null,
+            ),
+          ).toBe(true);
         } finally {
           harness.hub.unregisterDaemon(session.id);
           vi.useRealTimers();
@@ -578,8 +659,15 @@ describe("resolveSystemExecutionOptions", () => {
             ]),
           );
           expect(
-            response.providers.map((provider) => provider.id),
-          ).not.toContain("acp-opencode");
+            response.providers.find(
+              (provider) => provider.id === "acp-opencode",
+            )?.readiness,
+          ).toMatchObject({
+            status: "initializing",
+            freshness: "unverified",
+            checkedAt: null,
+            retryAfterMs: 5_000,
+          });
           expect(response.models).toEqual([catalogModel]);
           expect(response.modelLoadError).toBeNull();
           expect(
@@ -743,9 +831,10 @@ describe("resolveSystemExecutionOptions", () => {
             expect.objectContaining({ id: "acp-example-agent" }),
           ]),
         );
-        expect(response.providers.map((provider) => provider.id)).not.toContain(
-          "acp-opencode",
-        );
+        expect(
+          response.providers.find((provider) => provider.id === "acp-opencode")
+            ?.readiness,
+        ).toMatchObject({ status: "unknown", freshness: "unverified" });
         expect(response.models).toEqual([
           expect.objectContaining({
             model: "gpt-custom",
@@ -1144,7 +1233,7 @@ describe("resolveSystemExecutionOptions", () => {
         registry.markRegistrationsSettled();
 
         expect((await providersPromise).map((provider) => provider.id)).toEqual(
-          ["codex", "claude-code", "pi", "acp-cursor"],
+          registry.list().map((entry) => entry.info.id),
         );
       },
     );
@@ -1476,7 +1565,11 @@ describe("resolveSystemExecutionOptions provider model catalog", () => {
 
         heldHealth.resolve();
         await vi.waitFor(async () => {
-          expect(await listIds()).not.toContain("acp-opencode");
+          expect(
+            (
+              await listSystemProviderInfos(harness.deps, { hostId: host.id })
+            ).find((provider) => provider.id === "acp-opencode")?.readiness,
+          ).toMatchObject({ status: "not_installed", freshness: "fresh" });
         });
         expect(healthCount()).toBe(2 * probeCount);
       } finally {

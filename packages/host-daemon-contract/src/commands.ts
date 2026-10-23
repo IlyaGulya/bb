@@ -1,4 +1,7 @@
-import { workspaceTransferCommandSchemas, workspaceTransferResultSchemas } from "./workspace-transfer.js";
+import {
+  workspaceTransferCommandSchemas,
+  workspaceTransferResultSchemas,
+} from "./workspace-transfer.js";
 import {
   desktopBrowserCommandSchemas,
   desktopBrowserResultSchemas,
@@ -76,6 +79,7 @@ const INJECTED_SKILL_NAME_PATTERN =
 
 export const workspaceContextSchema = z.object({
   workspacePath: z.string().min(1),
+  additionalWorkspacePaths: z.array(z.string().min(1)).max(31).optional(),
 });
 export type WorkspaceContext = z.infer<typeof workspaceContextSchema>;
 

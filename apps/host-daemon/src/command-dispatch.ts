@@ -1,4 +1,10 @@
-import { captureWorkspace, copyWorkspaceRead, copyWorkspaceWrite, previewWorkspaceTransfer, restoreWorkspace } from "./workspace-transfer.js";
+import {
+  captureWorkspace,
+  copyWorkspaceRead,
+  copyWorkspaceWrite,
+  previewWorkspaceTransfer,
+  restoreWorkspace,
+} from "./workspace-transfer.js";
 import { operationEnvironment } from "./operation-environment.js";
 import {
   runEnvironmentHook,
@@ -699,18 +705,34 @@ const onlineRpcHandlers: OnlineRpcHandlerMap = {
   "workspace.transferPreview": (command, options) =>
     previewWorkspaceTransfer(command.rootPath, {
       shellEnv: options.runtimeManager.getShellEnv(),
-      activeThreadIds: () => options.runtimeManager.listWorkspaceActiveThreadIds(command.rootPath),
+      activeThreadIds: () =>
+        options.runtimeManager.listWorkspaceActiveThreadIds(command.rootPath),
     }),
   "workspace.capture": (command, options) =>
     captureWorkspace(command.rootPath, command.includePaths, {
       shellEnv: options.runtimeManager.getShellEnv(),
-      activeThreadIds: () => options.runtimeManager.listWorkspaceActiveThreadIds(command.rootPath),
-      acquireCapture: () => options.runtimeManager.acquireWorkspaceCapture(command.rootPath),
+      ...(command.remoteBase ? { remoteBase: command.remoteBase } : {}),
+      activeThreadIds: () =>
+        options.runtimeManager.listWorkspaceActiveThreadIds(command.rootPath),
+      acquireCapture: () =>
+        options.runtimeManager.acquireWorkspaceCapture(command.rootPath),
     }),
   "workspace.restore": (command, options) =>
-    restoreWorkspace(command.targetPath, command.checkpoint, command.branch, { shellEnv: options.runtimeManager.getShellEnv() }),
-  "workspace.copyRead": (command) => copyWorkspaceRead(command.rootPath, command.paths),
-  "workspace.copyWrite": (command) => copyWorkspaceWrite(command.rootPath, command.files),
+    restoreWorkspace(command.targetPath, command.checkpoint, command.branch, {
+      shellEnv: options.runtimeManager.getShellEnv(),
+    }),
+  "workspace.copyRead": (command) =>
+    copyWorkspaceRead(command.rootPath, command.paths),
+  "workspace.copyWrite": async (command, options) => {
+    const release = options.runtimeManager.acquireWorkspaceCapture(
+      command.rootPath,
+    );
+    try {
+      return await copyWorkspaceWrite(command.rootPath, command.files);
+    } finally {
+      release();
+    }
+  },
   "workspace.status": (command, options) =>
     readAvailableWorkspace(command, options, async (workspace) => ({
       workspaceStatus: await workspace.getStatus({

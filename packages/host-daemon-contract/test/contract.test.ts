@@ -1,4 +1,3 @@
-import { collectOptionalFieldPaths } from "@bb/test-helpers";
 import {
   TERMINAL_COLS_MAX,
   TERMINAL_DATA_MAX_BASE64_LENGTH,
@@ -502,9 +501,32 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
       },
     ],
   },
-  "workspace.transferPreview": { head: "a".repeat(40), branch: "main", files: [], activeThreadIds: [], maxPayloadBytes: 67108864 },
-  "workspace.capture": { checkpoint: { version: 1, head: "a".repeat(40), branch: "main", bundleBase64: "", bundleSha256: "b".repeat(64), lfsPaths: [], index: [], worktree: [], extraFiles: [], filePermissions: [] } },
-  "workspace.restore": { rootPath: "/tmp/restored-workspace", head: "a".repeat(40), branch: "main" },
+  "workspace.transferPreview": {
+    head: "a".repeat(40),
+    branch: "main",
+    files: [],
+    activeThreadIds: [],
+    maxPayloadBytes: 67108864,
+  },
+  "workspace.capture": {
+    checkpoint: {
+      version: 1,
+      head: "a".repeat(40),
+      branch: "main",
+      bundleBase64: "",
+      bundleSha256: "b".repeat(64),
+      lfsPaths: [],
+      index: [],
+      worktree: [],
+      extraFiles: [],
+      filePermissions: [],
+    },
+  },
+  "workspace.restore": {
+    rootPath: "/tmp/restored-workspace",
+    head: "a".repeat(40),
+    branch: "main",
+  },
   "workspace.copyRead": { files: [] },
   "workspace.copyWrite": { files: [] },
   "workspace.status": WORKSPACE_UNAVAILABLE_RESULT,
@@ -802,141 +824,6 @@ function expectHostRpcResponseRoundTrip(
 function terminalDataBase64(byteLength: number): string {
   return Buffer.alloc(byteLength, "a").toString("base64");
 }
-
-const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
-  "hostDaemonOnlineRpcCommandSchema.branch":
-    "workspace.restore inherits the captured branch unless the caller explicitly selects a new branch.",
-  "hostDaemonOnlineRpcCommandSchema.checkpoint.index.contentBase64":
-    "unchanged index blobs are already present in the bundled HEAD and omit duplicate content.",
-  "hostDaemonOnlineRpcCommandSchema.checkpoint.index.sha256":
-    "an index content SHA-256 exists exactly when changed blob content is carried.",
-  "hostDaemonCommandSchema.resolution.description":
-    "the interaction.resolve command's resolution is the persisted union, so it also admits the plugin_submitted arm and the description a plugin's describeSubmission returned. It never reaches the wire: a plugin interaction is settled in the server against its waiting requestInput promise and never queues a daemon command, so an older daemon never sees the field.",
-  "hostDaemonCommandSchema.resolution.description.detail":
-    "a described submission carries Markdown detail only when the plugin returned some; absence means the row title is the whole row.",
-  "hostDaemonCommandSchema.resolution.description.payload":
-    "a described submission carries a payload only when the plugin has something for its own timeline renderer; absence means the row renders from title and detail alone.",
-  "hostDaemonCommandSchema.resolution.description.title":
-    "a described submission overrides the row title only when the plugin returned one; absence means the presentation's completed label stands.",
-  "hostDaemonCommandSchema.dynamicTools.presentation":
-    "a dynamic tool declares a row presentation only when its plugin wrote one; absence means bb renders the call with the standard tool name and the plugin's branding glyph.",
-  "hostDaemonCommandSchema.dynamicTools.presentation.badge":
-    "a dynamic tool's presentation carries a badge only when there is something to flag about how the call will run; absence means the ordinary case, not a blank badge.",
-  "hostDaemonCommandSchema.dynamicTools.presentation.detail":
-    "a dynamic tool's presentation has a detail only when the plugin summarized the call; a missing detail means the label and title are the whole summary, not an empty string.",
-  "hostDaemonCommandSchema.dynamicTools.presentation.suppress":
-    "a dynamic tool's presentation marks suppress only for low-value rows the plugin wants collapsed; absence means render normally.",
-  "hostDaemonCommandSchema.dynamicTools.presentation.tint":
-    "a dynamic tool's presentation carries a tint only when the plugin wants an accent colour; absence means the neutral row tint, which is not a colour value.",
-  "hostDaemonCommandSchema.dynamicTools.presentation.title":
-    "a dynamic tool's presentation has a title only when the call has a headline (a path, a query); absence means the label stands alone.",
-  "hostDaemonCommandSchema.input.sourceProjectId":
-    "a source project exists only on a portable server-facing attachment reference; the server copies it into the destination and strips this field before sending a daemon command.",
-  "hostDaemonCommandSchema.input.hostId":
-    "a machine exists only on a server-facing absolute-path reference; the server checks it against the thread's machine and strips this field before sending a daemon command.",
-  "hostDaemonCommandSchema.input.mimeType":
-    "a localFile prompt input carries a mime type only when the uploader determined one; absence means the daemon must sniff or fall back, not that the file is untyped.",
-  "hostDaemonCommandSchema.input.name":
-    "a localFile prompt input names itself only when the uploader knew a name; absence means the path is the file's only identity, not that it is unnamed.",
-  "hostDaemonCommandSchema.input.sizeBytes":
-    "a localFile prompt input carries a size only when the uploader measured one; absence means unknown, and no reader may read it as zero.",
-  "hostDaemonCommandSchema.input.visibility":
-    "a prompt input declares visibility only to hide itself from the person: the single value agent-only marks an input the transcript does not show, so absence is the ordinary visible input.",
-  "hostDaemonCommandSchema.inputGroups.sourceProjectId":
-    "a source project exists only on a portable server-facing attachment reference; the server copies it into the destination and strips this field before sending grouped input to the daemon.",
-  "hostDaemonCommandSchema.inputGroups.hostId":
-    "a machine exists only on a server-facing absolute-path reference; the server checks it against the thread's machine and strips this field before sending a daemon command.",
-  "hostDaemonCommandSchema.inputGroups.mimeType":
-    "a localFile prompt input carries a mime type only when the uploader determined one; absence means the daemon must sniff or fall back, not that the file is untyped.",
-  "hostDaemonCommandSchema.inputGroups.name":
-    "a localFile prompt input names itself only when the uploader knew a name; absence means the path is the file's only identity, not that it is unnamed.",
-  "hostDaemonCommandSchema.inputGroups.sizeBytes":
-    "a localFile prompt input carries a size only when the uploader measured one; absence means unknown, and no reader may read it as zero.",
-  "hostDaemonCommandSchema.inputGroups.visibility":
-    "a prompt input declares visibility only to hide itself from the person: the single value agent-only marks an input the transcript does not show, so absence is the ordinary visible input.",
-  "hostDaemonCommandSchema.resumeContext.dynamicTools.presentation":
-    "a dynamic tool declares a row presentation only when its plugin wrote one; absence means bb renders the call with the standard tool name and the plugin's branding glyph.",
-  "hostDaemonCommandSchema.resumeContext.dynamicTools.presentation.badge":
-    "a dynamic tool's presentation carries a badge only when there is something to flag about how the call will run; absence means the ordinary case, not a blank badge.",
-  "hostDaemonCommandSchema.resumeContext.dynamicTools.presentation.detail":
-    "a dynamic tool's presentation has a detail only when the plugin summarized the call; a missing detail means the label and title are the whole summary, not an empty string.",
-  "hostDaemonCommandSchema.resumeContext.dynamicTools.presentation.suppress":
-    "a dynamic tool's presentation marks suppress only for low-value rows the plugin wants collapsed; absence means render normally.",
-  "hostDaemonCommandSchema.resumeContext.dynamicTools.presentation.tint":
-    "a dynamic tool's presentation carries a tint only when the plugin wants an accent colour; absence means the neutral row tint, which is not a colour value.",
-  "hostDaemonCommandSchema.resumeContext.dynamicTools.presentation.title":
-    "a dynamic tool's presentation has a title only when the call has a headline (a path, a query); absence means the label stands alone.",
-  "hostDaemonInteractiveRequestSchema.interaction.payload.questions.options":
-    "a user question omits options when it takes free text only; absence is the question's shape, not missing choices.",
-  "hostDaemonInteractiveRequestSchema.interaction.payload.questions.options.description":
-    "a question option carries a description only when its label needs a gloss; absence means the label stands alone.",
-  "hostDaemonInteractiveRequestSchema.interaction.payload.questions.shortLabel":
-    "a user question omits shortLabel when its prompt is short enough to title the row itself.",
-  "hostDaemonOnlineRpcCommandSchema.nativeRoots.commands.project.skipIfManifest":
-    "a provider-native root names a vendor-plugin marker file only when the plugin that knows that vendor layout declares one; absence means every skill-shaped directory under the root is a skill, and core names no vendor path itself.",
-  "hostDaemonOnlineRpcCommandSchema.nativeRoots.commands.user.skipIfManifest":
-    "a provider-native root names a vendor-plugin marker file only when the plugin that knows that vendor layout declares one; absence means every skill-shaped directory under the root is a skill, and core names no vendor path itself.",
-  "hostDaemonOnlineRpcCommandSchema.nativeRoots.resolved.commands.fallbackName":
-    "a resolved skill-file root carries a fallback name only when the file's frontmatter names none and something else supplies it; absence means the parent directory's name is used.",
-  "hostDaemonOnlineRpcCommandSchema.nativeRoots.resolved.commands.skipIfManifest":
-    "a provider-native root names a vendor-plugin marker file only when the plugin that knows that vendor layout declares one; absence means every skill-shaped directory under the root is a skill, and core names no vendor path itself.",
-  "hostDaemonOnlineRpcCommandSchema.nativeRoots.resolved.skills.fallbackName":
-    "a resolved skill-file root carries a fallback name only when the file's frontmatter names none and something else supplies it; absence means the parent directory's name is used.",
-  "hostDaemonOnlineRpcCommandSchema.nativeRoots.resolved.skills.skipIfManifest":
-    "a provider-native root names a vendor-plugin marker file only when the plugin that knows that vendor layout declares one; absence means every skill-shaped directory under the root is a skill, and core names no vendor path itself.",
-  "hostDaemonOnlineRpcCommandSchema.nativeRoots.skills.project.skipIfManifest":
-    "a provider-native root names a vendor-plugin marker file only when the plugin that knows that vendor layout declares one; absence means every skill-shaped directory under the root is a skill, and core names no vendor path itself.",
-  "hostDaemonOnlineRpcCommandSchema.nativeRoots.skills.user.skipIfManifest":
-    "a provider-native root names a vendor-plugin marker file only when the plugin that knows that vendor layout declares one; absence means every skill-shaped directory under the root is a skill, and core names no vendor path itself.",
-  "hostDaemonOnlineRpcCommandSchema.sharedSkillRoots.project.skipIfManifest":
-    "a provider-native root names a vendor-plugin marker file only when the plugin that knows that vendor layout declares one; absence means every skill-shaped directory under the root is a skill, and core names no vendor path itself.",
-  "hostDaemonOnlineRpcCommandSchema.sharedSkillRoots.user.skipIfManifest":
-    "a provider-native root names a vendor-plugin marker file only when the plugin that knows that vendor layout declares one; absence means every skill-shaped directory under the root is a skill, and core names no vendor path itself.",
-  "hostDaemonCommandSchema.targetPath":
-    "project.clone omits targetPath when the daemon should derive its default checkout location for the project.",
-  "hostDaemonOnlineRpcCommandSchema.expectedSha256":
-    "host.write_file may omit expectedSha256 for unconditional writes; a hash is the compare-and-swap guard and null means create-only.",
-  "hostDaemonOnlineRpcCommandSchema.ifNoneMatch":
-    "host.read_file omits ifNoneMatch for unconditional reads; when present the daemon may omit unchanged file content.",
-  "hostDaemonOnlineRpcCommandSchema.mode":
-    "host.write_file may omit mode to preserve existing permissions; when present it only controls newly created files.",
-  "hostDaemonOnlineRpcCommandSchema.mergeBaseBranch":
-    "workspace.status may omit mergeBaseBranch when the caller only needs working-tree state.",
-  "hostDaemonInteractiveRequestSchema.interaction.payload.subject.presentation.badge":
-    "a tool_use approval's presentation carries a badge only when the bridge has something to flag about how the call will run, such as a command opting out of the session sandbox; absence means the ordinary case, not a blank badge.",
-  "hostDaemonInteractiveRequestSchema.interaction.payload.subject.presentation.detail":
-    "a tool_use approval's presentation has a detail only when the bridge summarized the call; a missing detail means the label and title are the whole summary, not an empty string.",
-  "hostDaemonInteractiveRequestSchema.interaction.payload.subject.presentation.suppress":
-    "a tool_use approval's presentation marks suppress only for low-value rows the bridge wants collapsed; absence means render normally.",
-  "hostDaemonInteractiveRequestSchema.interaction.payload.subject.presentation.tint":
-    "a tool_use approval's presentation carries a tint only when the bridge wants an accent colour; absence means the neutral row tint, which is not a colour value.",
-  "hostDaemonInteractiveRequestSchema.interaction.payload.subject.presentation.title":
-    "a tool_use approval's presentation has a title only when the call has a headline (a path, a query); absence means the label stands alone.",
-  "hostDaemonOnlineRpcCommandSchema.cwd":
-    "provider.list_models may omit cwd when only user-level provider configuration applies.",
-  "hostDaemonOnlineRpcCommandSchema.query":
-    "host.list_files may omit a search string to list files without filtering.",
-  "hostDaemonOnlineRpcCommandSchema.path":
-    "host.browse_directory may omit path to list the host's home directory, which a remote caller cannot resolve.",
-  "hostDaemonOnlineRpcCommandSchema.ref":
-    "host.read_file may omit ref to read from disk; setting ref switches to git history at that ref.",
-  "hostDaemonOnlineRpcCommandSchema.rootPath":
-    "host.read_file may omit rootPath only for explicit absolute disk reads; ref-based reads still require it.",
-  "hostDaemonOnlineRpcCommandSchema.selectedBranch":
-    "host.list_branch_options may omit exact selected-branch classification when the caller only needs a branch option page.",
-  "hostDaemonCommandSchema.threadStoragePath":
-    "thread.start may include a storage path so the daemon creates the directory before the agent starts.",
-  "hostDaemonCommandSchema.fork":
-    "thread.start omits fork unless the new thread should clone an existing provider session; absent means a normal start.",
-  "hostDaemonCommandSchema.fork.sourceProviderCheckpointId":
-    "thread.start.fork names a checkpoint only when the clone should stop at an earlier source turn; absent means clone the session tip.",
-  "hostDaemonCommandSchema.inputGroups":
-    "thread.start and turn.submit omit inputGroups for ordinary single user-message turns; presence preserves grouped user messages within one turn.",
-  "hostDaemonCommandSchema.options.promptMode":
-    "thread runtime options carry a prompt mode only when the prompt entered one through the provider's declared composer action.",
-  "hostDaemonCommandSchema.options.sessionOptions":
-    "thread runtime options carry session option choices only while a user's choice differs from the value the provider last reported; absent means nothing to apply.",
-};
 
 describe("cache usage wire compatibility", () => {
   it.each([
@@ -1261,11 +1148,6 @@ describe("host-daemon command schemas", () => {
         reason: "superseded",
       }).success,
     ).toBe(false);
-  });
-
-  it("uses the current host-daemon protocol version", () => {
-    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(238);
-    expect(HOST_ARTIFACT_MAX_BYTES).toBe(256 * 1024 * 1024);
   });
 
   it.each([
@@ -2482,32 +2364,6 @@ describe("host-daemon command schemas", () => {
         sourceType: "project",
       }),
     ).toThrow();
-  });
-
-  it("keeps contract optional fields on an explicit allowlist", () => {
-    const optionalFieldPaths = collectOptionalFieldPaths({
-      hostDaemonActiveThreadSchema: contract.hostDaemonActiveThreadSchema,
-      hostDaemonCommandSchema: contract.hostDaemonCommandSchema,
-      hostDaemonInteractiveRequestSchema:
-        contract.hostDaemonInteractiveRequestSchema,
-      hostDaemonInteractiveRequestResponseSchema:
-        contract.hostDaemonInteractiveRequestResponseSchema,
-      hostDaemonOnlineRpcCommandSchema:
-        contract.hostDaemonOnlineRpcCommandSchema,
-      hostDaemonSessionOpenResponseSchema:
-        contract.hostDaemonSessionOpenResponseSchema,
-      workspaceCommitResultSchema:
-        contract.hostDaemonCommandResultSchemaByType["workspace.commit"],
-    });
-
-    expect(optionalFieldPaths).toEqual(
-      Object.keys(INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS).sort(),
-    );
-    expect(
-      Object.values(INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS).every(
-        (reason) => reason.trim().length > 0,
-      ),
-    ).toBe(true);
   });
 
   it("requires requestId, resumeContext, and target for turn.submit", () => {

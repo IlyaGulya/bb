@@ -103,3 +103,46 @@ prompts and results.
 - Bounded coverage logs what it omits.
 - Structured consumers receive schema-validated results.
 - The final response uses status or inspected history, not assumptions.
+
+## Task-managed build → review
+
+For an explicitly authorized Task build/review, use the existing Tasks surface
+instead of composing another scheduler or an open-ended agent council:
+
+```sh
+bb tasks workflow start TASK --key unique-launch-key --origin thr_origin \
+  --writer writer-profile --reviewer reviewer-profile \
+  --smoke '["./scripts/platform-smoke"]' --ui --json
+bb tasks workflow list TASK --json
+```
+
+The identifiers and command above are illustrative. Choose an idle origin in
+the task's linked, clean, committed single-root workspace and two already
+authorized profiles. The reviewer must differ by provider/runtime or model;
+reasoning level alone is insufficient. Catalog membership alone does not prove
+environment readiness. Do not reconnect accounts or bypass readiness checks.
+
+The native sequence is plan → same writer implementation and actual platform
+smoke → independent reviewer → `in_review`. Required smoke commands must really
+run and succeed; unit tests alone are not a platform smoke. UI tasks need
+inspectable screenshot/preview evidence. Inspect native worker logs and the
+result package, not merely a model's claim. BB checks the package's branch and
+commit against authoritative checkout status and requires a clean working tree.
+
+Do not accept automatically. Only after the human's explicit decision, use
+`bb tasks workflow accept twf_receipt --revision N --json`. A generic task
+status change to `done` cannot accept a pending result. For requested
+corrections, use `bb tasks workflow return twf_receipt --revision N --feedback
+"concrete correction" --json`. Return continues the same retained writer and
+provider session; generic workflow `--resume` is not a substitute.
+
+Reuse the launch key and identical input after a launch retry. Uncertain
+delivery fails closed; inspect the retained worker before another explicit
+Return. A definitively rejected first launch may use repaired selected profiles
+only when native state proves no established or uncertain context exists.
+Never replace an established writer to evade an error. See references/runs.md
+for the distinct retention and recovery rules.
+
+QuickJS confines orchestration code, not native worker tools. Explicit profile
+permissions apply, but reviewer prompts and commit checks are not an OS
+read-only sandbox. Review is not permission to publish externally.

@@ -176,6 +176,39 @@ function createAutomationServiceBb() {
         config: async (): Promise<{ primaryHostId: string | null }> => ({
           primaryHostId: "host_server",
         }),
+        providerStates: async ({
+          environmentId,
+          providerId,
+        }: { environmentId?: string; providerId?: string } = {}) => ({
+          providers: [
+            {
+              providerId: providerId ?? "codex",
+              displayName: "Codex",
+              status: "ready" as const,
+              statusMessage: null,
+              accountEmail: null,
+              planLabel: null,
+              installedVersion: null,
+              minimumSupportedVersion: null,
+              canInstall: false,
+              canUpdate: false,
+              loginCommand: null,
+              localLoginCommand: null,
+              readiness: {
+                verification: "required" as const,
+                scope:
+                  environmentId === undefined
+                    ? ("host" as const)
+                    : ("environment" as const),
+                status: "ready" as const,
+                freshness: "fresh" as const,
+                checkedAt: Date.now(),
+                retryAfterMs: null,
+                detail: "Fixture provider ready for the selected route.",
+              },
+            },
+          ],
+        }),
       },
       projects: {
         get: async ({ projectId }: { projectId: string }) => {
@@ -212,6 +245,16 @@ function createAutomationServiceBb() {
           [
             {
               id: "codex",
+              available: true,
+              readiness: {
+                verification: "required",
+                scope: "host",
+                status: "unknown",
+                freshness: "unverified",
+                checkedAt: null,
+                retryAfterMs: null,
+                detail: "Fixture requires a scoped readiness check.",
+              },
               capabilities: {
                 permissionModes: ["accept-edits", "auto", "full"],
               },
@@ -1265,7 +1308,12 @@ describe("automation service", () => {
     const db = createTestDb();
     const bb = {
       sdk: {
-        system: { config: async () => ({ primaryHostId: null }) },
+        system: {
+          config: async () => ({ primaryHostId: null }),
+          providerStates: async () => {
+            throw new Error("No provider should be checked without a project.");
+          },
+        },
         projects: {
           get: async () => {
             throw new Error("Project not found");

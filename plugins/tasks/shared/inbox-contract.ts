@@ -36,6 +36,7 @@ export const inboxSourceSchema = z.object({
         "native_interaction",
         "native_failure",
         "task_review",
+        "task_workflow",
       ].includes(value),
     "Reserved native source kind",
   ),

@@ -30,6 +30,11 @@ bb project get-workspace-transfer --operation-id operation_id --json
 bb thread spawn --project proj_example --environment env_target --transfer-operation-id operation_id --prompt "Continue from the transfer handoff" --json
 ```
 
+The core project CLI example uses the bounded no-remote bundle mode. To approve
+a remote/ref/SHA base for a large repository, use the SDK/HTTP `remoteBase` input
+or the Tasks multi-repository panel/commands below; do not put credentials in
+command arguments or copy authentication between hosts.
+
 Preparation returns a project source, copied-file hashes and actual readiness
 checks. Resolve failed checks before dispatching work. To copy specific local
 configuration from a same-project source, pass `--source-host <id>` and explicit
@@ -48,12 +53,27 @@ Preview first, stop source work, then transfer to a new path. All source threads
 must be idle. Transfer keeps the source intact and registers the verified target
 as another environment of the same project. It carries unpublished commits and
 tracked staged/unstaged changes, including binary files and deletes; explicitly
-select extra untracked/ignored files with `--include-path`. Tracked secret files
-require explicit consent. Neither machine needs shared private-remote credentials.
-Preview labels ordinary secret-like tracked files `sensitive-tracked`; explicit
-selection provides consent, but unsupported file types cannot be selected.
-The target comes from the source bundle without origin access; Git config,
-remote configuration and authentication are not automatically copied.
+select portable extra untracked/ignored files with `--include-path`.
+
+For large repositories, approve `remoteBase: {url, ref, head}`: a credential-free
+HTTPS/SSH origin, explicit published `refs/heads/...` or `refs/tags/...`, and
+exact prerequisite SHA. The target fetches with its own Git authorization,
+verifies the prerequisite, and applies only bounded unpublished commits and
+dirty overlays. Exact published HEAD needs no bundle. Cached origin candidates
+are not proof that the target can fetch the approved ref. Missing authorization,
+refs or objects fail visibly; there is no fallback account, source fetch/push
+or larger full-history fallback. Without a remote base, a full bundle is still
+available under the same limits and needs no target origin access.
+
+Ordinary token/secret source modules, action code and project instructions need
+no per-file approval. Preview flags ambiguous key/config-shaped tracked files
+as `sensitive-tracked`: review them with the source owner, explicitly select
+approved paths and require unchanged published provenance. Sensitive dirty,
+staged, untracked or unpublished historical bytes are refused. Native auth and
+session storage is forbidden even if selected. These path-based checks are not
+a semantic secret scanner. Source Git configuration/authentication is not copied;
+remote mode sets only the approved origin, and target provider/MCP authorization
+must be configured separately.
 
 Ordinary-file POSIX `rwx` permissions are retained and verified, including
 private `0600` files whose Git content and executable bit are unchanged.
@@ -62,8 +82,9 @@ migrated.
 
 The checkpoint limit is 64 MiB combined decoded data, including Git bundle,
 changed staged-index blobs, changed tracked working files and extra files;
-unchanged tracked files travel in the Git bundle rather than duplicate worktree
-blobs. The bundle's compressed bytes still count. Staged and working versions
+unchanged tracked files come from the target's approved fetch or the bundle,
+not duplicate worktree blobs. Any bundle's compressed bytes still count.
+Staged and working versions
 of a changed file can count twice. Preparation copy batches have the same limit.
 The encoded RPC can be approximately 85.4 MiB plus metadata. Each checkpoint
 or copy batch must also fit 96 MiB of serialized UTF-8 JSON, including base64
@@ -71,21 +92,27 @@ and path/index metadata. Both limits apply; oversized reads fail before returnin
 data and oversized writes fail before target processing or mutation. There is
 no chunking.
 Oversize data fails without truncation. Index metadata and previews allow
-10,000 entries; only exact ordinary files can be selected, not recursively copied
-directories. Ignored directories appear excluded in preview. Unsupported
-symlinks, submodules/gitlinks, sparse checkout/index, special index states, in-progress
-Git operations and custom non-LFS clean/smudge filters are refused.
+100,000 entries; select exact extra files, not recursively copied directories.
+Ignored directories appear excluded in preview. Verified tracked symlinks retain
+their pointers and staged/unstaged state without dereferencing contents. Their
+targets must exist inside the repository and avoid Git internals and sensitive
+storage. Untracked/explicit-copy links and escaping links are refused, as are
+submodules/gitlinks, sparse checkout/index, special index states, in-progress
+Git operations and custom non-LFS clean/smudge filters.
 Shallow/partial/promisor clones, grafts and replacement refs are also refused
 instead of fetching missing history or changing the source.
 
 Ordinary transfers need Node and Git. Git LFS files must have materialized
-content, not unresolved pointer-only working files: fetch/materialize source
-bytes first. A target with LFS paths
-also needs installed `git-lfs`. The transfer preserves pointer index entries
-and actual file bytes, configures standard local filters, and copies no remote
-authentication. LFS attribute interpretation must match on both sides;
-explicitly select required untracked/ignored `.gitattributes` files. Source-only
-info attributes or mismatched attributes produce actionable failures.
+source content, not unresolved pointers; arrange source materialization before
+capture, which does not fetch into the source. The target needs `git-lfs`.
+Unchanged LFS files already present at the approved published prerequisite use
+target-native LFS fetch/checkout and are verified against source identities,
+instead of embedding large payloads in JSON. Dirty/unpublished LFS remains
+bounded overlay data. The transfer configures standard target-local filters
+before checkout and copies no authentication. LFS attributes must match on both
+sides; explicitly select required untracked/ignored `.gitattributes` files.
+Source-only info attributes or mismatches fail rather than silently changing
+file interpretation.
 
 Save the returned operation ID to query durable progress or errors after a
 disconnect. The ready result includes the target environment ID and handoff;
@@ -97,6 +124,58 @@ across server restarts. This does not move a live process or its native
 session/authentication state. See the
 [API contract and detailed limits](environment-provisioning.md#project-preparation-and-transfer-api)
 and `bb guide projects` for all options.
+
+## Prepare one Task across multiple repositories
+
+Use the Task's repository preparation panel or the matching CLI commands:
+
+```bash
+bb tasks repositories inspect ABC-12 --project proj_android --environment env_android --host host_worker --json
+bb tasks repositories inspect ABC-12 --project proj_actions --environment env_actions --host host_worker --json
+bb tasks repositories prepare ABC-12 --bindings "$BINDINGS_JSON" --json
+bb tasks repositories show ABC-12 --json
+bb tasks repositories continue ABC-12 --checkpoint mrc_checkpoint_id --json
+```
+
+First confirm the current task scope, actual roots and their owners; do not
+infer them from a default project or stale linked ticket. In these commands,
+`--project` is the BB code project ID, not a Tasks tracker prefix. Inspect each
+source and build the reviewed `BINDINGS_JSON` array with 2–32 explicit roots:
+source environment/host/path/branch/HEAD, owner and role, required flag, fresh
+target host/path, isolated branch, executor preset, instructions, required
+instruction paths, explicit extra files and optional approved remote base.
+The [Tasks skill](../plugins/tasks/skills/tasks/SKILL.md#multi-repository-workspaces)
+lists the exact binding fields and plugin RPC names.
+
+The first root is required and primary. Every target uses the same execution
+host and preset, with non-overlapping repository roots. Each has its own
+environment, branch and dirty checkpoint, but continuation starts **one coherent
+native writer** with access to all ready folders and their instructions. There
+is no umbrella Git repository or required disconnected agent per root.
+
+`prepare` returns a durable checkpoint immediately and never starts an
+executor. The plugin's existing background lifecycle publishes per-root
+progress. Use `show`/the panel to inspect aggregate readiness, errors and native
+operation IDs; partial preparation is not migration success. All required roots
+and target execution readiness must verify before continuation. Failed optional
+roots remain visible and are not represented as prepared folders.
+
+An interrupted client/plugin can leave an explicit unknown native outcome.
+Observe/reconcile its saved receipt instead of blindly repeating the transfer.
+To retry a settled checkpoint, pass `--checkpoint <id>` to `prepare`, preserve
+verified bindings and choose fresh paths for failed/interrupted roots. Old
+targets and attempt history are retained. Once the coherent writer starts, its
+root set is fixed; single-root delegation cannot bypass the aggregate gate.
+The equivalent Tasks RPC/SDK uses the same asynchronous checkpoint lifecycle,
+not a long synchronous multi-root request.
+
+Native manifests enforce scoped writer ownership and source/target admission;
+they are **not an OS sandbox**. Read-only inspection and human Git controls
+remain available, while secondary bound executor/terminal admission is fenced.
+External host processes can still edit files: coordinate interventions and stop
+native writers before doing so. Each root retains durable local checkpoint and
+operation receipts. All backup work is explicitly deferred; no backup system
+is activated or accepted and no backup restore proof is required in this wave.
 
 ## Open bb from another browser
 

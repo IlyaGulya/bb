@@ -1,4 +1,8 @@
 import {
+  mayHaveWorkspaceRepositoryGroups,
+  repositoryWorkspacePaths,
+} from "../projects/workspace-repository-group.js";
+import {
   resolveHostEnvironment,
   mergeHostAndProviderEnvironment,
 } from "../hosts/host-environment.js";
@@ -70,6 +74,7 @@ export interface ResolvedThreadRuntimeCommandConfig {
   providerId: string;
   threadStoragePath: string;
   workspacePath: string;
+  additionalWorkspacePaths?: string[];
 }
 
 function requireWorkspacePath(
@@ -121,6 +126,12 @@ export async function resolveThreadRuntimeCommandConfig(
 ): Promise<ResolvedThreadRuntimeCommandConfig> {
   markTurnTraceSpan("runtimeConfig.started");
   const workspacePath = requireWorkspacePath(args.environment);
+  const additionalWorkspacePaths = mayHaveWorkspaceRepositoryGroups(
+    deps,
+    args.environment.id,
+  )
+    ? await repositoryWorkspacePaths(deps, args.environment.id, args.thread.id)
+    : undefined;
   const project = getProject(deps.db, args.thread.projectId);
   if (!project) {
     throw new ApiError(404, "project_not_found", "Project not found");
@@ -273,6 +284,19 @@ export async function resolveThreadRuntimeCommandConfig(
       workspaceAgentContext.agentInstructions,
     );
   }
+  if (additionalWorkspacePaths)
+    for (const rootPath of additionalWorkspacePaths) {
+      const context = await readWorkspaceAgentContext(deps, {
+        includeAgentInstructions: true,
+        hostId: args.environment.hostId,
+        workspacePath: rootPath,
+      });
+      instructionSections.push(
+        `Bound repository: ${rootPath}. This is a separate Git root owned by this same executor.`,
+        context.agentInstructions ??
+          "Read this repository's AGENTS.md and CLAUDE.md before editing.",
+      );
+    }
   const instructions = instructionSections.join("\n\n");
   const threadStoragePath = await requireLiveThreadStoragePath(deps, {
     hostId: args.environment.hostId,
@@ -289,5 +313,6 @@ export async function resolveThreadRuntimeCommandConfig(
     providerId: args.thread.providerId,
     threadStoragePath,
     workspacePath,
+    ...(additionalWorkspacePaths?.length ? { additionalWorkspacePaths } : {}),
   };
 }

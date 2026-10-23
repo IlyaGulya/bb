@@ -1,4 +1,6 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import { repositoryMigrations } from "../repositories/store.js";
+import { taskWorkflowMigration } from "../workflow/store.js";
 
 type PluginDatabase = ReturnType<BbPluginApi["storage"]["database"]>;
 
@@ -365,6 +367,8 @@ const MIGRATIONS = [
         WHERE source_kind = 'task_review' AND source_key = NEW.id AND active = 1;
     END;
   `,
+  repositoryMigrations.join(";\n"),
+  taskWorkflowMigration,
 ] as const;
 
 export function initializeTasksSchema(db: PluginDatabase): void {

@@ -469,7 +469,7 @@ export function registerHostRoutes(
     if (
       result.events.some((event) => event.type === "completed" && event.success)
     ) {
-      deps.providerRegistry.forgetInstalledKey({
+      deps.providerRegistry.invalidateReadiness({
         hostId,
         providerId: payload.provider,
       });

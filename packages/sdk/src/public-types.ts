@@ -8,6 +8,7 @@ export type {
   PermissionMode,
   PromptInput,
   PromptTextMention,
+  ProviderReadiness,
   ReasoningLevel,
   ServiceTier,
   ThreadStatus,

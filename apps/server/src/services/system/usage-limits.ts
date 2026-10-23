@@ -62,6 +62,12 @@ export async function getProviderUsageLimits(
     providers,
     async (provider): Promise<[string, ProviderUsage] | null> => {
       if (!provider.maintenance.usage) return null;
+      if (
+        provider.readiness?.status === "not_installed" &&
+        provider.readiness.freshness === "fresh"
+      ) {
+        return [provider.id, { status: "not_installed" }];
+      }
       const bridgeLaunch = resolveBridgeLaunchForProviderId(deps, provider.id);
       if (bridgeLaunch === null) return null;
       try {

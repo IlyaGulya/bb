@@ -12,7 +12,36 @@ async function createHost(
   const host = createFakePluginHost({
     pluginId: "automations",
     sdk: {
-      system: { config: async () => ({ primaryHostId: "host_fake" }) },
+      system: {
+        config: async () => ({ primaryHostId: "host_fake" }),
+        providerStates: async ({ providerId, environmentId } = {}) => ({
+          providers: [
+            {
+              providerId: providerId ?? "codex",
+              displayName: "Codex",
+              status: "ready",
+              statusMessage: null,
+              accountEmail: null,
+              planLabel: null,
+              installedVersion: null,
+              minimumSupportedVersion: null,
+              canInstall: false,
+              canUpdate: false,
+              loginCommand: null,
+              localLoginCommand: null,
+              readiness: {
+                verification: "required",
+                scope: environmentId === undefined ? "host" : "environment",
+                status: "ready",
+                freshness: "fresh",
+                checkedAt: Date.now(),
+                retryAfterMs: null,
+                detail: "Fixture provider ready for the selected route.",
+              },
+            },
+          ],
+        }),
+      },
       projects: {
         async get({ projectId }) {
           return {
@@ -46,6 +75,17 @@ async function createHost(
           return [
             {
               id: "codex",
+              displayName: "Codex",
+              available: true,
+              readiness: {
+                verification: "required",
+                scope: "host",
+                status: "unknown",
+                freshness: "unverified",
+                checkedAt: null,
+                retryAfterMs: null,
+                detail: "Fixture requires a scoped readiness check.",
+              },
               capabilities: {
                 permissionModes: ["accept-edits", "auto", "full"],
               },

@@ -10,7 +10,9 @@ Provider commands
 Providers are agent backends (e.g., codex, claude-code). Each supports different models.
 
   bb provider list [--machine <id-or-name> | --environment <id>]
-                                          List available providers
+                                          List registered providers and readiness
+  bb provider readiness [providerId] [--machine <id-or-name> | --environment <id>]
+                                          Check bounded provider readiness
   bb provider models [providerId] [--machine <id-or-name> | --environment <id>]
                      [--project <id>]
                                           List models for a provider
@@ -18,9 +20,28 @@ Providers are agent backends (e.g., codex, claude-code). Each supports different
 Use these before spawning threads if you are unsure which provider or model to use.
 `--host` is an alias for `--machine`. Machine and environment selectors are
 mutually exclusive because an environment already selects its machine. When no
-selector is supplied, both commands intentionally inspect the server machine.
+selector is supplied, these commands intentionally inspect the server machine.
 `bb guide threads` describes how `bb thread spawn` picks a default provider and
 model.
+
+Directory presence and `available` describe provider registration, not proof that
+its CLI is installed or authenticated. Cold, disabled, and confirmed missing
+providers remain identifiable. `readiness` separates verification applicability
+(`required` or `unsupported`), observation scope (`host` or `environment`), status,
+freshness (`fresh`, `stale`, or `unverified`), observation time (`checkedAt`),
+retry delay (`retryAfterMs`), and an actionable `detail`.
+
+`initializing` or `unknown` with unverified freshness is not `not_installed`
+and is not ready. Transient failures can retain an older observation only as
+stale, including its original `checkedAt`; stale ready is not a fresh preflight.
+Run `bb provider readiness <providerId> --machine <id> --json` to check just the
+selected provider rather than share the roster's bounded health-check budget.
+Use `--environment <id>` for an existing environment: host installation health
+does not establish that environment's authentication. Follow the returned action
+and retry delay without switching the requested provider, model, or account.
+Always-visible providers without supported health verification remain usable
+under their existing execution rules, with unsupported/unverified readiness,
+not fabricated ready status. Runtime authentication remains authoritative.
 
 Some providers read their models and options from the directory they run in
 (Pi, and opencode's project-level agents, for example). `--environment` lists
@@ -50,6 +71,9 @@ is rejected.
 Model lists answer from the machine's last stored list while a background
 refresh runs, so a list can be hours old. A provider whose refresh keeps
 failing or timing out keeps answering from its last stored list.
+Stored model catalogs do not establish readiness. `provider_not_ready` means
+the selected provider needs an applicable fresh readiness check; model pickers
+offer a targeted Check readiness action with visible progress and errors.
 
 When no list can be served, bb provider models prints the failing provider,
 the failure code, and the underlying host message on stderr, then reports the
@@ -65,14 +89,15 @@ Plugins.
   bb provider enable <id>
   bb provider list --all
 
-Disable hides one provider from pickers and the ordinary list and rejects new
+Disable marks the provider disabled in the ordinary directory and rejects new
 sessions and turns. It preserves its CLI, plugin, siblings and thread history;
 in-flight turns can finish. Enable also enables its supplying plugin if needed,
 while preserving other providers' individual opt-outs. list --all shows the global
 catalog including disabled plugins, without machine/environment selectors.
 SDK: providers.catalog() and providers.setEnabled({ providerId, enabled }).
-Enable restores automatic discovery, so installed-only agents again appear only
-where their CLI is installed. Disabling the default clears its selection; new
+Enable restores automatic discovery and readiness checks; installed-only agents
+remain listed even while their CLI is missing or not yet verified. Disabling
+the default clears its selection; new
 threads use the next enabled provider in saved order, including in projects whose
 last-used provider is disabled. Explicit or existing-thread choices never
 silently switch.

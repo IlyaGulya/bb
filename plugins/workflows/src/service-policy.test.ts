@@ -144,6 +144,15 @@ function setup(
             displayName: "Codex",
             logoUrl: null,
             available: true,
+            readiness: {
+              verification: "unsupported",
+              scope: "host",
+              status: "unknown",
+              freshness: "unverified",
+              checkedAt: null,
+              retryAfterMs: null,
+              detail: "Fixture has no health maintenance.",
+            },
             capabilities: {
               supportsThreadArchive: true,
               supportsThreadRename: true,
@@ -986,6 +995,68 @@ describe("workflow service policy integration", () => {
     controller.abort();
     await worker;
   });
+
+  it.each(["initializing", "auth_required", "not_installed"] as const)(
+    "does not spawn a workflow worker when selected environment readiness is %s",
+    async (status) => {
+      const test = setup();
+      harnesses.push(test.harness);
+      const [provider] = await test.bb.sdk.providers.list();
+      if (provider === undefined) throw new Error("Missing fixture provider");
+      const readiness = {
+        verification: "required" as const,
+        scope: "environment" as const,
+        status,
+        freshness:
+          status === "initializing"
+            ? ("unverified" as const)
+            : ("fresh" as const),
+        checkedAt: status === "initializing" ? null : 123,
+        retryAfterMs: 5_000,
+        detail: "Check the selected provider.",
+      };
+      test.harness.sdk.stub("providers.list", async () => [
+        { ...provider, readiness },
+      ]);
+      test.harness.sdk.stub("system.providerStates", async () => ({
+        providers: [
+          {
+            providerId: provider.id,
+            displayName: provider.displayName,
+            status: "unknown",
+            statusMessage: null,
+            accountEmail: null,
+            planLabel: null,
+            installedVersion: null,
+            minimumSupportedVersion: null,
+            canInstall: false,
+            canUpdate: false,
+            loginCommand: null,
+            localLoginCommand: null,
+            readiness,
+          },
+        ],
+      }));
+      const run = await test.start(source(`return await agent("one");`));
+      const controller = new AbortController();
+      const worker = test.service.runWorker(controller.signal);
+      try {
+        await eventually(() =>
+          expect(getRunRequired(test.db, run.id).status).toBe("failed"),
+        );
+        expect(getRunRequired(test.db, run.id).error).toContain(
+          status.replaceAll("_", " "),
+        );
+        expect(test.childCount()).toBe(0);
+        expect(test.harness.sdk.callsTo("system.providerStates")).toHaveLength(
+          1,
+        );
+      } finally {
+        controller.abort();
+        await worker;
+      }
+    },
+  );
 
   it("does not create or orphan a call when cancellation wins catalog or spawn", async () => {
     const catalogBlocked = setup();

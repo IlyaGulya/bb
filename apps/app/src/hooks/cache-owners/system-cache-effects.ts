@@ -1,8 +1,14 @@
 import type { QueryKey } from "@tanstack/react-query";
-import type { Environment, Host } from "@bb/domain";
+import type {
+  Environment,
+  Host,
+  ProviderInfo,
+  ProviderReadiness,
+} from "@bb/domain";
 import type {
   SystemConfigResponse,
   SystemProviderCatalogEntry,
+  SystemProvidersQuery,
 } from "@bb/server-contract";
 import {
   allEnvironmentDiffFilesQueryKeyPrefix,
@@ -39,6 +45,7 @@ import {
   sidebarNavigationQueryKey,
   systemConfigQueryKey,
   systemProviderCatalogQueryKey,
+  systemProvidersQueryKey,
   threadPromptHistoryQueryKeyPrefix,
   threadSearchQueryKeyPrefix,
   threadsQueryKey,
@@ -155,6 +162,37 @@ export async function applyProviderAvailabilityChange({
     queryClient.invalidateQueries({ queryKey: systemConfigQueryKey() }),
     invalidatePluginList({ queryClient }),
   ]);
+}
+
+export async function applyProviderReadinessObservation({
+  queryClient,
+  providerId,
+  routing,
+  readiness,
+}: QueryClientArg & {
+  providerId: string;
+  routing: SystemProvidersQuery;
+  readiness: ProviderReadiness;
+}): Promise<void> {
+  queryClient.setQueryData<ProviderInfo[]>(
+    systemProvidersQueryKey({
+      capability: routing.capability ?? null,
+      environmentId: routing.environmentId ?? null,
+      hostId: routing.hostId ?? null,
+    }),
+    (providers) =>
+      providers?.map((provider) =>
+        provider.id === providerId ? { ...provider, readiness } : provider,
+      ),
+  );
+  await queryClient.invalidateQueries({
+    queryKey: [
+      ...allSystemExecutionOptionsQueryKeyPrefix(),
+      routing.environmentId ?? null,
+      routing.hostId ?? null,
+      providerId,
+    ],
+  });
 }
 
 export function invalidateSystemProviders({

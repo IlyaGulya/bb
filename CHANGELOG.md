@@ -2,6 +2,23 @@
 
 ## AgentOS fork — unreleased
 
+- **Tasks 0.4.0:** prepare an explicit multi-repository workspace asynchronously,
+  retain per-root checkpoints and failures, then start one coherent writer on
+  the selected machine only after every required root verifies.
+- Transfer large Git/LFS repositories from an approved published prerequisite
+  using destination-local authentication, retaining bounded unpublished/dirty
+  state, file modes, selected portable extras and confined tracked symlinks.
+  Native credential/session storage is never a project-transfer payload.
+- Add native build → independent review with real platform smoke evidence,
+  commit/clean-tree verification, exact-revision human Accept, and Return to
+  the same retained writer session. Workflow attention appears in Inbox/Working.
+- Keep cold, disabled and missing providers visible with scoped readiness;
+  target-only refresh does not silently substitute an account or model.
+- Bundle Slack Inbox disabled and unconfigured. Approved minimal-scope Socket
+  Mode intake uses durable receipts, discussion deduplication and visible gaps,
+  never automatic dispatch, replies or acceptance.
+- Render Inbox context through the shared Markdown surface so task links and
+  structured daily-brief headings are usable.
 - **Tasks 0.2.0:** configure a task's code project, execution machine, workspace
   and agent preset independently of its tracker project. Continue an idle task
   on another machine with explicit file selection, a verified handoff and a new
@@ -22,7 +39,7 @@
   status by operation ID through the SDK and `bb project` commands; continuation
   uses a new native session, not live-session migration.
 - Continue ready workspace transfers through `bb thread spawn
-  --transfer-operation-id`, with idempotent continuation-thread linking and a
+--transfer-operation-id`, with idempotent continuation-thread linking and a
   durable source/target execution fence.
 - **Tasks 0.1.6:** selectively link or import Jira issues into native task cards.
   Explicit pull, proposals, three-way preview, push, and reconciliation are

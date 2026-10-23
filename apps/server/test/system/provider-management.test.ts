@@ -49,7 +49,11 @@ describe("provider management", () => {
           disabled.find((provider) => provider.id === "acp-cursor")?.enabled,
         ).toBe(false);
         expect(getDisabledProviderIds(harness.db)).toEqual(["acp-cursor"]);
-        expect(await visibleProviderIds(harness)).not.toContain("acp-cursor");
+        expect(
+          (await listSystemProviderInfos(harness.deps)).find(
+            (provider) => provider.id === "acp-cursor",
+          )?.readiness?.status,
+        ).toBe("disabled");
         expect(() =>
           requireBridgeLaunchForProviderId(harness.deps, "acp-cursor"),
         ).toThrow('Provider "acp-cursor" is disabled');
@@ -98,7 +102,11 @@ describe("provider management", () => {
           await setProviderEnabled(harness, "acp-opencode", true),
         );
         expect(getDisabledProviderIds(harness.db)).toEqual([]);
-        expect(await visibleProviderIds(harness)).not.toContain("acp-opencode");
+        expect(
+          (await listSystemProviderInfos(harness.deps)).find(
+            (provider) => provider.id === "acp-opencode",
+          )?.readiness,
+        ).toMatchObject({ status: "unknown", freshness: "unverified" });
       },
     );
   });

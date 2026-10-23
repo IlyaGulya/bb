@@ -112,9 +112,32 @@ async function bootAutomationsPlugin(
               ? routedPermissionModes
               : declaredPermissionModes;
           return [
-            { id: "codex", capabilities: { permissionModes } },
+            {
+              id: "codex",
+              available: true,
+              readiness: {
+                verification: "unsupported",
+                scope: "host",
+                status: "unknown",
+                freshness: "unverified",
+                checkedAt: null,
+                retryAfterMs: null,
+                detail: "Fixture has no health maintenance.",
+              },
+              capabilities: { permissionModes },
+            },
             {
               id: "claude",
+              available: true,
+              readiness: {
+                verification: "unsupported",
+                scope: "host",
+                status: "unknown",
+                freshness: "unverified",
+                checkedAt: null,
+                retryAfterMs: null,
+                detail: "Fixture has no health maintenance.",
+              },
               capabilities: { permissionModes: ["auto", "full"] },
             },
           ] as never;

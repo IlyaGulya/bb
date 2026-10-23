@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { gitBranchNameSchema, projectSourceSchema } from "@bb/domain";
+import { workspaceRemoteBaseSchema } from "@bb/host-daemon-contract";
 
 const relativeFilePathSchema = z
   .string()
@@ -80,6 +81,7 @@ export const previewWorkspaceTransferResponseSchema = z.object({
     }),
   ),
   activeThreadIds: z.array(z.string()),
+  remoteBaseCandidates: z.array(workspaceRemoteBaseSchema).max(8).optional(),
 });
 export type PreviewWorkspaceTransferResponse = z.infer<
   typeof previewWorkspaceTransferResponseSchema
@@ -90,6 +92,11 @@ export const transferWorkspaceRequestSchema =
       targetPath: targetPathSchema,
       branch: gitBranchNameSchema.optional(),
       includePaths: z.array(relativeFilePathSchema).max(10000),
+      remoteBase: workspaceRemoteBaseSchema.optional(),
+      operationId: z
+        .string()
+        .regex(/^wtx_[a-f0-9-]{36}$/u)
+        .optional(),
     })
     .strict();
 export type TransferWorkspaceRequest = z.infer<
@@ -102,6 +109,12 @@ const workspaceTransferOperationFields = {
   sourceHostId: z.string(),
   targetHostId: z.string(),
   targetPath: z.string(),
+  remoteBase: workspaceRemoteBaseSchema.optional(),
+  checkpointSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
+    .optional(),
+  checkpointBytes: z.number().int().nonnegative().optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
 };

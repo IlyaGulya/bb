@@ -69,7 +69,10 @@ import {
 
 type ServiceApi = Pick<BbPluginApi, "realtime" | "log"> & {
   sdk: {
-    system: { config(): Promise<{ primaryHostId: string | null }> };
+    system: { config(): Promise<{ primaryHostId: string | null }> } & Pick<
+      BbPluginApi["sdk"]["system"],
+      "providerStates"
+    >;
     projects: Pick<BbPluginApi["sdk"]["projects"], "get" | "list">;
     providers: Pick<BbPluginApi["sdk"]["providers"], "list">;
     threads: Pick<BbPluginApi["sdk"]["threads"], "get" | "send" | "spawn">;

@@ -67,6 +67,24 @@ function setup() {
       providers: {
         list: async () => [{ id: "codex", available: state.providerAvailable }],
       },
+      system: {
+        providerStates: async (args) => ({
+          providers: [
+            {
+              providerId: "codex",
+              readiness: {
+                verification: "required",
+                scope: args?.environmentId ? "environment" : "host",
+                status: "ready",
+                freshness: "fresh",
+                checkedAt: Date.now(),
+                retryAfterMs: null,
+                detail: "Fixture provider checked on the selected route",
+              },
+            },
+          ],
+        }),
+      },
       projects: {
         get: async () => ({
           sources: [

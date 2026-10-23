@@ -2,10 +2,12 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmod,
+  cp,
   lstat,
   mkdir,
   mkdtemp,
   readFile,
+  readlink,
   rm,
   symlink,
   writeFile,
@@ -17,6 +19,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   WORKSPACE_TRANSFER_MAX_BYTES,
   WORKSPACE_TRANSFER_MAX_SERIALIZED_BYTES,
+  workspaceRemoteBaseSchema,
   type WorkspaceTransferFile,
 } from "@bb/host-daemon-contract";
 import {
@@ -74,6 +77,39 @@ async function fixture() {
   await git(source, "commit", "-m", "initial");
   return { base, source, target: path.join(base, "target") };
 }
+async function publishedFixture() {
+  const fixturePaths = await fixture();
+  const published = path.join(fixturePaths.base, "published.git");
+  await git(
+    fixturePaths.source,
+    "clone",
+    "--bare",
+    fixturePaths.source,
+    published,
+  );
+  const head = (await git(fixturePaths.source, "rev-parse", "HEAD")).trim();
+  const url = "https://approved.example.test/team/repository.git";
+  const home = path.join(fixturePaths.base, "target-home");
+  await mkdir(home);
+  await writeFile(
+    path.join(home, ".gitconfig"),
+    `[url "file://${published}"]\n\tinsteadOf = ${url}\n`,
+  );
+  await git(fixturePaths.source, "remote", "add", "origin", url);
+  await git(
+    fixturePaths.source,
+    "update-ref",
+    "refs/remotes/origin/main",
+    head,
+  );
+  return {
+    ...fixturePaths,
+    published,
+    home,
+    remoteBase: { url, ref: "refs/heads/main", head },
+    targetOptions: { shellEnv: { HOME: home, XDG_CONFIG_HOME: home } },
+  };
+}
 function file(
   relative: string,
   bytes = Buffer.from([0, 255, 1]),
@@ -93,6 +129,423 @@ afterEach(async () => {
 });
 
 describe("portable workspace checkpoints", () => {
+  it("uses an approved published base plus unpublished commits and exact dirty overlays without source mutation", async () => {
+    const { source, target, remoteBase, targetOptions } =
+      await publishedFixture();
+    await writeFile(path.join(source, "unpublished.txt"), "local commit\n");
+    await git(source, "add", "unpublished.txt");
+    await git(source, "commit", "-m", "unpublished");
+    await writeFile(
+      path.join(source, "tracked.bin"),
+      Buffer.from([9, 8, 0, 255]),
+    );
+    await git(source, "add", "tracked.bin");
+    await writeFile(
+      path.join(source, "tracked.bin"),
+      Buffer.from([1, 0, 6, 255]),
+    );
+    await writeFile(
+      path.join(source, "AGENTS.md"),
+      "explicit portable context\n",
+    );
+    await git(
+      source,
+      "config",
+      "credential.helper",
+      "source-only-must-not-run",
+    );
+    const sourceConfig = await readFile(path.join(source, ".git", "config"));
+    const sourceIndex = await readFile(path.join(source, ".git", "index"));
+    const sourceHead = (await git(source, "rev-parse", "HEAD")).trim();
+    const sourceRefs = await git(source, "show-ref");
+    const preview = await previewWorkspaceTransfer(source);
+    expect(preview.remoteBaseCandidates).toContainEqual(remoteBase);
+    const { checkpoint } = await captureWorkspace(source, ["AGENTS.md"], {
+      remoteBase,
+    });
+    expect(checkpoint.remoteBase).toEqual(remoteBase);
+    expect(checkpoint.bundleBase64.length).toBeGreaterThan(0);
+    await restoreWorkspace(
+      target,
+      checkpoint,
+      "bb/remote-continuation",
+      targetOptions,
+    );
+    expect((await git(target, "rev-parse", "HEAD")).trim()).toBe(sourceHead);
+    expect(await git(target, "diff", "--cached", "--binary")).toBe(
+      await git(source, "diff", "--cached", "--binary"),
+    );
+    expect(await git(target, "diff", "--binary")).toBe(
+      await git(source, "diff", "--binary"),
+    );
+    expect(await readFile(path.join(target, "AGENTS.md"), "utf8")).toBe(
+      "explicit portable context\n",
+    );
+    expect(
+      (
+        await git(target, "config", "--local", "--get", "remote.origin.url")
+      ).trim(),
+    ).toBe(remoteBase.url);
+    await expect(
+      git(target, "config", "--local", "--get", "credential.helper"),
+    ).rejects.toThrow();
+    expect(await readFile(path.join(source, ".git", "config"))).toEqual(
+      sourceConfig,
+    );
+    expect(await readFile(path.join(source, ".git", "index"))).toEqual(
+      sourceIndex,
+    );
+    expect(await git(source, "show-ref")).toBe(sourceRefs);
+  });
+
+  it("transfers no Git bundle when exact HEAD is published and refuses a missing prerequisite without fallback", async () => {
+    const { source, target, base, remoteBase, targetOptions } =
+      await publishedFixture();
+    const { checkpoint } = await captureWorkspace(source, [], { remoteBase });
+    expect(checkpoint.bundleBase64).toBe("");
+    await restoreWorkspace(target, checkpoint, "bb/published", targetOptions);
+    expect((await git(target, "rev-parse", "HEAD")).trim()).toBe(
+      remoteBase.head,
+    );
+    const missingTarget = path.join(base, "missing-target");
+    await expect(
+      restoreWorkspace(
+        missingTarget,
+        {
+          ...checkpoint,
+          remoteBase: { ...remoteBase, head: "f".repeat(40) },
+          head: "f".repeat(40),
+        },
+        undefined,
+        targetOptions,
+      ),
+    ).rejects.toThrow("approved published prerequisite");
+    await expect(lstat(missingTarget)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    const missingRef = path.join(base, "missing-ref");
+    await expect(
+      restoreWorkspace(
+        missingRef,
+        {
+          ...checkpoint,
+          remoteBase: { ...remoteBase, ref: "refs/heads/not-published" },
+        },
+        undefined,
+        targetOptions,
+      ),
+    ).rejects.toThrow();
+    await expect(lstat(missingRef)).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await git(source, "rev-parse", "HEAD")).trim()).toBe(
+      remoteBase.head,
+    );
+  });
+
+  it("fetches unchanged published LFS using target-local configuration rather than embedding materialized bytes", async () => {
+    const { source, target, published, remoteBase, targetOptions } =
+      await publishedFixture();
+    await git(source, "lfs", "install", "--local", "--skip-smudge");
+    await writeFile(
+      path.join(source, ".gitattributes"),
+      "*.bin filter=lfs diff=lfs merge=lfs -text\n",
+    );
+    const bytes = Buffer.from([1, 255, 0, 32, 97, 100]);
+    await writeFile(path.join(source, "tracked.bin"), bytes);
+    await git(source, "add", ".gitattributes", "tracked.bin");
+    await git(source, "commit", "-m", "published LFS");
+    await git(published, "fetch", source, "main:main");
+    await cp(
+      path.join(source, ".git", "lfs", "objects"),
+      path.join(published, "lfs", "objects"),
+      { recursive: true },
+    );
+    remoteBase.head = (await git(source, "rev-parse", "HEAD")).trim();
+    const { checkpoint } = await captureWorkspace(source, [], { remoteBase });
+    expect(checkpoint.bundleBase64).toBe("");
+    expect(checkpoint.publishedLfsFiles?.map((entry) => entry.path)).toEqual([
+      "tracked.bin",
+    ]);
+    expect(
+      checkpoint.worktree.some((entry) => entry.path === "tracked.bin"),
+    ).toBe(false);
+    await restoreWorkspace(
+      target,
+      checkpoint,
+      "bb/published-lfs",
+      targetOptions,
+    );
+    expect(await readFile(path.join(target, "tracked.bin"))).toEqual(bytes);
+    expect((await git(target, "status", "--porcelain")).trim()).toBe("");
+    expect(await readFile(path.join(source, "tracked.bin"))).toEqual(bytes);
+  });
+
+  it("does not require per-file approval for ordinary token/secret source code, action modules or project instructions", async () => {
+    const { source, target, remoteBase, targetOptions } =
+      await publishedFixture();
+    const paths = [
+      "src/auth/token_storage.dart",
+      "city/secret-request/Client.kt",
+      ".github/actions/aws-secrets/action.yml",
+      ".claude/settings.json",
+      ".codex/skills/guide.md",
+    ];
+    for (const relative of paths) {
+      await mkdir(path.dirname(path.join(source, relative)), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(source, relative),
+        "ordinary published project source\n",
+      );
+    }
+    await git(source, "add", ".");
+    await git(source, "commit", "-m", "ordinary unpublished source modules");
+    await writeFile(
+      path.join(source, paths[0]!),
+      "ordinary private source edit\n",
+    );
+    const preview = await previewWorkspaceTransfer(source);
+    for (const relative of paths)
+      expect(
+        preview.files.find((entry) => entry.path === relative),
+      ).toMatchObject({ kind: "tracked", selectedByDefault: true });
+    const { checkpoint } = await captureWorkspace(source, [], { remoteBase });
+    expect(checkpoint.publishedContextPaths).toBeUndefined();
+    await restoreWorkspace(
+      target,
+      checkpoint,
+      "bb/ordinary-code",
+      targetOptions,
+    );
+    expect(await readFile(path.join(target, paths[0]!), "utf8")).toBe(
+      "ordinary private source edit\n",
+    );
+    expect(await git(target, "diff")).toBe(await git(source, "diff"));
+  });
+
+  it("requires explicit review only for unchanged ambiguous published key files and validates provenance on the target", async () => {
+    const { source, target, base, published, remoteBase, targetOptions } =
+      await publishedFixture();
+    const oldPublishedHead = remoteBase.head;
+    const relative = "app/test.keystore";
+    await mkdir(path.join(source, "app"));
+    await writeFile(
+      path.join(source, relative),
+      "fixture bytes, not a real signing key\n",
+    );
+    await git(source, "add", ".");
+    await git(source, "commit", "-m", "published fixture key-shaped asset");
+    await git(published, "fetch", source, "main:main");
+    remoteBase.head = (await git(source, "rev-parse", "HEAD")).trim();
+    await writeFile(
+      path.join(source, "ordinary.txt"),
+      "unpublished ordinary source\n",
+    );
+    await git(source, "add", "ordinary.txt");
+    await git(source, "commit", "-m", "ordinary unpublished commit");
+    const originalIndex = await readFile(path.join(source, ".git", "index"));
+    await expect(captureWorkspace(source, [], { remoteBase })).rejects.toThrow(
+      "explicit source-owner approval",
+    );
+    const { checkpoint } = await captureWorkspace(source, [relative], {
+      remoteBase,
+    });
+    expect(checkpoint.publishedContextPaths).toEqual([relative]);
+    expect(checkpoint.worktree.some((entry) => entry.path === relative)).toBe(
+      false,
+    );
+    await restoreWorkspace(
+      target,
+      checkpoint,
+      "bb/reviewed-context",
+      targetOptions,
+    );
+    expect(await readFile(path.join(target, relative))).toEqual(
+      await readFile(path.join(source, relative)),
+    );
+    expect(await readFile(path.join(source, ".git", "index"))).toEqual(
+      originalIndex,
+    );
+    await expect(
+      restoreWorkspace(
+        path.join(base, "missing-approval"),
+        { ...checkpoint, publishedContextPaths: [] },
+        undefined,
+        targetOptions,
+      ),
+    ).rejects.toThrow("exact published-context approval");
+    await expect(
+      restoreWorkspace(
+        path.join(base, "wrong-base"),
+        {
+          ...checkpoint,
+          remoteBase: { ...remoteBase, head: oldPublishedHead },
+        },
+        undefined,
+        targetOptions,
+      ),
+    ).rejects.toThrow("not unchanged at the approved published prerequisite");
+    await expect(
+      restoreWorkspace(
+        path.join(base, "overlay"),
+        {
+          ...checkpoint,
+          worktree: [
+            ...checkpoint.worktree,
+            { path: relative, file: file(relative) },
+          ],
+        },
+        undefined,
+        targetOptions,
+      ),
+    ).rejects.toThrow("Invalid published sensitive context");
+    await expect(
+      restoreWorkspace(
+        path.join(base, "no-base"),
+        { ...checkpoint, remoteBase: undefined },
+        undefined,
+        targetOptions,
+      ),
+    ).rejects.toThrow("requires an approved remote base");
+    await expect(
+      restoreWorkspace(
+        path.join(base, "native-context"),
+        {
+          ...checkpoint,
+          publishedContextPaths: [relative, ".claude/session.json"],
+        },
+        undefined,
+        targetOptions,
+      ),
+    ).rejects.toThrow("Invalid published sensitive context");
+    const privateIndex = file(
+      relative,
+      Buffer.from("private fixture overlay\n"),
+    );
+    await expect(
+      restoreWorkspace(
+        path.join(base, "index-overlay"),
+        {
+          ...checkpoint,
+          index: checkpoint.index.map((entry) =>
+            entry.path === relative
+              ? {
+                  ...entry,
+                  contentBase64: privateIndex.contentBase64,
+                  sha256: privateIndex.sha256,
+                }
+              : entry,
+          ),
+        },
+        undefined,
+        targetOptions,
+      ),
+    ).rejects.toThrow("Invalid published sensitive context");
+    await writeFile(path.join(source, relative), "private fixture edit\n");
+    await expect(
+      captureWorkspace(source, [relative], { remoteBase }),
+    ).rejects.toThrow("private worktree changes");
+    await git(source, "add", relative);
+    await expect(
+      captureWorkspace(source, [relative], { remoteBase }),
+    ).rejects.toThrow("unchanged at the explicitly approved published base");
+    await git(source, "commit", "-m", "unpublished key-shaped change");
+    await expect(
+      captureWorkspace(source, [relative], { remoteBase }),
+    ).rejects.toThrow("unchanged at the explicitly approved published base");
+  });
+
+  it.each([".claude/session.json", ".codex/auth.json", ".ssh/id_ed25519"])(
+    "never captures native authentication/session storage %s even with approval",
+    async (relative) => {
+      const { source, published, remoteBase } = await publishedFixture();
+      await mkdir(path.dirname(path.join(source, relative)), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(source, relative),
+        "fixture-only native storage\n",
+      );
+      await expect(
+        captureWorkspace(source, [relative], { remoteBase }),
+      ).rejects.toThrow("Untracked sensitive");
+      await git(source, "add", relative);
+      await git(source, "commit", "-m", "native storage fixture");
+      await git(published, "fetch", source, "main:main");
+      remoteBase.head = (await git(source, "rev-parse", "HEAD")).trim();
+      await expect(
+        captureWorkspace(source, [relative], { remoteBase }),
+      ).rejects.toThrow(
+        "Native authentication/session paths cannot be transferred",
+      );
+    },
+  );
+
+  it("does not smuggle a deleted sensitive file through unpublished Git history", async () => {
+    const { source, target, base, remoteBase, targetOptions } =
+      await publishedFixture();
+    const { checkpoint } = await captureWorkspace(source, [], { remoteBase });
+    await writeFile(
+      path.join(source, "credentials.json"),
+      '{"fixture":true}\n',
+    );
+    await git(source, "add", "credentials.json");
+    await git(source, "commit", "-m", "unpublished fixture credentials");
+    await git(source, "rm", "credentials.json");
+    await git(source, "commit", "-m", "remove fixture credentials");
+    await expect(captureWorkspace(source, [], { remoteBase })).rejects.toThrow(
+      "Unpublished history includes sensitive source context credentials.json",
+    );
+    await expect(captureWorkspace(source, [])).rejects.toThrow(
+      "Unpublished history includes sensitive source context credentials.json",
+    );
+    const bundlePath = path.join(base, "forged.bundle");
+    await git(
+      source,
+      "bundle",
+      "create",
+      bundlePath,
+      "HEAD",
+      `^${remoteBase.head}`,
+    );
+    const bundle = await readFile(bundlePath);
+    await expect(
+      restoreWorkspace(
+        target,
+        {
+          ...checkpoint,
+          head: (await git(source, "rev-parse", "HEAD")).trim(),
+          bundleBase64: bundle.toString("base64"),
+          bundleSha256: createHash("sha256").update(bundle).digest("hex"),
+        },
+        undefined,
+        targetOptions,
+      ),
+    ).rejects.toThrow(
+      "Unpublished history includes sensitive source context credentials.json",
+    );
+    await expect(lstat(path.join(target, "tracked.bin"))).rejects.toMatchObject(
+      { code: "ENOENT" },
+    );
+  });
+
+  it.each([
+    "file:///tmp/repo",
+    "file:/tmp/repo",
+    "/tmp/repo",
+    "https://token@github.com/org/repo.git",
+    "https://github.com/org/repo.git?token=private",
+    "ssh://git:password@github.com/org/repo.git",
+  ])("rejects unapproved or credential-bearing remote %s", (url) => {
+    expect(
+      workspaceRemoteBaseSchema.safeParse({
+        url,
+        ref: "refs/heads/main",
+        head: "a".repeat(40),
+      }).success,
+    ).toBe(false);
+  });
+
   it("routes every workspace RPC and enforces local session and terminal admission", async () => {
     const { source, target } = await fixture();
     const { runtime, threadControls } = createFakeRuntime();
@@ -252,9 +705,14 @@ describe("portable workspace checkpoints", () => {
       expect((await lstat(path.join(copiedTarget, ".env"))).mode & 0o777).toBe(
         0o600,
       );
-      const { checkpoint } = await captureWorkspace(source, [".env"]);
+      await expect(captureWorkspace(source, [".env"])).rejects.toThrow(
+        "Untracked sensitive",
+      );
+      const { checkpoint } = await captureWorkspace(source, []);
       await restoreWorkspace(target, checkpoint);
-      expect((await lstat(path.join(target, ".env"))).mode & 0o777).toBe(0o600);
+      await expect(lstat(path.join(target, ".env"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
       expect((await lstat(path.join(target, "tracked.bin"))).mode & 0o777).toBe(
         0o600,
       );
@@ -277,7 +735,7 @@ describe("portable workspace checkpoints", () => {
     });
   });
 
-  it("requires explicit consent for tracked sensitive paths and never silently drops them", async () => {
+  it("refuses private tracked sensitive bytes even when explicitly selected", async () => {
     const { source, target } = await fixture();
     await writeFile(path.join(source, ".env"), "TEST_SECRET=selected\n");
     await git(source, "add", "-f", ".env");
@@ -291,18 +749,165 @@ describe("portable workspace checkpoints", () => {
     await expect(captureWorkspace(source, [])).rejects.toThrow(
       "Tracked sensitive path .env",
     );
-    const { checkpoint } = await captureWorkspace(source, [".env"]);
+    await expect(captureWorkspace(source, [".env"])).rejects.toThrow(
+      "approved published remote base",
+    );
+    await expect(lstat(target)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("preserves confined instruction links, directory links and staged/unstaged link checkpoints without copying sessions", async () => {
+    const { source, target } = await fixture();
+    await mkdir(path.join(source, "docs", "skills"), { recursive: true });
+    await mkdir(path.join(source, ".claude"));
+    for (const name of ["agents", "staged", "unstaged"])
+      await writeFile(
+        path.join(source, "docs", `${name}.md`),
+        `${name} instructions\n`,
+      );
+    await writeFile(
+      path.join(source, "docs", "mcp.json"),
+      '{"mcpServers":{}}\n',
+    );
+    await writeFile(
+      path.join(source, "docs", "skills", "SKILL.md"),
+      "repository skill\n",
+    );
+    for (const [name, targetPath] of [
+      ["AGENTS.md", "docs/agents.md"],
+      ["CLAUDE.md", "docs/agents.md"],
+      [".mcp.json", "docs/mcp.json"],
+      [".claude/skills", "../docs/skills"],
+      ["deleted-link", "script.sh"],
+    ])
+      await symlink(targetPath!, path.join(source, name!));
+    await git(source, "add", ".");
+    await git(source, "commit", "-m", "confined context links");
+    await rm(path.join(source, "AGENTS.md"));
+    await symlink("docs/staged.md", path.join(source, "AGENTS.md"));
+    await git(source, "add", "AGENTS.md");
+    await rm(path.join(source, "AGENTS.md"));
+    await symlink("docs/unstaged.md", path.join(source, "AGENTS.md"));
+    await rm(path.join(source, "deleted-link"));
+    await writeFile(
+      path.join(source, ".claude", "session.json"),
+      "must remain source-local\n",
+    );
+    await symlink("docs/agents.md", path.join(source, "intent-link"));
+    await git(source, "add", "--intent-to-add", "intent-link");
+    const originalHead = await git(source, "rev-parse", "HEAD");
+    const originalIndex = await readFile(path.join(source, ".git", "index"));
+    const staged = await git(source, "diff", "--cached", "--binary");
+    const unstaged = await git(source, "diff", "--binary");
+    const preview = await previewWorkspaceTransfer(source);
+    expect(
+      preview.files.find((entry) => entry.path === ".claude/skills"),
+    ).toMatchObject({ tracked: true, selectedByDefault: true });
+    expect(
+      preview.files.find((entry) => entry.path === ".claude/session.json")
+        ?.excludedReason,
+    ).toContain("Sensitive");
+    const { checkpoint } = await captureWorkspace(source, []);
+    await restoreWorkspace(target, checkpoint, "bb/coherent-context");
+    expect(await git(target, "diff", "--cached", "--binary")).toBe(staged);
+    expect(await git(target, "diff", "--binary")).toBe(unstaged);
+    expect(await readlink(path.join(target, "AGENTS.md"))).toBe(
+      "docs/unstaged.md",
+    );
+    expect(await readlink(path.join(target, ".claude", "skills"))).toBe(
+      "../docs/skills",
+    );
+    expect(await readFile(path.join(target, "CLAUDE.md"), "utf8")).toBe(
+      "agents instructions\n",
+    );
+    expect(await readFile(path.join(target, ".mcp.json"), "utf8")).toBe(
+      '{"mcpServers":{}}\n',
+    );
+    expect(
+      await readFile(
+        path.join(target, ".claude", "skills", "SKILL.md"),
+        "utf8",
+      ),
+    ).toBe("repository skill\n");
+    await expect(
+      lstat(path.join(target, ".claude", "session.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(
+      lstat(path.join(target, "deleted-link")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(path.join(source, ".git", "index"))).toEqual(
+      originalIndex,
+    );
+    expect(await git(source, "rev-parse", "HEAD")).toBe(originalHead);
+    expect((await git(source, "branch", "--show-current")).trim()).toBe("main");
+  });
+
+  it("preserves tracked regular-to-link and link-to-regular worktree changes", async () => {
+    const { source, target } = await fixture();
+    await symlink("script.sh", path.join(source, "link"));
+    await git(source, "add", "link");
+    await git(source, "commit", "-m", "tracked link");
+    await rm(path.join(source, "link"));
+    await writeFile(path.join(source, "link"), "now an ordinary file\n");
+    await rm(path.join(source, "deleted.txt"));
+    await symlink("script.sh", path.join(source, "deleted.txt"));
+    const { checkpoint } = await captureWorkspace(source, []);
     await restoreWorkspace(target, checkpoint);
-    expect(await readFile(path.join(target, ".env"), "utf8")).toBe(
-      "TEST_SECRET=selected\n",
+    expect((await lstat(path.join(target, "link"))).isFile()).toBe(true);
+    expect(await readFile(path.join(target, "link"), "utf8")).toBe(
+      "now an ordinary file\n",
+    );
+    expect(await readlink(path.join(target, "deleted.txt"))).toBe("script.sh");
+    expect(await git(target, "diff", "--binary")).toBe(
+      await git(source, "diff", "--binary"),
     );
   });
 
-  it("refuses symlinks, gitlinks, unmerged entries, unsupported flags, and in-progress operations", async () => {
+  it.each([
+    "../outside",
+    "/tmp/outside",
+    ".git/config",
+    ".env",
+    "missing-file",
+  ])(
+    "refuses unsafe or unresolved tracked link target %s",
+    async (linkTarget) => {
+      const { source } = await fixture();
+      await symlink(linkTarget, path.join(source, "AGENTS.md"));
+      await git(source, "add", "AGENTS.md");
+      await expect(previewWorkspaceTransfer(source)).rejects.toThrow();
+      await expect(captureWorkspace(source, [])).rejects.toThrow();
+      expect(await readlink(path.join(source, "AGENTS.md"))).toBe(linkTarget);
+    },
+  );
+
+  it("rejects forged checkpoint links before creating a target and does not broaden explicit copy", async () => {
+    const { source, target } = await fixture();
+    const { checkpoint } = await captureWorkspace(source, []);
+    const unsafe = {
+      ...file("script.sh", Buffer.from("../outside")),
+      mode: "120000" as const,
+      permissions: 0o777,
+    };
+    checkpoint.worktree.push({ path: "script.sh", file: unsafe });
+    await expect(restoreWorkspace(target, checkpoint)).rejects.toThrow();
+    await expect(lstat(target)).rejects.toMatchObject({ code: "ENOENT" });
+    await mkdir(target);
+    await expect(
+      copyWorkspaceWrite(target, [
+        {
+          ...unsafe,
+          contentBase64: Buffer.from("script.sh").toString("base64"),
+          sha256: createHash("sha256").update("script.sh").digest("hex"),
+        },
+      ]),
+    ).rejects.toThrow("verified tracked");
+  });
+
+  it("refuses escaping symlinks, gitlinks, unmerged entries, unsupported flags, and in-progress operations", async () => {
     const { source } = await fixture();
-    await symlink("script.sh", path.join(source, "link"));
+    await symlink("../outside", path.join(source, "link"));
     await git(source, "add", "link");
-    await expect(captureWorkspace(source, [])).rejects.toThrow("Symlinks");
+    await expect(captureWorkspace(source, [])).rejects.toThrow();
     await git(source, "rm", "--cached", "link");
     await rm(path.join(source, "link"));
     const head = (await git(source, "rev-parse", "HEAD")).trim();

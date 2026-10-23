@@ -526,7 +526,7 @@ describe("public provider installation routes", () => {
           return handleProviderInstallationRpc(request, installed);
         },
       });
-      const listProviderIds = async (): Promise<string[]> => {
+      const readProviderReadiness = async () => {
         const response = await harness.app.request(
           `${API}/system/providers?hostId=${host.id}`,
         );
@@ -534,7 +534,7 @@ describe("public provider installation routes", () => {
         return systemProviderInfoSchema
           .array()
           .parse(await readJson(response))
-          .map((provider) => provider.id);
+          .find((provider) => provider.id === "installable-agent")?.readiness;
       };
       const installProvider = () =>
         harness.app.request(`${API}/hosts/${host.id}/provider-clis/install`, {
@@ -552,11 +552,17 @@ describe("public provider installation routes", () => {
             request.command.providerId === "installable-agent",
         );
 
-      expect(await listProviderIds()).not.toContain("installable-agent");
+      expect(await readProviderReadiness()).toMatchObject({
+        status: "not_installed",
+        freshness: "fresh",
+      });
       const installResponse = await installProvider();
       expect(installResponse.status).toBe(200);
       expect(await installResponse.text()).toContain('"success":true');
-      expect(await listProviderIds()).toContain("installable-agent");
+      expect(await readProviderReadiness()).toMatchObject({
+        status: "ready",
+        freshness: "fresh",
+      });
       expect(providerHealthRequests()).toHaveLength(2);
     });
   });

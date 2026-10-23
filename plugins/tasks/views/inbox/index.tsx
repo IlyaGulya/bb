@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
+import { Markdown, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import type {
   InboxEntry,
   InboxRpcContract,
@@ -30,6 +30,7 @@ function InboxCard({
   const [until, setUntil] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
   const locked = useRef(false);
   const [history, setHistory] = useState<Array<{
     revision: string;
@@ -66,11 +67,14 @@ function InboxCard({
       </div>
       <p className="text-sm text-muted-foreground">{item.reason}</p>
       {item.body && (
-        <details>
+        <details onToggle={(event) => setContextOpen(event.currentTarget.open)}>
           <summary className="cursor-pointer text-sm">Context</summary>
-          <p className="mt-2 whitespace-pre-wrap break-words text-sm">
-            {item.body}
-          </p>
+          {contextOpen && (
+            <Markdown
+              content={item.body}
+              className="mt-2 min-w-0 break-words text-sm"
+            />
+          )}
         </details>
       )}
       {item.snoozedUntil && (

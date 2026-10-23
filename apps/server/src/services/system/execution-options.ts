@@ -24,19 +24,18 @@ import {
 import { expectedFallbackErrorLogFields } from "../lib/error-log-fields.js";
 import { isSuspendedHostUnavailableError } from "../lib/lifecycle-api-errors.js";
 import { projectCheckoutPathOnHost } from "../projects/project-workspace.js";
-import {
-  createProviderListingBudget,
-  type ProviderListingBudget,
-} from "../providers/native-roots.js";
+import { createProviderListingBudget } from "../providers/native-roots.js";
 import {
   toProviderModelCatalogFailureCode,
   toProviderModelCatalogFailureDetail,
   type ProviderModelCatalogAccess,
 } from "../providers/provider-model-catalog-store.js";
-import type {
-  ProviderHealthCacheKey,
-  ProviderRegistryService,
-} from "../providers/provider-registry.js";
+import type { ProviderRegistryService } from "../providers/provider-registry.js";
+import {
+  failedProviderReadiness,
+  observedProviderReadiness,
+  unknownProviderReadiness,
+} from "../providers/provider-readiness.js";
 import { getSupportedReasoningLevelsForProvider } from "../threads/thread-reasoning-policy.js";
 import { resolveSystemLookupHostId } from "./host-lookup.js";
 import { resolveBridgeLaunchForProviderId } from "./provider-bridge-launch.js";
@@ -172,63 +171,101 @@ async function listInstalledPluginProviderInfos(
         providerMatchesFilter(registration.info, filter),
     );
   const budget = createProviderListingBudget();
-  const results = await mapProviderMaintenanceRequests(
-    registrations,
-    async (registration) => {
-      const bridgeLaunch = resolveBridgeLaunchForProviderId(
-        deps,
-        registration.info.id,
-      );
-      if (bridgeLaunch === null) return null;
-      const cacheKey: ProviderHealthCacheKey = {
-        hostId,
-        providerId: registration.info.id,
-      };
-      const probe = async (probeBudget: ProviderListingBudget) => {
-        const result = await callHostRetryableOnlineRpc(deps, {
-          hostId,
-          timeoutMs: probeBudget.remainingMs(),
-          command: {
-            type: "provider.health",
-            providerId: registration.info.id,
-            bridgeLaunch,
-          },
-        });
-        return result.supported && result.health.status !== "not_installed";
-      };
-      const cached = deps.providerRegistry.lookupInstalled(cacheKey);
-      try {
-        const installed = cached ?? probe(budget);
-        if (cached === undefined) {
-          deps.providerRegistry.rememberInstalled(cacheKey, installed);
-        } else {
-          void deps.providerRegistry.revalidateInstalled(cacheKey, () =>
-            probe(createProviderListingBudget()),
+  return mapProviderMaintenanceRequests(registrations, async (registration) => {
+    const readiness = await deps.providerRegistry.resolveReadiness(
+      { hostId, providerId: registration.info.id },
+      async () => {
+        const bridgeLaunch = resolveBridgeLaunchForProviderId(
+          deps,
+          registration.info.id,
+        );
+        if (bridgeLaunch === null)
+          return unknownProviderReadiness(
+            "The provider bridge is unavailable. Check the provider plugin.",
           );
-        }
-        return (await installed) ? registration.info : null;
-      } catch (error) {
-        deps.providerRegistry.forgetInstalledKey(cacheKey);
-        if (!canOmitProviderDiscoveryForError(error)) {
+        try {
+          const result = await callHostRetryableOnlineRpc(deps, {
+            hostId,
+            timeoutMs: budget.remainingMs(),
+            command: {
+              type: "provider.health",
+              providerId: registration.info.id,
+              bridgeLaunch,
+            },
+          });
+          return result.supported
+            ? observedProviderReadiness(result.health)
+            : unknownProviderReadiness(
+                "This provider does not report readiness. Check the provider plugin before execution.",
+              );
+        } catch (error) {
+          if (!isSuspendedHostUnavailableError(error)) {
+            deps.logger.warn(
+              {
+                ...(error instanceof ApiError
+                  ? expectedFallbackErrorLogFields(error)
+                  : {
+                      errorName:
+                        error instanceof Error ? error.name : "unknown",
+                    }),
+                hostId,
+                providerId: registration.info.id,
+              },
+              "Failed to resolve installed-only provider status",
+            );
+          }
           throw error;
         }
-        if (!isSuspendedHostUnavailableError(error)) {
-          deps.logger.warn(
-            {
-              ...expectedFallbackErrorLogFields(error),
-              hostId,
-              providerId: registration.info.id,
-            },
-            "Failed to resolve installed-only provider status",
-          );
-        }
-        return null;
-      }
-    },
-  );
-  return results.filter(
-    (provider): provider is ProviderInfo => provider !== null,
-  );
+      },
+    );
+    return { ...registration.info, readiness };
+  });
+}
+
+export function registeredProviderInfos(
+  deps: Pick<LoggedWorkSessionDeps, "providerRegistry">,
+  filter: ProviderFilter,
+  hostId: string | null,
+): ProviderInfo[] {
+  const disabled = deps.providerRegistry.disabledProviderIds();
+  return deps.providerRegistry
+    .list()
+    .filter((registration) => providerMatchesFilter(registration.info, filter))
+    .map(({ info, visibility }): ProviderInfo => {
+      const verification =
+        visibility === "installed" || info.maintenance.health
+          ? "required"
+          : "unsupported";
+      return {
+        ...info,
+        readiness: disabled.has(info.id)
+          ? {
+              verification,
+              scope: "host",
+              status: "disabled",
+              freshness: "fresh",
+              checkedAt: Date.now(),
+              retryAfterMs: null,
+              detail: "Provider is disabled. Enable it in provider settings.",
+            }
+          : ((hostId === null
+              ? undefined
+              : deps.providerRegistry.lookupReadiness({
+                  hostId,
+                  providerId: info.id,
+                })) ?? {
+              ...unknownProviderReadiness(
+                verification === "unsupported"
+                  ? "This provider does not support readiness checks. Plugin availability is not a health observation."
+                  : hostId === null
+                    ? "Machine is unavailable. Connect or resume it, then refresh provider readiness."
+                    : undefined,
+              ),
+              verification,
+              ...(verification === "unsupported" ? { retryAfterMs: null } : {}),
+            }),
+      };
+    });
 }
 
 export async function listSystemProviderInfosForHost(
@@ -236,28 +273,28 @@ export async function listSystemProviderInfosForHost(
   hostId: string,
   filter: ProviderFilter = {},
 ): Promise<ProviderInfo[]> {
-  const configured = listConfiguredSystemProviderInfos(deps, filter);
+  const registered = registeredProviderInfos(deps, filter, hostId);
   const installed = await listInstalledPluginProviderInfos(
     deps,
     hostId,
     filter,
   );
-  const visibleIds = new Set([
-    ...configured.map((provider) => provider.id),
-    ...installed.map((provider) => provider.id),
-  ]);
-  return deps.providerRegistry
-    .list()
-    .filter((registration) => visibleIds.has(registration.info.id))
-    .map((registration) => registration.info);
+  const observations = new Map(
+    installed.map((provider) => [provider.id, provider]),
+  );
+  return registered.map(
+    (provider) => observations.get(provider.id) ?? provider,
+  );
 }
 
 function resolveSystemProviderInfosPlan(
   deps: LoggedWorkSessionDeps,
   query: ListSystemProviderInfosRequest = {},
 ): ResolveSystemProviderInfosPlanResult {
+  let lookupHostId: string | null = null;
   try {
     const hostId = resolveSystemLookupHostId(deps, query);
+    lookupHostId = hostId;
     requireConnectedHostSession(deps, hostId);
     return {
       hostId,
@@ -281,9 +318,26 @@ function resolveSystemProviderInfosPlan(
       hostId: null,
       hostLookupError: error,
       providersPromise: Promise.resolve(
-        listConfiguredSystemProviderInfos(deps, {
-          capability: query.capability,
-          providerId: query.onlyProviderId,
+        registeredProviderInfos(
+          deps,
+          {
+            capability: query.capability,
+            providerId: query.onlyProviderId,
+          },
+          lookupHostId,
+        ).map((provider) => {
+          if (
+            lookupHostId === null ||
+            provider.readiness?.checkedAt == null ||
+            provider.readiness.status === "disabled"
+          )
+            return provider;
+          const readiness = failedProviderReadiness(provider.readiness, error);
+          deps.providerRegistry.observeReadiness(
+            { hostId: lookupHostId, providerId: provider.id },
+            readiness,
+          );
+          return { ...provider, readiness };
         }),
       ),
     };
@@ -295,7 +349,10 @@ export async function listSystemProviderInfos(
   query: ListSystemProviderInfosRequest = {},
 ): Promise<ProviderInfo[]> {
   await deps.providerRegistry.whenRegistrationsSettled();
-  return await resolveSystemProviderInfosPlan(deps, query).providersPromise;
+  return await resolveSystemProviderInfosPlan(deps, {
+    ...query,
+    onlyProviderId: query.onlyProviderId ?? query.providerId,
+  }).providersPromise;
 }
 
 export async function resolveSystemProviderModels(
@@ -482,11 +539,10 @@ async function resolveExecutionOptions(
     ? providers.find((provider) => provider.id === query.providerId)
     : undefined;
   const modelsProvider =
-    earlyModelResultPromise !== null
-      ? configuredRequestedProvider
-      : query.providerId === undefined
-        ? providers[0]
-        : requestedProvider;
+    query.providerId === undefined
+      ? providers.find((provider) => provider.readiness?.status !== "disabled")
+      : requestedProvider;
+  void earlyModelResultPromise?.catch(() => undefined);
 
   const permissionCeiling = getHostPermissionCeiling(deps, hostId);
 
@@ -505,6 +561,30 @@ async function resolveExecutionOptions(
       providers,
       permissionCeiling,
       ...unavailableProviderModelResult(modelsProvider.id),
+    };
+  }
+
+  const readiness = modelsProvider.readiness;
+  if (
+    readiness !== undefined &&
+    (readiness.status === "disabled" ||
+      (query.environmentId === undefined &&
+        (readiness.freshness === "stale" ||
+          (readiness.status !== "ready" &&
+            (readiness.status !== "unknown" ||
+              deps.providerRegistry.get(modelsProvider.id)?.visibility ===
+                "installed")))))
+  ) {
+    return {
+      providers,
+      permissionCeiling,
+      models: [],
+      selectedOnlyModels: [],
+      modelLoadError: {
+        providerId: modelsProvider.id,
+        code: "provider_not_ready",
+        detail: readiness.detail,
+      },
     };
   }
 

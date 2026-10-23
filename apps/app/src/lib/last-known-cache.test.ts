@@ -2,6 +2,12 @@ import { createMemoryStorage } from "@bb/test-helpers";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createLastKnownCache } from "./last-known-cache";
+import { makeProviderInfo } from "@bb/test-helpers/domain-fixtures";
+import {
+  providerListCacheKey,
+  readCachedProviderList,
+  writeCachedProviderList,
+} from "./provider-list-cache";
 
 const schema = z.object({ models: z.array(z.string()) });
 const localStorage = createMemoryStorage();
@@ -133,5 +139,42 @@ describe("createLastKnownCache", () => {
     expect(
       keys.filter((key) => localStorage.getItem(key) !== null),
     ).toHaveLength(3);
+  });
+});
+
+describe("provider observation replay", () => {
+  it("replays the provider identity and observation time but never fresh readiness from local storage", () => {
+    const key = providerListCacheKey({
+      hostId: "host-cold",
+      environmentId: null,
+    });
+    writeCachedProviderList(key, [
+      makeProviderInfo({
+        id: "acp-omp",
+        readiness: {
+          verification: "required",
+          scope: "host",
+          status: "ready",
+          freshness: "fresh",
+          checkedAt: 123,
+          retryAfterMs: null,
+          detail: "Ready",
+        },
+      }),
+    ]);
+    expect(readCachedProviderList(key)?.[0]).toMatchObject({
+      id: "acp-omp",
+      readiness: {
+        status: "ready",
+        freshness: "stale",
+        checkedAt: 123,
+        detail: expect.stringContaining("refresh"),
+      },
+    });
+    expect(
+      readCachedProviderList(
+        providerListCacheKey({ hostId: "host-other", environmentId: null }),
+      ),
+    ).toBeNull();
   });
 });

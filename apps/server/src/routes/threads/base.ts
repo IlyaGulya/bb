@@ -386,11 +386,22 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
     if (payload.sectionId) {
       requireThreadSection(deps, payload.sectionId);
     }
-    const { transferOperationId, ...request } = payload;
-    const thread = await createWorkspaceContinuationThread(deps, { projectId: payload.projectId, environment: payload.environment, transferOperationId }, () => createThreadFromRequest(deps, {
-      ...request,
-      origin: payload.origin,
-    }));
+    const { transferOperationId, repositoryTransferOperationIds, ...request } =
+      payload;
+    const thread = await createWorkspaceContinuationThread(
+      deps,
+      {
+        projectId: payload.projectId,
+        environment: payload.environment,
+        transferOperationId,
+        repositoryTransferOperationIds,
+      },
+      () =>
+        createThreadFromRequest(deps, {
+          ...request,
+          origin: payload.origin,
+        }),
+    );
     return context.json(toThreadResponseFromThread(deps, { thread }), 201);
   });
 

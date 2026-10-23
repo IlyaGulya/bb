@@ -57,7 +57,9 @@ export function registerUsageSource(bb: BbPluginApi) {
     if (
       !providers.some(
         (provider) =>
-          provider.id === providerId && provider.pluginId === "provider-acp",
+          provider.id === providerId &&
+          provider.pluginId === "provider-acp" &&
+          provider.readiness?.status !== "disabled",
       )
     )
       throw new Error("Usage resource no longer exists.");
@@ -136,7 +138,11 @@ export function registerUsageSource(bb: BbPluginApi) {
                 capability: "usage",
               });
               return providers
-                .filter((provider) => provider.pluginId === "provider-acp")
+                .filter(
+                  (provider) =>
+                    provider.pluginId === "provider-acp" &&
+                    provider.readiness?.status !== "disabled",
+                )
                 .map((provider) => {
                   const id = JSON.stringify([host.id, provider.id]);
                   return {

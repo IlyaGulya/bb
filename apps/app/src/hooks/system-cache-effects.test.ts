@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { QueryObserver } from "@tanstack/react-query";
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { createAppQueryClient } from "@/lib/query-client";
+import { makeProviderInfo } from "@bb/test-helpers/domain-fixtures";
+import type { ProviderInfo, ProviderReadiness } from "@bb/domain";
 import {
   environmentDiffFilesQueryKey,
   environmentDiffPatchQueryKey,
@@ -24,6 +26,7 @@ import {
   threadTimelineQueryKey,
 } from "./queries/query-keys";
 import {
+  applyProviderReadinessObservation,
   invalidateRealtimeQueriesAfterServerReconnect,
   invalidateRealtimeQueriesFetchedBeforeInitialConnect,
 } from "./cache-owners/system-cache-effects";
@@ -99,6 +102,69 @@ async function waitForQueryCalls(
 }
 
 describe("system cache effects", () => {
+  it("applies readiness only to its routed provider and refreshes only that provider's model queries", async () => {
+    const queryClient = createCacheEffectQueryClient();
+    const roster = systemProvidersQueryKey({
+      environmentId: "env-one",
+      hostId: null,
+      capability: null,
+    });
+    const otherRoster = systemProvidersQueryKey({
+      environmentId: "env-two",
+      hostId: null,
+      capability: null,
+    });
+    const providers = [
+      makeProviderInfo({ id: "codex" }),
+      makeProviderInfo({ id: "claude-code" }),
+    ];
+    queryClient.setQueryData(roster, providers);
+    queryClient.setQueryData(otherRoster, providers);
+    const selectedModels = systemExecutionOptionsQueryKey({
+      environmentId: "env-one",
+      hostId: null,
+      providerId: "codex",
+    });
+    const siblingModels = systemExecutionOptionsQueryKey({
+      environmentId: "env-one",
+      hostId: null,
+      providerId: "claude-code",
+    });
+    const otherModels = systemExecutionOptionsQueryKey({
+      environmentId: "env-two",
+      hostId: null,
+      providerId: "codex",
+    });
+    for (const key of [selectedModels, siblingModels, otherModels])
+      queryClient.setQueryData(key, EMPTY_EXECUTION_OPTIONS);
+    const readiness: ProviderReadiness = {
+      verification: "required",
+      scope: "environment",
+      status: "initializing",
+      freshness: "unverified",
+      checkedAt: null,
+      retryAfterMs: 5_000,
+      detail: "Retry shortly.",
+    };
+    await applyProviderReadinessObservation({
+      queryClient,
+      routing: { environmentId: "env-one" },
+      providerId: "codex",
+      readiness,
+    });
+    expect(
+      queryClient.getQueryData<ProviderInfo[]>(roster)?.[0]?.readiness,
+    ).toEqual(readiness);
+    expect(queryClient.getQueryData<ProviderInfo[]>(roster)?.[1]).toEqual(
+      providers[1],
+    );
+    expect(queryClient.getQueryData(otherRoster)).toEqual(providers);
+    expect(queryClient.getQueryState(selectedModels)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(siblingModels)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(otherModels)?.isInvalidated).toBe(false);
+    queryClient.clear();
+  });
+
   it("invalidates canonical active thread caches after reconnect", () => {
     const queryClient = createCacheEffectQueryClient();
     const threadKey = threadQueryKey("thread-1");

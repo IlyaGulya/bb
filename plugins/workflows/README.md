@@ -96,7 +96,7 @@ including file edits and other writes, because resume is restricted to the same
 environment workspace where those effects remain. Runs created before
 replay-safety metadata existed replay nothing.
 
-Agent calls retry transient provider failures twice with bounded backoff before
+Ordinary, non-Task-managed agent calls retry transient provider failures twice with bounded backoff before
 the failure reaches the workflow script. Retryability comes from an explicit
 SDK `retryable` marker when available or conservative overload, rate-limit,
 provider 5xx, and network-error signatures. Authentication, configuration,
@@ -109,9 +109,9 @@ corrective retries after their initial invalid attempt.
 
 Workflow workers use BB's generic hidden-thread visibility. They remain
 out of sidebar organization without contributing unread/pending favicon
-attention. Retention archives them when it deletes their run, because a
-stopped worker keeps its thread row and no server cascade reaches a root
-hidden thread. Ordinary search, prompt history,
+attention. Retired ordinary workers are archived by durable cleanup; their
+thread records remain inspectable. Task build/review workers are instead
+retained until explicit acceptance or task-deletion cleanup. Ordinary search, prompt history,
 lifecycle, and direct operations remain available. Workers are root threads,
 so no parent notification applies; a hidden thread that does have a parent
 still reports its turns and blockers to it. Workflows does not create a
@@ -125,6 +125,101 @@ schema-validated, and evaluated in a separate QuickJS VM. Parent and child VMs
 share one FIFO agent scheduler, call budget, cancellation signal, replay order,
 and phase/progress record. A child cannot invoke a grandchild.
 
+## Task build → review
+
+Tasks can use this native engine for a bounded implementation workflow without
+writing a separate script or installing another scheduler. Workflows must be
+enabled, and the task's tracker project must link to the BB code project.
+Choose an idle origin thread in that project's ready single-root workspace.
+Start from a clean, committed branch with no other active workspace work.
+Multi-repository support is not a prerequisite for this single-root path.
+
+Select two existing, authorized Tasks execution profiles. The reviewer must
+use a different provider/runtime or model from the writer; changing only the
+reasoning level is not independent review. Provider readiness and model
+availability still apply. No account reconnection or credential pooling is
+required by the workflow.
+
+The three sequential native calls are:
+
+1. The writer produces the plan.
+2. The **same writer thread/provider session** implements it, commits its owned
+   changes, and executes the actual platform smoke commands.
+3. A separate reviewer inspects the change and evidence.
+
+The result package records the plan, branch, full commit, diff summary, command
+text/output/exit codes, UI evidence locations, limitations, independent review
+findings/verdict, and next decision. Every required smoke command must appear
+in the evidence, and recorded commands must exit successfully. Unit tests alone
+are not a substitute for the requested platform smoke. UI tasks require a
+screenshot or preview location and description. Inspect the actual worker
+logs and artifacts: structured model output is not, by itself, proof that a
+command ran or a screenshot exists.
+
+BB checks authoritative workspace status before the reviewer, after review,
+before successful completion, and again on Accept. The reported branch and
+commit must match the checkout, and the working tree must be clean. A changed
+checkout cannot be accepted as the previously reviewed result.
+
+Use the Tasks card's **Build → review** section or its CLI. The following
+identifiers and smoke command are illustrative; use the real task, profile,
+origin, and platform command:
+
+```sh
+bb tasks workflow start TASK --key unique-launch-key --origin thr_origin \
+  --writer writer-profile --reviewer reviewer-profile \
+  --smoke '["./scripts/platform-smoke"]' --ui --json
+bb tasks workflow list TASK --json
+bb tasks workflow return twf_receipt --revision 1 --feedback "Fix the observed layout defect" --json
+bb tasks workflow accept twf_receipt --revision 2 --json
+```
+
+Reuse the same launch key and identical input when retrying a launch. A durable
+receipt prevents duplicate native runs. Completed result publication is
+transactional and once per revision: the task becomes `in_review`, not `done`,
+including when the independent reviewer requests changes. Human **Accept**
+must name the exact current revision. Generic task status `done` is not an
+alternative acceptance path. Review never authorizes external publication.
+
+Human **Return** requires concrete feedback and creates another journal run
+in the same workflow group while continuing the retained writer and its
+workspace/provider session. This is not generic `bb workflows run --resume`
+prefix replay and never silently substitutes a new writer. The card links the
+native worker threads. Working follows actual worker activity even if the
+origin stays idle; Inbox review uses the writer's package, and launch/run
+failures appear in Needs input.
+
+Retained workers and journal records stay pinned while human review is
+pending. Acceptance releases the group for ordinary cleanup. Task/project
+deletion preflights all affected groups and releases them in one native
+transaction; an active group prevents release of the whole deletion set.
+An unavailable, deleted, archived, or execution-changed established writer
+must be repaired rather than replaced.
+
+`threads.send` has no idempotency key. An uncertain continuation delivery fails
+closed, preserving the same worker for inspection and a subsequent explicit
+Return; it does not blindly send again. A missing launch acknowledgement is
+reconciled against native worker metadata, and an unresolved outcome cannot
+create a replacement writer. A definitive rejected initial creation is
+different: when native state proves there is no established or uncertain
+context, repair the originally selected execution profiles and Return to retry
+the first writer launch. Existing/uncertain contexts cannot change profiles.
+Launch errors can also retry the same durable receipt from the card.
+
+The QuickJS sandbox confines orchestration code, **not provider-native worker
+tools**. Workers use explicitly selected permission modes and profiles.
+Workflows grants its structured-result tool; other installed plugin and native
+tools retain their existing policies. Reviewer instructions and unchanged
+commit checks are not an OS read-only sandbox.
+
+SDK callers use Tasks RPCs `launchTaskWorkflow`, `taskWorkflows`,
+`acceptTaskWorkflow`, and `returnTaskWorkflow` through
+`bb.sdk.plugins.callRpc({ pluginId: "tasks", method, input, outputSchema })`.
+Tasks owns its validated remote protocol schema; forked Tasks installations
+do not import this plugin's private implementation. Task-managed completion
+is consumed from the durable journal and does not start an extra origin-agent
+turn.
+
 ## Settings
 
 Workflows declares six plugin settings:
@@ -134,17 +229,17 @@ Workflows declares six plugin settings:
   child workflow.
 - `maxAgentCalls` bounds the shared parent/child call count.
 - `totalRunTimeoutMs` fails a run independently of explicit cancellation.
-- `retentionDays` controls terminal-run cleanup while preserving active runs
-  and retained resume ancestors. The sweep archives each expired run's worker
-  threads before it deletes the run, and keeps the run for a later sweep when a
-  worker does not archive.
+- `retentionDays` controls terminal-run cleanup while preserving active runs,
+  retained resume ancestors, and pending Task build/review groups. Retired
+  worker archival has its own durable cleanup retries; releasing a Task group
+  does not delete its workspace or imply acceptance of another revision.
 - `maxNotificationBytes` bounds completion messages by UTF-8 byte length.
 
 `maxActiveRuns` is live plugin-global dispatch policy: changing it immediately
 changes how many queued runs the worker may claim. The other five values are
 snapshotted into each new run and remain fixed for that run, including a resumed
 run. Saving settings does not require a plugin reload.
-Terminal runs send an agent-only completion input back to the origin thread. It
+Ordinary, non-Task-managed terminal runs send an agent-only completion input back to the origin thread. It
 steers an active origin immediately or starts a turn when the origin is idle,
 while remaining absent from the user-facing timeline and search. Polling the
 compact `status` summary remains authoritative when a completion message is

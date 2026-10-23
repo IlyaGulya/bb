@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -17,7 +17,11 @@ import {
   workspaceTransferOperationSchema,
 } from "@bb/server-contract";
 import { assertWorkspaceTransferAdmission } from "../../src/services/projects/workspace-transfer-locks.js";
-import { assertWorkspaceContinuationAdmission } from "../../src/services/projects/workspace-transfer-admission.js";
+import {
+  assertWorkspaceContinuationAdmission,
+  rememberWorkspaceContinuation,
+  workspaceContinuationAdmissionRequired,
+} from "../../src/services/projects/workspace-transfer-admission.js";
 import { createWorkspaceContinuationThread } from "../../src/services/projects/workspace-transfer.js";
 import {
   listQueuedCommands,
@@ -61,6 +65,72 @@ function request(projectId: string, action: string, body: object) {
 }
 
 describe("workspace transfers", () => {
+  it("does not delay ordinary dispatch on an absent transfer registry and activates ownership when a transfer is later remembered", async () => {
+    await withTestHarness(async (harness) => {
+      const host = seedHostSession(harness.deps).host;
+      const project = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      }).project;
+      const source = seedEnvironment(harness.deps, {
+        projectId: project.id,
+        hostId: host.id,
+        path: "/ordinary-source",
+      });
+      const target = seedEnvironment(harness.deps, {
+        projectId: project.id,
+        hostId: host.id,
+        path: "/later-target",
+      });
+      const scan = vi.spyOn(fs, "readdir").mockImplementation(async () => {
+        throw new Error(
+          "Ordinary dispatch must not wait on transfer registry I/O",
+        );
+      });
+      try {
+        expect(
+          workspaceContinuationAdmissionRequired(harness.deps, source.id),
+        ).toBe(false);
+        await expect(
+          assertWorkspaceContinuationAdmission(harness.deps, source.id),
+        ).resolves.toBeUndefined();
+        expect(scan).not.toHaveBeenCalled();
+        await rememberWorkspaceContinuation(harness.deps, {
+          operationId: `wtx_${randomUUID()}`,
+          projectId: project.id,
+          sourceEnvironmentId: source.id,
+          sourceHostId: host.id,
+          targetHostId: host.id,
+          targetPath: "/later-target",
+          environmentId: target.id,
+          hostId: host.id,
+          rootPath: "/later-target",
+          createdAt: 1,
+          updatedAt: 1,
+          status: "ready",
+          head,
+          branch: "bb/later",
+          handoff: "Verified fixture",
+        });
+        expect(
+          workspaceContinuationAdmissionRequired(harness.deps, source.id),
+        ).toBe(true);
+        expect(
+          workspaceContinuationAdmissionRequired(harness.deps, target.id),
+        ).toBe(true);
+        seedThread(harness.deps, {
+          projectId: project.id,
+          environmentId: target.id,
+          status: "active",
+        });
+        await expect(
+          assertWorkspaceContinuationAdmission(harness.deps, source.id),
+        ).rejects.toThrow("other workspace");
+        expect(scan).not.toHaveBeenCalled();
+      } finally {
+        scan.mockRestore();
+      }
+    });
+  });
   it("transfers into a new environment in the same project and durably returns only verified handoff", async () => {
     await withTestHarness(async (harness) => {
       const sourceHost = seedHostSession(harness.deps, {
@@ -151,6 +221,18 @@ describe("workspace transfers", () => {
         `/api/v1/workspace-transfers/${result.operationId}`,
       );
       expect(await readJson(durable)).toEqual(result);
+      const savedCheckpoint = await fs.readFile(
+        path.join(
+          harness.deps.config.dataDir,
+          "workspace-transfers",
+          `${result.operationId}.checkpoint`,
+        ),
+      );
+      expect(JSON.parse(savedCheckpoint.toString("utf8"))).toEqual(checkpoint);
+      expect(result.checkpointSha256).toBe(
+        createHash("sha256").update(savedCheckpoint).digest("hex"),
+      );
+      expect(result.checkpointBytes).toBe(savedCheckpoint.length);
       expect(() =>
         assertWorkspaceTransferAdmission(harness.db, source.id),
       ).not.toThrow();
@@ -196,8 +278,15 @@ describe("workspace transfers", () => {
         assertWorkspaceContinuationAdmission(
           harness.deps,
           result.environmentId,
+          targetThread.id,
         ),
       ).resolves.toBeUndefined();
+      await expect(
+        assertWorkspaceContinuationAdmission(
+          harness.deps,
+          result.environmentId,
+        ),
+      ).rejects.toThrow("already has a writer");
       expect(
         await readJson(
           await harness.app.request(
@@ -270,8 +359,17 @@ describe("workspace transfers", () => {
         projectId: project.id,
         hostId: host.id,
       });
+      const operationId = `wtx_${randomUUID()}`;
+      const remoteBase = {
+        url: "https://approved.example.test/team/repository.git",
+        ref: "refs/heads/main",
+        head,
+      };
+      const captured = { ...checkpoint, remoteBase };
       const responsePromise = harness.app.fetch(
         request(project.id, "transfer-workspace", {
+          operationId,
+          remoteBase,
           sourceEnvironmentId: source.id,
           targetHostId: host.id,
           targetPath: "/existing/repo",
@@ -282,7 +380,10 @@ describe("workspace transfers", () => {
         harness,
         ({ command }) => command.type === "workspace.capture",
       );
-      await reportQueuedCommandSuccess(harness, capture, { checkpoint });
+      expect(capture.command).toMatchObject({ remoteBase });
+      await reportQueuedCommandSuccess(harness, capture, {
+        checkpoint: captured,
+      });
       const restore = await waitForQueuedCommand(
         harness,
         ({ command }) => command.type === "workspace.restore",
@@ -299,6 +400,47 @@ describe("workspace transfers", () => {
       expect(await readJson(response)).toMatchObject({
         details: { sourcePreserved: true, targetPath: "/existing/repo" },
       });
+      const saved = await fs.readFile(
+        path.join(
+          harness.deps.config.dataDir,
+          "workspace-transfers",
+          `${operationId}.checkpoint`,
+        ),
+      );
+      expect(JSON.parse(saved.toString("utf8"))).toEqual(captured);
+      const durable = workspaceTransferOperationSchema.parse(
+        await readJson(
+          await harness.app.request(
+            `/api/v1/workspace-transfers/${operationId}`,
+          ),
+        ),
+      );
+      expect(durable).toMatchObject({
+        status: "failed",
+        remoteBase,
+        checkpointSha256: createHash("sha256").update(saved).digest("hex"),
+        checkpointBytes: saved.length,
+      });
+      const duplicate = await harness.app.fetch(
+        request(project.id, "transfer-workspace", {
+          operationId,
+          sourceEnvironmentId: source.id,
+          targetHostId: host.id,
+          targetPath: "/different/fresh-path",
+          includePaths: [],
+          remoteBase,
+        }),
+      );
+      expect(duplicate.status).toBe(409);
+      expect(
+        workspaceTransferOperationSchema.parse(
+          await readJson(
+            await harness.app.request(
+              `/api/v1/workspace-transfers/${operationId}`,
+            ),
+          ),
+        ),
+      ).toEqual(durable);
     });
   });
   it("reloads symmetric execution fencing from a ready journal after restart", async () => {

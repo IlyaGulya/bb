@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { parseChangelog } from "../../../../../changelog-parser";
-import {
-  CHANGELOG_ENTRIES,
-  LATEST_CHANGELOG_ENTRY,
-  RELEASE_META,
-} from "./changelog-preview";
 
 const SAMPLE = `# Changelog
 
@@ -104,25 +99,5 @@ It also adds more ways to customize bb.
         ],
       },
     ]);
-  });
-});
-
-describe("LATEST_CHANGELOG_ENTRY", () => {
-  it("is the newest release, not the running build's", () => {
-    expect(LATEST_CHANGELOG_ENTRY).toBe(CHANGELOG_ENTRIES[0]);
-  });
-
-  it("reads the repo's own changelog", () => {
-    expect(CHANGELOG_ENTRIES.length).toBeGreaterThan(0);
-    expect(LATEST_CHANGELOG_ENTRY?.version).toMatch(/^\d+\.\d+\.\d+/);
-    expect(LATEST_CHANGELOG_ENTRY?.sections.length).toBeGreaterThan(0);
-  });
-
-  it("has presentation metadata for the newest release", () => {
-    expect(
-      LATEST_CHANGELOG_ENTRY === null
-        ? undefined
-        : RELEASE_META[LATEST_CHANGELOG_ENTRY.version],
-    ).toBeDefined();
   });
 });

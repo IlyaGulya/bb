@@ -9,8 +9,74 @@ import { registerAttachments } from "../attachments";
 import { attachmentDownloadUrl } from "../shared/attachments";
 import { tasksRpcContract } from "../shared/contract";
 import { createComment, createStore, registerTasksApi } from ".";
+import { TaskWorkflowStore } from "../workflow/store.js";
 
 describe("Tasks RPC domain API", () => {
+  it.each(["updateTask", "boardMove"] as const)(
+    "does not accept a pending workflow through %s",
+    async (method) => {
+      const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
+      try {
+        const store = createStore(bb);
+        registerTasksApi(bb, store);
+        const project = store.tasks.createProject({
+          name: "Review gate",
+          prefix: "GATE",
+          color: "blue",
+        });
+        const task = store.tasks.createTask({
+          projectId: project.id,
+          title: "Requires independent review",
+          status: "in_progress",
+        });
+        const workflows = new TaskWorkflowStore(store);
+        workflows.create(
+          "launch-guard",
+          task.id,
+          {
+            key: "workflow-guard:1",
+            group: "workflow-guard",
+            projectId: "proj_guard",
+            originThreadId: "thr_guard",
+            task: task.title,
+            writer: {
+              provider: "test-provider",
+              model: "writer",
+              reasoningLevel: "low",
+              permissionMode: "auto",
+              serviceTier: null,
+              instructions: "",
+            },
+            reviewer: {
+              provider: "test-provider",
+              model: "reviewer",
+              reasoningLevel: "low",
+              permissionMode: "auto",
+              serviceTier: null,
+              instructions: "",
+            },
+            smokeCommands: ["node app.mjs"],
+            uiRequired: false,
+            feedback: "",
+          },
+          "{}",
+        );
+        await expect(
+          harness.callRpc(method, {
+            taskId: task.id,
+            status: "done",
+            authorName: "Operator",
+          }),
+        ).rejects.toThrow(/explicit workflow Accept/);
+        expect(store.tasks.getTask(task.id)?.status).toBe("in_progress");
+        expect(workflows.get("workflow-guard").state).toBe("launching");
+        expect(store.tasks.listComments(task.id)).toEqual([]);
+      } finally {
+        await harness.dispose();
+      }
+    },
+  );
+
   it.each(["get", "send"])(
     "returns and publishes a persisted comment while notification %s is blocked",
     async (blockedOperation) => {

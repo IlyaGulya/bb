@@ -84,7 +84,19 @@ the most-parsed commands ends with the same shape.
     [{id, name, type, status, lifecycle, maxPermissionMode, lastSeenAt}]    (bare array)
 
   bb provider list --json
-    [{id, displayName, available, capabilities, reasoningLevels, serviceTiers}]    (bare array)
+    [{id, displayName, available, capabilities, reasoningLevels, serviceTiers, readiness: {verification, scope, status, freshness, checkedAt, retryAfterMs, detail}}]    (bare array)
+
+  bb provider readiness [providerId] --json
+    {providers: [{providerId, displayName, status, statusMessage, accountEmail, planLabel, installedVersion, minimumSupportedVersion, canInstall, canUpdate, loginCommand, localLoginCommand, readiness: {verification, scope, status, freshness, checkedAt, retryAfterMs, detail}}]}
+
+    available describes registration, not installation or authentication.
+    readiness.verification is required or unsupported; scope is host or environment.
+    freshness is fresh, stale, or unverified. checkedAt is the observation time
+    in milliseconds (null without an observation); retryAfterMs is a suggested
+    delay, not a guarantee of recovery. Unknown and initializing are not ready
+    and do not mean confirmed not_installed. Older observations remain stale
+    after transient failure. --machine/--host/--environment select the route;
+    a host observation does not prove authentication for an environment.
 
   bb provider models [providerId] --json
     [{id, model, displayName, supportedReasoningEfforts, defaultReasoningEffort, supportedServiceTiers?, isDefault}]    (bare array)

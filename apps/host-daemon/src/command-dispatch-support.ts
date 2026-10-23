@@ -271,5 +271,11 @@ export async function requireWorkspaceEnvironment(
       ? { targetThreadId: args.targetThreadId }
       : {}),
     workspacePath: args.workspaceContext.workspacePath,
+    ...(args.workspaceContext.additionalWorkspacePaths !== undefined
+      ? {
+          additionalWorkspacePaths:
+            args.workspaceContext.additionalWorkspacePaths,
+        }
+      : {}),
   });
 }

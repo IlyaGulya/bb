@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { ResolvedWorkflowExecutionSelection } from "./cache.js";
 import type { JsonValue, WorkflowAgentOptions } from "./types.js";
+import { buildReviewMigration } from "./build-review-policy.js";
 
 export type Db = Database.Database;
 type WorkflowRunStatus =
@@ -232,6 +233,7 @@ export const migrations = [
   `CREATE INDEX workflow_runs_expiry_idx
      ON workflow_runs(finished_at + json_extract(settings_json, '$.retentionDays') * 86400000)
      WHERE status IN ('succeeded', 'failed', 'cancelled') AND notification_sent = 1;`,
+  buildReviewMigration,
 ];
 
 export function createRun(
@@ -452,7 +454,8 @@ export function recoverInterruptedRuns(db: Db): string[] {
          FROM workflow_calls calls
          JOIN workflow_runs runs ON runs.id = calls.run_id
          WHERE runs.status = 'running' AND calls.status = 'running'
-           AND calls.child_thread_id IS NOT NULL`,
+           AND calls.child_thread_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM workflow_build_reviews r WHERE r.run_id = runs.id)`,
       )
       .all() as Array<{ childThreadId: string }>;
     const now = Date.now();
@@ -466,7 +469,7 @@ export function recoverInterruptedRuns(db: Db): string[] {
       `UPDATE workflow_calls SET status = 'cancelled', error = 'Plugin restarted', finished_at = ?
        WHERE status IN ('queued', 'running') AND run_id IN (
          SELECT id FROM workflow_runs WHERE status = 'running'
-       )`,
+       ) AND NOT EXISTS (SELECT 1 FROM workflow_build_reviews r WHERE r.run_id = workflow_calls.run_id)`,
     ).run(now);
     db.prepare(
       `UPDATE workflow_runs SET status = 'queued', error = NULL, finished_at = NULL
@@ -818,6 +821,7 @@ const EXPIRED_TERMINAL_RUN_IDS_SQL = `WITH RECURSIVE retained(id, resumed_from_r
          SELECT id, resumed_from_run_id FROM workflow_runs
          WHERE status IN ('queued', 'running')
            OR finished_at + json_extract(settings_json, '$.retentionDays') * 86400000 > ?
+           OR EXISTS (SELECT 1 FROM workflow_build_reviews r WHERE r.run_id = workflow_runs.id AND r.released = 0)
          UNION
          SELECT parent.id, parent.resumed_from_run_id
          FROM workflow_runs parent
@@ -880,6 +884,9 @@ export function deleteTerminalRuns(db: Db, runIds: readonly string[]): number {
     db.prepare(
       `DELETE FROM workflow_workers WHERE archived_at IS NOT NULL AND run_id IN (${placeholders})`,
     ).run(...runIds);
+    db.prepare(
+      "DELETE FROM workflow_build_review_workers WHERE NOT EXISTS (SELECT 1 FROM workflow_build_reviews r WHERE r.group_key = workflow_build_review_workers.group_key)",
+    ).run();
     return deleted;
   })();
 }
@@ -909,7 +916,12 @@ const RETIRED_WORKER_FROM = `FROM workflow_workers workers
     LEFT JOIN workflow_runs runs ON runs.id = workers.run_id
     WHERE workers.archived_at IS NULL
       AND (calls.id IS NULL OR calls.status NOT IN ('queued', 'running')
-        OR calls.child_thread_id IS NOT workers.thread_id OR runs.status NOT IN ('queued', 'running'))`;
+        OR calls.child_thread_id IS NOT workers.thread_id OR runs.status NOT IN ('queued', 'running'))
+      AND NOT EXISTS (SELECT 1 FROM workflow_build_review_workers retained
+        JOIN workflow_build_reviews reviews ON reviews.group_key = retained.group_key
+        WHERE retained.thread_id = workers.thread_id AND reviews.released = 0)
+      AND NOT EXISTS (SELECT 1 FROM workflow_build_reviews reviews
+        WHERE reviews.run_id = workers.run_id AND reviews.released = 0)`;
 
 export function retiredWorkers(
   db: Db,

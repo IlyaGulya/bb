@@ -19,7 +19,9 @@ export const JSON_SHAPE_BY_COMMAND_PATH: Readonly<Record<string, string>> = {
   "machine list":
     "[{id, name, type, status, lifecycle, maxPermissionMode, lastSeenAt}]    (bare array)",
   "provider list":
-    "[{id, displayName, available, capabilities, reasoningLevels, serviceTiers}]    (bare array)",
+    "[{id, displayName, available, capabilities, reasoningLevels, serviceTiers, readiness: {verification, scope, status, freshness, checkedAt, retryAfterMs, detail}}]    (bare array)",
+  "provider readiness":
+    "{providers: [{providerId, displayName, status, statusMessage, readiness: {verification, scope, status, freshness, checkedAt, retryAfterMs, detail}, ...}]}",
   "provider models":
     "[{id, model, displayName, supportedReasoningEfforts, defaultReasoningEffort, supportedServiceTiers?, isDefault}]    (bare array)",
   "environment list":

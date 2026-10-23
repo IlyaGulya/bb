@@ -5,14 +5,14 @@ Run a script that fans work out to many agent threads, pipelines their results, 
 - A live run card in chat that shows the state, phases, active workers, and elapsed time.
 - A status card above the composer for each active run in the thread, with a stop control.
 - A **Workflow run** panel that lists every phase and worker call and links each worker to its thread.
-- A completion message delivered to the thread that started the run.
+- For ordinary workflows, a completion message delivered to the origin thread. Task-managed workflows publish their result package in Tasks instead of starting another origin-agent turn.
 - Settings for active runs, agent concurrency, call budget, run timeout, retention days, and notification size.
 
 ## How it works
 
 A workflow is a JavaScript file. It runs in a sandbox with no file, shell, network, or clock access. Calls to `agent(...)` start normal bb worker threads with their usual tools and permissions. Scripts can pipeline stages, run parallel barriers, and request a JSON Schema for a worker's output. Successful calls are cached, so a resumed or restarted run replays them and continues live from the first change.
 
-Worker threads stay hidden from the sidebar. Expired runs are archived after the retention period.
+Worker threads stay hidden from the sidebar but remain directly inspectable. Ordinary retired workers are archived; Task build/review workers and journals remain pinned until explicit acceptance or deletion cleanup.
 
 ## For agents
 
@@ -21,3 +21,29 @@ Agents start runs with the `bb_workflow_run` tool and inspect them with the `bb 
 ## Requirements
 
 The plugin is off by default. Commands must run inside a bb project thread.
+
+## Task build → review
+
+With Tasks and Workflows enabled, choose an idle origin in the task's linked,
+clean single-root project workspace and two existing authorized profiles. The
+reviewer must differ by provider/runtime or model, not merely reasoning level.
+The bounded sequence is plan → **same writer** implementation and actual
+platform smoke → independent review → `in_review`.
+
+The task card and `bb tasks workflow start/list/return/accept` expose the same
+workflow. The package includes branch, commit, diff summary, command results,
+UI screenshot/preview locations when required, limitations, review findings,
+and next decision. Actual platform smoke is mandatory; unit tests are not a
+substitute. BB checks authoritative branch/commit identity and a clean working
+tree before/after review and again at acceptance.
+
+Human Accept names the exact revision; generic `done` cannot accept a pending
+workflow. Return continues the retained writer/provider session and workspace.
+Uncertain delivery fails closed rather than duplicating work or replacing the
+writer. A definitively rejected first launch with no established or uncertain
+context can retry after its selected profiles are repaired. The README
+documents recovery and idempotency boundaries.
+
+Provider-native tools retain their permission policy. Neither reviewer
+instructions nor commit checks constitute an OS read-only sandbox. Inspect real
+worker logs and UI artifacts before accepting structured evidence.

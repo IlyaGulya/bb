@@ -14,6 +14,8 @@ export * from "./host-contract.js";
 export type * from "./json-value.js";
 export * from "./rpc-contract.js";
 export { experimental_THREAD_ACTION_GROUPS } from "./thread-action-groups.js";
+export { providerExecutionReadinessBlocker as experimental_providerExecutionReadinessBlocker } from "@bb/domain";
+export type { ProviderReadiness } from "@bb/domain";
 export type {
   ExperimentalDesktopBrowsersArea,
   ExperimentalDesktopBrowserScope,

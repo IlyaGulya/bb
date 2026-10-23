@@ -371,6 +371,7 @@ export function resolveNewThreadSubmitDisabledReason({
 
   const fatalModelLoadError =
     modelLoadError?.code === "provider_unavailable" ||
+    modelLoadError?.code === "provider_not_ready" ||
     modelLoadError?.code === "missing_executable" ||
     modelLoadError?.code === "auth_required";
   if (modelLoadError && (fatalModelLoadError || !selectedThreadModel)) {

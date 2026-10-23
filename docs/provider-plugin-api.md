@@ -153,9 +153,14 @@ Still experimental on the declaration (see api_to_audit.md):
   machine-local state. It participates in bridge process identity, so
   changing it starts a new bridge process for the next runtime.
 - `experimental_visibility` — `"always"` (default) or `"installed"`, which
-  lists the provider on a host only when its bridge's `provider/health` status
-  is not `not_installed`. Such a declaration must support health; bridge
-  failures hide only that provider.
+  requires host readiness verification through the bridge's `provider/health`.
+  Such a declaration must support health. Registered identities remain in
+  discovery when cold, disabled, not installed, or affected by bridge failure;
+  `readiness` exposes status, scope, applicability and freshness separately from
+  registration `available`. Transient failures preserve earlier observations
+  only as stale, never fresh ready. Always-visible providers without health
+  support remain usable under their existing rules with unsupported/unverified
+  readiness. Host installation health does not prove environment/preset auth.
 - `experimental_nativeSkillRoots` and `experimental_nativeCommandRoots` —
   where the agent keeps its own skills and slash commands, at most 32 roots
   per side. Each root is a path or

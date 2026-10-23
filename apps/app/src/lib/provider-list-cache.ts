@@ -1,4 +1,4 @@
-import { providerInfoSchema } from "@bb/domain";
+import { providerInfoSchema, type ProviderInfo } from "@bb/domain";
 import { z } from "zod";
 import { createLastKnownCache } from "@/lib/last-known-cache";
 
@@ -19,5 +19,26 @@ export function providerListCacheKey({
   return providerListCache.key(environmentId, hostId);
 }
 
-export const readCachedProviderList = providerListCache.read;
+export function readCachedProviderList(key: string): ProviderInfo[] | null {
+  return (
+    providerListCache
+      .read(key)
+      ?.map((provider): ProviderInfo =>
+        provider.readiness === undefined
+          ? provider
+          : {
+              ...provider,
+              readiness: {
+                ...provider.readiness,
+                freshness:
+                  provider.readiness.checkedAt === null
+                    ? "unverified"
+                    : "stale",
+                detail:
+                  "Cached observation; refresh provider readiness before execution.",
+              },
+            },
+      ) ?? null
+  );
+}
 export const writeCachedProviderList = providerListCache.write;

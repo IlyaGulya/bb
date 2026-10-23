@@ -118,6 +118,25 @@ export type ProviderExtensionKinds = z.infer<
   typeof providerExtensionKindsSchema
 >;
 
+export const providerReadinessSchema = z.object({
+  verification: z.enum(["required", "unsupported"]),
+  scope: z.enum(["host", "environment"]),
+  status: z.enum([
+    "unknown",
+    "initializing",
+    "ready",
+    "not_installed",
+    "disabled",
+    "auth_required",
+    "unsupported_version",
+  ]),
+  freshness: z.enum(["unverified", "fresh", "stale"]),
+  checkedAt: z.number().nullable(),
+  retryAfterMs: z.number().nonnegative().nullable(),
+  detail: z.string(),
+});
+export type ProviderReadiness = z.infer<typeof providerReadinessSchema>;
+
 export const providerInfoSchema = z.object({
   id: z.string(),
   pluginId: z.string().min(1),
@@ -134,12 +153,36 @@ export const providerInfoSchema = z.object({
   composerActions: z.array(providerComposerActionSchema),
   completedTurnDisplay: completedTurnDisplaySchema,
   available: z.boolean(),
+  readiness: providerReadinessSchema.optional(),
   strings: providerStringsSchema.optional(),
   serviceTiers: z.array(providerOptionDescriptorSchema).optional(),
   reasoningLevels: z.array(providerOptionDescriptorSchema).optional(),
   extensionKinds: providerExtensionKindsSchema.optional(),
 });
 export type ProviderInfo = z.infer<typeof providerInfoSchema>;
+
+export function providerExecutionReadinessBlocker(
+  provider: ProviderInfo,
+  observation: ProviderReadiness | null,
+  scope: ProviderReadiness["scope"],
+): string | null {
+  if (!provider.available)
+    return `Provider ${provider.id} plugin is unavailable. Check provider settings.`;
+  if (provider.readiness?.status === "disabled")
+    return provider.readiness.detail;
+  if (provider.readiness?.verification === "unsupported") return null;
+  if (observation === null || observation.scope !== scope) {
+    return `Provider ${provider.id} readiness has not been verified for this ${scope}. Check readiness on the selected machine or environment.`;
+  }
+  if (
+    observation.verification === "required" &&
+    observation.status === "ready" &&
+    observation.freshness === "fresh" &&
+    observation.checkedAt !== null
+  )
+    return null;
+  return `${provider.displayName}: ${observation.status.replaceAll("_", " ")} (${observation.freshness}). ${observation.detail}`;
+}
 
 export const providerRecoveryKindValues = [
   "sessionArchived",

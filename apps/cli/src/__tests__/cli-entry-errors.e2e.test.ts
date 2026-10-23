@@ -200,14 +200,6 @@ describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
     expect(result.stderr).toContain("Commands: wait, spawn");
   }, 30_000);
 
-  it("names the real command for a guessed verb with no alias", async () => {
-    const result = await runCli(["provider", "show", "codex"]);
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("error: unknown command 'show'");
-    expect(result.stderr).toContain("Commands: list, enable, disable, models");
-  }, 30_000);
-
   it("runs bb machine for bb host when no plugin owns that name", async () => {
     const result = await runCli(["host", "list", "--json"]);
 

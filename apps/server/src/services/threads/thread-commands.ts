@@ -282,9 +282,12 @@ export async function buildThreadStartCommand(
     type: "thread.start",
     environmentId: args.environment.id,
     threadId: args.thread.id,
-    workspaceContext: workspaceContextFromPath({
-      path: runtimeContext.workspacePath,
-    }),
+    workspaceContext: {
+      ...workspaceContextFromPath({ path: runtimeContext.workspacePath }),
+      ...(runtimeContext.additionalWorkspacePaths
+        ? { additionalWorkspacePaths: runtimeContext.additionalWorkspacePaths }
+        : {}),
+    },
     projectId: args.projectId,
     providerId: args.providerId,
     bridgeLaunch,
@@ -334,9 +337,17 @@ function buildPreparedTurnSubmitCommandPayload(
     }),
     target: args.target,
     resumeContext: {
-      workspaceContext: workspaceContextFromPath({
-        path: args.runtimeContext.workspacePath,
-      }),
+      workspaceContext: {
+        ...workspaceContextFromPath({
+          path: args.runtimeContext.workspacePath,
+        }),
+        ...(args.runtimeContext.additionalWorkspacePaths
+          ? {
+              additionalWorkspacePaths:
+                args.runtimeContext.additionalWorkspacePaths,
+            }
+          : {}),
+      },
       projectId: args.runtimeContext.projectId,
       providerId: args.runtimeContext.providerId,
       bridgeLaunch,

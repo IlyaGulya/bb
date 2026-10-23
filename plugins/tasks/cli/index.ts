@@ -51,6 +51,10 @@ import type { JiraHandlers } from "../jira";
 import { jiraCommands } from "./jira";
 import type { InboxHandlers } from "../inbox/index.js";
 import { inboxCommands } from "./inbox.js";
+import type { RepositoryHandlers } from "../repositories";
+import type { TaskWorkflowHandlers } from "../workflow/index.js";
+import { repositoryCommands } from "./repositories";
+import { workflowCommands } from "./workflow.js";
 
 const TASK_KEY_PATTERN = /^([A-Z][A-Z0-9]{0,9})-(\d+)$/;
 const BB_PROJECT_ID_PATTERN = /^proj_[A-Za-z0-9_-]+$/;
@@ -676,6 +680,8 @@ export function registerTasksCli(
   status: PluginStatus,
   jiraHandlers: JiraHandlers,
   inboxHandlers?: InboxHandlers,
+  repositories?: RepositoryHandlers,
+  workflows?: TaskWorkflowHandlers,
 ): void {
   const domain = registerHandlers(bb, store);
   bb.cli.register(
@@ -686,6 +692,50 @@ export function registerTasksCli(
       description:
         "Tasks are addressed by key (ABC-12) or ULID. --project takes a tracker project prefix or id, never a bb project id (proj_...).",
       commands: {
+        ...(repositories
+          ? {
+              repositories: groupCommand(
+                "repositories",
+                "Prepare and continue a coherent multi-repository task workspace",
+                [
+                  [
+                    "inspect",
+                    "Inspect a source without copying or starting work",
+                  ],
+                  [
+                    "prepare",
+                    "Prepare explicit repository bindings without dispatch",
+                  ],
+                  ["show", "Read aggregate readiness and per-root receipts"],
+                  ["continue", "Continue one writer across all verified roots"],
+                ],
+              ),
+              ...repositoryCommands(
+                repositories,
+                (address) => resolveTask(domain, address),
+                guard,
+              ),
+            }
+          : {}),
+        ...(workflows
+          ? {
+              workflow: groupCommand(
+                "workflow",
+                "Build, independently review, then explicitly accept or return",
+                [
+                  ["start", "Launch a bounded build and review workflow"],
+                  ["list", "Inspect revisions, evidence and native workers"],
+                  ["accept", "Accept the exact reviewed revision"],
+                  ["return", "Send feedback to the same retained writer"],
+                ],
+              ),
+              ...workflowCommands(
+                workflows,
+                (address) => resolveTask(domain, address),
+                guard,
+              ),
+            }
+          : {}),
         ...(inboxHandlers
           ? {
               inbox: groupCommand(

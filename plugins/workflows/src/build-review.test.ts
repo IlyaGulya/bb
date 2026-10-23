@@ -1,0 +1,601 @@
+import Database from "better-sqlite3";
+import {
+  createFakePluginHost,
+  makeThreadResponse,
+  type FakePluginHost,
+} from "@get-bb/plugin-sdk/testing";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  attachCallThread,
+  createRun,
+  getCall,
+  getRunRequired,
+  isWorkerRetired,
+  listExpiredTerminalRuns,
+  migrations,
+  recoverInterruptedRuns,
+  settleCall,
+  startCall,
+} from "./data.js";
+import { managedContextStarted, managedWorker } from "./build-review-policy.js";
+import { DEFAULT_WORKFLOW_SETTINGS } from "./settings.js";
+import type { BuildReviewStart } from "./build-review-contract.js";
+import { executeWorkflowScript } from "./runtime.js";
+import { parseWorkflowSource } from "./parser.js";
+import { buildReviewSource, registerBuildReview } from "./build-review.js";
+import { createWorkflowService } from "./service.js";
+import { verifyBuildReviewWorkspace } from "./build-review-workspace.js";
+
+const databases: Database.Database[] = [];
+const hosts: FakePluginHost[] = [];
+afterEach(async () => {
+  for (const host of hosts.splice(0)) await host.harness.dispose();
+  for (const db of databases.splice(0)) db.close();
+});
+const request: BuildReviewStart = {
+  key: "task:1",
+  group: "task",
+  projectId: "project",
+  originThreadId: "thr_origin",
+  task: "Owned bounded fixture",
+  writer: {
+    provider: "codex",
+    model: "writer",
+    reasoningLevel: "medium",
+    permissionMode: "full",
+    serviceTier: null,
+    instructions: "",
+  },
+  reviewer: {
+    provider: "claude",
+    model: "reviewer",
+    reasoningLevel: "medium",
+    permissionMode: "auto",
+    serviceTier: null,
+    instructions: "",
+  },
+  smokeCommands: ["platform smoke"],
+  uiRequired: true,
+  feedback: "",
+};
+const fixtureRunInput = {
+  projectId: "project",
+  originThreadId: "thr_origin",
+  environmentId: "env_fixture",
+  originProvider: "codex",
+  originModel: "writer",
+  originReasoningLevel: "medium",
+  originPermissionMode: "full",
+  name: "fixture",
+  source: "return null",
+  sourceHash: "fixture",
+  argsJson: "null",
+  settingsJson: JSON.stringify(DEFAULT_WORKFLOW_SETTINGS),
+  resumedFromRunId: null,
+};
+function setup(workerStatus: "idle" | "error" = "idle") {
+  const db = new Database(":memory:");
+  databases.push(db);
+  db.pragma("foreign_keys = ON");
+  db.exec(migrations.join("\n"));
+  const run = createRun(db, fixtureRunInput);
+  db.prepare(
+    "INSERT INTO workflow_build_reviews(request_key, group_key, run_id, request_json) VALUES (?, ?, ?, ?)",
+  ).run(request.key, request.group, run.id, JSON.stringify(request));
+  db.prepare("UPDATE workflow_runs SET status = 'running' WHERE id = ?").run(
+    run.id,
+  );
+  const send = vi.fn(async () => ({
+    ok: true as const,
+    delivery: "sent" as const,
+  }));
+  const host = createFakePluginHost({
+    pluginId: "workflows",
+    sdk: {
+      threads: {
+        get: async ({ threadId }) =>
+          makeThreadResponse({
+            id: threadId,
+            environmentId: "env_fixture",
+            status: workerStatus,
+          }),
+        defaultExecutionOptions: async () => ({
+          model: "writer",
+          reasoningLevel: "medium",
+          permissionMode: "full",
+          serviceTier: "default",
+          source: "client/thread/start",
+        }),
+        send,
+      },
+    },
+  });
+  hosts.push(host);
+  const call = (index: number) =>
+    startCall(db, {
+      runId: run.id,
+      callIndex: index,
+      cacheKey: `call-${index}`,
+      prompt: "owned fixture",
+      options: {
+        selection: null,
+        outputSchema: null,
+        title: null,
+        phase: null,
+      },
+      selection: {
+        providerId: "codex",
+        model: "writer",
+        reasoningLevel: "medium",
+        permissionMode: "full",
+      },
+      replay: null,
+    });
+  return { db, run: getRunRequired(db, run.id), host, send, call };
+}
+
+describe("native managed launch receipts", () => {
+  it("deduplicates concurrent launch and plugin restart by durable key", async () => {
+    const { db, host } = setup();
+    const service = createWorkflowService(host.bb, db);
+    const launch = { ...request, key: "another:1", group: "another" };
+    const input = {
+      projectId: launch.projectId,
+      originThreadId: launch.originThreadId,
+      source: buildReviewSource(launch),
+      args: null,
+      resumedFromRunId: null,
+      buildReview: launch,
+    };
+    const [first, duplicate] = await Promise.all([
+      service.start(input),
+      service.start(input),
+    ]);
+    expect(duplicate.id).toBe(first.id);
+    expect((await createWorkflowService(host.bb, db).start(input)).id).toBe(
+      first.id,
+    );
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM workflow_build_reviews WHERE request_key = 'another:1'",
+        )
+        .get(),
+    ).toEqual({ count: 1 });
+    await expect(
+      service.start({
+        ...input,
+        buildReview: { ...launch, task: "Conflicting task" },
+      }),
+    ).rejects.toThrow(/different input/);
+  });
+});
+
+describe("batch workflow deletion release", () => {
+  it("refuses an active later group without releasing any earlier completed context", async () => {
+    const { db, run, host } = setup();
+    db.prepare(
+      "UPDATE workflow_runs SET status = 'succeeded' WHERE id = ?",
+    ).run(run.id);
+    const active = createRun(db, fixtureRunInput);
+    db.prepare(
+      "INSERT INTO workflow_build_reviews(request_key, group_key, run_id, request_json) VALUES (?, ?, ?, ?)",
+    ).run(
+      "other:1",
+      "other",
+      active.id,
+      JSON.stringify({ ...request, key: "other:1", group: "other" }),
+    );
+    const handlers = registerBuildReview(
+      host.bb,
+      db,
+      createWorkflowService(host.bb, db),
+    );
+    expect(() =>
+      handlers.releaseBuildReviewContexts({ groups: [request.group, "other"] }),
+    ).toThrow(/no contexts/);
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM workflow_build_reviews WHERE released = 1",
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+    db.prepare("UPDATE workflow_runs SET status = 'failed' WHERE id = ?").run(
+      active.id,
+    );
+    expect(
+      await handlers.releaseBuildReviewContexts({
+        groups: [request.group, "other"],
+      }),
+    ).toEqual({ released: true });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM workflow_build_reviews WHERE released = 1",
+        )
+        .get(),
+    ).toEqual({ count: 2 });
+    await expect(
+      createWorkflowService(host.bb, db).start({
+        projectId: request.projectId,
+        originThreadId: request.originThreadId,
+        source: buildReviewSource(request),
+        args: null,
+        resumedFromRunId: null,
+        buildReview: { ...request, key: "task:after-release" },
+      }),
+    ).rejects.toThrow(/released/);
+  });
+});
+
+describe("failed initial writer launch recovery", () => {
+  it("permits human Return after a definitive rejected spawn without claiming an existing writer session", async () => {
+    const { db, run, host, call } = setup();
+    const first = call(0);
+    const rejection = Object.assign(
+      new Error("Invalid initial provider configuration"),
+      { status: 400, code: "invalid_request" },
+    );
+    await expect(
+      managedWorker(host.bb, db, run, first, "plan", async () => {
+        throw rejection;
+      }),
+    ).rejects.toBe(rejection);
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM workflow_build_review_deliveries WHERE call_id = ?",
+        )
+        .get(first.id),
+    ).toEqual({ state: "rejected" });
+    expect(managedContextStarted(db, request.group)).toBe(false);
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS count FROM workflow_build_review_workers")
+        .get(),
+    ).toEqual({ count: 0 });
+    db.prepare("UPDATE workflow_runs SET status = 'failed' WHERE id = ?").run(
+      run.id,
+    );
+    const next = createRun(db, fixtureRunInput);
+    db.prepare("UPDATE workflow_runs SET status = 'running' WHERE id = ?").run(
+      next.id,
+    );
+    db.prepare(
+      "INSERT INTO workflow_build_reviews(request_key, group_key, run_id, request_json) VALUES (?, ?, ?, ?)",
+    ).run(
+      "task:2",
+      request.group,
+      next.id,
+      JSON.stringify({
+        ...request,
+        key: "task:2",
+        feedback: "Configuration repaired; retry",
+      }),
+    );
+    const nextCall = startCall(db, {
+      runId: next.id,
+      callIndex: 0,
+      cacheKey: "retry-first-writer",
+      prompt: "plan",
+      options: {
+        selection: null,
+        outputSchema: null,
+        title: null,
+        phase: null,
+      },
+      selection: {
+        providerId: "codex",
+        model: "writer",
+        reasoningLevel: "medium",
+        permissionMode: "full",
+      },
+      replay: null,
+    });
+    const spawn = vi.fn(async () => ({ id: "thr_first_accepted_writer" }));
+    expect(
+      await managedWorker(
+        host.bb,
+        db,
+        getRunRequired(db, next.id),
+        nextCall,
+        "plan",
+        spawn,
+      ),
+    ).toEqual({ id: "thr_first_accepted_writer" });
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+  it("does not downgrade an ambiguous network failure into a safe rejected spawn", async () => {
+    const { db, run, host, call } = setup();
+    const first = call(0);
+    await expect(
+      managedWorker(host.bb, db, run, first, "plan", async () => {
+        throw new Error("Connection lost after request");
+      }),
+    ).rejects.toThrow(/Connection lost/);
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM workflow_build_review_deliveries WHERE call_id = ?",
+        )
+        .get(first.id),
+    ).toEqual({ state: "spawning" });
+    expect(managedContextStarted(db, request.group)).toBe(true);
+  });
+});
+
+describe("first-writer profile repair policy", () => {
+  it("allows repaired profile selection before context exists but never swaps an established writer", async () => {
+    const { db, run, host } = setup();
+    db.prepare("UPDATE workflow_runs SET status = 'failed' WHERE id = ?").run(
+      run.id,
+    );
+    const handlers = registerBuildReview(
+      host.bb,
+      db,
+      createWorkflowService(host.bb, db),
+    );
+    const repaired = {
+      ...request,
+      key: "task:2",
+      writer: { ...request.writer, model: "repaired-model" },
+      feedback: "Fix the invalid initial profile",
+    };
+    const next = await handlers.startBuildReview(repaired);
+    expect(next.contextStarted).toBe(false);
+    db.prepare("UPDATE workflow_runs SET status = 'failed' WHERE id = ?").run(
+      next.runId,
+    );
+    db.prepare(
+      "INSERT INTO workflow_build_review_workers(group_key, role, thread_id) VALUES (?, 'writer', 'thr_established_writer')",
+    ).run(request.group);
+    await expect(
+      handlers.startBuildReview({
+        ...repaired,
+        key: "task:3",
+        writer: { ...repaired.writer, model: "replacement" },
+      }),
+    ).rejects.toThrow(/existing writer/);
+  });
+});
+
+describe("build/review commit identity", () => {
+  it("rejects stale commits and reviewer working-tree writes using authoritative host status", async () => {
+    const { db, run, call } = setup();
+    const build = call(1);
+    const evidence = {
+      branch: "owned-fixture",
+      commit: "a".repeat(40),
+      diff: "owned file +1",
+      commands: [{ command: "platform smoke", exitCode: 0, output: "passed" }],
+      uiEvidence: [],
+      limitations: [],
+      nextDecision: "Accept or Return",
+    };
+    settleCall(db, {
+      id: build.id,
+      status: "succeeded",
+      result: evidence,
+      error: null,
+    });
+    let commit = evidence.commit;
+    let dirty = false;
+    const host = createFakePluginHost({
+      pluginId: "workflows",
+      sdk: {
+        environments: {
+          status: async () => ({
+            outcome: "available",
+            workspace: {
+              checkout: {
+                kind: "branch",
+                branchName: "owned-fixture",
+                headSha: commit,
+              },
+              workingTree: {
+                hasUncommittedChanges: dirty,
+                state: "clean",
+                insertions: 0,
+                deletions: 0,
+                lineStatsComplete: true,
+                fileCount: 0,
+                files: [],
+              },
+              branch: { currentBranch: "owned-fixture", defaultBranch: "main" },
+              mergeBase: null,
+            },
+          }),
+        },
+      },
+    });
+    hosts.push(host);
+    await expect(
+      verifyBuildReviewWorkspace(host.bb, db, run),
+    ).resolves.toBeUndefined();
+    commit = "b".repeat(40);
+    await expect(verifyBuildReviewWorkspace(host.bb, db, run)).rejects.toThrow(
+      /authoritative/,
+    );
+    commit = evidence.commit;
+    dirty = true;
+    await expect(verifyBuildReviewWorkspace(host.bb, db, run)).rejects.toThrow(
+      /uncommitted/,
+    );
+  });
+});
+
+describe("human Return session identity", () => {
+  it.each(["idle", "error"] as const)(
+    "uses the retained %s writer in a later native run rather than creating another provider session",
+    async (status) => {
+      const { db, run, host, send, call } = setup(status);
+      const first = call(0);
+      const spawn = vi.fn(async () => ({ id: "thr_same_writer" }));
+      await managedWorker(host.bb, db, run, first, "original plan", spawn);
+      attachCallThread(db, first.id, "thr_same_writer");
+      settleCall(db, {
+        id: first.id,
+        status: "succeeded",
+        result: "original context",
+        error: null,
+      });
+      db.prepare(
+        "UPDATE workflow_runs SET status = 'succeeded' WHERE id = ?",
+      ).run(run.id);
+      const next = createRun(db, fixtureRunInput);
+      db.prepare(
+        "UPDATE workflow_runs SET status = 'running' WHERE id = ?",
+      ).run(next.id);
+      db.prepare(
+        "INSERT INTO workflow_build_reviews(request_key, group_key, run_id, request_json) VALUES (?, ?, ?, ?)",
+      ).run(
+        "task:2",
+        request.group,
+        next.id,
+        JSON.stringify({
+          ...request,
+          key: "task:2",
+          feedback: "Repair the mobile layout",
+        }),
+      );
+      const nextCall = startCall(db, {
+        runId: next.id,
+        callIndex: 0,
+        cacheKey: "return",
+        prompt: "Repair the mobile layout",
+        options: {
+          selection: null,
+          outputSchema: null,
+          title: null,
+          phase: null,
+        },
+        selection: {
+          providerId: "codex",
+          model: "writer",
+          reasoningLevel: "medium",
+          permissionMode: "full",
+        },
+        replay: null,
+      });
+      expect(
+        await managedWorker(
+          host.bb,
+          db,
+          getRunRequired(db, next.id),
+          nextCall,
+          "Repair the mobile layout",
+          spawn,
+        ),
+      ).toEqual({ id: "thr_same_writer" });
+      expect(spawn).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId: "thr_same_writer",
+          input: [
+            expect.objectContaining({ text: "Repair the mobile layout" }),
+          ],
+        }),
+      );
+    },
+  );
+});
+describe("retained native build/review workers", () => {
+  it("reuses the same writer for plan and build, suppresses duplicate delivery, and retains it for human Return", async () => {
+    const { db, run, host, send, call } = setup();
+    const spawn = vi.fn(async () => ({ id: "thr_writer" }));
+    const plan = call(0);
+    await managedWorker(host.bb, db, run, plan, "plan", spawn);
+    attachCallThread(db, plan.id, "thr_writer");
+    settleCall(db, {
+      id: plan.id,
+      status: "succeeded",
+      result: "plan",
+      error: null,
+    });
+    expect(isWorkerRetired(db, "thr_writer")).toBe(false);
+    const build = call(1);
+    expect(
+      await managedWorker(
+        host.bb,
+        db,
+        run,
+        build,
+        "build and real smoke",
+        spawn,
+      ),
+    ).toEqual({ id: "thr_writer" });
+    expect(
+      await managedWorker(host.bb, db, run, build, "duplicate", spawn),
+    ).toEqual({ id: "thr_writer" });
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(getCall(db, run.id, 1)?.childThreadId).toBe("thr_writer");
+    expect(recoverInterruptedRuns(db)).toEqual([]);
+    expect(getCall(db, run.id, 1)?.status).toBe("running");
+    expect(
+      await managedWorker(host.bb, db, run, build, "restart", spawn),
+    ).toEqual({ id: "thr_writer" });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+  it("fails closed on uncertain follow-up delivery instead of launching a replacement writer", async () => {
+    const { db, run, host, send, call } = setup();
+    const build = call(1);
+    db.prepare(
+      "INSERT INTO workflow_build_review_deliveries(call_id, thread_id, state) VALUES (?, 'thr_writer', 'sending')",
+    ).run(build.id);
+    const spawn = vi.fn(async () => ({ id: "thr_duplicate" }));
+    await expect(
+      managedWorker(host.bb, db, run, build, "return", spawn),
+    ).rejects.toThrow(/uncertain/);
+    expect(send).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+  it("pins terminal runs and workers until acceptance releases their group", async () => {
+    const { db, run, host, call } = setup();
+    const plan = call(0);
+    await managedWorker(host.bb, db, run, plan, "plan", async () => ({
+      id: "thr_writer",
+    }));
+    attachCallThread(db, plan.id, "thr_writer");
+    settleCall(db, {
+      id: plan.id,
+      status: "succeeded",
+      result: "plan",
+      error: null,
+    });
+    db.prepare(
+      "UPDATE workflow_runs SET status = 'succeeded', notification_sent = 1, finished_at = 1 WHERE id = ?",
+    ).run(run.id);
+    expect(listExpiredTerminalRuns(db, Date.now(), 20).runIds).toEqual([]);
+    expect(isWorkerRetired(db, "thr_writer")).toBe(false);
+    db.prepare("UPDATE workflow_build_reviews SET released = 1").run();
+    expect(listExpiredTerminalRuns(db, Date.now(), 20).runIds).toEqual([
+      run.id,
+    ]);
+    expect(isWorkerRetired(db, "thr_writer")).toBe(true);
+  });
+  it("refuses missing actual smoke evidence before invoking a reviewer", async () => {
+    const parsed = parseWorkflowSource(buildReviewSource(request));
+    const agent = vi
+      .fn()
+      .mockResolvedValueOnce("plan")
+      .mockResolvedValueOnce({
+        commands: [{ command: "unit tests", exitCode: 0 }],
+        uiEvidence: [],
+      });
+    await expect(
+      executeWorkflowScript({
+        body: parsed.body,
+        args: {
+          task: request.task,
+          feedback: "",
+          smokeCommands: request.smokeCommands,
+          uiRequired: true,
+        },
+        capabilities: { agent, phase() {}, log() {} },
+      }),
+    ).rejects.toThrow(/Missing required real smoke/);
+    expect(agent).toHaveBeenCalledTimes(2);
+  });
+});

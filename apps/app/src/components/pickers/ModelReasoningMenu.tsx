@@ -6,7 +6,10 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import type { SystemExecutionOptionsModelLoadError } from "@bb/server-contract";
+import type {
+  SystemExecutionOptionsModelLoadError,
+  SystemProvidersQuery,
+} from "@bb/server-contract";
 import {
   DEFAULT_SERVICE_TIER,
   type ProviderOptionDescriptor,
@@ -46,10 +49,12 @@ import {
   ModelLoadErrorMessage,
 } from "./model-load-error-message";
 import type { ModelNavRow } from "./ModelReasoningPicker";
+import { ProviderReadinessRetry } from "./ProviderReadinessRetry";
 
 export interface ModelReasoningMenuProps {
   listRef: RefObject<HTMLDivElement | null>;
   providerId: string;
+  providerRouting?: SystemProvidersQuery | undefined;
   provider: ProviderPickerOption | undefined;
   providerLabel: string;
   listboxId: string | undefined;
@@ -117,6 +122,7 @@ function reasoningLadderClassName(
 export function ModelReasoningMenu({
   listRef,
   providerId,
+  providerRouting,
   provider,
   providerLabel,
   listboxId,
@@ -272,6 +278,14 @@ export function ModelReasoningMenu({
               ) : (
                 "No models available"
               )}
+              {modelLoadError?.code === "provider_not_ready" ? (
+                <ProviderReadinessRetry
+                  providerId={providerId}
+                  {...(providerRouting === undefined
+                    ? {}
+                    : { routing: providerRouting })}
+                />
+              ) : null}
             </div>
           )}
         </div>

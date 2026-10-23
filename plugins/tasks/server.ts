@@ -5,11 +5,14 @@ import manifest from "./package.json" with { type: "json" };
 import { createStore, registerTasksApi } from "./api";
 import { registerAttachments } from "./attachments";
 import { registerTasksCli } from "./cli";
-import { registerDelegation } from "./delegate";
+import { registerDelegation, taskExecutionEffects } from "./delegate";
 import { registerLifecycle } from "./lifecycle";
 import { registerMentions } from "./mentions";
 import { registerJiraSync } from "./jira";
 import { registerInbox } from "./inbox/index.js";
+import { repositoryHandlers } from "./repositories";
+import { repositoryRpcContract } from "./shared/repositories";
+import { registerTaskWorkflows } from "./workflow/index.js";
 
 const TASKS_PLUGIN_NAME = "Tasks";
 const TASKS_PLUGIN_VERSION = manifest.version;
@@ -33,7 +36,22 @@ export default async function plugin(bb: BbPluginApi) {
   registerAttachments(bb, store.tasks);
   const jiraHandlers = registerJiraSync(bb, store);
   const inboxHandlers = registerInbox(bb, store);
-  registerTasksCli(bb, store, statusPayload(), jiraHandlers, inboxHandlers);
+  const repositories = repositoryHandlers(
+    bb,
+    store,
+    taskExecutionEffects(bb, store),
+  );
+  bb.rpc.register(repositoryRpcContract, repositories);
+  const workflows = registerTaskWorkflows(bb, store);
+  registerTasksCli(
+    bb,
+    store,
+    statusPayload(),
+    jiraHandlers,
+    inboxHandlers,
+    repositories,
+    workflows,
+  );
   registerDelegation(bb, store);
   registerMentions(bb, store);
   await registerLifecycle(bb, store);

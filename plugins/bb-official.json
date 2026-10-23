@@ -90,6 +90,10 @@
     "category": "agents-and-providers",
     "screenshots": []
   },
+  "slack-inbox": {
+    "category": "tasks-and-workflows",
+    "screenshots": []
+  },
   "secrets": {
     "category": "security",
     "screenshots": []

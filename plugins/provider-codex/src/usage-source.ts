@@ -58,6 +58,7 @@ export function registerUsageSource(bb: BbPluginApi) {
       !providers.some(
         (provider) =>
           provider.id === providerId &&
+          provider.readiness?.status !== "disabled" &&
           provider.pluginId === "provider-codex" &&
           provider.id === "codex",
       )
@@ -141,6 +142,7 @@ export function registerUsageSource(bb: BbPluginApi) {
                 .filter(
                   (provider) =>
                     provider.pluginId === "provider-codex" &&
+                    provider.readiness?.status !== "disabled" &&
                     provider.id === "codex",
                 )
                 .map((provider) => {

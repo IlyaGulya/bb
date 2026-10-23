@@ -5,6 +5,7 @@ import { publishTasksChanged, type TasksApiStore } from "../api/index.js";
 import { inboxRpcContract } from "../shared/inbox-contract.js";
 import { errorMessage } from "../shared/errors.js";
 import { InboxStore, type InboxSource } from "./store.js";
+import { buildReviewInspectionSchema } from "../workflow/remote-contract.js";
 
 export type InboxHandlers = PluginRpcHandlers<typeof inboxRpcContract>;
 type WorkingItem = z.infer<
@@ -47,6 +48,28 @@ export function registerInbox(
       checkedInteractions.add(threadId);
       checkedFailures.add(threadId);
     }
+    const workflowViews = db
+      .prepare<
+        [],
+        {
+          id: string;
+          taskId: string;
+          revision: number;
+          state: string;
+          error: string | null;
+          workersJson: string | null;
+        }
+      >(`SELECT id, task_id AS taskId, revision, state,
+      json_extract(view_json, '$.error') AS error,
+      json_extract(view_json, '$.native.workers') AS workersJson
+      FROM task_workflow_runs WHERE state <> 'accepted'`)
+      .all()
+      .map((row) => ({
+        ...row,
+        workers: buildReviewInspectionSchema.shape.workers.parse(
+          JSON.parse(row.workersJson ?? "[]"),
+        ),
+      }));
     const linked = db
       .prepare<
         [],
@@ -65,11 +88,59 @@ export function registerInbox(
       ORDER BY CASE WHEN t.status IN ('done', 'canceled') THEN 1 ELSE 0 END, executor_rank, tt.task_id`,
       )
       .all();
+    for (const workflow of workflowViews) {
+      for (const worker of workflow.workers) {
+        if (
+          linked.some(
+            (link) =>
+              link.task_id === workflow.taskId &&
+              link.thread_id === worker.threadId,
+          )
+        )
+          continue;
+        linked.push({
+          task_id: workflow.taskId,
+          thread_id: worker.threadId,
+          live_status: workflow.state === "running" ? "working" : "idle",
+          executor_rank: 0,
+        });
+      }
+    }
     const currentExecutors = new Map(
       linked
         .filter((link) => link.executor_rank === 1)
         .map((link) => [link.task_id, link.thread_id]),
     );
+    for (const workflow of workflowViews) {
+      const writer = workflow.workers.find(
+        (worker) => worker.role === "writer",
+      );
+      if (writer && workflow.state === "in_review")
+        currentExecutors.set(workflow.taskId, writer.threadId);
+      if (!workflow.error && workflow.state !== "failed") continue;
+      const task = store.tasks.getTask(workflow.taskId);
+      if (!task || ["done", "canceled"].includes(task.status)) continue;
+      const sourceKey = workflow.id;
+      seen.add(`task_workflow:${sourceKey}`);
+      upsert({
+        sourceKind: "task_workflow",
+        sourceKey,
+        revision: `${workflow.revision}:${createHash("sha256")
+          .update(workflow.error ?? workflow.state)
+          .digest("hex")}`,
+        title: `${task.key}: workflow needs attention`,
+        body: `${workflow.error ?? "Workflow failed before producing a reviewable result."}\n\nOpen the task's Build → review card. Failed runs can be returned with concrete feedback; launch errors retry the same durable launch receipt after their prerequisite is repaired. No new writer replaces an existing session.`,
+        context: inbox.taskContext(task.id),
+        lane: "needs_input",
+        reason:
+          workflow.state === "launching"
+            ? "Workflow launch is blocked; no completed result"
+            : "Workflow requires correction before human review",
+        active: true,
+        taskId: task.id,
+        threadId: writer?.threadId ?? null,
+      });
+    }
     const running = new Set<string>();
     if (linked.length > 0) {
       try {
@@ -288,6 +359,7 @@ export function registerInbox(
       if (seen.has(`${item.sourceKind}:${item.sourceKey}`)) continue;
       const checked =
         item.sourceKind === "task_review" ||
+        item.sourceKind === "task_workflow" ||
         item.taskId === null ||
         !linked.some(
           (link) =>

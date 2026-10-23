@@ -1159,6 +1159,11 @@ export interface PluginSidebarThreadsState {
  * the host's own pickers read. `logoUrl` is server-relative
  * (`/api/v1/system/providers/<id>/logo`) or null when the provider declared a
  * glyph or no icon; `strings` carries the provider's declared copy.
+ * `available` reports plugin registration availability, not execution health.
+ * Discovery includes cold and disabled providers. `readiness` separately gives
+ * verification applicability, host/environment scope, status, freshness,
+ * observation time and retry guidance. Cached or initializing observations are
+ * not fresh readiness; unsupported maintenance remains unknown, never ready.
  */
 export interface PluginProvidersState {
   status: "loading" | "ready" | "error";

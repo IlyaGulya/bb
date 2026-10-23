@@ -14,16 +14,69 @@ describe("bb provider command output", () => {
   const register: CommandRegistrar = (program) =>
     registerProviderCommands(program, () => "http://server");
 
-  it("bb provider list renders the shared borderless table", async () => {
-    const get = vi.fn(async () => [{ id: "openai", displayName: "OpenAI" }]);
+  it("keeps cold providers visible with actionable readiness rather than claiming availability", async () => {
+    const get = vi.fn(async () => [
+      {
+        id: "acp-omp",
+        displayName: "OMP",
+        available: true,
+        readiness: {
+          verification: "required",
+          scope: "host",
+          status: "initializing",
+          freshness: "unverified",
+          checkedAt: null,
+          retryAfterMs: 5_000,
+          detail: "Initialization did not finish. Retry shortly.",
+        },
+      },
+    ]);
     stubServerApi({ "v1.system.providers.$get": get });
-
     await runCommand(["provider", "list"], register);
+    const output = collectLogPayloads(vi.mocked(console.log)).join("\n");
+    expect(output).toContain("acp-omp");
+    expect(output).toContain("Loaded");
+    expect(output).toContain("initializing");
+    expect(output).toContain("unverified");
+    expect(output).toContain("Retry shortly");
+  });
 
+  it("checks only the selected provider and preserves definitive failure in JSON", async () => {
+    const response = {
+      providers: [
+        {
+          providerId: "acp-omp",
+          status: "not_installed",
+          readiness: {
+            verification: "required",
+            scope: "environment",
+            status: "not_installed",
+            freshness: "fresh",
+            checkedAt: 123,
+            retryAfterMs: null,
+            detail: "Install OMP.",
+          },
+        },
+      ],
+    };
+    const get = vi.fn(async () => response);
+    stubServerApi({ "v1.system.providers.state.$get": get });
+    await runCommand(
+      [
+        "provider",
+        "readiness",
+        "acp-omp",
+        "--environment",
+        "env-remote",
+        "--json",
+      ],
+      register,
+    );
+    expect(get).toHaveBeenCalledWith({
+      query: { providerId: "acp-omp", environmentId: "env-remote" },
+    });
     expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
-      "",
-      "ID      Name  \n------  ------\nopenai  OpenAI",
-      "",
+      JSON.stringify(response, null, 2),
     ]);
   });
 

@@ -546,6 +546,9 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Bring any CLI agent into bb, with its own models and icon",
           "Run every thread started with it through a bridge the plugin ships",
           "Report context usage, service tiers, and install status",
+          "Read registered provider names and icons from the directory, including disabled and unverified entries; presence and availability are not readiness",
+          "Inspect observation scope and freshness, then target one provider with sdk.system.providerStates({ providerId, ...routing }) for a bounded readiness check",
+          "Apply experimental_providerExecutionReadinessBlocker before execution without mistaking unsupported verification or stale host health for fresh environment authentication",
         ],
         apiSymbols: [
           "contextSnapshotSchema",
@@ -560,6 +563,8 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginProviderIconRegistration",
           "experimental_useProviders",
           "PluginProvidersState",
+          "ProviderReadiness",
+          "experimental_providerExecutionReadinessBlocker",
           "ExperimentalPluginProviderEnvContext",
           "ExperimentalPluginProviderEnvEntry",
           "ExperimentalPluginProviderEnvHealthContext",

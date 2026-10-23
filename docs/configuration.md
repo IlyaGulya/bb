@@ -1069,6 +1069,66 @@ The builtin Workflows plugin is disabled on fresh installations
 The settings other than `maxActiveRuns` are snapshotted into each new run. See
 the `workflows` skill.
 
+Tasks exposes a bounded **Build → review** workflow using these native settings,
+not a second scheduler. Select an idle prepared origin workspace and two
+existing execution profiles with different providers or models. A single
+retained writer plans, implements and runs the required platform smoke; the
+independent reviewer inspects the same committed checkout. Result publication
+sets In Review, not Done. Explicit exact-revision Accept rechecks the commit
+and clean tree; Return continues the same writer/session. Provider permission
+modes are not an OS read-only sandbox. See the Tasks and Workflows skills for
+matching RPC and CLI operations.
+
+### Tasks repository workspace
+
+Tasks 0.4.0 can bind multiple explicit code projects to one task without changing
+its tracker project or Work/Personal organization. Preparation is asynchronous:
+inspect sources, queue bindings, then inspect per-root receipts. Every required
+root must verify on the same machine and execution profile before one coherent
+native writer starts. Each root keeps its own Git branch and instructions.
+
+There are no implicit credential or MCP migrations. Large repositories use an
+explicit credential-free remote, published ref and prerequisite commit; the
+destination uses its own Git/LFS authentication. See
+[environment provisioning](environment-provisioning.md#project-preparation-and-transfer-api)
+for payload limits, checkpoint recovery and source/target ownership.
+
+### Slack Inbox
+
+The bundled `bb--slack-inbox` plugin is disabled by default. Enabling the plugin
+does not grant corporate authorization: its own `enabled` and `approved`
+settings also default to `false`. Configure only after approval for the app,
+selected conversation subscriptions and storing the selected work text in BB.
+There is no automatic historical import or all-mentions coverage.
+
+Settings → Plugins → Slack Inbox holds `teamId`, permitted human `userId`,
+explicit conversation allowlist (`[{id,kind}]`, kinds `public|private|im|mpim`)
+and `context` (`unknown|work|personal`). Put dedicated `appToken` and `botToken`
+in the native secret settings; never use command arguments or borrow Claude,
+browser or user-session credentials. The app token needs `connections:write`.
+Select only the conversation kinds required:
+
+| Kind    | Bot scopes                          | Message subscription |
+| ------- | ----------------------------------- | -------------------- |
+| public  | `channels:history`, `channels:read` | `message.channels`   |
+| private | `groups:history`, `groups:read`     | `message.groups`     |
+| im      | `im:history`, `im:read`             | `message.im`         |
+| mpim    | `mpim:history`, `mpim:read`         | `message.mpim`       |
+
+Enable Socket Mode and outbound HTTPS/WSS; invite the bot only to approved
+conversations. Human-to-human DMs are not visible to a bot. No public webhook,
+chat/reaction write scopes, polling or model use is needed. Access checks are
+not proof that app subscriptions work; verify a real approved mention.
+
+`bb slack-inbox setup|status|coverage|retry` exposes setup, receipt and gap
+status without secret or message bytes. `configure --data JSON --yes` shares
+the validated non-secret RPC policy. Plugin RPCs `status`, `configure`,
+`checkCoverage`, and `retry` are also available through
+`sdk.plugins.callRpc({pluginId:"bb--slack-inbox",...})`; the consumer SDK is
+`plugins/slack-inbox/src/sdk.ts`. Received discussions enter native Inbox;
+human link/create/resolve/snooze remains separate from dispatch and acceptance.
+Disconnections and missing access remain visible coverage gaps.
+
 ### Thread list plugin
 
 The bundled Thread list plugin owns the sidebar thread list layout, synced to

@@ -80,7 +80,14 @@ export function installProviderModelCatalogPrewarm(
     const providers = await listSystemProviderInfosForHost(deps, hostId);
     const defaultProviderId = deps.providerRegistry.getUserDefaultProviderId();
     const queue = providers
-      .filter((provider) => provider.available)
+      .filter(
+        (provider) =>
+          provider.available &&
+          (provider.readiness === undefined ||
+            provider.readiness.status === "unknown" ||
+            (provider.readiness.status === "ready" &&
+              provider.readiness.freshness === "fresh")),
+      )
       .sort(
         (left, right) =>
           Number(right.id === defaultProviderId) -

@@ -1,9 +1,13 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import {
+  experimental_providerExecutionReadinessBlocker,
+  type BbPluginApi,
+} from "@get-bb/plugin-sdk";
 import type { AgentEnvironment, PermissionMode } from "./rpc-types.js";
 
 type ProviderPermissionApi = {
   sdk: {
     providers: Pick<BbPluginApi["sdk"]["providers"], "list">;
+    system: Pick<BbPluginApi["sdk"]["system"], "providerStates">;
   };
 };
 
@@ -29,10 +33,30 @@ export async function resolvePermissionMode(
   requested: PermissionMode | undefined,
   routing: ProviderRouting = {},
 ): Promise<PermissionMode> {
-  const providers = await bb.sdk.providers.list(routing);
+  const providers = await bb.sdk.providers.list({ ...routing, providerId });
   const provider = providers.find((candidate) => candidate.id === providerId);
   if (provider === undefined || provider.available === false) {
     throw new Error(`Provider ${providerId} is not available.`);
+  }
+  if (provider.readiness?.verification !== "unsupported") {
+    const result = await bb.sdk.system.providerStates({
+      ...routing,
+      providerId,
+    });
+    const blocker = experimental_providerExecutionReadinessBlocker(
+      provider,
+      result.providers.find((candidate) => candidate.providerId === providerId)
+        ?.readiness ?? null,
+      routing.environmentId === undefined ? "host" : "environment",
+    );
+    if (blocker !== null) throw new Error(blocker);
+  } else {
+    const blocker = experimental_providerExecutionReadinessBlocker(
+      provider,
+      null,
+      "host",
+    );
+    if (blocker !== null) throw new Error(blocker);
   }
   if (
     requested !== undefined &&

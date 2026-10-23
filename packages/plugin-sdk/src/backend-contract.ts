@@ -1500,8 +1500,8 @@ export interface PluginProviderDeclaration {
    */
   experimental_bridgeOptions?: Readonly<Record<string, JsonValue>>;
   /**
-   * Whether the provider is always listed or only listed on hosts where its
-   * bridge reports it installed. Defaults to `"always"`.
+   * `"installed"` probes host readiness; unknown and missing providers remain
+   * discoverable with explicit status. `"always"` skips installation discovery.
    */
   experimental_visibility?: "always" | "installed";
   /**
@@ -2063,7 +2063,9 @@ export interface PluginStatusApi {
 export type PluginBbSdk = Omit<BbSdk, "threads"> & {
   threads: Omit<
     BbSdk["threads"],
-    "getPluginMetadata" | "updatePluginMetadata" | "experimental_listPluginMetadata"
+    | "getPluginMetadata"
+    | "updatePluginMetadata"
+    | "experimental_listPluginMetadata"
   > & {
     getPluginMetadata(
       args: Omit<ThreadPluginMetadataArgs, "pluginId"> & { pluginId?: string },

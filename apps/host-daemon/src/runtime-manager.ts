@@ -133,6 +133,7 @@ export interface RuntimeEntry {
   retainedSkillCatalogHashes: Set<string>;
   workspace: HostWorkspace;
   path: string;
+  additionalWorkspacePaths?: readonly string[];
   terminals: Set<string>;
 }
 
@@ -148,6 +149,7 @@ export interface EnsureEnvironmentArgs {
   setupContributedEnv?: readonly HostDaemonContributedEnvEntry[];
   targetThreadId?: string;
   workspacePath?: string;
+  additionalWorkspacePaths?: readonly string[];
   provision?: ProvisionWorkspaceArgs;
 }
 
@@ -320,14 +322,24 @@ export class RuntimeManager {
   }
 
   private canonicalWorkspacePath(workspacePath: string): string {
-    try { return realpathSync(workspacePath); } catch { return path.resolve(workspacePath); }
+    try {
+      return realpathSync(workspacePath);
+    } catch {
+      return path.resolve(workspacePath);
+    }
   }
 
   private assertWorkspaceNotCapturing(workspacePath: string): void {
     const resolved = this.canonicalWorkspacePath(workspacePath);
     for (const root of this.workspaceCaptures) {
-      if (resolved === root || resolved.startsWith(`${root}${path.sep}`) || root.startsWith(`${resolved}${path.sep}`)) {
-        throw new Error("Workspace capture is in progress; wait before starting local sessions or modifying this environment.");
+      if (
+        resolved === root ||
+        resolved.startsWith(`${root}${path.sep}`) ||
+        root.startsWith(`${resolved}${path.sep}`)
+      ) {
+        throw new Error(
+          "Workspace capture is in progress; wait before starting local sessions or modifying this environment.",
+        );
       }
     }
   }
@@ -336,10 +348,25 @@ export class RuntimeManager {
     const root = this.canonicalWorkspacePath(workspacePath);
     const ids = new Set<string>();
     for (const entry of this.entries.values()) {
-      const entryPath = this.canonicalWorkspacePath(entry.path);
-      if (entryPath !== root && !entryPath.startsWith(`${root}${path.sep}`) && !root.startsWith(`${entryPath}${path.sep}`)) continue;
-      for (const threadId of entry.runtime.getLiveThreadIds()) ids.add(threadId);
-      for (const threadId of this.inFlightThreadCommandsByEnvironmentId.get(entry.environmentId)?.keys() ?? []) ids.add(threadId);
+      const entryPaths = [
+        entry.path,
+        ...(entry.additionalWorkspacePaths ?? []),
+      ].map((entryPath) => this.canonicalWorkspacePath(entryPath));
+      if (
+        !entryPaths.some(
+          (entryPath) =>
+            entryPath === root ||
+            entryPath.startsWith(`${root}${path.sep}`) ||
+            root.startsWith(`${entryPath}${path.sep}`),
+        )
+      )
+        continue;
+      for (const threadId of entry.runtime.getLiveThreadIds())
+        ids.add(threadId);
+      for (const threadId of this.inFlightThreadCommandsByEnvironmentId
+        .get(entry.environmentId)
+        ?.keys() ?? [])
+        ids.add(threadId);
     }
     return [...ids];
   }
@@ -347,21 +374,46 @@ export class RuntimeManager {
   acquireWorkspaceCapture(workspacePath: string): () => void {
     const root = this.canonicalWorkspacePath(workspacePath);
     this.assertWorkspaceNotCapturing(root);
-    if (this.pendingEnvironmentEnsures.size || this.pendingEntries.size || this.pendingWorkspaceRefreshes.size) {
-      throw new Error("Environment initialization is in progress; wait for it to finish before workspace capture.");
+    if (
+      this.pendingEnvironmentEnsures.size ||
+      this.pendingEntries.size ||
+      this.pendingWorkspaceRefreshes.size
+    ) {
+      throw new Error(
+        "Environment initialization is in progress; wait for it to finish before workspace capture.",
+      );
     }
-    if (this.listWorkspaceActiveThreadIds(root).length) throw new Error("Workspace has active local sessions; stop them before capture.");
+    if (this.listWorkspaceActiveThreadIds(root).length)
+      throw new Error(
+        "Workspace has active local sessions; stop them before capture.",
+      );
     for (const entry of this.entries.values()) {
       const entryPath = this.canonicalWorkspacePath(entry.path);
-      if ((entryPath === root || entryPath.startsWith(`${root}${path.sep}`) || root.startsWith(`${entryPath}${path.sep}`)) && entry.runtime.hasOpenBackgroundWork()) {
-        throw new Error("Workspace has active local background work; stop it before capture.");
+      if (
+        (entryPath === root ||
+          entryPath.startsWith(`${root}${path.sep}`) ||
+          root.startsWith(`${entryPath}${path.sep}`)) &&
+        entry.runtime.hasOpenBackgroundWork()
+      ) {
+        throw new Error(
+          "Workspace has active local background work; stop it before capture.",
+        );
       }
-      if ((entryPath === root || entryPath.startsWith(`${root}${path.sep}`) || root.startsWith(`${entryPath}${path.sep}`)) && entry.terminals.size) {
-        throw new Error("Workspace has active local terminals; close them before capture.");
+      if (
+        (entryPath === root ||
+          entryPath.startsWith(`${root}${path.sep}`) ||
+          root.startsWith(`${entryPath}${path.sep}`)) &&
+        entry.terminals.size
+      ) {
+        throw new Error(
+          "Workspace has active local terminals; close them before capture.",
+        );
       }
     }
     this.workspaceCaptures.add(root);
-    return () => { this.workspaceCaptures.delete(root); };
+    return () => {
+      this.workspaceCaptures.delete(root);
+    };
   }
 
   get(environmentId: string): RuntimeEntry | undefined {
@@ -486,7 +538,10 @@ export class RuntimeManager {
     return this.enqueueThreadControl(threadId, () => {
       const entry = this.entries.get(environmentId);
       if (entry) this.assertWorkspaceNotCapturing(entry.path);
-      else if (this.workspaceCaptures.size) throw new Error("Workspace capture is in progress; wait before starting local sessions.");
+      else if (this.workspaceCaptures.size)
+        throw new Error(
+          "Workspace capture is in progress; wait before starting local sessions.",
+        );
       const commandsByThreadId =
         this.inFlightThreadCommandsByEnvironmentId.get(environmentId) ??
         new Map<string, number>();
@@ -928,8 +983,15 @@ export class RuntimeManager {
   }
 
   async ensureEnvironment(args: EnsureEnvironmentArgs): Promise<RuntimeEntry> {
-    const workspacePath = args.provision?.path ?? args.workspacePath ?? this.entries.get(args.environmentId)?.path;
+    const workspacePath =
+      args.provision?.path ??
+      args.workspacePath ??
+      this.entries.get(args.environmentId)?.path;
     if (workspacePath) this.assertWorkspaceNotCapturing(workspacePath);
+    for (const additionalPath of args.additionalWorkspacePaths ??
+      this.entries.get(args.environmentId)?.additionalWorkspacePaths ??
+      [])
+      this.assertWorkspaceNotCapturing(additionalPath);
     const pending = this.pendingEnvironmentEnsures.get(args.environmentId);
     if (pending) {
       await pending;
@@ -951,6 +1013,29 @@ export class RuntimeManager {
     const skillConfig = await this.resolveRuntimeSkillConfig(args);
     const existing = this.entries.get(args.environmentId);
     if (existing) {
+      if (
+        args.additionalWorkspacePaths === undefined &&
+        existing.additionalWorkspacePaths?.length
+      )
+        args = {
+          ...args,
+          additionalWorkspacePaths: existing.additionalWorkspacePaths,
+        };
+      if (
+        args.additionalWorkspacePaths !== undefined &&
+        JSON.stringify(args.additionalWorkspacePaths) !==
+          JSON.stringify(existing.additionalWorkspacePaths ?? [])
+      ) {
+        if (
+          existing.runtime.getLiveThreadIds().length ||
+          existing.terminals.size
+        )
+          throw new Error(
+            "Cannot change repository bindings while this workspace has a live writer or terminal",
+          );
+        await this.forgetEnvironment(args.environmentId);
+        return this.ensureEnvironmentOnce(args);
+      }
       const compatible = await this.ensureCompatibleEntry({
         entry: existing,
         skillConfig,
@@ -1260,8 +1345,43 @@ export class RuntimeManager {
       ...provision,
       signal: args.provisionSignal,
     });
-    const workspaceWriteRoots =
-      await workspace.getAdditionalWorkspaceWriteRoots();
+    const additionalWorkspacePaths: string[] = [];
+    const workspaceWriteRoots = [
+      ...(await workspace.getAdditionalWorkspaceWriteRoots()),
+    ];
+    const primaryRoot = args.additionalWorkspacePaths?.length
+      ? realpathSync(workspace.path)
+      : workspace.path;
+    for (const requestedPath of args.additionalWorkspacePaths ?? []) {
+      if (
+        !path.isAbsolute(requestedPath) ||
+        path.resolve(requestedPath) !== requestedPath ||
+        realpathSync(requestedPath) !== requestedPath
+      )
+        throw new Error(
+          "Bound repository paths must be existing canonical absolute directories, not symlinks",
+        );
+      const roots = [primaryRoot, ...additionalWorkspacePaths];
+      if (
+        roots.some(
+          (root) =>
+            root === requestedPath ||
+            root.startsWith(`${requestedPath}${path.sep}`) ||
+            requestedPath.startsWith(`${root}${path.sep}`),
+        )
+      )
+        throw new Error("Bound repository roots must not overlap");
+      this.assertWorkspaceNotCapturing(requestedPath);
+      const boundWorkspace = await this.provisionHostWorkspace({
+        path: requestedPath,
+        signal: args.provisionSignal,
+      });
+      additionalWorkspacePaths.push(requestedPath);
+      workspaceWriteRoots.push(
+        requestedPath,
+        ...(await boundWorkspace.getAdditionalWorkspaceWriteRoots()),
+      );
+    }
     const additionalWorkspaceWriteRoots = this.runtimeWorkspaceWriteRoots({
       threadStorageRootPath: this.options.threadStorageRootPath,
       workspaceRoots: workspaceWriteRoots,
@@ -1338,6 +1458,7 @@ export class RuntimeManager {
       terminals: new Set<string>(),
       workspace,
       path: workspace.path,
+      additionalWorkspacePaths,
     };
   }
 

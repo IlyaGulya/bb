@@ -1,3 +1,7 @@
+import {
+  assertRepositoryTargetUnowned,
+  registerWorkspaceRepositoryGroup,
+} from "./workspace-repository-group.js";
 import type { Thread } from "@bb/domain";
 import type { CreateThreadRequest } from "@bb/server-contract";
 import { getThreadSafe } from "../threads/thread-create-helpers.js";
@@ -5,7 +9,7 @@ import {
   assertWorkspaceContinuationAdmission,
   rememberWorkspaceContinuation,
 } from "./workspace-transfer-admission.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { and, eq, inArray } from "drizzle-orm";
@@ -219,6 +223,9 @@ export async function previewWorkspaceTransfer(
     head: preview.head,
     branch: preview.branch,
     files: preview.files,
+    ...(preview.remoteBaseCandidates
+      ? { remoteBaseCandidates: preview.remoteBaseCandidates }
+      : {}),
     activeThreadIds: [
       ...new Set([
         ...preview.activeThreadIds,
@@ -235,6 +242,11 @@ export async function transferWorkspace(
 ): Promise<TransferWorkspaceResponse> {
   const source = sourceEnvironment(deps, projectId, input.sourceEnvironmentId);
   requireHost(deps, input.targetHostId);
+  await assertRepositoryTargetUnowned(
+    deps,
+    input.targetHostId,
+    input.targetPath,
+  );
   const relativeTarget = path.posix.relative(source.path, input.targetPath);
   if (
     source.hostId === input.targetHostId &&
@@ -246,7 +258,7 @@ export async function transferWorkspace(
       "workspace_target_inside_source",
       "Choose a new target outside the source workspace so transfer preserves the source unchanged",
     );
-  const operationId = `wtx_${randomUUID()}`;
+  const operationId = input.operationId ?? `wtx_${randomUUID()}`;
   const release = acquireWorkspaceTransferLock(
     deps.db,
     source.id,
@@ -261,11 +273,41 @@ export async function transferWorkspace(
     sourceHostId: source.hostId,
     targetHostId: input.targetHostId,
     targetPath: input.targetPath,
+    ...(input.remoteBase ? { remoteBase: input.remoteBase } : {}),
     createdAt: Date.now(),
     updatedAt: Date.now(),
     status: "pending",
   };
+  let claimed = false;
   try {
+    const filename = operationPath(deps, operationId);
+    await fs.mkdir(path.dirname(filename), { recursive: true, mode: 0o700 });
+    try {
+      await fs.access(filename);
+      throw new ApiError(
+        409,
+        "workspace_transfer_exists",
+        "This operation ID already exists; inspect it instead of replaying a transfer",
+      );
+    } catch (error) {
+      if (
+        !(error instanceof Error && "code" in error && error.code === "ENOENT")
+      )
+        throw error;
+    }
+    try {
+      const claim = await fs.open(`${filename}.claim`, "wx", 0o600);
+      await claim.close();
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "EEXIST")
+        throw new ApiError(
+          409,
+          "workspace_transfer_exists",
+          "This operation ID is already reserved; inspect it instead of replaying a transfer",
+        );
+      throw error;
+    }
+    claimed = true;
     assertIdle(deps, source.id);
     await saveOperation(deps, operation);
     operation = { ...operation, status: "capturing", updatedAt: Date.now() };
@@ -277,9 +319,38 @@ export async function transferWorkspace(
         type: "workspace.capture",
         rootPath: source.path,
         includePaths: input.includePaths,
+        ...(input.remoteBase ? { remoteBase: input.remoteBase } : {}),
       },
     });
+    if (
+      JSON.stringify(checkpoint.remoteBase ?? null) !==
+      JSON.stringify(input.remoteBase ?? null)
+    )
+      throw new ApiError(
+        409,
+        "workspace_remote_base_changed",
+        "Source checkpoint did not preserve the explicitly approved remote base",
+      );
     assertIdle(deps, source.id);
+    const serialized = JSON.stringify(checkpoint);
+    const checkpointPath = operationPath(deps, operationId).replace(
+      /\.json$/u,
+      ".checkpoint",
+    );
+    const checkpointTemporary = `${checkpointPath}.${randomUUID()}.tmp`;
+    const checkpointHandle = await fs.open(checkpointTemporary, "wx", 0o600);
+    try {
+      await checkpointHandle.writeFile(serialized);
+      await checkpointHandle.sync();
+    } finally {
+      await checkpointHandle.close();
+    }
+    await fs.rename(checkpointTemporary, checkpointPath);
+    operation = {
+      ...operation,
+      checkpointSha256: createHash("sha256").update(serialized).digest("hex"),
+      checkpointBytes: Buffer.byteLength(serialized),
+    };
     operation = { ...operation, status: "transferring", updatedAt: Date.now() };
     await saveOperation(deps, operation);
     const target = await callHostOnlineRpcForWork(deps, {
@@ -326,6 +397,11 @@ export async function transferWorkspace(
       `Branch: ${target.branch ?? "detached HEAD"}`,
       "Git history (including unpublished HEAD), staged index, tracked worktree changes/deletions/modes and explicitly selected additional files were transferred and verified byte-for-byte. The source was preserved.",
       `Portable index entries: ${checkpoint.index.length}. Worktree delta entries: ${checkpoint.worktree.length}. Selected additional files: ${checkpoint.extraFiles.length}.`,
+      ...(input.remoteBase
+        ? [
+            `Published prerequisite: ${input.remoteBase.url} ${input.remoteBase.ref} at ${input.remoteBase.head}. The target fetched this history using its own authorization; only unpublished commits and dirty overlays crossed the checkpoint transport.`,
+          ]
+        : []),
       `Tracked worktree deltas: ${checkpoint.worktree.length ? checkpoint.worktree.map((entry) => `${JSON.stringify(entry.path)}${entry.file === null ? " (deleted)" : ""}`).join(", ") : "none"}`,
       `Explicit additional files: ${input.includePaths.length ? input.includePaths.map((entry) => JSON.stringify(entry)).join(", ") : "none"}`,
       "Start a new native provider session here. No running process, native session, credentials, MCP setup or provider authentication was migrated. Review task context and inspect git status before continuing.",
@@ -344,6 +420,7 @@ export async function transferWorkspace(
     await saveOperation(deps, result);
     return result;
   } catch (error) {
+    if (!claimed) throw error;
     operation = {
       ...operation,
       status: "failed",
@@ -373,11 +450,22 @@ export async function createWorkspaceContinuationThread(
   deps: AppDeps,
   request: Pick<
     CreateThreadRequest,
-    "projectId" | "environment" | "transferOperationId"
+    | "projectId"
+    | "environment"
+    | "transferOperationId"
+    | "repositoryTransferOperationIds"
   >,
   create: () => Promise<Thread>,
 ): Promise<Thread> {
-  if (request.transferOperationId === undefined) return create();
+  if (request.transferOperationId === undefined) {
+    if (request.repositoryTransferOperationIds !== undefined)
+      throw new ApiError(
+        400,
+        "repository_primary_required",
+        "A repository group requires its primary transfer operation",
+      );
+    return create();
+  }
   const operation = await getWorkspaceTransfer(
     deps,
     request.transferOperationId,
@@ -393,7 +481,10 @@ export async function createWorkspaceContinuationThread(
       "invalid_workspace_continuation",
       "A continuation requires a ready transfer for this same project and reused target environment",
     );
-  if (operation.continuationThreadId !== undefined)
+  if (
+    operation.continuationThreadId !== undefined &&
+    request.repositoryTransferOperationIds === undefined
+  )
     return getThreadSafe(deps, operation.continuationThreadId);
   const source = sourceEnvironment(
     deps,
@@ -407,8 +498,89 @@ export async function createWorkspaceContinuationThread(
     source.hostId,
     source.path,
   );
+  const additionalReleases: Array<() => void> = [];
   try {
     assertIdle(deps, source.id);
+    if (request.repositoryTransferOperationIds !== undefined) {
+      if (
+        request.repositoryTransferOperationIds[0] !== operation.operationId ||
+        new Set(request.repositoryTransferOperationIds).size !==
+          request.repositoryTransferOperationIds.length
+      )
+        throw new ApiError(
+          400,
+          "repository_primary_mismatch",
+          "List each transfer once, with the primary operation first",
+        );
+      const operations: TransferWorkspaceResponse[] = [operation];
+      for (const id of request.repositoryTransferOperationIds.slice(1)) {
+        const member = await getWorkspaceTransfer(deps, id);
+        if (member.status !== "ready")
+          throw new ApiError(
+            409,
+            "repository_not_ready",
+            `Repository transfer is not verified: ${id}`,
+          );
+        const memberSource = sourceEnvironment(
+          deps,
+          member.projectId,
+          member.sourceEnvironmentId,
+        );
+        additionalReleases.push(
+          acquireWorkspaceTransferLock(
+            deps.db,
+            memberSource.id,
+            operation.operationId,
+            memberSource.hostId,
+            memberSource.path,
+          ),
+        );
+        assertIdle(deps, memberSource.id);
+        if (!operation.continuationThreadId)
+          assertIdle(deps, member.environmentId);
+        operations.push(member);
+      }
+      if (!operation.continuationThreadId)
+        assertIdle(deps, operation.environmentId);
+      if (!operation.continuationThreadId)
+        for (const member of operations) {
+          const target = sourceEnvironment(
+            deps,
+            member.projectId,
+            member.environmentId,
+          );
+          if (
+            target.path !== member.rootPath ||
+            target.hostId !== member.hostId
+          )
+            throw new ApiError(
+              409,
+              "repository_target_changed",
+              "Prepared repository identity changed",
+            );
+          const preview = await previewWorkspaceTransfer(
+            deps,
+            member.projectId,
+            {
+              sourceEnvironmentId: member.environmentId,
+              targetHostId: member.hostId,
+            },
+          );
+          if (
+            preview.head !== member.head ||
+            preview.branch !== member.branch ||
+            preview.activeThreadIds.length
+          )
+            throw new ApiError(
+              409,
+              "repository_target_changed",
+              "Every bound target must remain idle at its verified HEAD and branch before executor start",
+            );
+        }
+      await registerWorkspaceRepositoryGroup(deps, operations);
+    }
+    if (operation.continuationThreadId !== undefined)
+      return getThreadSafe(deps, operation.continuationThreadId);
     await assertWorkspaceContinuationAdmission(deps, source.id);
     assertIdle(deps, source.id);
     const existing = deps.db
@@ -448,6 +620,8 @@ export async function createWorkspaceContinuationThread(
     return thread;
   } finally {
     release();
+    for (const releaseAdditional of additionalReleases.reverse())
+      releaseAdditional();
   }
 }
 

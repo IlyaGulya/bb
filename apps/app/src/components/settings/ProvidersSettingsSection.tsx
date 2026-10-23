@@ -202,6 +202,16 @@ function SortableProviderRow({
       <span className="min-w-0 flex-1 truncate font-medium">
         {provider.displayName}
       </span>
+      {provider.readiness !== undefined &&
+      (provider.readiness.status !== "ready" ||
+        provider.readiness.freshness !== "fresh") ? (
+        <span title={provider.readiness.detail}>
+          <SettingsBadge>
+            {provider.readiness.status.replaceAll("_", " ")}
+            {provider.readiness.freshness === "stale" ? " (stale)" : ""}
+          </SettingsBadge>
+        </span>
+      ) : null}
       {!provider.available ? (
         <SettingsBadge>Unavailable</SettingsBadge>
       ) : isDefault ? (
@@ -280,7 +290,9 @@ export function ProvidersSettingsSection({
     (provider) => !provider.enabled || !provider.pluginEnabled,
   );
   const controlsDisabled = disabled || setEnabled.isPending;
-  const serverProviders: ProviderInfo[] = providersQuery.data ?? [];
+  const serverProviders: ProviderInfo[] = (providersQuery.data ?? []).filter(
+    (provider) => provider.readiness?.status !== "disabled",
+  );
   const [optimisticOrder, setOptimisticOrder] = useState<string[] | null>(null);
   const providers = applyProviderOrder(serverProviders, optimisticOrder);
   const ids = providers.map((provider) => provider.id);

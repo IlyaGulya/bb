@@ -7,10 +7,12 @@ import {
   mkdtemp,
   open,
   readFile,
+  readlink,
   realpath,
   rm,
   rmdir,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { devNull, tmpdir } from "node:os";
@@ -22,22 +24,32 @@ import {
   workspaceCheckpointSchema,
   workspaceTransferFileSchema,
   workspaceTransferPathSchema,
+  workspaceRemoteBaseSchema,
+  type WorkspaceRemoteBase,
   type WorkspaceCheckpoint,
   type WorkspaceTransferFile,
   type WorkspaceTransferPreviewResult,
 } from "@bb/host-daemon-contract";
 
-type GitEntry = { path: string; mode: "100644" | "100755"; oid: string };
+type GitEntry = {
+  path: string;
+  mode: "100644" | "100755" | "120000";
+  oid: string;
+};
 type FileIdentity = {
   oid: string;
-  mode: "100644" | "100755";
+  mode: GitEntry["mode"];
   permissions: number;
   stamp: string;
+  contentSha256?: string;
 } | null;
 type TransferOptions = {
   shellEnv?: Record<string, string>;
   activeThreadIds?: () => string[];
   acquireCapture?: () => () => void;
+  remoteBase?: WorkspaceRemoteBase;
+  nativeRemoteAuthentication?: boolean;
+  timeoutMs?: number;
 };
 const transfers = new Set<string>();
 const sizeError =
@@ -65,7 +77,7 @@ export function assertWorkspaceTransferSerializedSize(
 function uniquePaths(paths: string[]) {
   if (paths.length > WORKSPACE_TRANSFER_MAX_FILES)
     throw new Error(
-      "Workspace transfer supports at most 10,000 files per list; narrow the selection.",
+      `Workspace transfer supports at most ${WORKSPACE_TRANSFER_MAX_FILES.toLocaleString("en-US")} files per list; narrow the selection.`,
     );
   const result = paths.map((value) => workspaceTransferPathSchema.parse(value));
   if (new Set(result).size !== result.length)
@@ -94,7 +106,9 @@ function git(
     Object.assign(env, {
       GIT_OPTIONAL_LOCKS: "0",
       GIT_CONFIG_NOSYSTEM: "1",
-      GIT_CONFIG_GLOBAL: devNull,
+      ...(options.nativeRemoteAuthentication
+        ? {}
+        : { GIT_CONFIG_GLOBAL: devNull }),
       GIT_TERMINAL_PROMPT: "0",
       GIT_ATTR_NOSYSTEM: "1",
       GIT_NO_LAZY_FETCH: "1",
@@ -126,10 +140,10 @@ function git(
     let failure: Error | null = null;
     const timer = setTimeout(() => {
       failure = new Error(
-        "Git workspace transfer exceeded 120 seconds; reduce repository/selection size and retry.",
+        `Git workspace transfer exceeded ${(options.timeoutMs ?? 120_000) / 1000} seconds; inspect remote availability and repository/selection size before retrying.`,
       );
       child.kill("SIGKILL");
-    }, 120_000);
+    }, options.timeoutMs ?? 120_000);
     child.stdout.on("data", (chunk: Buffer) => {
       bytes += chunk.length;
       if (bytes > WORKSPACE_TRANSFER_MAX_BYTES) {
@@ -191,12 +205,78 @@ async function confined(root: string, relative: string, createParents = false) {
   }
   return path.join(root, ...parts);
 }
-async function readOrdinary(
+function confinedLinkTarget(relative: string, content: Buffer) {
+  const target = content.toString("utf8");
+  if (
+    !content.equals(Buffer.from(target)) ||
+    target.length === 0 ||
+    target.length > 4096 ||
+    path.posix.isAbsolute(target) ||
+    /[\\\u0000-\u001f\u007f:]/u.test(target)
+  )
+    throw new Error(
+      `Symlink target must be a confined relative UTF-8 path: ${relative}`,
+    );
+  const resolved = path.posix.normalize(
+    path.posix.join(path.posix.dirname(relative), target),
+  );
+  workspaceTransferPathSchema.parse(resolved);
+  if (secretReason(resolved))
+    throw new Error(
+      `Symlink cannot reference an authentication/session path: ${relative}`,
+    );
+  return target;
+}
+async function readConfinedLink(
   root: string,
   relative: string,
   charge: (bytes: number) => void,
 ): Promise<WorkspaceTransferFile> {
   const absolute = await confined(root, relative);
+  const before = await lstat(absolute);
+  if (!before.isSymbolicLink())
+    throw new Error(`Source changed during capture: ${relative}`);
+  const content = Buffer.from(await readlink(absolute));
+  confinedLinkTarget(relative, content);
+  const resolved = await realpath(absolute);
+  const resolvedRelative = path
+    .relative(root, resolved)
+    .split(path.sep)
+    .join("/");
+  workspaceTransferPathSchema.parse(resolvedRelative);
+  if (secretReason(resolvedRelative))
+    throw new Error(
+      `Symlink cannot reference an authentication/session path: ${relative}`,
+    );
+  const after = await lstat(absolute);
+  if (
+    before.ino !== after.ino ||
+    before.size !== after.size ||
+    before.mtimeMs !== after.mtimeMs ||
+    before.ctimeMs !== after.ctimeMs ||
+    content.toString() !== (await readlink(absolute))
+  )
+    throw new Error(
+      `Source changed during capture: ${relative}; stop writers and retry.`,
+    );
+  charge(content.length);
+  return {
+    path: relative,
+    mode: "120000",
+    permissions: 0o777,
+    contentBase64: content.toString("base64"),
+    sha256: sha256(content),
+  };
+}
+async function readOrdinary(
+  root: string,
+  relative: string,
+  charge: (bytes: number) => void,
+  allowSymlink = false,
+): Promise<WorkspaceTransferFile> {
+  const absolute = await confined(root, relative);
+  if (allowSymlink && (await lstat(absolute)).isSymbolicLink())
+    return readConfinedLink(root, relative, charge);
   const handle = await open(
     absolute,
     constants.O_RDONLY | constants.O_NOFOLLOW,
@@ -250,6 +330,7 @@ async function fileIdentity(
   root: string,
   relative: string,
   objectFormat: "sha1" | "sha256",
+  withContentSha256 = false,
 ): Promise<FileIdentity> {
   let absolute: string;
   try {
@@ -266,18 +347,32 @@ async function fileIdentity(
     throw error;
   }
   if (info.isDirectory()) return null;
-  if (!info.isFile() || info.isSymbolicLink())
-    throw new Error(
-      `Symlinks and non-ordinary files cannot be transferred: ${relative}`,
-    );
+  if (info.isSymbolicLink()) {
+    const file = await readConfinedLink(root, relative, () => {});
+    const content = Buffer.from(file.contentBase64, "base64");
+    return {
+      oid: createHash(objectFormat)
+        .update(`blob ${content.length}\0`)
+        .update(content)
+        .digest("hex"),
+      mode: "120000",
+      permissions: 0o777,
+      stamp: `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`,
+    };
+  }
+  if (!info.isFile())
+    throw new Error(`Non-ordinary files cannot be transferred: ${relative}`);
   const hash = createHash(objectFormat).update(`blob ${info.size}\0`);
+  const contentHash = withContentSha256 ? createHash("sha256") : null;
   const handle = await open(
     absolute,
     constants.O_RDONLY | constants.O_NOFOLLOW,
   );
   try {
-    for await (const chunk of handle.createReadStream({ autoClose: false }))
+    for await (const chunk of handle.createReadStream({ autoClose: false })) {
       hash.update(chunk);
+      contentHash?.update(chunk);
+    }
   } finally {
     await handle.close();
   }
@@ -296,6 +391,7 @@ async function fileIdentity(
     mode: info.mode & 0o100 ? ("100755" as const) : ("100644" as const),
     permissions: info.mode & 0o777,
     stamp: `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`,
+    ...(contentHash ? { contentSha256: contentHash.digest("hex") } : {}),
   };
 }
 function isMissing(error: unknown) {
@@ -306,33 +402,93 @@ function isMissing(error: unknown) {
   );
 }
 function secretReason(relative: string) {
+  if (nativeAuthenticationPath(relative))
+    return "Sensitive native authentication/session storage; cannot be transferred even with explicit selection.";
   const parts = relative.toLowerCase().split("/");
+  const name = parts[parts.length - 1]!;
+  const storageFile =
+    /(?:^|[._-])(?:auth|credentials?|secrets?|tokens?)(?:[._-](?:local|private|prod|production|dev|development|test|staging))?\.(?:jsonl?|toml|ya?ml|ini|cfg|conf|properties|txt)$/u.test(
+      name,
+    );
+  const extensionlessStorage = /^(?:auth|credentials?|secrets?|tokens?)$/u.test(
+    name,
+  );
   if (
-    parts.some((part) =>
-      [
-        ".ssh",
-        ".aws",
-        ".azure",
-        ".gnupg",
-        ".kube",
-        ".codex",
-        ".claude",
-        ".config",
-        ".mcp",
-        ".bb",
-        "secrets",
-        "credentials",
-      ].includes(part),
+    /^\.env(?:\.|$)/u.test(name) ||
+    /\.(?:pem|key|p12|pfx|keystore)$/u.test(name) ||
+    [
+      ".npmrc",
+      ".pypirc",
+      ".netrc",
+      "settings-security.xml",
+      "id_rsa",
+      "id_ed25519",
+    ].includes(name) ||
+    storageFile ||
+    extensionlessStorage ||
+    (parts.some((part) => part === "secrets" || part === "credentials") &&
+      /(?:\.(?:jsonl?|toml|ya?ml|ini|cfg|conf|properties|txt))$/u.test(name))
+  )
+    return "Sensitive configuration/auth/session path; explicit source-owner review is required.";
+  return undefined;
+}
+function nativeAuthenticationPath(relative: string): boolean {
+  const value = relative.toLowerCase();
+  return (
+    /(?:^|\/)\.(?:ssh|aws|azure|gnupg|kube|bb)(?:\/|$)/u.test(value) ||
+    /(?:^|\/)\.codex\/(?!skills(?:\/|$))/u.test(value) ||
+    /(?:^|\/)\.claude\/(?:projects|sessions?|\.credentials\.json|credentials|history\.jsonl)(?:[./]|$)/u.test(
+      value,
     ) ||
-    parts.some(
-      (part) =>
-        /^\.env(?:\.|$)/u.test(part) ||
-        /(?:^|[._-])(?:credentials|secrets?|tokens?)(?:[._-]|$)/u.test(part) ||
-        /\.(?:pem|key|p12|pfx|keystore)$/u.test(part),
+    /(?:^|\/)\.config\/(?:gh|gcloud|aws)(?:\/|$)/u.test(value)
+  );
+}
+
+async function assertNoSensitiveUnpublishedHistory(
+  root: string,
+  head: string,
+  publishedHead: string | undefined,
+  options: TransferOptions,
+) {
+  if (publishedHead === head) return;
+  const objects = (
+    await git(
+      root,
+      [
+        "rev-list",
+        "--objects",
+        head,
+        ...(publishedHead ? [`^${publishedHead}`] : []),
+      ],
+      options,
     )
   )
-    return "Sensitive configuration/auth/session path; select this exact ordinary file explicitly to consent to copying it.";
-  return undefined;
+    .toString("utf8")
+    .split("\n")
+    .flatMap((object) => {
+      const split = object.indexOf(" ");
+      const relative = split < 0 ? "" : object.slice(split + 1);
+      return relative && secretReason(relative)
+        ? [{ oid: object.slice(0, split), path: relative }]
+        : [];
+    });
+  if (!objects.length) return;
+  const kinds = (
+    await git(
+      root,
+      ["cat-file", "--batch-check=%(objecttype)"],
+      options,
+      Buffer.from(objects.map((object) => object.oid).join("\n") + "\n"),
+    )
+  )
+    .toString("utf8")
+    .trim()
+    .split("\n");
+  const sensitive = objects.find((_, index) => kinds[index] === "blob");
+  if (sensitive)
+    throw new Error(
+      `Unpublished history includes sensitive source context ${sensitive.path}; obtain an approved published prerequisite containing it instead of copying sensitive history.`,
+    );
 }
 function gitPaths(output: Buffer) {
   const text = output.toString("utf8");
@@ -379,10 +535,8 @@ function parseEntries(output: Buffer, tree: boolean): GitEntry[] {
     const mode = match[1];
     const relative = match[4]!;
     workspaceTransferPathSchema.parse(relative);
-    if (mode !== "100644" && mode !== "100755")
-      throw new Error(
-        `Symlinks, gitlinks, and submodules are unsupported: ${relative}`,
-      );
+    if (mode !== "100644" && mode !== "100755" && mode !== "120000")
+      throw new Error(`Submodules and gitlinks are unsupported: ${relative}`);
     if (!tree && match[3] !== "0")
       throw new Error(
         `Unmerged index entry: ${relative}; resolve conflicts before transfer.`,
@@ -649,6 +803,18 @@ async function inspect(root: string, options: TransferOptions) {
       .filter(Boolean),
   );
   const intentPaths = [...visible].filter((value) => !invisible.has(value));
+  for (const entry of headEntries)
+    if (entry.mode === "120000")
+      confinedLinkTarget(
+        entry.path,
+        await git(root, ["cat-file", "blob", entry.oid], options),
+      );
+  for (const entry of indexEntries)
+    if (entry.mode === "120000" && !intentPaths.includes(entry.path))
+      confinedLinkTarget(
+        entry.path,
+        await git(root, ["cat-file", "blob", entry.oid], options),
+      );
   return {
     head,
     branch: branchValue === "HEAD" ? null : branchValue,
@@ -659,6 +825,103 @@ async function inspect(root: string, options: TransferOptions) {
     intentPaths,
     lfsPaths,
   };
+}
+async function publishedLfsPointers(
+  root: string,
+  headEntries: GitEntry[],
+  lfsPaths: string[],
+  baseHead: string,
+  options: TransferOptions,
+): Promise<Map<string, string>> {
+  if (!lfsPaths.length) return new Map();
+  const published = new Set(
+    parseEntries(
+      await git(root, ["ls-tree", "-rz", "--full-tree", baseHead], options),
+      true,
+    ).map((entry) => entry.oid),
+  );
+  const lfs = new Set(lfsPaths);
+  const entries = headEntries.filter(
+    (entry) => lfs.has(entry.path) && published.has(entry.oid),
+  );
+  if (!entries.length) return new Map();
+  const output = await git(
+    root,
+    ["cat-file", "--batch"],
+    options,
+    Buffer.from(entries.map((entry) => entry.oid).join("\n") + "\n"),
+  );
+  const result = new Map<string, string>();
+  let offset = 0;
+  for (const entry of entries) {
+    const end = output.indexOf(10, offset);
+    const header = output.subarray(offset, end).toString("utf8");
+    const match = /^([a-f0-9]+) blob (\d+)$/u.exec(header);
+    if (!match || match[1] !== entry.oid)
+      throw new Error(`Cannot inspect published LFS pointer: ${entry.path}`);
+    const size = Number(match[2]);
+    const content = output.subarray(end + 1, end + 1 + size).toString("utf8");
+    offset = end + 1 + size + 1;
+    const sha = /^oid sha256:([a-f0-9]{64})$/mu.exec(content)?.[1];
+    if (
+      content.startsWith("version https://git-lfs.github.com/spec/v1\n") &&
+      sha
+    )
+      result.set(entry.path, sha);
+  }
+  return result;
+}
+async function cachedRemoteBases(
+  root: string,
+  head: string,
+  branch: string | null,
+  options: TransferOptions,
+): Promise<WorkspaceRemoteBase[]> {
+  let url: string;
+  try {
+    url = (await git(root, ["config", "--get", "remote.origin.url"], options))
+      .toString("utf8")
+      .trim();
+  } catch {
+    return [];
+  }
+  const result: WorkspaceRemoteBase[] = [];
+  for (const name of new Set([
+    ...(branch ? [branch] : []),
+    "dev",
+    "main",
+    "master",
+  ])) {
+    if (
+      !workspaceRemoteBaseSchema.safeParse({
+        url,
+        ref: `refs/heads/${name}`,
+        head,
+      }).success
+    )
+      continue;
+    try {
+      const base = (
+        await git(
+          root,
+          ["merge-base", head, `refs/remotes/origin/${name}`],
+          options,
+        )
+      )
+        .toString("utf8")
+        .trim();
+      result.push(
+        workspaceRemoteBaseSchema.parse({
+          url,
+          ref: `refs/heads/${name}`,
+          head: base,
+        }),
+      );
+    } catch {
+      continue;
+    }
+  }
+  return result;
 }
 export async function previewWorkspaceTransfer(
   rootPath: string,
@@ -671,12 +934,13 @@ export async function previewWorkspaceTransfer(
   );
   const files: WorkspaceTransferPreviewResult["files"] = [];
   for (const relative of [...tracked].sort()) {
-    await fileIdentity(
-      root,
-      relative,
-      state.head.length === 64 ? "sha256" : "sha1",
-    );
     const excludedReason = secretReason(relative);
+    if (!excludedReason)
+      await fileIdentity(
+        root,
+        relative,
+        state.head.length === 64 ? "sha256" : "sha1",
+      );
     files.push({
       path: relative,
       kind: excludedReason ? "sensitive-tracked" : "tracked",
@@ -704,11 +968,18 @@ export async function previewWorkspaceTransfer(
         excludedReason,
       });
     }
+  const remoteBaseCandidates = await cachedRemoteBases(
+    root,
+    state.head,
+    state.branch,
+    options,
+  );
   return {
     head: state.head,
     branch: state.branch,
     files,
     activeThreadIds: options.activeThreadIds?.() ?? [],
+    ...(remoteBaseCandidates.length ? { remoteBaseCandidates } : {}),
     maxPayloadBytes: WORKSPACE_TRANSFER_MAX_BYTES,
   };
 }
@@ -739,18 +1010,95 @@ export async function captureWorkspace(
     const originalMetadata = await metadataFingerprint(gitDirectory);
     const selection = new Set(uniquePaths(includePaths));
     const state = await inspect(root, options);
+    const remoteBase = options.remoteBase
+      ? workspaceRemoteBaseSchema.parse(options.remoteBase)
+      : undefined;
+    if (remoteBase) {
+      try {
+        await git(
+          root,
+          ["merge-base", "--is-ancestor", remoteBase.head, state.head],
+          options,
+        );
+      } catch {
+        throw new Error(
+          `Approved published prerequisite ${remoteBase.head} must be a locally available ancestor of source HEAD; the source was not fetched or modified.`,
+        );
+      }
+    }
+    const publishedPointers = remoteBase
+      ? await publishedLfsPointers(
+          root,
+          state.headEntries,
+          state.lfsPaths,
+          remoteBase.head,
+          options,
+        )
+      : new Map<string, string>();
+    const publishedLfsFiles: NonNullable<
+      WorkspaceCheckpoint["publishedLfsFiles"]
+    > = [];
     const tracked = new Set(
       [...state.headEntries, ...state.indexEntries].map((entry) => entry.path),
     );
-    for (const relative of tracked)
-      if (secretReason(relative) && !selection.has(relative))
+    for (const relative of tracked) {
+      if (nativeAuthenticationPath(relative))
         throw new Error(
-          `Tracked sensitive path ${relative} cannot be silently omitted. Explicitly include this exact path to consent, or remove it from the workspace before transfer.`,
+          `Native authentication/session paths cannot be transferred: ${relative}`,
         );
+      if (secretReason(relative) && (!remoteBase || !selection.has(relative)))
+        throw new Error(
+          `Tracked sensitive path ${relative} requires explicit source-owner approval and an approved published remote base; private credential bytes cannot be copied.`,
+        );
+    }
     const charge = budget();
     const objectFormat = state.head.length === 64 ? "sha256" : "sha1";
     const headByPath = new Map(
       state.headEntries.map((entry) => [entry.path, entry]),
+    );
+    const publishedContextPaths = remoteBase
+      ? [...tracked].filter((relative) => !!secretReason(relative))
+      : [];
+    const protectedContext = new Set(publishedContextPaths);
+    if (remoteBase && publishedContextPaths.length) {
+      const published = new Map(
+        parseEntries(
+          await git(
+            root,
+            ["ls-tree", "-rz", "--full-tree", remoteBase.head],
+            options,
+          ),
+          true,
+        ).map((entry) => [entry.path, entry]),
+      );
+      const staged = new Map(
+        state.indexEntries.map((entry) => [entry.path, entry]),
+      );
+      for (const relative of publishedContextPaths) {
+        const base = published.get(relative);
+        const current = headByPath.get(relative);
+        const index = staged.get(relative);
+        if (nativeAuthenticationPath(relative))
+          throw new Error(
+            `Native authentication/session paths cannot be transferred: ${relative}`,
+          );
+        if (
+          !base ||
+          current?.oid !== base.oid ||
+          current.mode !== base.mode ||
+          index?.oid !== base.oid ||
+          index.mode !== base.mode
+        )
+          throw new Error(
+            `Flagged source context must already be unchanged at the explicitly approved published base: ${relative}`,
+          );
+      }
+    }
+    await assertNoSensitiveUnpublishedHistory(
+      root,
+      state.head,
+      remoteBase?.head,
+      options,
     );
     const intents = new Set(state.intentPaths);
     const index: WorkspaceCheckpoint["index"] = [];
@@ -777,25 +1125,60 @@ export async function captureWorkspace(
     const worktree: WorkspaceCheckpoint["worktree"] = [];
     const filePermissions: WorkspaceCheckpoint["filePermissions"] = [];
     for (const relative of [...tracked].sort()) {
-      const identity = await fileIdentity(root, relative, objectFormat);
+      const identity = await fileIdentity(
+        root,
+        relative,
+        objectFormat,
+        publishedPointers.has(relative),
+      );
       identities.set(relative, identity);
+      if (protectedContext.has(relative)) {
+        const published = headByPath.get(relative)!;
+        if (
+          !identity ||
+          identity.mode !== published.mode ||
+          (identity.oid !== published.oid &&
+            (!identity.contentSha256 ||
+              identity.contentSha256 !== publishedPointers.get(relative)))
+        )
+          throw new Error(
+            `Flagged source context has private worktree changes; these bytes will not be copied: ${relative}`,
+          );
+      }
       if (identity)
         filePermissions.push({
           path: relative,
           permissions: identity.permissions,
         });
+      if (
+        identity &&
+        identity.mode !== "120000" &&
+        identity.contentSha256 &&
+        identity.contentSha256 === publishedPointers.get(relative)
+      ) {
+        publishedLfsFiles.push({
+          path: relative,
+          oid: identity.oid,
+          mode: identity.mode,
+        });
+        continue;
+      }
       const base = headByPath.get(relative);
       if (!identity) {
         if (base) worktree.push({ path: relative, file: null });
       } else if (identity.oid !== base?.oid || identity.mode !== base?.mode)
         worktree.push({
           path: relative,
-          file: await readOrdinary(root, relative, charge),
+          file: await readOrdinary(root, relative, charge, true),
         });
     }
     const extraFiles: WorkspaceTransferFile[] = [];
     for (const relative of selection)
       if (!tracked.has(relative)) {
+        if (secretReason(relative))
+          throw new Error(
+            `Untracked sensitive configuration/auth/session bytes cannot be transferred: ${relative}`,
+          );
         identities.set(
           relative,
           await fileIdentity(root, relative, objectFormat),
@@ -804,9 +1187,22 @@ export async function captureWorkspace(
       }
     temporary = await mkdtemp(path.join(tmpdir(), "bb-workspace-capture-"));
     const bundlePath = path.join(temporary, "workspace.bundle");
-    await git(root, ["bundle", "create", bundlePath, "HEAD"], options);
-    charge((await stat(bundlePath)).size);
-    const bundle = await readFile(bundlePath);
+    let bundle: Buffer = Buffer.alloc(0);
+    if (!remoteBase || remoteBase.head !== state.head) {
+      await git(
+        root,
+        [
+          "bundle",
+          "create",
+          bundlePath,
+          "HEAD",
+          ...(remoteBase ? [`^${remoteBase.head}`] : []),
+        ],
+        options,
+      );
+      charge((await stat(bundlePath)).size);
+      bundle = await readFile(bundlePath);
+    }
     if (JSON.stringify(state) !== JSON.stringify(await inspect(root, options)))
       throw new Error(
         "Source Git state changed during capture; stop writers and retry.",
@@ -814,7 +1210,14 @@ export async function captureWorkspace(
     for (const [relative, identity] of identities)
       if (
         JSON.stringify(identity) !==
-        JSON.stringify(await fileIdentity(root, relative, objectFormat))
+        JSON.stringify(
+          await fileIdentity(
+            root,
+            relative,
+            objectFormat,
+            publishedPointers.has(relative),
+          ),
+        )
       )
         throw new Error(
           `Source changed during capture: ${relative}; stop writers and retry.`,
@@ -830,6 +1233,7 @@ export async function captureWorkspace(
         "Source Git state changed during capture; stop writers and retry.",
       );
     if (
+      bundle.length > 0 &&
       !(await git(root, ["bundle", "list-heads", bundlePath, "HEAD"], options))
         .toString("utf8")
         .startsWith(`${state.head} HEAD`)
@@ -845,6 +1249,9 @@ export async function captureWorkspace(
       version: 1,
       head: state.head,
       branch: state.branch,
+      ...(remoteBase ? { remoteBase } : {}),
+      ...(publishedLfsFiles.length ? { publishedLfsFiles } : {}),
+      ...(publishedContextPaths.length ? { publishedContextPaths } : {}),
       bundleBase64: bundle.toString("base64"),
       bundleSha256: sha256(bundle),
       lfsPaths: state.lfsPaths,
@@ -879,16 +1286,30 @@ async function writeOrdinary(
   file: WorkspaceTransferFile,
   content: Buffer,
   replace = false,
+  allowSymlink = false,
 ) {
+  if (file.mode === "120000" && !allowSymlink)
+    throw new Error(
+      `Symlinks are supported only for verified tracked workspace checkpoints: ${file.path}`,
+    );
+  const linkTarget =
+    file.mode === "120000" ? confinedLinkTarget(file.path, content) : null;
   const absolute = await confined(root, file.path, true);
   if (replace) {
     try {
       const info = await lstat(absolute);
-      if (!info.isFile() || info.isSymbolicLink())
+      if (!info.isFile() && !(allowSymlink && info.isSymbolicLink()))
         throw new Error(`Unsafe restore path: ${file.path}`);
+      if (info.isSymbolicLink() || linkTarget !== null) await rm(absolute);
     } catch (error) {
       if (!isMissing(error)) throw error;
     }
+  }
+  if (linkTarget !== null) {
+    await symlink(linkTarget, absolute);
+    if (sha256(Buffer.from(await readlink(absolute))) !== file.sha256)
+      throw new Error(`Target symlink verification failed: ${file.path}`);
+    return;
   }
   const handle = await open(
     absolute,
@@ -986,9 +1407,58 @@ export async function restoreWorkspace(
     if (entry.file) {
       if (entry.path !== entry.file.path)
         throw new Error("Worktree entry path does not match file path.");
-      decodedFile(entry.file, charge);
+      const content = decodedFile(entry.file, charge);
+      if (entry.file.mode === "120000") confinedLinkTarget(entry.path, content);
     }
-  for (const file of checkpoint.extraFiles) decodedFile(file, charge);
+  for (const file of checkpoint.extraFiles) {
+    if (secretReason(file.path))
+      throw new Error(
+        `Untracked sensitive configuration/auth/session bytes cannot be restored: ${file.path}`,
+      );
+    if (file.mode === "120000")
+      throw new Error(`Untracked symlinks cannot be transferred: ${file.path}`);
+    decodedFile(file, charge);
+  }
+  if (
+    bundle.length === 0 &&
+    (!checkpoint.remoteBase || checkpoint.remoteBase.head !== checkpoint.head)
+  )
+    throw new Error(
+      "An empty bundle requires source HEAD itself to be the approved published prerequisite",
+    );
+  uniquePaths((checkpoint.publishedLfsFiles ?? []).map((file) => file.path));
+  if (
+    checkpoint.publishedLfsFiles?.length &&
+    (!checkpoint.remoteBase ||
+      checkpoint.publishedLfsFiles.some(
+        (file) =>
+          !checkpoint.lfsPaths.includes(file.path) ||
+          checkpoint.worktree.some((entry) => entry.path === file.path),
+      ))
+  )
+    throw new Error(
+      "Published LFS identities require an approved remote base and non-overlapping tracked LFS paths",
+    );
+  const publishedContext = new Set(
+    uniquePaths(checkpoint.publishedContextPaths ?? []),
+  );
+  if (publishedContext.size && !checkpoint.remoteBase)
+    throw new Error(
+      "Published sensitive context requires an approved remote base.",
+    );
+  for (const relative of publishedContext)
+    if (
+      nativeAuthenticationPath(relative) ||
+      !secretReason(relative) ||
+      checkpoint.worktree.some((entry) => entry.path === relative) ||
+      checkpoint.extraFiles.some((entry) => entry.path === relative) ||
+      checkpoint.index.some(
+        (entry) =>
+          entry.path === relative &&
+          (entry.contentBase64 !== undefined || entry.intentToAdd),
+      )
+    )
+      throw new Error(`Invalid published sensitive context: ${relative}`);
   const requested = path.resolve(targetPath);
   await mkdir(path.dirname(requested), { recursive: true });
   const root = path.join(
@@ -1024,9 +1494,58 @@ export async function restoreWorkspace(
     const branch = branchOverride ?? checkpoint.branch;
     if (branch !== null)
       await git(root, ["check-ref-format", "--branch", branch], options);
-    await git(root, ["fetch", "--no-tags", bundlePath, "HEAD"], options);
+    const remoteDeadline = Date.now() + 18 * 60 * 1000;
+    const remoteOptions = () => ({
+      ...options,
+      nativeRemoteAuthentication: true,
+      timeoutMs: Math.max(1, remoteDeadline - Date.now()),
+    });
+    if (checkpoint.remoteBase) {
+      await git(
+        root,
+        ["remote", "add", "origin", checkpoint.remoteBase.url],
+        options,
+      );
+      await git(
+        root,
+        [
+          "fetch",
+          "--quiet",
+          "--no-tags",
+          "--no-recurse-submodules",
+          "origin",
+          checkpoint.remoteBase.ref,
+        ],
+        remoteOptions(),
+      );
+      try {
+        await git(
+          root,
+          [
+            "merge-base",
+            "--is-ancestor",
+            checkpoint.remoteBase.head,
+            "FETCH_HEAD^{commit}",
+          ],
+          options,
+        );
+      } catch {
+        throw new Error(
+          `Target origin/ref does not contain the approved published prerequisite ${checkpoint.remoteBase.head}; no alternate account, origin or full-history fallback was attempted.`,
+        );
+      }
+    }
+    if (bundle.length)
+      await git(root, ["fetch", "--no-tags", bundlePath, "HEAD"], options);
     const fetched = (
-      await git(root, ["rev-parse", "FETCH_HEAD^{commit}"], options)
+      await git(
+        root,
+        [
+          "rev-parse",
+          bundle.length ? "FETCH_HEAD^{commit}" : `${checkpoint.head}^{commit}`,
+        ],
+        options,
+      )
     )
       .toString("utf8")
       .trim();
@@ -1040,6 +1559,20 @@ export async function restoreWorkspace(
       ),
       true,
     );
+    for (const entry of headEntries)
+      if (entry.mode === "120000")
+        confinedLinkTarget(
+          entry.path,
+          await git(root, ["cat-file", "blob", entry.oid], options),
+        );
+    for (const entry of checkpoint.index)
+      if (entry.mode === "120000" && !entry.intentToAdd)
+        confinedLinkTarget(
+          entry.path,
+          entry.contentBase64 === undefined
+            ? await git(root, ["cat-file", "blob", entry.oid], options)
+            : Buffer.from(entry.contentBase64, "base64"),
+        );
     const trackedPaths = new Set(
       [...headEntries, ...checkpoint.index].map((entry) => entry.path),
     );
@@ -1053,6 +1586,62 @@ export async function restoreWorkspace(
     for (const file of checkpoint.extraFiles)
       if (trackedPaths.has(file.path))
         throw new Error(`Extra file conflicts with tracked path: ${file.path}`);
+    const sensitiveTracked = [...trackedPaths].filter(
+      (relative) => !!secretReason(relative),
+    );
+    if (
+      sensitiveTracked.some(
+        (relative) =>
+          nativeAuthenticationPath(relative) || !publishedContext.has(relative),
+      ) ||
+      [...publishedContext].some((relative) => !trackedPaths.has(relative))
+    )
+      throw new Error(
+        "Sensitive tracked paths require exact published-context approval; native authentication/session paths cannot be restored.",
+      );
+    if (publishedContext.size) {
+      const publishedEntries =
+        checkpoint.remoteBase!.head === checkpoint.head
+          ? headEntries
+          : parseEntries(
+              await git(
+                root,
+                ["ls-tree", "-rz", "--full-tree", checkpoint.remoteBase!.head],
+                options,
+              ),
+              true,
+            );
+      const publishedByPath = new Map(
+        publishedEntries.map((entry) => [entry.path, entry]),
+      );
+      const currentByPath = new Map(
+        headEntries.map((entry) => [entry.path, entry]),
+      );
+      const stagedByPath = new Map(
+        checkpoint.index.map((entry) => [entry.path, entry]),
+      );
+      for (const relative of publishedContext) {
+        const base = publishedByPath.get(relative);
+        const current = currentByPath.get(relative);
+        const staged = stagedByPath.get(relative);
+        if (
+          !base ||
+          current?.oid !== base.oid ||
+          current.mode !== base.mode ||
+          staged?.oid !== base.oid ||
+          staged.mode !== base.mode
+        )
+          throw new Error(
+            `Sensitive context is not unchanged at the approved published prerequisite: ${relative}`,
+          );
+      }
+    }
+    await assertNoSensitiveUnpublishedHistory(
+      root,
+      checkpoint.head,
+      checkpoint.remoteBase?.head,
+      options,
+    );
     await git(root, ["checkout", "--detach", checkpoint.head], options);
     for (const entry of headEntries) {
       const identity = await fileIdentity(
@@ -1071,14 +1660,76 @@ export async function restoreWorkspace(
           {
             path: entry.path,
             mode: entry.mode,
-            permissions: entry.mode === "100755" ? 0o755 : 0o644,
+            permissions:
+              entry.mode === "120000"
+                ? 0o777
+                : entry.mode === "100755"
+                  ? 0o755
+                  : 0o644,
             contentBase64: content.toString("base64"),
             sha256: sha256(content),
           },
           content,
           true,
+          true,
         );
       }
+    }
+    if (checkpoint.lfsPaths.length) {
+      try {
+        await git(root, ["lfs", "version"], options);
+      } catch {
+        throw new Error(
+          "This checkpoint contains Git LFS files. Install Git LFS on the target machine, then retry; published LFS also requires target-local remote authorization. No target environment was registered.",
+        );
+      }
+      // Git LFS checkout otherwise returns success without materializing files
+      // when filter.lfs.clean is absent, even if the LFS binary is installed.
+      for (const [key, value] of [
+        ["clean", "git-lfs clean -- %f"],
+        ["smudge", "git-lfs smudge -- %f"],
+        ["process", "git-lfs filter-process"],
+        ["required", "true"],
+      ]) {
+        await git(
+          root,
+          ["config", "--local", `filter.lfs.${key}`, value!],
+          options,
+        );
+      }
+    }
+    if (checkpoint.remoteBase && checkpoint.publishedLfsFiles?.length) {
+      await git(
+        root,
+        [
+          "-c",
+          "lfs.fetchinclude=",
+          "-c",
+          "lfs.fetchexclude=",
+          "lfs",
+          "fetch",
+          "origin",
+          checkpoint.remoteBase.head,
+        ],
+        remoteOptions(),
+      );
+      for (
+        let offset = 0;
+        offset < checkpoint.publishedLfsFiles.length;
+        offset += 100
+      )
+        await git(
+          root,
+          [
+            "lfs",
+            "checkout",
+            "--",
+            ...checkpoint.publishedLfsFiles
+              .slice(offset, offset + 100)
+              .map((file) => file.path),
+          ],
+          remoteOptions(),
+        );
     }
     if (branch !== null) {
       await git(
@@ -1126,7 +1777,7 @@ export async function restoreWorkspace(
         try {
           const absolute = await confined(root, entry.path);
           const info = await lstat(absolute);
-          if (!info.isFile() || info.isSymbolicLink())
+          if (!info.isFile() && !info.isSymbolicLink())
             throw new Error(`Unsafe deletion path: ${entry.path}`);
           await rm(absolute);
           let parent = path.dirname(absolute);
@@ -1149,6 +1800,7 @@ export async function restoreWorkspace(
           entry.file,
           Buffer.from(entry.file.contentBase64, "base64"),
           true,
+          true,
         );
     for (const file of checkpoint.extraFiles)
       await writeOrdinary(
@@ -1156,29 +1808,21 @@ export async function restoreWorkspace(
         file,
         Buffer.from(file.contentBase64, "base64"),
       );
-    if (checkpoint.lfsPaths.length) {
-      try {
-        await git(root, ["lfs", "version"], options);
-      } catch {
-        throw new Error(
-          "This checkpoint contains materialized Git LFS files. Install Git LFS on the target machine, then retry; no target files were registered and no remote authentication is needed for this restore.",
-        );
-      }
-      for (const [key, value] of [
-        ["clean", "git-lfs clean -- %f"],
-        ["smudge", "git-lfs smudge -- %f"],
-        ["process", "git-lfs filter-process"],
-        ["required", "true"],
-      ]) {
-        await git(
-          root,
-          ["config", "--local", `filter.lfs.${key}`, value!],
-          options,
-        );
-      }
-    }
     for (const entry of checkpoint.index)
       if (entry.intentToAdd) {
+        if (entry.mode === "120000") {
+          const absolute = await confined(root, entry.path);
+          if (!(await lstat(absolute)).isSymbolicLink())
+            throw new Error(
+              `Intent-to-add symlink must be present: ${entry.path}`,
+            );
+          await git(
+            root,
+            ["add", "--force", "--intent-to-add", "--", entry.path],
+            options,
+          );
+          continue;
+        }
         const absolute = await confined(root, entry.path, true);
         let originalMode: number | null = null;
         try {
@@ -1272,6 +1916,17 @@ export async function restoreWorkspace(
           permissions: null,
         });
     }
+    for (const file of checkpoint.publishedLfsFiles ?? []) {
+      if (!expectedWorktree.has(file.path))
+        throw new Error(
+          `Published LFS path is not present in HEAD: ${file.path}`,
+        );
+      expectedWorktree.set(file.path, {
+        oid: file.oid,
+        mode: file.mode,
+        permissions: null,
+      });
+    }
     if (checkpoint.filePermissions.length !== expectedWorktree.size)
       throw new Error(
         "Checkpoint must preserve permissions for every present tracked file.",
@@ -1283,6 +1938,11 @@ export async function restoreWorkspace(
           `Permissions do not belong to a present tracked file: ${entry.path}`,
         );
       expected.permissions = entry.permissions;
+      if (expected.mode === "120000") {
+        if (entry.permissions !== 0o777)
+          throw new Error(`Invalid symlink permissions: ${entry.path}`);
+        continue;
+      }
       const handle = await open(
         await confined(root, entry.path),
         constants.O_RDONLY | constants.O_NOFOLLOW,

@@ -17,6 +17,7 @@ export type ProviderHostRoutingArgs =
 
 export type ProviderListArgs = ProviderHostRoutingArgs & {
   capability?: SystemProvidersQuery["capability"];
+  providerId?: string;
   signal?: AbortSignal;
 };
 export type ProviderModelsArgs = (
@@ -63,6 +64,7 @@ export function createProvidersArea(args: CreateSdkAreaArgs): ProvidersArea {
           {
             query: {
               capability: input.capability,
+              providerId: input.providerId,
               environmentId: input.environmentId,
               hostId: input.hostId,
             },

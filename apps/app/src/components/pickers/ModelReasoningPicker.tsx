@@ -1122,6 +1122,7 @@ export function ModelReasoningPicker({
         <ModelReasoningMenu
           listRef={listRef}
           providerId={activeProviderId}
+          providerRouting={providerRouting}
           provider={activeProvider}
           providerLabel={activeProviderLabel}
           listboxId={showSearchInput ? listboxId : undefined}

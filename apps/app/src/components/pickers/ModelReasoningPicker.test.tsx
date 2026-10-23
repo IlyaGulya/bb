@@ -15,10 +15,12 @@ import type {
   ServiceTier,
 } from "@bb/domain";
 import { makeProviderInfo } from "@bb/test-helpers/domain-fixtures";
+import { createDeferredPromise } from "@bb/test-helpers";
 import type {
   SystemExecutionOptionsModelLoadError,
   SystemExecutionOptionsResponse,
   SystemProvidersQuery,
+  SystemProviderStatesResponse,
 } from "@bb/server-contract";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { systemExecutionOptionsQueryKey } from "@/hooks/queries/query-keys";
@@ -56,6 +58,7 @@ vi.mock("@/lib/sdk", () => ({
   sdk: {
     system: {
       executionOptions: vi.fn(() => new Promise<never>(() => undefined)),
+      providerStates: vi.fn(),
     },
   },
 }));
@@ -416,6 +419,42 @@ describe("ModelReasoningPicker", () => {
     expect(screen.getByTitle("Codex")).not.toBeNull();
     expect(screen.getByText("Could not load models for Codex.")).not.toBeNull();
     expect(screen.getByText("Provider plugin failed to load")).not.toBeNull();
+  });
+
+  it("checks only the selected cold provider, shows progress, and surfaces retry failure without switching models", async () => {
+    const held = createDeferredPromise<SystemProviderStatesResponse>();
+    vi.mocked(sdk.system.providerStates).mockReturnValueOnce(held.promise);
+    const { onSelectedProviderChange, onModelChange } = renderPicker({
+      providerRouting: { environmentId: "env-cold" },
+      modelOptions: [],
+      modelValue: "",
+      modelLoadError: {
+        providerId: "codex",
+        code: "provider_not_ready",
+        detail: "Provider is initializing. Retry shortly.",
+      },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Provider, model and reasoning" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Check readiness" }));
+    expect(
+      (
+        await screen.findByRole("button", { name: "Checking readiness…" })
+      ).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(sdk.system.providerStates).toHaveBeenCalledWith({
+      environmentId: "env-cold",
+      providerId: "codex",
+    });
+    await act(async () =>
+      held.reject(new Error("Machine connection unavailable")),
+    );
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Machine connection unavailable",
+    );
+    expect(onSelectedProviderChange).not.toHaveBeenCalled();
+    expect(onModelChange).not.toHaveBeenCalled();
   });
 
   it("names the missing CLI in one short line and links it to the install page", () => {

@@ -25,6 +25,11 @@ export function formatModelLoadErrorReason({
   switch (error.code) {
     case "provider_unavailable":
       return "Provider plugin failed to load";
+    case "provider_not_ready":
+      return (
+        error.detail ??
+        "Provider readiness is not verified. Refresh provider health before execution."
+      );
     case "missing_executable":
       return "CLI not found";
     case "auth_required":

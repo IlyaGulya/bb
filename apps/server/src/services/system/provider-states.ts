@@ -3,9 +3,17 @@ import type {
   SystemProviderStatesResponse,
   SystemProvidersQuery,
 } from "@bb/server-contract";
-import type { ProviderInfo } from "@bb/domain";
+import type { ProviderInfo, ProviderReadiness } from "@bb/domain";
 import type { AppDeps } from "../../types.js";
-import { COMMAND_TIMEOUT_MS } from "../../constants.js";
+import {
+  createProviderListingBudget,
+  type ProviderListingBudget,
+} from "../providers/native-roots.js";
+import {
+  failedProviderReadiness,
+  observedProviderReadiness,
+  unknownProviderReadiness,
+} from "../providers/provider-readiness.js";
 import {
   callHostRetryableOnlineRpc,
   isHostUnavailableApiError,
@@ -14,7 +22,7 @@ import {
   requireConnectedHostSession,
   requireEnvironment,
 } from "../lib/entity-lookup.js";
-import { listSystemProviderInfos } from "./execution-options.js";
+import { registeredProviderInfos } from "./execution-options.js";
 import { resolveSystemLookupHostId } from "./host-lookup.js";
 import { resolveBridgeLaunchForProviderId } from "./provider-bridge-launch.js";
 import { mapProviderMaintenanceRequests } from "./provider-maintenance-concurrency.js";
@@ -24,12 +32,20 @@ import { isSuspendedHostUnavailableError } from "../lib/lifecycle-api-errors.js"
 function unknownProviderState(
   provider: ProviderInfo,
   statusMessage: string,
+  readiness: ProviderReadiness = {
+    ...unknownProviderReadiness(statusMessage),
+    verification: provider.readiness?.verification ?? "required",
+    ...(provider.readiness?.verification === "unsupported"
+      ? { retryAfterMs: null }
+      : {}),
+  },
 ): SystemProviderState {
   return {
     providerId: provider.id,
     displayName: provider.displayName,
     status: "unknown",
     statusMessage,
+    readiness,
     accountEmail: null,
     planLabel: null,
     installedVersion: null,
@@ -43,8 +59,21 @@ function unknownProviderState(
 
 async function getProviderState(
   deps: AppDeps,
-  args: { cwd?: string; hostId: string; provider: ProviderInfo },
+  args: {
+    cwd?: string;
+    hostId: string;
+    provider: ProviderInfo;
+    budget: ProviderListingBudget;
+    scope: ProviderReadiness["scope"];
+  },
 ): Promise<SystemProviderState> {
+  if (args.provider.readiness?.status === "disabled") {
+    return unknownProviderState(
+      args.provider,
+      args.provider.readiness.detail,
+      args.provider.readiness,
+    );
+  }
   if (!args.provider.maintenance.health) {
     return unknownProviderState(
       args.provider,
@@ -62,7 +91,7 @@ async function getProviderState(
   try {
     const result = await callHostRetryableOnlineRpc(deps, {
       hostId: args.hostId,
-      timeoutMs: COMMAND_TIMEOUT_MS,
+      timeoutMs: args.budget.remainingMs(),
       command: {
         type: "provider.health",
         providerId: args.provider.id,
@@ -71,39 +100,58 @@ async function getProviderState(
       },
     });
     if (!result.supported) {
-      return unknownProviderState(
-        args.provider,
-        "Provider readiness was not reported.",
+      const readiness = unknownProviderReadiness(
+        "Provider readiness was not reported. Check the provider plugin before execution.",
+      );
+      if (args.scope === "host")
+        deps.providerRegistry.observeReadiness(
+          { hostId: args.hostId, providerId: args.provider.id },
+          readiness,
+        );
+      return unknownProviderState(args.provider, readiness.detail, readiness);
+    }
+    let health = result.health;
+    if (health.status === "unauthenticated" || health.status === "expired") {
+      const contributed = await resolvePluginProviderEnvHealth({
+        providerId: args.provider.id,
+        hostId: args.hostId,
+      });
+      if (contributed !== null) {
+        health = {
+          ...health,
+          status: "ready",
+          statusMessage: contributed.statusMessage,
+          accountEmail: null,
+          planLabel: contributed.label,
+          loginCommand: null,
+          localLoginCommand: null,
+        };
+      }
+    }
+    const readiness = observedProviderReadiness(health);
+    if (args.scope === "host") {
+      deps.providerRegistry.observeReadiness(
+        { hostId: args.hostId, providerId: args.provider.id },
+        readiness,
       );
     }
-    const health = {
-      providerId: args.provider.id,
-      displayName: args.provider.displayName,
-      ...result.health,
-      localLoginCommand: result.health.localLoginCommand ?? null,
-    };
-    if (health.status !== "unauthenticated" && health.status !== "expired") {
-      return health;
-    }
-    const contributed = await resolvePluginProviderEnvHealth({
-      providerId: args.provider.id,
-      hostId: args.hostId,
-    });
-    if (contributed === null) return health;
     return {
       ...health,
-      status: "ready",
-      statusMessage: contributed.statusMessage,
-      accountEmail: null,
-      planLabel: contributed.label,
-      loginCommand: null,
-      localLoginCommand: null,
+      providerId: args.provider.id,
+      displayName: args.provider.displayName,
+      localLoginCommand: health.localLoginCommand ?? null,
+      readiness,
     };
-  } catch {
-    return unknownProviderState(
-      args.provider,
-      "Provider readiness could not be checked.",
-    );
+  } catch (error) {
+    const previous =
+      args.scope === "host" ? args.provider.readiness : undefined;
+    const readiness = failedProviderReadiness(previous, error);
+    if (args.scope === "host")
+      deps.providerRegistry.observeReadiness(
+        { hostId: args.hostId, providerId: args.provider.id },
+        readiness,
+      );
+    return unknownProviderState(args.provider, readiness.detail, readiness);
   }
 }
 
@@ -116,7 +164,13 @@ export async function getProviderStates(
     query.environmentId === undefined
       ? undefined
       : (requireEnvironment(deps.db, query.environmentId).path ?? undefined);
-  const providers = await listSystemProviderInfos(deps, { hostId });
+  await deps.providerRegistry.whenRegistrationsSettled();
+  const scope = query.environmentId === undefined ? "host" : "environment";
+  const providers = registeredProviderInfos(
+    deps,
+    { providerId: query.providerId, capability: query.capability },
+    hostId,
+  );
   try {
     requireConnectedHostSession(deps, hostId);
   } catch (error) {
@@ -127,18 +181,46 @@ export async function getProviderStates(
       ? "Machine is paused."
       : "Provider readiness could not be checked.";
     return {
-      providers: providers.map((provider) =>
-        unknownProviderState(provider, statusMessage),
-      ),
+      providers: providers.map((provider) => {
+        const readiness: ProviderReadiness =
+          provider.readiness?.status === "disabled"
+            ? provider.readiness
+            : scope === "host" && provider.readiness?.checkedAt != null
+              ? failedProviderReadiness(provider.readiness, error)
+              : {
+                  ...unknownProviderReadiness(statusMessage),
+                  verification: provider.readiness?.verification ?? "required",
+                  scope,
+                };
+        if (readiness.freshness === "stale")
+          deps.providerRegistry.observeReadiness(
+            { hostId, providerId: provider.id },
+            readiness,
+          );
+        return unknownProviderState(provider, statusMessage, readiness);
+      }),
     };
   }
+  const budget = createProviderListingBudget();
   return {
-    providers: await mapProviderMaintenanceRequests(providers, (provider) =>
-      getProviderState(deps, {
-        hostId,
-        provider,
-        ...(cwd === undefined ? {} : { cwd }),
-      }),
+    providers: await mapProviderMaintenanceRequests(
+      providers,
+      async (provider) => {
+        const state = await getProviderState(deps, {
+          hostId,
+          provider,
+          budget,
+          scope,
+          ...(cwd === undefined ? {} : { cwd }),
+        });
+        return {
+          ...state,
+          readiness: {
+            ...(state.readiness ?? unknownProviderReadiness()),
+            scope,
+          },
+        };
+      },
     ),
   };
 }

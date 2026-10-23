@@ -12,6 +12,7 @@ import type { JsonValue } from "./types.js";
 import { prepareWorkflowSource } from "./workflow-input.js";
 import { workflowUiRpcContract } from "./ui-contract.js";
 import { buildWorkflowRunView } from "./ui-view.js";
+import { registerBuildReview } from "./build-review.js";
 
 const sourceInputFields = {
   script: z
@@ -98,6 +99,7 @@ export default async function plugin(bb: BbPluginApi) {
       ),
   );
   registerWorkflowCli(bb, service);
+  registerBuildReview(bb, db, service);
 
   function workflowForThread(threadId: string, runId: string | null) {
     const run =

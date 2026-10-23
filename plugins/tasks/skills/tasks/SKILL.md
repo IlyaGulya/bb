@@ -168,8 +168,9 @@ each renders its own card.
 
 - `bb tasks --help` lists every command, and `bb tasks <command> --help` prints
   that command's arguments, accepted values, and limits. Both exit 0.
-- `--project` takes a tracker project prefix or id such as `ABC`, never a bb
-  project id (`proj_...`). `bb tasks project list` shows both columns.
+- Tracker commands use `--project` with a tracker prefix or ID such as `ABC`;
+  `bb tasks project list` shows both columns. `repositories inspect --project`
+  is different: it requires the explicit BB code project ID (`proj_...`).
 - `bb tasks status` reports the plugin's name and version. A task's workflow
   status is `bb tasks list --status <status>` and
   `bb tasks update ABC-12 --status <status>`.
@@ -303,3 +304,147 @@ the write. Reconciliation can remain uncertain. All Jira commands support
   remaining risk or blocker.
 - Prefer stable task keys such as `ABC-12` for task commands. Use `--json` for
   machine-readable output and human output for quick inspection.
+
+## Multi-repository workspaces
+
+Use `repositories` when one authorized task spans multiple real Git roots.
+Do not infer roots or ownership from the task's default project. Read linked
+source snapshots when the description is empty, and confirm the current scope
+and source owner before preparation or continuation. A historical ticket or
+released change is not authorization to dispatch it again.
+
+```sh
+bb tasks repositories inspect ABC-12 --project proj_android --environment env_android --host host_worker --json
+bb tasks repositories inspect ABC-12 --project proj_actions --environment env_actions --host host_worker --json
+bb tasks repositories prepare ABC-12 --bindings "$BINDINGS_JSON" --json
+bb tasks repositories show ABC-12 --json
+bb tasks repositories continue ABC-12 --checkpoint mrc_checkpoint_id --json
+```
+
+`BINDINGS_JSON` is the reviewed JSON array of 2–32 bindings, not the inspection
+response. Each binding supplies:
+
+- `id`, `bbProjectId`, `role`, `owner`, and `required`.
+- `sourceEnvironmentId`, `sourceHostId`, `sourcePath`, `sourceBranch` (nullable),
+  and the exact `sourceHead` from inspection.
+- `targetHostId`, a fresh canonical absolute `targetPath`, an isolated `branch`
+  different from the source branch, and an existing executor `presetId`.
+- Nonempty `instructions`, required repository-relative `instructionPaths`,
+  and explicit `includePaths` for portable untracked/ignored files. Include
+  every portable dirty file; ignored directories are not copied recursively.
+- Optional `remoteBase: {url, ref, head}`: an approved credential-free HTTPS/SSH
+  origin, explicit `refs/heads/...` or `refs/tags/...`, and exact prerequisite
+  commit SHA. Cached candidates are suggestions, not verified remote presence.
+
+The first binding is required and becomes the primary environment. All targets
+must use the same host and executor profile, with non-overlapping roots.
+Continuation starts **one coherent native writer** with every ready folder's
+path, role and instructions; it does not create an umbrella Git repository or
+require one disconnected agent per root. Each root retains its own environment,
+isolated branch and dirty checkpoint. Every required root and its execution
+readiness must verify before any executor starts. Existing single-root
+delegation/continuation cannot bypass this aggregate gate.
+
+`prepare` persists a checkpoint and returns immediately without dispatch.
+Observe aggregate/per-root state, errors, native transfer IDs and attempts with
+`show` or the Task panel. Plugin lifecycle interruption can leave an explicit
+`interrupted`/unknown root; `show` reconciles available native receipts without
+replaying the transfer. After preparation settles, retry with
+`repositories prepare ... --checkpoint <id> --bindings "$BINDINGS_JSON"`:
+keep verified roots unchanged and choose fresh paths for failed/interrupted
+roots. Preserve their old targets and receipts. Continue only with authorization;
+once continuation begins, the bound root set is fixed.
+
+For large repositories use the approved remote base: the target fetches using
+its **own** Git authentication, verifies the prerequisite, then applies bounded
+unpublished commits and dirty overlays. Exact published HEAD needs no bundle.
+No source fetch/push, credential fallback or auth/session copying occurs.
+Published LFS uses target-native Git LFS/auth; source LFS bytes must already be
+materialized. Target provider/MCP authorization is a separate prerequisite.
+Ordinary source modules named token/secret and project instructions do not
+require per-file approval. Genuine ambiguous key/config files require owner
+review and unchanged published provenance; native auth/session storage and
+sensitive dirty/unpublished bytes are refused even if selected.
+
+Native metadata/preview lists allow 100,000 entries; decoded checkpoint data is
+bounded at 64 MiB and serialized JSON at 96 MiB. Tasks permits up to 10,000
+explicit `includePaths`. Verified tracked symlinks preserve their pointers
+without dereferencing outside the repository; untracked links and unsafe
+targets are refused. Oversize or partial transfers are not success.
+
+The durable manifest enforces scoped native writer ownership, not an OS
+sandbox. Read-only inspection and human Git controls remain available; coordinate
+human edits and stop native writers before intervention. Backup work is
+explicitly deferred: local manifest/checkpoint durability does not activate a
+backup system, and no backup restore proof is required in this wave.
+
+Plugin RPC/SDK consumers use the same `inspectTaskRepository`,
+`prepareTaskRepositories`, `getTaskRepositories` and `continueTaskRepositories`
+contract. Preparation returns the same immediate aggregate checkpoint; do not
+replace it with synchronous multi-root waits or a separate scheduler.
+
+## Build → review
+
+Use this flow only when the user authorizes a bounded task implementation and
+independent review. Workflows must be enabled. The task must be open and linked
+to its BB code project; select an idle origin in a ready, clean, committed
+single-root workspace without other active work. This path does not require
+multi-repository preparation and cannot bypass an existing repository manifest.
+
+Select two existing authorized execution profiles that differ by
+provider/runtime or model. A different reasoning level alone does not provide
+independent review. Provider readiness is environment-specific; a provider's
+presence in the catalog is not proof of readiness.
+
+```sh
+bb tasks workflow start TASK --key unique-launch-key --origin thr_origin \
+  --writer writer-profile --reviewer reviewer-profile \
+  --smoke '["./scripts/platform-smoke"]' --ui --json
+bb tasks workflow list TASK --json
+```
+
+These identifiers and smoke command are illustrative. Supply actual platform
+smoke commands, not unit tests substituted for real interaction. `--ui`
+requires screenshot or preview evidence. The task card offers the same
+**Build → review** controls and links native workers.
+
+The native sequence is plan → implementation and actual smoke by the **same
+writer** → independent reviewer → `in_review`. The package records the plan,
+branch, full commit, diff summary, command results, UI evidence locations,
+limitations, reviewer findings/verdict, and next decision. Inspect worker logs
+and actual artifacts rather than trusting structured model claims. BB checks
+authoritative branch/commit identity and a clean working tree before/after
+review and on Accept.
+
+Only after the human explicitly decides on the current result:
+
+```sh
+bb tasks workflow accept twf_receipt --revision 1 --json
+bb tasks workflow return twf_receipt --revision 1 \
+  --feedback "Describe the observed defect and required correction" --json
+```
+
+These are alternative decisions, not commands to execute together. Accept
+requires the exact current revision and marks the task done. Generic status
+`done` is not acceptance of a pending workflow. Return preserves the writer's
+BB thread, provider session, workspace, and execution profile; it does not
+silently start a fresh writer. Retained worker contexts and native journals
+remain pinned until acceptance or task-deletion cleanup. Review does not grant
+external publication permission.
+
+Retry a launch with the same key and identical input. Duplicate results cannot
+publish duplicate revision comments. Uncertain native delivery fails closed
+instead of spawning another writer or blindly resending; inspect the retained
+worker and request a deliberate Return. A definitively rejected first creation
+can retry with repaired original profiles only when there is no established
+or uncertain context. Existing/uncertain sessions cannot change profiles.
+Inbox Needs input exposes launch/run errors, including failures before a worker
+exists; review keeps the writer's result as its source.
+
+SDK callers use Tasks RPCs `launchTaskWorkflow`, `taskWorkflows`,
+`acceptTaskWorkflow`, and `returnTaskWorkflow`; the validated Tasks contract is
+also used by the CLI and card. Workflows provides its native QuickJS engine,
+journal, bounded calls, and structured-result tool. Its orchestration sandbox
+does not sandbox provider-native tools: explicit profile permissions apply,
+but reviewer instructions and unchanged commit checks are not an OS read-only
+security boundary.

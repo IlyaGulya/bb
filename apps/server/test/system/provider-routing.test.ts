@@ -110,27 +110,36 @@ describe("system provider host routing", () => {
         projectId: project.id,
       });
 
-      const primaryIds = await providerIds(
-        await harness.app.request("/api/v1/system/providers"),
+      const readProviders = async (query = "") =>
+        systemProviderInfoSchema
+          .array()
+          .parse(
+            await readJson(
+              await harness.app.request(`/api/v1/system/providers${query}`),
+            ),
+          );
+      const primaryProviders = await readProviders();
+      expect(
+        primaryProviders.find((provider) => provider.id === "acp-opencode")
+          ?.readiness,
+      ).toMatchObject({ status: "ready", freshness: "fresh", scope: "host" });
+      expect(
+        primaryProviders.find((provider) => provider.id === "acp-omp")
+          ?.readiness?.status,
+      ).toBe("not_installed");
+      const remoteProviders = await readProviders(`?hostId=${remote.host.id}`);
+      expect(
+        remoteProviders.find((provider) => provider.id === "acp-omp")?.readiness
+          ?.status,
+      ).toBe("ready");
+      expect(
+        remoteProviders.find((provider) => provider.id === "acp-opencode")
+          ?.readiness?.status,
+      ).toBe("not_installed");
+      const environmentProviders = await readProviders(
+        `?environmentId=${environment.id}`,
       );
-      expect(primaryIds).toContain("acp-opencode");
-      expect(primaryIds).not.toContain("acp-omp");
-
-      const explicitRemoteIds = await providerIds(
-        await harness.app.request(
-          `/api/v1/system/providers?hostId=${remote.host.id}`,
-        ),
-      );
-      expect(explicitRemoteIds).toContain("acp-omp");
-      expect(explicitRemoteIds).not.toContain("acp-opencode");
-
-      const environmentIds = await providerIds(
-        await harness.app.request(
-          `/api/v1/system/providers?environmentId=${environment.id}`,
-        ),
-      );
-      expect(environmentIds).toContain("acp-omp");
-      expect(environmentIds).not.toContain("acp-opencode");
+      expect(environmentProviders).toEqual(remoteProviders);
 
       const primaryModels = systemExecutionOptionsResponseSchema.parse(
         await readJson(
@@ -289,6 +298,8 @@ const interleavedProviderOrder = [
   "codex",
   "pi",
   "acp-cursor",
+  "acp-grok",
+  "acp-hermes-agent",
 ];
 
 describe("persisted provider ordering", () => {
@@ -323,8 +334,8 @@ describe("persisted provider ordering", () => {
       expect(responder.requests).toHaveLength(probeCount);
       installed.delete("acp-omp");
       expect(await read()).toEqual(reversed);
-      harness.deps.providerRegistry.forgetAllInstalled();
-      expect(await read()).toEqual(reversed.filter((id) => id !== "acp-omp"));
+      harness.deps.providerRegistry.invalidateReadiness();
+      expect(await read()).toEqual(reversed);
       expect(responder.requests).toHaveLength(probeCount * 2);
       const options = systemExecutionOptionsResponseSchema.parse(
         await readJson(
@@ -334,7 +345,7 @@ describe("persisted provider ordering", () => {
         ),
       );
       expect(options.providers.map((provider) => provider.id)).toEqual(
-        reversed.filter((id) => id !== "acp-omp"),
+        reversed,
       );
       expect(options.models.map((model) => model.model)).toEqual(["model"]);
     });
@@ -375,16 +386,32 @@ describe("persisted provider ordering", () => {
           },
         });
         await saveProviderOrder(harness, interleavedProviderOrder);
-        const hidden = ["not_installed", "unsupported", "failed"].includes(
-          status,
+        const providers = systemProviderInfoSchema
+          .array()
+          .parse(
+            await readJson(
+              await harness.app.request("/api/v1/system/providers"),
+            ),
+          );
+        expect(providers.map((provider) => provider.id)).toEqual(
+          interleavedProviderOrder,
         );
         expect(
-          await providerIds(
-            await harness.app.request("/api/v1/system/providers"),
-          ),
-        ).toEqual(
-          interleavedProviderOrder.filter((id) => !hidden || id !== "acp-omp"),
-        );
+          providers.find((provider) => provider.id === "acp-omp")?.readiness,
+        ).toMatchObject({
+          status:
+            status === "failed"
+              ? "initializing"
+              : status === "unsupported"
+                ? "unknown"
+                : status === "unauthenticated"
+                  ? "auth_required"
+                  : status,
+          freshness:
+            status === "failed" || status === "unsupported"
+              ? "unverified"
+              : "fresh",
+        });
       });
     },
   );
@@ -396,7 +423,7 @@ describe("persisted provider ordering", () => {
         await providerIds(
           await harness.app.request("/api/v1/system/providers"),
         ),
-      ).toEqual(["claude-code", "codex", "pi", "acp-cursor"]);
+      ).toEqual(interleavedProviderOrder);
     });
   });
 
@@ -436,14 +463,14 @@ describe("persisted provider ordering", () => {
         await saveProviderOrder(harness, interleavedProviderOrder);
         const registrations = harness.deps.providerRegistry.list();
         const expected = registrations.filter(
-          (entry) =>
-            entry.info.maintenance[capability] &&
-            (entry.visibility === "always" || entry.info.id === "acp-opencode"),
+          (entry) => entry.info.maintenance[capability],
         );
         const result = await listSystemProviderInfos(harness.deps, {
           capability,
         });
-        expect(result).toEqual(expected.map((entry) => entry.info));
+        expect(result.map((provider) => provider.id)).toEqual(
+          expected.map((entry) => entry.info.id),
+        );
         expect(result.map((provider) => provider.id)).toContain("acp-opencode");
         if (capability === "usage") {
           expect(

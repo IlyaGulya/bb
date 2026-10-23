@@ -8,6 +8,10 @@ export interface RequestTimeoutFetchOptions {
   timeoutMs: number;
 }
 
+export interface RequestTimeoutInit extends RequestInit {
+  timeoutMs?: number;
+}
+
 interface RequestTimeoutContext {
   requestSignal: AbortSignal;
   timeoutSignal: AbortSignal;
@@ -99,22 +103,30 @@ export function createRequestTimeoutFetch(
   validateRequestTimeoutMs(options.timeoutMs);
 
   return async (input, init) => {
-    const timeoutSignal = AbortSignal.timeout(options.timeoutMs);
+    const override = (init as RequestTimeoutInit | undefined)?.timeoutMs;
+    const timeoutMs = override === undefined ? options.timeoutMs : override;
+    if (override !== undefined) validateRequestTimeoutMs(timeoutMs);
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
     const requestSignal = init?.signal
       ? AbortSignal.any([init.signal, timeoutSignal])
       : timeoutSignal;
     const context: RequestTimeoutContext = {
       requestSignal,
       timeoutSignal,
-      timeoutMs: options.timeoutMs,
+      timeoutMs,
     };
 
     try {
-      const response = await fetch(input, { ...init, signal: requestSignal });
+      const requestInit: RequestTimeoutInit = {
+        ...init,
+        signal: requestSignal,
+      };
+      delete requestInit.timeoutMs;
+      const response = await fetch(input, requestInit);
       return wrapRequestTimeoutResponse({ context, response });
     } catch (error) {
       if (isRequestTimeoutError(context, error)) {
-        throw new BbRequestTimeoutError(options.timeoutMs);
+        throw new BbRequestTimeoutError(timeoutMs);
       }
       throw error;
     }

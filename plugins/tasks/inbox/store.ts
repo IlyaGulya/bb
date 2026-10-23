@@ -259,7 +259,7 @@ export class InboxStore {
   nativeEntries(): InboxEntry[] {
     return this.db
       .prepare<[], unknown>(
-        `${select} WHERE i.active = 1 AND i.source_kind IN ('native_interaction', 'native_failure', 'task_review')`,
+        `${select} WHERE i.active = 1 AND i.source_kind IN ('native_interaction', 'native_failure', 'task_review', 'task_workflow')`,
       )
       .all()
       .map(entry);
@@ -268,7 +268,7 @@ export class InboxStore {
     return (
       this.db
         .prepare<[string], { context: InboxEntry["context"] }>(
-          "SELECT context FROM inbox_entries WHERE task_id = ? AND source_kind NOT IN ('native_interaction', 'native_failure', 'task_review') ORDER BY created_at LIMIT 1",
+          "SELECT context FROM inbox_entries WHERE task_id = ? AND source_kind NOT IN ('native_interaction', 'native_failure', 'task_review', 'task_workflow') ORDER BY created_at LIMIT 1",
         )
         .get(taskId)?.context ?? "unknown"
     );

@@ -770,7 +770,7 @@ export function createApp(
     disposePluginHost: (args) => disposePluginHostWorkers(deps, args),
     onSettingsChanged: (pluginId) => {
       deps.providerNativeRoots.invalidate(pluginId);
-      deps.providerRegistry.forgetAllInstalled();
+      deps.providerRegistry.invalidateReadiness();
     },
     onPluginUnregistered: (pluginId) => {
       requestQueuedMessageDispatch(deps, {

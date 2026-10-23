@@ -52,10 +52,10 @@ export function registerProviderCommands(
     .description("Manage providers and inspect their models");
 
   addProviderRoutingOptions(provider.command("list"))
-    .description("List available providers")
+    .description("List registered providers with host readiness and freshness")
     .option(
       "--all",
-      "Include disabled providers and providers whose plugins are disabled",
+      "Show the global registration catalog, including disabled plugins (not host readiness)",
     )
     .option("--json", "Print machine-readable JSON output")
     .action(
@@ -99,6 +99,49 @@ export function registerProviderCommands(
         }
         printProviderTable(providers);
       }),
+    );
+
+  addProviderRoutingOptions(provider.command("readiness [providerId]"))
+    .description(
+      "Check bounded provider health on a machine or environment; unknown is not ready",
+    )
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(
+        async (
+          providerId: string | undefined,
+          opts: ProviderListCommandOptions,
+        ) => {
+          const serverUrl = getUrl();
+          const result = await createCliBbSdk(serverUrl).system.providerStates({
+            ...(await resolveMachineEnvironmentRouting(opts, serverUrl)),
+            ...(providerId === undefined ? {} : { providerId }),
+          });
+          if (outputJson(opts, result)) return;
+          const rows = result.providers.map((provider) => [
+            provider.providerId,
+            provider.readiness?.status ?? provider.status,
+            provider.readiness?.freshness ?? "unverified",
+            provider.readiness?.verification ?? "unverified",
+            provider.readiness?.scope ?? "unknown",
+            provider.readiness?.detail ?? provider.statusMessage ?? "",
+          ]);
+          printBorderlessTable(
+            {
+              head: [
+                "ID",
+                "Readiness",
+                "Freshness",
+                "Verification",
+                "Scope",
+                "Action",
+              ],
+              colWidths: columnWidths(rows, [4, 9, 9, 12, 5, 6]),
+            },
+            rows,
+          );
+        },
+      ),
     );
 
   for (const enabled of [true, false]) {
@@ -190,11 +233,18 @@ function includeSelectedOnlyModel(
 }
 
 function printProviderTable(providers: SystemProviderInfo[]): void {
-  const rows = providers.map((provider) => [provider.id, provider.displayName]);
+  const rows = providers.map((provider) => [
+    provider.id,
+    provider.displayName,
+    provider.available ? "Loaded" : "Unavailable",
+    provider.readiness?.status ?? "unknown",
+    provider.readiness?.freshness ?? "unverified",
+    provider.readiness?.detail ?? "Check provider readiness before execution.",
+  ]);
   printBorderlessTable(
     {
-      head: ["ID", "Name"],
-      colWidths: columnWidths(rows, [4, 4]),
+      head: ["ID", "Name", "Plugin", "Readiness", "Freshness", "Action"],
+      colWidths: columnWidths(rows, [4, 4, 6, 9, 9, 6]),
     },
     rows,
   );

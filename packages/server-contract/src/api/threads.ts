@@ -96,6 +96,11 @@ export const createThreadRequestSchema = z
   .object({
     projectId: z.string().min(1),
     transferOperationId: z.string().min(1).optional(),
+    repositoryTransferOperationIds: z
+      .array(z.string().min(1))
+      .min(2)
+      .max(32)
+      .optional(),
     providerId: z.string().min(1).optional(),
     origin: threadCreateOriginSchema,
     originPluginId: z.string().min(1).optional(),

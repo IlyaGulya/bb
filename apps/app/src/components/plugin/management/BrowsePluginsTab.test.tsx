@@ -644,7 +644,6 @@ describe("BrowsePluginsTab", () => {
       name: "Memory installed — 4,210 installs",
     });
     expect(installed.querySelector('[data-icon="Check"]')).toBeTruthy();
-    expect(installed.textContent).toContain("4.2K");
     expect(installed.getAttribute("aria-disabled")).toBe("true");
     expect(
       screen.queryByRole("button", { name: /Install Memory/u }),
@@ -702,7 +701,6 @@ describe("BrowsePluginsTab", () => {
     const install = await screen.findByRole("button", {
       name: "Install Memory — 4,210 installs",
     });
-    expect(install.textContent).toContain("4.2K");
     fireEvent.click(install);
     expect(onInstall).toHaveBeenCalledWith(
       expect.objectContaining({

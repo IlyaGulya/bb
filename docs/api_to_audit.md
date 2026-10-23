@@ -1286,6 +1286,31 @@ Before stabilization, audit:
   under `plugins/*` sets a status today, so the rename is free until the
   prefix drops.
 
+## `experimental_providerExecutionReadinessBlocker`
+
+Shared execution preflight helper exported from `@get-bb/plugin-sdk`, used by
+Tasks, Automations, and Workflows. It accepts a `ProviderInfo`, a
+`ProviderReadiness | null` observation, and the actual `"host" | "environment"`
+scope; returns an actionable blocker string or null. Registration unavailability
+and disabled providers block. Required verification needs a matching-scope,
+fresh ready observation with `checkedAt`; unknown, initializing, stale,
+not-installed, auth-required, and unsupported-version observations do not pass.
+Genuinely unsupported verification permits the existing execution path without
+claiming a fresh ready observation.
+
+Use targeted `sdk.providers.list({ providerId, ...routing })` and
+`sdk.system.providerStates({ providerId, ...routing })`; do not interpret
+directory membership as readiness or substitute another account/model.
+Host installation checks do not establish credentials for another environment
+or preset. Runtime authentication remains authoritative.
+
+**Audit before stabilizing.** Establish scoped runtime credential semantics;
+verify consumer-visible cold/timeout/offline and definitive failure boundaries,
+stale observation retention and invalidation, bounded targeted recovery, and
+continued usability of maintenance-unsupported providers without fabricated
+readiness. Added regression coverage is not evidence of deployed runtime
+acceptance; deployment/UI/worker smoke evidence is tracked separately.
+
 ## `bb.providers.register` (`experimental_bridgeOptions`, `experimental_visibility`, and the `experimental_providerBridge` artifact export)
 
 **Kept experimental (2026-08-22).** `bb.providers.register` and the
@@ -1299,9 +1324,15 @@ policy exists.
 
 `experimental_bridgeOptions` is bounded JSON, opaque to core, delivered to
 every bridge launch as provider-scoped static options.
-`experimental_visibility: "installed"` withholds a provider from unscoped
-listings until its `provider/health` is not `not_installed`. The bridge is the
-`experimental_providerBridge` export of the plugin's `bb.host` artifact.
+`experimental_visibility: "installed"` requires installation/readiness
+verification, but no longer withholds registered identities from discovery.
+Cold checks, exhausted budgets, and transient bridge failures expose explicit
+unknown/initializing or stale observations, distinct from confirmed
+`not_installed`. Disabled entries remain identifiable. `available` describes
+registration separately from readiness. Always-visible declarations without
+health verification remain unsupported/unverified, not fabricated ready.
+The bridge is the `experimental_providerBridge` export of the plugin's
+`bb.host` artifact.
 
 Docs: `providers.md`, [provider-plugin-api.md](provider-plugin-api.md) §1–2.
 

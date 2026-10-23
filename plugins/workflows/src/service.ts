@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import Ajv from "ajv";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { requireWorkflowProviderReadiness } from "./provider-readiness.js";
 import {
   WORKFLOW_CALL_CACHE_VERSION,
   computeWorkflowCallCacheKey,
@@ -73,6 +74,14 @@ import type {
 import { utf8Prefix } from "./utf8.js";
 import { parseStoredAgentOptions } from "./validation.js";
 import { prepareWorkflowSource } from "./workflow-input.js";
+import {
+  managedProfile,
+  managedRequest,
+  managedRunId,
+  managedWorker,
+} from "./build-review-policy.js";
+import type { BuildReviewStart } from "./build-review-contract.js";
+import { verifyBuildReviewWorkspace } from "./build-review-workspace.js";
 
 const executionValuesSchema = z.object({
   model: z.string().min(1),
@@ -333,6 +342,7 @@ interface StartWorkflowInput {
   source: string;
   args: JsonValue;
   resumedFromRunId: string | null;
+  buildReview?: BuildReviewStart;
 }
 
 export interface WorkflowService {
@@ -630,21 +640,54 @@ export function createWorkflowService(
         );
       }
     }
-    const created = createRun(db, {
-      projectId: input.projectId,
-      originThreadId: input.originThreadId,
-      environmentId: origin.environmentId,
-      originProvider: origin.providerId,
-      originModel: origin.model,
-      originReasoningLevel: origin.reasoningLevel,
-      originPermissionMode: origin.permissionMode,
-      name: parsed.metadata.name,
-      source: input.source,
-      sourceHash: createHash("sha256").update(input.source).digest("hex"),
-      argsJson: JSON.stringify(input.args),
-      settingsJson: JSON.stringify(currentSettings),
-      resumedFromRunId: input.resumedFromRunId,
-    });
+    const created = db.transaction(() => {
+      if (input.buildReview) {
+        const existingId = managedRunId(db, input.buildReview.key);
+        if (existingId) {
+          if (
+            JSON.stringify(managedRequest(db, existingId)) !==
+            JSON.stringify(input.buildReview)
+          )
+            throw new Error(
+              "Build/review launch key already has different input",
+            );
+          return getRunRequired(db, existingId);
+        }
+        if (
+          db
+            .prepare(`SELECT 1 FROM workflow_build_reviews r JOIN workflow_runs w ON w.id = r.run_id
+          WHERE r.group_key = ? AND (r.released = 1 OR w.status IN ('queued', 'running')) LIMIT 1`)
+            .get(input.buildReview.group)
+        )
+          throw new Error("Build/review context is already active or released");
+      }
+      const row = createRun(db, {
+        projectId: input.projectId,
+        originThreadId: input.originThreadId,
+        environmentId: origin.environmentId,
+        originProvider: origin.providerId,
+        originModel: origin.model,
+        originReasoningLevel: origin.reasoningLevel,
+        originPermissionMode: origin.permissionMode,
+        name: parsed.metadata.name,
+        source: input.source,
+        sourceHash: createHash("sha256").update(input.source).digest("hex"),
+        argsJson: JSON.stringify(input.args),
+        settingsJson: JSON.stringify(currentSettings),
+        resumedFromRunId: input.resumedFromRunId,
+      });
+      if (input.buildReview) {
+        db.prepare(
+          "INSERT INTO workflow_build_reviews(request_key, group_key, run_id, request_json) VALUES (?, ?, ?, ?)",
+        ).run(
+          input.buildReview.key,
+          input.buildReview.group,
+          row.id,
+          JSON.stringify(input.buildReview),
+        );
+      }
+      return row;
+    })();
     wakeWorker();
     publishRunsChanged(created.originThreadId);
     return created;
@@ -726,15 +769,20 @@ export function createWorkflowService(
     run: WorkflowRunRow,
     options: WorkflowAgentOptions,
     signal: AbortSignal,
+    callIndex: number,
   ): Promise<ResolvedSelection> {
     const inherited = options.selection === null;
-    const requested = options.selection ?? {
-      provider: run.originProvider,
-      model: run.originModel,
-      reasoningLevel: run.originReasoningLevel,
-    };
+    const policy = managedProfile(db, run.id, callIndex);
+    const requested = policy ??
+      options.selection ?? {
+        provider: run.originProvider,
+        model: run.originModel,
+        reasoningLevel: run.originReasoningLevel,
+      };
     const providers = await bb.sdk.providers.list({
       environmentId: run.environmentId,
+      providerId: requested.provider,
+      signal,
     });
     throwIfCancelled(signal);
     const provider = providers.find(
@@ -745,6 +793,12 @@ export function createWorkflowService(
         `Provider ${JSON.stringify(requested.provider)} is not available on this workflow host`,
       );
     }
+    await requireWorkflowProviderReadiness(
+      bb,
+      run.environmentId,
+      provider,
+      signal,
+    );
     const catalog = await bb.sdk.providers.models({
       environmentId: run.environmentId,
       providerId: requested.provider,
@@ -777,7 +831,7 @@ export function createWorkflowService(
       );
     }
     const permissionMode = executionValuesSchema.shape.permissionMode.parse(
-      run.originPermissionMode,
+      policy?.permissionMode ?? run.originPermissionMode,
     );
     if (!provider.capabilities.permissionModes.includes(permissionMode)) {
       throw new Error(
@@ -924,15 +978,20 @@ export function createWorkflowService(
         }
       }
 
-      call = startCall(db, {
-        runId: run.id,
-        callIndex,
-        cacheKey,
-        prompt,
-        options,
-        selection,
-        replay: null,
-      });
+      call =
+        sameRunCall !== null &&
+        managedRequest(db, run.id) !== null &&
+        ["queued", "running"].includes(sameRunCall.status)
+          ? sameRunCall
+          : startCall(db, {
+              runId: run.id,
+              callIndex,
+              cacheKey,
+              prompt,
+              options,
+              selection,
+              replay: null,
+            });
       publishRunsChanged(run.originThreadId);
     } finally {
       replayDecision.release();
@@ -945,31 +1004,53 @@ export function createWorkflowService(
           throw new Error("Workflow origin is archived or deleted");
         }
         throwIfCancelled(signal);
+        if (managedRequest(db, run.id) !== null && callIndex === 2)
+          await verifyBuildReviewWorkspace(bb, db, run);
         spawningCalls.add(call.id);
-        const child = await bb.sdk.threads.spawn({
-          lifecycleOwnerThreadId: run.originThreadId,
-          pluginMetadata: {
-            workflowWorker: 1,
-            runId: run.id,
-            callId: call.id,
-            originThreadId: run.originThreadId,
-          },
-          projectId: run.projectId,
-          environment: { type: "reuse", environmentId: run.environmentId },
-          prompt: childPrompt(run, prompt, options),
-          title: options.title ?? `${run.name} · ${callIndex + 1}`,
-          providerId: selection.providerId,
-          model: selection.model,
-          reasoningLevel: selection.reasoningLevel,
-          permissionMode: selection.permissionMode,
-          visibility: "hidden",
-        });
+        const profile = managedProfile(db, run.id, callIndex);
+        const workerPrompt = childPrompt(
+          run,
+          profile?.instructions
+            ? `${profile.instructions}\n\n${prompt}`
+            : prompt,
+          options,
+        );
+        const spawn = () =>
+          bb.sdk.threads.spawn({
+            lifecycleOwnerThreadId: run.originThreadId,
+            pluginMetadata: {
+              workflowWorker: 1,
+              runId: run.id,
+              callId: call.id,
+              originThreadId: run.originThreadId,
+            },
+            projectId: run.projectId,
+            environment: { type: "reuse", environmentId: run.environmentId },
+            prompt: workerPrompt,
+            title: options.title ?? `${run.name} · ${callIndex + 1}`,
+            providerId: selection.providerId,
+            model: selection.model,
+            reasoningLevel: selection.reasoningLevel,
+            permissionMode: selection.permissionMode,
+            ...(profile?.serviceTier
+              ? { serviceTier: profile.serviceTier }
+              : {}),
+            visibility: "hidden",
+          });
+        const child =
+          (await managedWorker(bb, db, run, call, workerPrompt, spawn)) ??
+          (await spawn());
         ownWorker(db, child.id, run.id, call.id, run.originThreadId);
         if (signal.aborted) {
           await stopChild(child.id);
           throw new Error("Workflow cancelled");
         }
-        const attached = attachCallThread(db, call.id, child.id);
+        const currentCall = getCall(db, run.id, call.callIndex);
+        const attached =
+          currentCall?.childThreadId === child.id &&
+          currentCall.status === "running"
+            ? true
+            : attachCallThread(db, call.id, child.id);
         if (!attached || signal.aborted) {
           await stopChild(child.id);
           throw new Error("Workflow cancelled");
@@ -979,13 +1060,17 @@ export function createWorkflowService(
         const stopOnAbort = () => void stopChild(child.id);
         signal.addEventListener("abort", stopOnAbort, { once: true });
         try {
+          const queuedInput =
+            managedRequest(db, run.id) !== null &&
+            (await bb.sdk.threads.queuedMessages.list({ threadId: child.id }))
+              .length > 0;
           const current = await bb.sdk.threads.get({ threadId: child.id });
           throwIfCancelled(signal);
-          if (current.status === "idle") {
+          if (!queuedInput && current.status === "idle") {
             const output = await bb.sdk.threads.output({ threadId: child.id });
             throwIfCancelled(signal);
             onThreadIdle(child.id, output.output);
-          } else if (current.status === "error") {
+          } else if (!queuedInput && current.status === "error") {
             failThreadCall(
               child.id,
               "Workflow worker failed before attachment completed",
@@ -1001,7 +1086,10 @@ export function createWorkflowService(
           );
         }
         try {
-          return await waitForCall(call, signal);
+          const result = await waitForCall(call, signal);
+          if (managedRequest(db, run.id) !== null && callIndex >= 1)
+            await verifyBuildReviewWorkspace(bb, db, run);
+          return result;
         } finally {
           signal.removeEventListener("abort", stopOnAbort);
         }
@@ -1009,7 +1097,11 @@ export function createWorkflowService(
         spawningCalls.delete(call.id);
         throwIfCancelled(signal);
         const delay = PROVIDER_RETRY_DELAYS_MS[call.providerRetryAttempts];
-        if (delay === undefined || !isRetryableProviderFailure(error)) {
+        if (
+          managedRequest(db, run.id) !== null ||
+          delay === undefined ||
+          !isRetryableProviderFailure(error)
+        ) {
           throw error;
         }
         const detail = message(error);
@@ -1289,6 +1381,10 @@ export function createWorkflowService(
   async function notify(run: WorkflowRunRow): Promise<void> {
     const latest = getRunRequired(db, run.id);
     if (latest.notificationSent) return;
+    if (managedRequest(db, run.id) !== null) {
+      markNotificationSent(db, run.id);
+      return;
+    }
     const settings = settingsForRun(latest);
     if (!beginNotificationAttempt(db, run.id)) return;
     try {
@@ -1382,7 +1478,12 @@ export function createWorkflowService(
         const index = callIndex;
         callIndex += 1;
         const computeIdentity = async (previousKey: string | null) => {
-          const selection = await validateSelection(run, options, callSignal);
+          const selection = await validateSelection(
+            run,
+            options,
+            callSignal,
+            index,
+          );
           const cacheKey = computeWorkflowCallCacheKey({
             version: WORKFLOW_CALL_CACHE_VERSION,
             previousCacheKey: previousKey,
@@ -1520,6 +1621,8 @@ export function createWorkflowService(
           throw new Error(`Workflow result is invalid: ${validation.error}`);
         }
       }
+      if (managedRequest(db, run.id) !== null)
+        await verifyBuildReviewWorkspace(bb, db, run);
       await settleRunAndStopOutstanding({
         id: run.id,
         status: "succeeded",
@@ -1555,9 +1658,14 @@ export function createWorkflowService(
     for (const call of listRunningCalls(db)) {
       const threadId = call.childThreadId!;
       try {
+        const queuedInput =
+          managedRequest(db, call.runId) !== null &&
+          (await bb.sdk.threads.queuedMessages.list({ threadId })).length > 0;
         const thread = await bb.sdk.threads.get({ threadId });
         if (thread.archivedAt != null) {
           failThreadCall(threadId, "Workflow worker was archived");
+        } else if (queuedInput) {
+          continue;
         } else if (thread.status === "idle") {
           const output = await bb.sdk.threads.output({ threadId });
           onThreadIdle(threadId, output.output);

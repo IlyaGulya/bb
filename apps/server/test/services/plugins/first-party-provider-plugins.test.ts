@@ -116,9 +116,6 @@ const FIRST_PARTY_PROVIDER_DECLARATIONS = [
 const PROVIDER_IDS = FIRST_PARTY_PROVIDER_DECLARATIONS.map(
   (plugin) => plugin.providerId,
 );
-const ALWAYS_VISIBLE_PROVIDER_IDS = FIRST_PARTY_PROVIDER_DECLARATIONS.filter(
-  (plugin) => plugin.visibility === "always",
-).map((plugin) => plugin.providerId);
 
 const NEW_ACP_PLUGIN_ID = "bb--provider-acp-next";
 const ACP_PROVIDER_IDS = FIRST_PARTY_PROVIDER_DECLARATIONS.filter(
@@ -203,19 +200,22 @@ describe("first-party provider plugins", () => {
 
         const infos = await listSystemProviderInfos(harness.deps, {});
         expect(infos.map((info) => info.id)).toEqual(
-          ALWAYS_VISIBLE_PROVIDER_IDS,
+          registry.list().map((entry) => entry.info.id),
         );
         expect(infos.map((info) => info.logoUrl)).toEqual(
-          ALWAYS_VISIBLE_PROVIDER_IDS.map((providerId) =>
-            expectedLogoUrl(registry, providerId),
-          ),
+          registry
+            .list()
+            .map(({ info: { id: providerId } }) =>
+              expectedLogoUrl(registry, providerId),
+            ),
         );
         expect(
           infos.map((info) => [info.id, info.capabilities.supportsFork]),
         ).toEqual(
-          FIRST_PARTY_PROVIDER_DECLARATIONS.filter(
-            (plugin) => plugin.visibility === "always",
-          ).map((plugin) => [plugin.providerId, plugin.fork !== "none"]),
+          FIRST_PARTY_PROVIDER_DECLARATIONS.map((plugin) => [
+            plugin.providerId,
+            plugin.fork !== "none",
+          ]),
         );
       },
     );

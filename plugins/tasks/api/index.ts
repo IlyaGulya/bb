@@ -28,6 +28,10 @@ import {
   type CommentsChangedEvent,
   type CommentProvider,
 } from "../shared/contract";
+import {
+  assertTaskWorkflowStatusTransition,
+  releaseTaskWorkflowContexts,
+} from "../workflow/index.js";
 
 interface TaskLabelIdRow {
   task_id: string;
@@ -653,6 +657,7 @@ export function registerHandlers(
         const taskIds = store.tasks
           .listTasks({ projectId: input.projectId })
           .map((task) => task.id);
+        await releaseTaskWorkflowContexts(bb, store, taskIds);
         const attachments = attachmentsForTasks(store.tasks, taskIds);
         const deleted = store.tasks.deleteProject(input.projectId);
         if (deleted) {
@@ -714,6 +719,7 @@ export function registerHandlers(
         }
 
         const result = store.transaction(() => {
+          assertTaskWorkflowStatusTransition(store, current.id, input.status);
           const beforeLabelIds = store.tasks
             .listTaskLabels(current.id)
             .map((link) => link.labelId);
@@ -771,6 +777,7 @@ export function registerHandlers(
       const task = store.tasks.getTask(input.taskId);
       const subtasks = task ? store.tasks.listSubtasks(task.id) : [];
       const attachments = attachmentsForTasks(store.tasks, [input.taskId]);
+      await releaseTaskWorkflowContexts(bb, store, [input.taskId]);
       const deleted = store.tasks.deleteTask(input.taskId);
       if (deleted && task) {
         await removeAttachmentBlobs(bb, store.tasks, attachments);
@@ -803,6 +810,7 @@ export function registerHandlers(
       const current = store.tasks.getTask(input.taskId);
       if (!current) throw new Error(`Task not found: ${input.taskId}`);
       const result = store.transaction(() => {
+        assertTaskWorkflowStatusTransition(store, current.id, input.status);
         const moved = store.tasks.updatePosition(current.id, {
           status: input.status,
           beforeTaskId: input.beforeTaskId,

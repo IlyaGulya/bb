@@ -528,7 +528,11 @@ export function useThreadCreationOptions(
     (): ProviderPickerOption[] =>
       providers.map((p) => ({
         value: p.id,
-        label: p.displayName,
+        label:
+          p.readiness === undefined ||
+          (p.readiness.status === "ready" && p.readiness.freshness === "fresh")
+            ? p.displayName
+            : `${p.displayName} (${p.readiness.verification === "unsupported" ? "readiness unsupported" : p.readiness.status.replaceAll("_", " ")}${p.readiness.freshness === "stale" ? ", stale" : ""})`,
         icon: getProviderIconInfo("agent", p.id, p)?.icon,
         ...(p.strings?.brandPrefix === undefined
           ? {}

@@ -15,10 +15,10 @@ import type {
 } from "@get-bb/plugin-sdk";
 import { providerAlreadyRegisteredMessage } from "@get-bb/plugin-sdk/internal/host-policy";
 
-export interface ProviderHealthCacheKey {
-  hostId: string;
-  providerId: string;
-}
+import {
+  createProviderReadinessCache,
+  type ProviderReadinessCache,
+} from "./provider-readiness.js";
 
 export interface ProviderServerCapabilities {
   reasoningLevels: readonly ReasoningLevel[];
@@ -54,22 +54,12 @@ export interface ProviderRegistration {
   iconNames: ReadonlySet<string>;
 }
 
-const PROVIDER_INSTALLED_CACHE_TTL_MS = 5 * 60_000;
-
-export interface ProviderRegistryService {
+export interface ProviderRegistryService extends ProviderReadinessCache {
   list(): ProviderRegistration[];
   disabledProviderIds(): ReadonlySet<string>;
   getUserDefaultProviderId(): string | null;
   get(providerId: string): ProviderRegistration | null;
   getRegistrationRevision(): number;
-  lookupInstalled(key: ProviderHealthCacheKey): Promise<boolean> | undefined;
-  rememberInstalled(key: ProviderHealthCacheKey, value: Promise<boolean>): void;
-  revalidateInstalled(
-    key: ProviderHealthCacheKey,
-    probe: () => Promise<boolean>,
-  ): Promise<void>;
-  forgetInstalledKey(key: ProviderHealthCacheKey): void;
-  forgetAllInstalled(): void;
   getServerCapabilities(providerId: string): ProviderServerCapabilities | null;
   getSupportedPermissionModes(
     providerId: string,
@@ -111,18 +101,7 @@ export function createProviderRegistryService(
   >();
   const providerRegistrationWaiters = new Map<string, Set<() => void>>();
   let registrationRevision = 0;
-  const installedByHostId = new Map<
-    string,
-    Map<
-      string,
-      {
-        registrationRevision: number;
-        expiresAt: number;
-        value: Promise<boolean>;
-        revalidating: boolean;
-      }
-    >
-  >();
+  const readiness = createProviderReadinessCache();
   let registrationSequence = 0;
 
   function compareInstallRank(
@@ -192,6 +171,7 @@ export function createProviderRegistryService(
   }
 
   const service: ProviderRegistryService = {
+    ...readiness,
     disabledProviderIds() {
       return new Set(
         deps.readUserProviderPreferences?.().disabledProviderIds ?? [],
@@ -232,62 +212,6 @@ export function createProviderRegistryService(
 
     getRegistrationRevision() {
       return registrationRevision;
-    },
-
-    lookupInstalled(key) {
-      return installedByHostId.get(key.hostId)?.get(key.providerId)?.value;
-    },
-
-    rememberInstalled(key, value) {
-      let hostEntries = installedByHostId.get(key.hostId);
-      if (hostEntries === undefined) {
-        hostEntries = new Map();
-        installedByHostId.set(key.hostId, hostEntries);
-      }
-      hostEntries.set(key.providerId, {
-        registrationRevision,
-        expiresAt: Date.now() + PROVIDER_INSTALLED_CACHE_TTL_MS,
-        value,
-        revalidating: false,
-      });
-    },
-
-    revalidateInstalled(key, probe) {
-      const entry = installedByHostId.get(key.hostId)?.get(key.providerId);
-      if (
-        entry === undefined ||
-        entry.revalidating ||
-        (entry.registrationRevision === registrationRevision &&
-          entry.expiresAt > Date.now())
-      ) {
-        return Promise.resolve();
-      }
-      entry.revalidating = true;
-      const isCurrent = () =>
-        installedByHostId.get(key.hostId)?.get(key.providerId) === entry;
-      return probe().then(
-        (installed) => {
-          if (isCurrent()) {
-            service.rememberInstalled(key, Promise.resolve(installed));
-          }
-        },
-        () => {
-          if (isCurrent()) {
-            service.forgetInstalledKey(key);
-          }
-        },
-      );
-    },
-
-    forgetInstalledKey(key) {
-      const hostEntries = installedByHostId.get(key.hostId);
-      if (hostEntries === undefined) return;
-      hostEntries.delete(key.providerId);
-      if (hostEntries.size === 0) installedByHostId.delete(key.hostId);
-    },
-
-    forgetAllInstalled() {
-      installedByHostId.clear();
     },
 
     getServerCapabilities(providerId) {
@@ -347,6 +271,7 @@ export function createProviderRegistryService(
         sequence: registrationSequence,
       });
       registrationRevision += 1;
+      readiness.invalidateReadiness({ providerId });
       releaseProviderRegistrationWaiters(providerId);
       return {
         dispose() {
@@ -354,6 +279,7 @@ export function createProviderRegistryService(
             pluginRegistrations.delete(providerId);
             registrationRanks.delete(entry);
             registrationRevision += 1;
+            readiness.invalidateReadiness({ providerId });
           }
         },
       };

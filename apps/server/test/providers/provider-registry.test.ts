@@ -1,3 +1,5 @@
+import { ApiError } from "../../src/errors.js";
+import type { ProviderReadiness } from "@bb/domain";
 import { createDeferredPromise } from "@bb/test-helpers";
 import { describe, expect, it, vi } from "vitest";
 import { createProviderRegistryService } from "../../src/services/providers/provider-registry.js";
@@ -314,112 +316,118 @@ describe("provider registry", () => {
   });
 });
 
-describe("installed-state cache", () => {
-  it("serves a remembered answer and dedupes concurrent probes", async () => {
-    const registry = createProviderRegistryService({});
-    registerProvider(registry, "codex", "provider-codex");
-    const key = {
-      hostId: "host_1",
-      providerId: "codex",
-    };
-
-    expect(registry.lookupInstalled(key)).toBeUndefined();
-
-    let probes = 0;
-    const probe = () => {
-      probes += 1;
-      return Promise.resolve(true);
-    };
-    const inFlight = probe();
-    registry.rememberInstalled(key, inFlight);
-
-    expect(await registry.lookupInstalled(key)).toBe(true);
-    expect(await registry.lookupInstalled(key)).toBe(true);
-    expect(probes).toBe(1);
+describe("provider readiness observations", () => {
+  const ready = () => ({
+    verification: "required" as const,
+    scope: "host" as const,
+    status: "ready" as const,
+    freshness: "fresh" as const,
+    checkedAt: Date.now(),
+    retryAfterMs: null,
+    detail: "Ready",
   });
+  const key = { hostId: "host_1", providerId: "codex" };
 
-  it("serves the answer when the registration revision moves and replaces it after exactly one revalidation", async () => {
-    const registry = createProviderRegistryService({});
-    registerProvider(registry, "codex", "provider-codex");
-    const key = {
-      hostId: "host_1",
-      providerId: "codex",
-    };
-    registry.rememberInstalled(key, Promise.resolve(true));
-    const held = createDeferredPromise<boolean>();
+  it("shares a cold probe without claiming initialization is readiness", async () => {
+    const registry = createProviderRegistryService();
+    const held = createDeferredPromise<ProviderReadiness>();
     const probe = vi.fn(() => held.promise);
-    await registry.revalidateInstalled(key, probe);
-    expect(probe).not.toHaveBeenCalled();
-
-    registerProvider(registry, "claude-code", "provider-claude-code");
-
-    expect(await registry.lookupInstalled(key)).toBe(true);
-    const revalidation = registry.revalidateInstalled(key, probe);
-    void registry.revalidateInstalled(key, probe);
+    const first = registry.resolveReadiness(key, probe);
+    const second = registry.resolveReadiness(key, probe);
+    expect(registry.lookupReadiness(key)).toMatchObject({
+      status: "initializing",
+      freshness: "unverified",
+      checkedAt: null,
+    });
+    await Promise.resolve();
     expect(probe).toHaveBeenCalledTimes(1);
-    held.resolve(false);
-    await revalidation;
-    expect(await registry.lookupInstalled(key)).toBe(false);
-    await registry.revalidateInstalled(key, probe);
-    expect(probe).toHaveBeenCalledTimes(1);
+    held.resolve(ready());
+    expect(await first).toMatchObject({ status: "ready", freshness: "fresh" });
+    expect(await second).toEqual(await first);
   });
 
-  it("drops an expired answer when its revalidation fails and never writes a revalidation over a newer answer", async () => {
+  it("retains observations as stale across transient failure and applies a retry cooldown", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
-      vi.setSystemTime(1_800_000_000_000);
-      const registry = createProviderRegistryService({});
-      const failing = { hostId: "host_1", providerId: "codex" };
-      const replaced = { hostId: "host_1", providerId: "pi" };
-      registry.rememberInstalled(failing, Promise.resolve(true));
-      registry.rememberInstalled(replaced, Promise.resolve(true));
-      vi.setSystemTime(1_800_000_000_000 + 5 * 60_000);
-
-      await registry.revalidateInstalled(failing, () =>
-        Promise.reject(new Error("health failed")),
+      const registry = createProviderRegistryService();
+      const observation = ready();
+      registry.observeReadiness(key, observation);
+      vi.setSystemTime(Date.now() + 5 * 60_000);
+      const failing = vi.fn(async () => {
+        throw new Error("host timeout");
+      });
+      expect(await registry.resolveReadiness(key, failing)).toMatchObject({
+        status: "ready",
+        freshness: "stale",
+        checkedAt: observation.checkedAt,
+        retryAfterMs: 5_000,
+      });
+      await vi.waitFor(() =>
+        expect(registry.lookupReadiness(key)?.detail).toContain(
+          "refresh failed",
+        ),
       );
-      expect(registry.lookupInstalled(failing)).toBeUndefined();
-
-      const held = createDeferredPromise<boolean>();
-      const revalidation = registry.revalidateInstalled(
-        replaced,
-        () => held.promise,
+      await registry.resolveReadiness(key, failing);
+      expect(failing).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(Date.now() + 5_000);
+      await registry.resolveReadiness(key, async () => ({
+        ...ready(),
+        status: "not_installed",
+      }));
+      await vi.waitFor(() =>
+        expect(registry.lookupReadiness(key)).toMatchObject({
+          status: "not_installed",
+          freshness: "fresh",
+        }),
       );
-      registry.forgetAllInstalled();
-      registry.rememberInstalled(replaced, Promise.resolve(true));
-      held.resolve(false);
-      await revalidation;
-      expect(await registry.lookupInstalled(replaced)).toBe(true);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("forgets one host-provider answer or all answers", async () => {
-    const registry = createProviderRegistryService({});
-    registerProvider(registry, "codex", "provider-codex");
-    const hostOneCodex = {
-      hostId: "host_1",
-      providerId: "codex",
-    };
-    const hostTwoCodex = {
-      hostId: "host_2",
-      providerId: "codex",
-    };
-    const hostOnePi = {
-      hostId: "host_1",
-      providerId: "pi",
-    };
-    registry.rememberInstalled(hostOneCodex, Promise.resolve(true));
-    registry.rememberInstalled(hostTwoCodex, Promise.resolve(false));
-    registry.rememberInstalled(hostOnePi, Promise.resolve(false));
+  it("does not turn a cold failure into confirmed absence", async () => {
+    const registry = createProviderRegistryService();
+    expect(
+      await registry.resolveReadiness(key, async () => {
+        throw new ApiError(502, "host_unavailable", "Host is unavailable");
+      }),
+    ).toMatchObject({
+      status: "initializing",
+      freshness: "unverified",
+      checkedAt: null,
+      retryAfterMs: 5_000,
+    });
+  });
 
-    registry.forgetInstalledKey(hostOneCodex);
-    expect(registry.lookupInstalled(hostOneCodex)).toBeUndefined();
-    expect(await registry.lookupInstalled(hostTwoCodex)).toBe(false);
-    expect(await registry.lookupInstalled(hostOnePi)).toBe(false);
+  it("does not overwrite a newer observation when an older probe finishes", async () => {
+    const registry = createProviderRegistryService();
+    const held = createDeferredPromise<ProviderReadiness>();
+    const pending = registry.resolveReadiness(key, () => held.promise);
+    registry.invalidateReadiness();
+    registry.observeReadiness(key, { ...ready(), status: "auth_required" });
+    held.resolve(ready());
+    await pending;
+    expect(registry.lookupReadiness(key)?.status).toBe("auth_required");
+  });
 
-    registry.forgetAllInstalled();
-    expect(registry.lookupInstalled(hostOnePi)).toBeUndefined();
+  it("isolates hosts and invalidates only the changed provider registration", () => {
+    const registry = createProviderRegistryService();
+    const registration = registerProvider(registry, "codex", "provider-codex");
+    registry.observeReadiness(key, ready());
+    registry.observeReadiness(
+      { ...key, hostId: "host_2" },
+      { ...ready(), status: "not_installed" },
+    );
+    registry.observeReadiness({ ...key, providerId: "pi" }, ready());
+    registerProvider(registry, "claude-code", "provider-claude-code");
+    expect(registry.lookupReadiness(key)?.status).toBe("ready");
+    expect(registry.lookupReadiness({ ...key, hostId: "host_2" })?.status).toBe(
+      "not_installed",
+    );
+    registration.dispose();
+    expect(registry.lookupReadiness(key)).toBeUndefined();
+    expect(registry.lookupReadiness({ ...key, providerId: "pi" })?.status).toBe(
+      "ready",
+    );
   });
 });

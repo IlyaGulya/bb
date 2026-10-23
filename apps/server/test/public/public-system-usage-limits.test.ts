@@ -18,6 +18,7 @@ const USAGE_RESPONSE: ProviderUsageResponse = {
   },
   "claude-code": { status: "unauthenticated" },
   "acp-cursor": { status: "unauthenticated" },
+  "acp-opencode": { status: "not_installed" },
 };
 
 function providerUsage(providerId: string): ProviderUsage | null {
@@ -102,6 +103,51 @@ describe("GET /api/v1/system/usage-limits", () => {
       }
     });
   });
+
+  it.each(["unverified", "stale"] as const)(
+    "still checks actual usage when installation readiness is %s",
+    async (freshness) => {
+      await withTestHarness(async (harness) => {
+        const { host, session } = seedHostSession(harness.deps);
+        harness.deps.providerRegistry.observeReadiness(
+          { hostId: host.id, providerId: "acp-opencode" },
+          {
+            verification: "required",
+            scope: "host",
+            status: freshness === "stale" ? "not_installed" : "initializing",
+            freshness,
+            checkedAt: freshness === "stale" ? 123 : null,
+            retryAfterMs: 5_000,
+            detail: "Installation readiness is not current.",
+          },
+        );
+        const usage: ProviderUsage = {
+          status: "ok",
+          accountEmail: null,
+          planLabel: null,
+          windows: [],
+        };
+        const responder = registerHostRpcResponder(harness, {
+          hostId: host.id,
+          sessionId: session.id,
+          handle: (request) =>
+            request.command.type === "provider.usage"
+              ? { ok: true, result: { supported: true, usage } }
+              : handleUsageRequest(request),
+        });
+        const response = await harness.app.request(
+          `/api/v1/system/usage-limits?hostId=${host.id}&providerId=acp-opencode`,
+        );
+        expect(response.status).toBe(200);
+        expect(await readJson(response)).toEqual({ "acp-opencode": usage });
+        expect(
+          responder.requests.filter(
+            (request) => request.command.type === "provider.usage",
+          ),
+        ).toHaveLength(1);
+      });
+    },
+  );
 
   it("retries provider usage errors instead of retaining them", async () => {
     await withTestHarness(async (harness) => {

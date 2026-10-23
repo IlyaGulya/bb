@@ -18,6 +18,7 @@ import {
   permissionModeSchema,
   pluginThemeMetaSchema,
   providerInfoSchema,
+  providerReadinessSchema,
 } from "@bb/domain";
 import { providerHealthSchema as providerHealthSchema } from "@bb/provider-bridge-protocol/provider-maintenance";
 import { hostPlatformSchema } from "@bb/host-daemon-contract/local";
@@ -52,6 +53,7 @@ export type MachineEnvironmentReplace = z.infer<
 
 export const systemExecutionOptionsModelLoadErrorCodeSchema = z.enum([
   "provider_unavailable",
+  "provider_not_ready",
   "missing_executable",
   "auth_required",
   "timeout",
@@ -90,6 +92,7 @@ export const systemProvidersQuerySchema = z
   .object({
     ...systemProviderHostQueryFields,
     capability: z.enum(["usage"]),
+    providerId: z.string().min(1),
   })
   .partial()
   .superRefine(rejectMultipleWorkspaceSelectors);
@@ -142,6 +145,7 @@ export const systemProviderStateSchema = providerHealthSchema.extend({
   providerId: z.string().min(1),
   displayName: z.string().min(1),
   localLoginCommand: z.string().min(1).nullable(),
+  readiness: providerReadinessSchema.optional(),
 });
 export type SystemProviderState = z.infer<typeof systemProviderStateSchema>;
 

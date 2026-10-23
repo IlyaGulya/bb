@@ -439,7 +439,7 @@ registered agent provider in picker order, as the same `ProviderInfo` the
 host's composer reads (`id`, `pluginId`, `displayName`, `family`, `icon`,
 `logoUrl`, `available`, `capabilities`, `maintenance`, `extensionKinds`,
 `composerActions`, and the declared `strings`, `reasoningLevels`,
-`serviceTiers`). It reads the host's own cached roster, so
+`serviceTiers`, plus `readiness`). It reads the host's own cached roster, so
 it costs no extra request. Use it whenever a surface shows a thread's or
 automation's provider: never vendor provider names or copy in a plugin.
 
@@ -455,3 +455,21 @@ failed; `providers` is empty in both cases, so fall back to the id. The
 backend counterpart is `bb.sdk.providers.list()`. Keep the hook in the plugin
 entry (`app.tsx`) and pass names down as props, so view components stay pure
 and testable outside the plugin runtime.
+
+The directory retains disabled, confirmed missing, and cold/unverified
+providers. Presence and `available` describe registration, not installation or
+authentication. Read `readiness.verification`, `scope`, `status`, `freshness`,
+`checkedAt`, `retryAfterMs`, and `detail` when presenting readiness. An older
+observation may remain stale across a transient failure; neither stale ready
+nor unverified initializing establishes a fresh preflight.
+
+For execution preflight, target the chosen provider with
+`bb.sdk.providers.list({ providerId, ...routing })` and, when verification is
+required, `bb.sdk.system.providerStates({ providerId, ...routing })`. Pass the
+descriptor, returned observation (or null), and actual `"host"` or
+`"environment"` scope to `experimental_providerExecutionReadinessBlocker` from
+`@get-bb/plugin-sdk`. A nonnull result is an actionable blocker. Unsupported
+verification permits existing execution validation without pretending readiness
+was established. Do not reuse host installation health as authentication for a
+different environment or preset; runtime credentials remain authoritative.
+Expose a bounded explicit retry, not an automatic account/model substitution.

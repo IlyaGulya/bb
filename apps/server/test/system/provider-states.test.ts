@@ -60,12 +60,9 @@ describe("getProviderStates", () => {
         hostId: host.id,
       });
 
-      expect(result.providers.map((provider) => provider.providerId)).toEqual([
-        "codex",
-        "claude-code",
-        "pi",
-        "acp-cursor",
-      ]);
+      expect(result.providers.map((provider) => provider.providerId)).toEqual(
+        harness.deps.providerRegistry.list().map((entry) => entry.info.id),
+      );
       expect(result.providers).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -173,13 +170,13 @@ describe("getProviderStates", () => {
         hostId: host.id,
       });
 
-      expect(result.providers.map((provider) => provider.providerId)).toEqual([
-        "codex",
-        "claude-code",
-        "pi",
-        "acp-cursor",
-        "acp-opencode",
-      ]);
+      expect(result.providers.map((provider) => provider.providerId)).toEqual(
+        harness.deps.providerRegistry.list().map((entry) => entry.info.id),
+      );
+      expect(
+        result.providers.find((provider) => provider.providerId === "acp-omp")
+          ?.readiness,
+      ).toMatchObject({ status: "not_installed", freshness: "fresh" });
       expect(result.providers[0]).toMatchObject({
         providerId: "codex",
         status: "ready",
@@ -251,6 +248,12 @@ describe("getProviderStates", () => {
       ).toMatchObject({
         status: "unknown",
         statusMessage: "This provider does not report readiness.",
+        readiness: {
+          verification: "unsupported",
+          status: "unknown",
+          freshness: "unverified",
+          checkedAt: null,
+        },
       });
       expect(
         responder.requests.some(
@@ -313,14 +316,71 @@ describe("getProviderStates", () => {
 
       const result = await getProviderStates(harness.deps, {
         environmentId: environment.id,
+        providerId: "codex",
       });
 
       expect(result.providers[0]?.providerId).toBe("codex");
       expect(primaryCalls).toBe(0);
-      expect(healthCwds.filter((cwd) => cwd === undefined)).toHaveLength(4);
-      expect(healthCwds.filter((cwd) => cwd !== undefined)).toEqual(
-        Array(4).fill(environment.path),
-      );
+      expect(healthCwds).toEqual([environment.path]);
+      expect(result.providers).toHaveLength(1);
+      expect(result.providers[0]?.readiness).toMatchObject({
+        scope: "environment",
+        status: "ready",
+        freshness: "fresh",
+      });
+      expect(
+        harness.deps.providerRegistry.lookupReadiness({
+          hostId: remote.host.id,
+          providerId: "codex",
+        }),
+      ).toBeUndefined();
+    });
+  });
+  it("keeps targeted transient failures distinct from confirmed auth requirements", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      let transient = true;
+      const responder = registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: () =>
+          transient
+            ? {
+                ok: false,
+                errorCode: "host_unavailable",
+                errorMessage: "Bridge is still initializing",
+              }
+            : {
+                ok: true,
+                result: {
+                  supported: true,
+                  health: {
+                    ...readyHealth("acp-omp"),
+                    status: "unauthenticated",
+                  },
+                },
+              },
+      });
+      const cold = await getProviderStates(harness.deps, {
+        hostId: host.id,
+        providerId: "acp-omp",
+      });
+      expect(cold.providers).toHaveLength(1);
+      expect(cold.providers[0]?.readiness).toMatchObject({
+        status: "initializing",
+        freshness: "unverified",
+        checkedAt: null,
+      });
+      transient = false;
+      const confirmed = await getProviderStates(harness.deps, {
+        hostId: host.id,
+        providerId: "acp-omp",
+      });
+      expect(confirmed.providers[0]?.readiness).toMatchObject({
+        status: "auth_required",
+        freshness: "fresh",
+      });
+      expect(responder.requests).toHaveLength(2);
     });
   });
 });

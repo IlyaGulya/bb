@@ -3,17 +3,28 @@ import type {
   SystemExecutionOptionsResponse,
 } from "@bb/server-contract";
 import type { BbSdkTransport } from "../transport.js";
+import type { RequestTimeoutInit } from "../response.js";
 
 export interface CreateSdkAreaArgs {
   transport: BbSdkTransport;
 }
 
-type SignalRequestOptions = { init: { signal: AbortSignal } };
+type SignalRequestOptions = { init: RequestTimeoutInit };
 
 export function signalRequestArgs(
   signal: AbortSignal | undefined,
+  timeoutMs?: number,
 ): [] | [SignalRequestOptions] {
-  return signal === undefined ? [] : [{ init: { signal } }];
+  return signal === undefined && timeoutMs === undefined
+    ? []
+    : [
+        {
+          init: {
+            ...(signal === undefined ? {} : { signal }),
+            ...(timeoutMs === undefined ? {} : { timeoutMs }),
+          },
+        },
+      ];
 }
 
 export async function readExecutionOptions(

@@ -35,6 +35,11 @@ const REPO_PLUGINS_DIRECTORY_NAME = "plugins";
 
 export const BUILTIN_PLUGINS = [
   {
+    name: "slack-inbox",
+    pluginId: "bb--slack-inbox",
+    defaultEnabled: false,
+  },
+  {
     name: "storage-retention",
     pluginId: "bb--storage-retention",
     defaultEnabled: false,

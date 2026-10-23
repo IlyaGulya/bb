@@ -1,4 +1,7 @@
-import { assertWorkspaceContinuationAdmission } from "../projects/workspace-transfer-admission.js";
+import {
+  assertWorkspaceContinuationAdmission,
+  workspaceContinuationAdmissionRequired,
+} from "../projects/workspace-transfer-admission.js";
 import { assertWorkspaceTransferAdmission } from "../projects/workspace-transfer-locks.js";
 import { hostCommandMayWake } from "./wake-policy.js";
 import { isHostCleanupAllowed } from "./cleanup-context.js";
@@ -186,12 +189,35 @@ async function prepareHostForWork(
     },
   );
   assertMachineLifecycleAdmission(deps, args.hostId);
-  if (args.command.type === "thread.start" || args.command.type === "turn.submit" || args.command.type === "thread.rewind.prepare") {
-    assertWorkspaceTransferAdmission(deps.db, getThread(deps.db, args.command.threadId)?.environmentId ?? null);
-    await assertWorkspaceContinuationAdmission(deps, getThread(deps.db, args.command.threadId)?.environmentId ?? null);
-    assertWorkspaceTransferAdmission(deps.db, getThread(deps.db, args.command.threadId)?.environmentId ?? null);
+  if (
+    args.command.type === "thread.start" ||
+    args.command.type === "turn.submit" ||
+    args.command.type === "thread.rewind.prepare"
+  ) {
+    assertWorkspaceTransferAdmission(
+      deps.db,
+      getThread(deps.db, args.command.threadId)?.environmentId ?? null,
+    );
+    if (
+      workspaceContinuationAdmissionRequired(
+        deps,
+        getThread(deps.db, args.command.threadId)?.environmentId ?? null,
+      )
+    )
+      await assertWorkspaceContinuationAdmission(
+        deps,
+        getThread(deps.db, args.command.threadId)?.environmentId ?? null,
+        args.command.threadId,
+      );
+    assertWorkspaceTransferAdmission(
+      deps.db,
+      getThread(deps.db, args.command.threadId)?.environmentId ?? null,
+    );
   }
-  if (args.command.type === "workspace.commit" || args.command.type === "workspace.pull_request_action") {
+  if (
+    args.command.type === "workspace.commit" ||
+    args.command.type === "workspace.pull_request_action"
+  ) {
     assertWorkspaceTransferAdmission(deps.db, args.command.environmentId);
   }
   if (

@@ -30,14 +30,17 @@ normal interruption and retry behavior.
 ## Project preparation and transfer API
 
 The core SDK exposes these methods under `BbSdk.projects`. Each input also
-accepts an optional abort `signal`.
+accepts an optional abort `signal`. Preview and transfer additionally accept
+per-call `timeoutMs`; this is SDK transport metadata, not an HTTP JSON field.
+The default Node request timeout remains 75 seconds; callers may explicitly
+allow longer transfers without changing other requests' deadlines.
 
-| SDK method | HTTP route | Input |
-| --- | --- | --- |
-| `prepareMachine` | `POST /api/v1/projects/:id/prepare-machine` | `{projectId, hostId, targetPath, sourceHostId?, copyPaths?}` |
-| `previewWorkspaceTransfer` | `POST /api/v1/projects/:id/preview-workspace-transfer` | `{projectId, sourceEnvironmentId, targetHostId}` |
-| `transferWorkspace` | `POST /api/v1/projects/:id/transfer-workspace` | `{projectId, sourceEnvironmentId, targetHostId, targetPath, branch?, includePaths}` |
-| `getWorkspaceTransfer` | `GET /api/v1/workspace-transfers/:operationId` | `{operationId}` |
+| SDK method                 | HTTP route                                             | Input                                                                                                          |
+| -------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `prepareMachine`           | `POST /api/v1/projects/:id/prepare-machine`            | `{projectId, hostId, targetPath, sourceHostId?, copyPaths?}`                                                   |
+| `previewWorkspaceTransfer` | `POST /api/v1/projects/:id/preview-workspace-transfer` | `{projectId, sourceEnvironmentId, targetHostId}`                                                               |
+| `transferWorkspace`        | `POST /api/v1/projects/:id/transfer-workspace`         | `{projectId, sourceEnvironmentId, targetHostId, targetPath, branch?, includePaths, remoteBase?, operationId?}` |
+| `getWorkspaceTransfer`     | `GET /api/v1/workspace-transfers/:operationId`         | `{operationId}`                                                                                                |
 
 Project IDs are route parameters, not JSON body fields. Preparation returns
 `{source, copiedFiles: [{path, sha256}], readiness: {ready, checks: [{name, ok,
@@ -46,12 +49,20 @@ paths are confined relative files from a source host belonging to this project;
 there are no implicit secret-file copies or silent overwrites.
 
 Preview returns `{sourceEnvironmentId, sourceHostId, head, branch, files,
-activeThreadIds}`. Each file has `{path, kind, tracked, selectedByDefault,
-excludedReason?}`. Branch is nullable. Inspect exclusions before selecting
-untracked/ignored files; tracked secret exclusions require explicit
-`includePaths` consent rather than silently losing changes.
-Ordinary tracked secret-like files use `kind: "sensitive-tracked"` and can be
-explicitly selected for consent; unsupported file types are hard refusals.
+activeThreadIds, remoteBaseCandidates?}`. Each file has `{path, kind, tracked,
+selectedByDefault, excludedReason?}`. Branch is nullable. Cached origin/ref/SHA
+candidates are suggestions requiring explicit approval, not proof of remote
+availability.
+
+Inspect exclusions before selecting portable untracked/ignored files. Ordinary
+token/secret source modules, action code and project instructions are not
+credential storage and need no per-file approval. Ambiguous key/config-shaped
+tracked files use `kind: "sensitive-tracked"`: review with the source owner,
+select exact approved paths, and provide a published `remoteBase`. Their HEAD,
+index and worktree content must be unchanged at that prerequisite. Sensitive
+untracked, staged, dirty or unpublished historical blobs are refused. Native
+authentication/session storage is forbidden even when explicitly selected.
+These are path-based safeguards, not a semantic secret scanner.
 
 Transfer returns `{operationId, status: "ready", environmentId, hostId, rootPath,
 head, branch, handoff}` only after verification. The durable query returns
@@ -59,17 +70,34 @@ head, branch, handoff}` only after verification. The durable query returns
 `targetPath`, `createdAt`, `updatedAt` and status. Status is `pending`,
 `capturing`, `transferring`, `verifying`, `ready`, `failed` or `interrupted`.
 Ready includes the transfer result fields and optional `continuationThreadId`;
-failure exposes an `error` string. Use the operation ID to inspect a transfer
-after a lost client connection.
+failure exposes an `error` string. Captured payloads have durable byte-count and
+SHA-256 receipts (`checkpointBytes`, `checkpointSha256`). Use the operation ID
+to inspect a transfer after a lost client connection. A caller-provided
+`operationId` is claimed exclusively; resubmission does not overwrite or replay
+an existing operation.
 
 The source environment and its threads must be idle and remain unchanged during
 capture. The target path must be new; transfer preserves the source and registers
-a new environment of the same project. A Git bundle carries unpublished commits
-without requiring private remote access on both machines. Staged/unstaged tracked
-changes, deletes, binary files and modes are preserved. There is no live native
-session migration: continuation starts a new session using the returned handoff.
-The target is created from the source bundle without origin access. Git config,
-authentication and remote configuration are not automatically transferred.
+a new environment of the same project. Staged/unstaged tracked changes, deletes,
+binary files and modes are preserved. There is no live native session migration:
+continuation starts a new session using the returned handoff.
+
+For a published base, supply `remoteBase: {url, ref, head}`: a credential-free
+HTTPS or SSH origin, explicit `refs/heads/...` or `refs/tags/...`, and exact
+prerequisite commit SHA. The source verifies locally available ancestry without
+fetching or changing its refs. The target fetches the approved ref using its
+**own** Git authentication, verifies that it contains the prerequisite, and
+applies only unpublished commits through a bounded incremental bundle. When
+source HEAD itself is the approved published commit, no bundle is needed.
+Tracked dirty overlays and explicit extra files remain independently verified.
+Missing refs, authorization or prerequisite objects fail visibly: no other
+account, origin, push or full-history fallback is attempted.
+
+Without `remoteBase`, a bounded full bundle remains available without target
+origin access. It must still satisfy the same checkpoint limits and sensitive
+history restrictions. Source Git config, credentials and native sessions are
+not copied. Remote mode creates only the explicitly approved target origin;
+provider and MCP authorization remain target-local prerequisites.
 Ordinary files retain their POSIX `rwx` permission bits, independently of Git's
 executable bit. Checkpoints include permissions metadata for unchanged tracked
 files without retransmitting their contents. Ownership, ACLs, extended
@@ -91,34 +119,91 @@ survives server restarts. The CLI equivalent is `bb thread spawn --project <id>
 
 Checkpoint payloads support 64 MiB of combined decoded bytes across bundle,
 changed staged-index blobs, changed tracked working files and selected extras.
-Unchanged tracked files travel in the Git bundle rather than duplicate worktree
-blobs; the bundle's compressed bytes still count. Staged and working versions
-can count twice. Preparation copy batches also support 64 MiB combined.
-Index metadata and preview lists support 10,000 entries. The decoded limit can produce
+Unchanged tracked files come from the approved target fetch or Git bundle,
+not duplicate worktree blobs; any bundle's compressed bytes still count.
+Staged and working versions can count twice. Preparation copy batches also
+support 64 MiB combined.
+Index metadata and preview lists support 100,000 entries. The decoded limit can produce
 approximately 85.4 MiB of base64-encoded RPC JSON plus metadata. Each checkpoint
 or `{files}` copy batch must also fit 96 MiB of UTF-8 JSON serialization,
 including base64 and path/index metadata. Both limits apply. Oversized capture
 and copy reads fail before returning data; restore and copy writes fail before
 target processing or mutation. Transfers are not chunked or truncated.
-Symlinks, submodules/gitlinks, sparse checkout/index,
+Tracked symlinks preserve mode `120000` and pointer bytes, not dereferenced
+contents. Targets must be existing, repository-confined relative paths that
+avoid Git internals and sensitive storage. Source and target validation also
+cover staged and unstaged pointer changes. Untracked/explicit-copy symlinks,
+escaping links, submodules/gitlinks, sparse checkout/index,
 unmerged entries, skip-worktree, assume-unchanged, in-progress Git operations
 and custom non-LFS clean/smudge filters are refused. Shallow/partial/promisor
 clones, grafts and replacement refs are also refused to avoid lazy network
 fetches, incomplete history and source mutation. No whole-home archive
 or automatic agent-session/auth/MCP-secret directory copying is performed.
-Only exact ordinary files can be selected, including explicit nested relative
+Only exact extra files can be selected, including explicit nested relative
 paths. Ignored directories appear as excluded directory entries in preview;
 selection does not recursively copy directories.
 
-Ordinary transfers require Node and Git. Git LFS transfers preserve materialized
-working bytes alongside pointer index entries; unresolved pointer-only files
-are refused: fetch/materialize actual source bytes before retrying. When LFS
-paths exist, the target must have `git-lfs` installed;
-transfer configures only standard local LFS filter commands and copies no
-network credentials or authentication. The effective `filter=lfs` path set must
-match on the target. Select required `.gitattributes` files explicitly when
-untracked/ignored; source-only info attributes or attribute mismatches fail with
-actionable errors rather than changing file interpretation silently.
+Ordinary transfers require Node and Git. Git LFS source files must contain
+materialized bytes, not unresolved pointers; materialize them separately before
+capture, because transfer never fetches into the source. With an approved base,
+unchanged published LFS content is fetched and materialized using target-native
+Git LFS/authentication, rather than embedded in JSON. Its raw identity is then
+verified against the source checkpoint. Dirty or unpublished LFS content still
+counts toward the bounded dirty overlay.
+
+The target must have `git-lfs` installed for LFS paths. Transfer configures only
+standard target-local LFS filters, before materialization, and copies no network
+credentials. The effective `filter=lfs` path set must match on the target.
+Select required `.gitattributes` files explicitly when untracked/ignored;
+source-only info attributes or attribute mismatches fail rather than changing
+file interpretation silently.
+
+## Coherent multi-repository Task preparation
+
+Tasks exposes `repositories inspect`, `prepare`, `show` and `continue` through
+its CLI and Task panel. The matching plugin RPC/SDK methods are
+`inspectTaskRepository`, `prepareTaskRepositories`, `getTaskRepositories` and
+`continueTaskRepositories`. Bind 2–32 explicit repositories with owner, role,
+source host/path/branch/HEAD, target host/path, isolated branch, executor preset,
+instructions and required instruction paths. Do not derive roots or ownership
+from the default project. Tasks permits up to 10,000 explicit `includePaths`.
+
+The first binding is required and becomes the primary environment; all targets
+must share one host and executor profile and have distinct, non-nested roots.
+Each keeps its own Git repository, environment, branch and dirty checkpoint.
+One coherent native thread receives all ready folders' paths and instructions.
+There is no synthetic umbrella repository or mandatory agent-per-root split.
+Every required root must pass preparation and execution readiness checks before
+any executor starts; the aggregate gate cannot be bypassed through single-root
+delegation/continuation.
+
+Task preparation persists reservations and returns a `preparing` checkpoint
+immediately. The existing plugin lifecycle background service performs the work
+and publishes per-root progress; this is not a synchronous multi-root RPC.
+It opts into a 20-minute preview request and a 45-minute transfer request, while
+native capture/restore phases retain their own 20-minute bounds. Cancellation
+and plugin restart preserve explicit `interrupted`/unknown outcomes and native
+operation IDs. `show`/get reconciles available ready receipts without replay.
+Partial preparation never means overall migration success.
+
+Retry a settled checkpoint with its ID, keep verified roots unchanged and
+choose fresh target paths for failed/interrupted roots. Prior targets, payloads
+and attempt history remain inspectable. Continue explicitly after agreement;
+once continuation begins, the bound root set is fixed. Core
+`threads.spawn` uses the primary `transferOperationId`, reused primary
+environment and `repositoryTransferOperationIds`; native
+`additionalWorkspacePaths` supplies the other roots and their write permissions.
+
+The durable `workspace-repository-groups/<primaryEnvironmentId>.json` manifest
+and transfer `.checkpoint`/operation receipts preserve scoped native ownership
+and recovery state. They are not an OS sandbox: read-only inspection and human
+Git controls remain available, and external host processes can still write
+files. Coordinate human edits and stop native writers before intervention;
+group-bound secondary executor/terminal admission remains fenced.
+
+Backup work is explicitly deferred. Local manifest/payload durability neither
+activates nor accepts a backup system, and no backup restore proof is required
+in this wave.
 
 CLI equivalents and all flags are in `bb guide projects`; see
 [multiple-device usage](multiple-devices.md) for the operator workflow.

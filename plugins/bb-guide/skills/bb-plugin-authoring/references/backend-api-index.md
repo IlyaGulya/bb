@@ -9,6 +9,7 @@ Read the installed declarations for exact current signatures.
 - `PLUGIN_CLI_OUTPUT_MAX_BYTES`
 - `defineRpcContract`
 - `experimental_defineHostEntry`
+- `experimental_providerExecutionReadinessBlocker`
 - `defineCli`
 - `cliCommand`
 - `PluginCliError`
@@ -232,6 +233,7 @@ Read the installed declarations for exact current signatures.
 - `PluginProviderStrings`
 - `PluginProviders`
 - `PluginProvidersState`
+- `ProviderReadiness`
 - `PluginRealtime`
 - `PluginRealtimeConnectionState`
 - `PluginRowLabels`

@@ -30,6 +30,8 @@ import { ThreadsSection } from "./threads.js";
 import { type TaskExecution } from "../../shared/execution.js";
 import { DetailToasts, useDetailToasts } from "./toast.js";
 import { JiraSourcePanel } from "../jira/source-panel.js";
+import { TaskRepositoriesControl } from "./repositories.js";
+import { TaskWorkflowPanel } from "./workflow.js";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -498,27 +500,41 @@ function TaskDetail({ task }: { task: Task }) {
             subtasks={subtasks.data ?? []}
             onCreate={createSubtask}
           />
+          <TaskRepositoriesControl
+            taskId={task.id}
+            presets={presets.data ?? []}
+          />
+          <TaskWorkflowPanel
+            taskId={task.id}
+            profiles={(presets.data ?? []).map(({ id, name }) => ({
+              id,
+              name,
+            }))}
+          />
 
-            <div className="mt-6">
-              <ThreadsSection
-                taskId={task.id}
-                onContinued={() => { threads.refresh(); pullRequests.refresh(); }}
-                threads={threads.data ?? []}
-                pullRequests={pullRequests.data?.pullRequests}
-                unavailableThreadIds={
-                  pullRequests.data?.unavailableThreadIds ?? []
-                }
-                onDetach={async (thread) => {
-                  await delegationRpc.call("taskThreadsDetach", {
-                    taskId: task.id,
-                    threadId: thread.threadId,
-                  });
-                  threads.refresh();
-                  pullRequests.refresh();
-                }}
-                onError={(message) => push(message)}
-              />
-            </div>
+          <div className="mt-6">
+            <ThreadsSection
+              taskId={task.id}
+              onContinued={() => {
+                threads.refresh();
+                pullRequests.refresh();
+              }}
+              threads={threads.data ?? []}
+              pullRequests={pullRequests.data?.pullRequests}
+              unavailableThreadIds={
+                pullRequests.data?.unavailableThreadIds ?? []
+              }
+              onDetach={async (thread) => {
+                await delegationRpc.call("taskThreadsDetach", {
+                  taskId: task.id,
+                  threadId: thread.threadId,
+                });
+                threads.refresh();
+                pullRequests.refresh();
+              }}
+              onError={(message) => push(message)}
+            />
+          </div>
           <JiraSourcePanel key={task.id} task={task} />
 
           <div className="mt-1">

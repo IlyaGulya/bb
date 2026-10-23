@@ -92,12 +92,14 @@ come from persisted native attempt/error events, so a later failed turn reopens
 attention even if its intervening recovery happened between Inbox sweeps.
 Unavailable failure-event reads preserve prior decisions and report a warning.
 
-`in_review` creates a Review item pointing to the task and latest non-retired
-result thread. Idle, completed, and deleted threads never mark the task accepted.
-Resolve dismisses only the review reminder: acceptance remains an explicit
-task status decision. Changed review content/result attachments reopen it;
-priority/timestamp-only changes do not. A completed workspace continuation's
-source is retained as history and excluded from current attention.
+`in_review` creates a Review item pointing to the task and its result thread.
+Managed build/review results point to the retained writer's package rather
+than the newest reviewer link. Ordinary results use the latest non-retired
+thread. Idle, completed and deleted threads never mark the task accepted.
+Resolve dismisses only the reminder. Managed workflows require exact-revision
+Accept; a generic status change to Done is rejected. Changed review content
+reopens attention; priority/timestamp-only changes do not. A completed workspace
+continuation's source is retained as history and excluded from current attention.
 
 Snooze chooses a future local time in the UI, or an ISO-8601 timestamp with
 timezone from the CLI. The server returns due entries within its 15-second
@@ -148,6 +150,24 @@ Original source URLs must be HTTP(S); all source text is untrusted context.
 
 ## Changelog
 
+### 0.4.0
+
+- Bind multiple explicit code projects/roots to one task, prepare asynchronously,
+  inspect per-root failures and resume preparation without replaying uncertain
+  native operations. Continue with one coherent writer only after all required
+  roots verify on the same host and execution profile.
+- Preserve published Git/LFS prerequisites with target-native authentication,
+  bounded unpublished/dirty overlays, selected portable files, confined tracked
+  instruction symlinks and durable transfer receipts. No auth-home migration.
+- Add native build → independent review with a retained writer, actual platform
+  smoke evidence, authoritative commit checks, exact-revision human Accept and
+  same-session Return. Project deletion preflights all retained groups atomically.
+- Project workflow worker activity, writer result packages and failed/blocked
+  workflow attention through the existing Working/Inbox views. Render Inbox
+  context with BB's shared Markdown component and actionable links.
+- Require fresh readiness on the actual selected provider/environment; a
+  registered or cold provider is not silently treated as ready.
+
 ### 0.3.0
 
 - Add persistent unified Inbox and Working, native question/review projection,
@@ -156,6 +176,34 @@ Original source URLs must be HTTP(S); all source text is untrusted context.
 - Add deduplicated external source revision ingestion and recovery, with
   dismissal surviving restart. Append inbox schema migration without rewriting
   existing task, attachment, Jira, or execution data.
+
+## Multi-repository and reviewed execution
+
+The task card includes **Repository workspace** and **Build → review**.
+The shipped Tasks skill documents the complete validated input and CLI/RPC
+surface: `repositories inspect|prepare|show|continue` and
+`workflow start|list|accept|return`. These are explicit operations; moving a
+board card does not start either flow.
+
+Repository bindings name each code project, source environment/owner/HEAD,
+target path, isolated branch, role, instructions and permitted profile. The
+first required root is primary. Preparation creates no executor; partial
+readiness blocks continuation. All roots use one selected host/profile and
+one native thread, not independent per-repository agents.
+
+Build/review starts from an idle prepared single-root workspace in the
+tracker's linked code project. It intentionally refuses a task already bound
+to the multi-repository execution path. Select distinct allowed writer and
+reviewer models/providers, and name the actual platform smoke commands.
+Native Workflows must be enabled. Its three phases are Plan, Build and
+platform smoke, Independent review. A published package is never acceptance.
+
+Return preserves the established writer/session and workspace. An uncertain
+send is not blindly resent or replaced. Before the first writer is established,
+a definitive launch rejection permits repairing the originally selected
+profiles and retrying with explicit feedback. Generic Done cannot bypass
+pending workflow acceptance. Human Accept requires the exact latest revision
+and an unchanged clean reviewed commit.
 
 ## CLI reference
 
@@ -174,32 +222,32 @@ also accept one comma-separated list. File paths (`--file`, `--attach`,
 inside an agent thread that is the thread's machine, otherwise the server's
 machine; pass `--machine <id-or-name>` to target another enrolled machine.
 
-| Command                                         | Purpose                                                                                                                                    |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `bb tasks status`                               | Show the installed Tasks plugin name and version. Task workflow status lives on `bb tasks list --status` and `bb tasks update --status`.   |
-| `bb tasks project create\|list\|show\|update`   | Manage tracker projects, folders, colors, prefixes, and bb-project links.                                                                  |
-| `bb tasks folder create\|list\|update\|delete`  | Organize tracker projects into nested folders. Deleting a folder moves its projects and subfolders to the top level; no tasks are deleted. |
-| `bb tasks create`                               | Create a task with description, priority, labels, due date, optional parent, and file attachments (repeatable `--attach <path>`).          |
-| `bb tasks list`                                 | Page/filter tasks by project, status, priority, label, active agents, or search text; supports `--sort`, `--limit`, and `--cursor`.        |
-| `bb tasks show <key-or-id>`                     | Show the complete task record, including comments, attachments, subtasks, and attached threads.                                            |
-| `bb tasks update <key-or-id>`                   | Update status, priority, title, description, due date, or labels.                                                                          |
-| `bb tasks move <key-or-id>`                     | Move a task and its sub-tasks to `--project`. Moved tasks get new keys; old keys keep resolving, and labels are matched by name.           |
-| `bb tasks comment <key-or-id>`                  | Add a Markdown comment from inline text or a file; optionally notify the latest responding task agent.                                     |
-| `bb tasks attachment add\|get\|list\|remove`    | Add, fetch, list, or remove attachments. Referenced attachments require `remove --remove-references`.                                      |
-| `bb tasks preset list\|create\|update\|delete`  | Manage reusable agent execution presets.                                                                                                   |
-| `bb tasks delegate <key>`                       | Start and attach a new agent thread using a preset.                                                                                        |
-| `bb tasks execution get\|set\|clear <key>`       | Inspect, persist, or clear task execution routing independently of tracker defaults. |
-| `bb tasks execution environments --bb-project <id>` | List existing environments, optionally filtered by `--machine`. |
-| `bb tasks continue preview\|start\|list <key>` | Preview, start, or inspect durable idle-workspace continuations into new native sessions. |
-| `bb tasks attach <key-or-id>`                   | Attach the current bb thread to a task when it was not delegated from Tasks.                                                               |
-| `bb tasks detach <key-or-id>`                   | Detach the current bb thread (or `--thread <id>`) from a task, for example a dead predecessor after a respawn.                             |
-| `bb tasks threads <key>`                        | List the bb threads attached to a task: live threads first, newest first.                                                                  |
-| `bb tasks label create\|list\|delete`           | Manage project-scoped labels.                                                                                                              |
-| `bb tasks seed-demo --yes`                      | Create sample folders, projects, labels, tasks, and comments for evaluation.                                                               |
-| `bb tasks jira connections\|show\|import`       | Discover configured connections, read stored source context, or import/link one selected Jira issue into native Tasks.                     |
-| `bb tasks jira search\|links`                   | Page read-only Jira discovery via JQL, or resolve native links by immutable Jira issue IDs.                                                |
-| `bb tasks jira pull\|draft\|clear\|transitions` | Explicitly refresh source, prepare/discard one proposal, or list Jira transition/status pairs.                                             |
-| `bb tasks jira preview\|push\|reconcile`        | Review three-way changes, explicitly push a reviewed preview ID, or reconcile an uncertain write by operation ID.                          |
+| Command                                             | Purpose                                                                                                                                    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bb tasks status`                                   | Show the installed Tasks plugin name and version. Task workflow status lives on `bb tasks list --status` and `bb tasks update --status`.   |
+| `bb tasks project create\|list\|show\|update`       | Manage tracker projects, folders, colors, prefixes, and bb-project links.                                                                  |
+| `bb tasks folder create\|list\|update\|delete`      | Organize tracker projects into nested folders. Deleting a folder moves its projects and subfolders to the top level; no tasks are deleted. |
+| `bb tasks create`                                   | Create a task with description, priority, labels, due date, optional parent, and file attachments (repeatable `--attach <path>`).          |
+| `bb tasks list`                                     | Page/filter tasks by project, status, priority, label, active agents, or search text; supports `--sort`, `--limit`, and `--cursor`.        |
+| `bb tasks show <key-or-id>`                         | Show the complete task record, including comments, attachments, subtasks, and attached threads.                                            |
+| `bb tasks update <key-or-id>`                       | Update status, priority, title, description, due date, or labels.                                                                          |
+| `bb tasks move <key-or-id>`                         | Move a task and its sub-tasks to `--project`. Moved tasks get new keys; old keys keep resolving, and labels are matched by name.           |
+| `bb tasks comment <key-or-id>`                      | Add a Markdown comment from inline text or a file; optionally notify the latest responding task agent.                                     |
+| `bb tasks attachment add\|get\|list\|remove`        | Add, fetch, list, or remove attachments. Referenced attachments require `remove --remove-references`.                                      |
+| `bb tasks preset list\|create\|update\|delete`      | Manage reusable agent execution presets.                                                                                                   |
+| `bb tasks delegate <key>`                           | Start and attach a new agent thread using a preset.                                                                                        |
+| `bb tasks execution get\|set\|clear <key>`          | Inspect, persist, or clear task execution routing independently of tracker defaults.                                                       |
+| `bb tasks execution environments --bb-project <id>` | List existing environments, optionally filtered by `--machine`.                                                                            |
+| `bb tasks continue preview\|start\|list <key>`      | Preview, start, or inspect durable idle-workspace continuations into new native sessions.                                                  |
+| `bb tasks attach <key-or-id>`                       | Attach the current bb thread to a task when it was not delegated from Tasks.                                                               |
+| `bb tasks detach <key-or-id>`                       | Detach the current bb thread (or `--thread <id>`) from a task, for example a dead predecessor after a respawn.                             |
+| `bb tasks threads <key>`                            | List the bb threads attached to a task: live threads first, newest first.                                                                  |
+| `bb tasks label create\|list\|delete`               | Manage project-scoped labels.                                                                                                              |
+| `bb tasks seed-demo --yes`                          | Create sample folders, projects, labels, tasks, and comments for evaluation.                                                               |
+| `bb tasks jira connections\|show\|import`           | Discover configured connections, read stored source context, or import/link one selected Jira issue into native Tasks.                     |
+| `bb tasks jira search\|links`                       | Page read-only Jira discovery via JQL, or resolve native links by immutable Jira issue IDs.                                                |
+| `bb tasks jira pull\|draft\|clear\|transitions`     | Explicitly refresh source, prepare/discard one proposal, or list Jira transition/status pairs.                                             |
+| `bb tasks jira preview\|push\|reconcile`            | Review three-way changes, explicitly push a reviewed preview ID, or reconcile an uncertain write by operation ID.                          |
 
 Statuses are `backlog`, `todo`, `in_progress`, `in_review`, `done`, and
 `canceled`. Priorities are `urgent`, `high`, `medium`, `low`, and `none`.

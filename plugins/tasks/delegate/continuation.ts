@@ -5,6 +5,7 @@ import type { Preset, Task, TaskThreadLiveStatus } from "../db";
 import { errorMessage } from "../shared/errors";
 import { delegationRpcContract } from "./contract";
 import { ExecutionStore, type StoredContinuation } from "./execution-store";
+import { RepositoryStore } from "../repositories/store";
 import {
   environmentThreads,
   requireIdleTask,
@@ -190,6 +191,7 @@ export function continuationHandlers(
     },
     async continueTask(input) {
       return withTaskExecution(input.taskId, async () => {
+        new RepositoryStore(store).assertSingleRootAllowed(input.taskId);
         const task = store.tasks.getTask(input.taskId);
         if (!task) throw new Error(`Task not found: ${input.taskId}`);
         const preset = store.tasks.getPreset(input.presetId);
