@@ -1,5 +1,6 @@
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import manifest from "./package.json" with { type: "json" };
 
 import { createStore, registerTasksApi } from "./api";
 import { registerAttachments } from "./attachments";
@@ -10,7 +11,7 @@ import { registerMentions } from "./mentions";
 import { registerJiraSync } from "./jira";
 
 const TASKS_PLUGIN_NAME = "Tasks";
-export const TASKS_PLUGIN_VERSION = "0.1.6";
+const TASKS_PLUGIN_VERSION = manifest.version;
 
 const tasksRpcContract = defineRpcContract({
   ping: {
