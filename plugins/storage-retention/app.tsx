@@ -49,6 +49,7 @@ import {
   LARGE_FILE_MIN_BYTES,
   LARGE_FILE_NUDGE_MIN_BYTES,
 } from "./src/rules.js";
+import { FleetHealthPanel } from "./health-app.js";
 
 type HostReport = import("./src/storage-types.js").HostStorageResponse;
 type Hosts = import("./src/storage-types.js").HostStorageListResponse["hosts"];
@@ -263,6 +264,12 @@ function StoragePanel(props: PluginNavPanelProps) {
       connection();
     };
   }, [sdk, refresh]);
+  if (data?.state.readOnly)
+    return (
+      <div className="h-full overflow-y-auto">
+        <FleetHealthPanel hostId={props.subPath || null} readOnly />
+      </div>
+    );
   return (
     <StoragePage
       key={props.subPath}
@@ -621,6 +628,7 @@ function StoragePage({
           hostId ? "space-y-6" : "space-y-10",
         )}
       >
+        <FleetHealthPanel hostId={hostId} readOnly={false} />
         {hostId && state && (
           <header className="space-y-3">
             <button

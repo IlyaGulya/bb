@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  createFakePluginHost,
+  createFakePluginHost as createHost,
   makeThreadResponse,
 } from "@get-bb/plugin-sdk/testing";
 import { selectCandidates, type RetentionThread } from "./policy.js";
 import plugin from "./server.js";
+const createFakePluginHost: typeof createHost = (options) =>
+  createHost({
+    ...options,
+    settings: { ...options?.settings, readOnly: false },
+  });
 
 const DAY = 86400000;
 const NOW = 100 * DAY;

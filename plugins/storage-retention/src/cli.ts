@@ -7,6 +7,7 @@ import {
 } from "@get-bb/plugin-sdk";
 import { policySchema } from "./contract.js";
 import type { Service } from "./service.js";
+import type { Health } from "./health.js";
 
 const MACHINE = { type: "string", description: "Machine ID" } as const;
 const YES = {
@@ -51,6 +52,7 @@ export function registerCli(
   bb: BbPluginApi,
   service: Service,
   storage: Storage,
+  health: Health,
 ) {
   bb.cli.register(
     defineCli({
@@ -61,6 +63,18 @@ export function registerCli(
         run: (input) => ({ exitCode: 0, stdout: input.help }),
       }),
       commands: {
+        health: cliCommand({
+          summary:
+            "Read fleet health; --rescan measures connected workers without cleanup",
+          options: {
+            rescan: {
+              type: "boolean",
+              description: "Wait for a fresh read-only fleet measurement",
+            },
+          },
+          run: ({ options }) =>
+            output(() => (options.rescan ? health.scanAll() : health.fleet())),
+        }),
         cleanup: cliCommand({
           summary: "Start background cleanup; read progress with storage usage",
           options: {

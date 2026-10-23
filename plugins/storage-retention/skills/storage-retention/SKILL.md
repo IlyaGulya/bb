@@ -5,12 +5,16 @@ description: Inspect machine storage, clean up files, and configure automatic th
 
 # Storage & retention
 
-Enable `bb plugin enable bb--storage-retention`. Both policies default to Never.
-Open the plugin's sidebar panel for machine reports and retention settings.
-All settings in the panel save immediately when changed.
+Enable `bb plugin enable bb--storage-retention`. Native setting `readOnly`
+defaults true, forcing effective retention Never/all deletion policies off even
+when old policies were saved. The sidebar shows read-only fleet health. Cleanup
+RPC/CLI calls reject in this mode. Do not set `readOnly=false` for monitoring;
+that deliberately restores saved maintenance policies and the maintenance UI.
 All commands return JSON. Use the owning server's normal SDK/plugin RPC transport.
 
 ```sh
+bb storage health
+bb storage health --rescan
 bb storage retention
 bb storage retention --archive-after 30 --delete-after 90
 bb storage retention --archive-after 30 --delete-after 90 --save --yes
@@ -31,6 +35,36 @@ bb storage clear-archived-files --machine HOST_ID --yes
 bb storage remove-dev-instances --machine HOST_ID --yes
 bb storage remove-dev-instances --machine HOST_ID --instance NAME --yes
 ```
+
+Health RPCs are `health(null)` (cached observations) and `scanHealth(null)`
+(waits for read-only worker measurements). SDK transport:
+`sdk.plugins.callRpc({pluginId:"bb--storage-retention",method:"health",input:null,outputSchema:fleetHealthSchema})`.
+The schema is exported from `src/health-types.ts`. All enrolled hosts appear,
+including offline machines; measurements never substitute server/container
+values for remote machines. Each code/data path has actual filesystem available
+bytes or an explicit unavailable result. Samples older than three minutes are
+stale. CPU is load average, not utilization; missing CPU/RAM/capacity is null.
+Container metrics are explicitly scoped. One-minute native scheduling and
+connection recovery keep samples current without starting cleanup.
+Active work uses `threads.running` (canonical starting/active, hidden included);
+unresolved host routing makes counts unknown. RAM with `basis:"os-free"` is
+OS free memory, not cache-adjusted available memory; container RAM is remaining
+cgroup allowance.
+
+Critical disk (at most 5 GiB or 5% available) and previously observed worker loss
+upsert stable source keys in Tasks Inbox. Sample timestamps and changing byte
+counts do not reopen dismissed warnings. Recovery resolves only the source item;
+a new incident advances a persisted generation. `inboxError` exposes failed
+delivery and subsequent scans retry. Do not manufacture metrics for real hosts
+to exercise warnings. Use `src/health.test.ts` fixtures for thresholds/restarts.
+
+Before health-only use, `bb storage retention` must return `readOnly:true` and
+all policies Never/off. The new read-only default makes activation safe without
+pre-editing the old `policy` KV value. To persist safe policies explicitly:
+`bb storage retention --archive-after never --delete-after never --delete-storage-on-archive false --delete-dev-data-on-checkout-removal false --save --yes`.
+Core orphan maintenance remains independent and unchanged.
+
+The maintenance commands below require deliberately disabling read-only mode.
 
 Without `--save`, retention thresholds only preview affected thread counts.
 Days must be whole numbers from 1 to 3650, or `never`. Unspecified settings

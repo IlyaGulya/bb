@@ -25,6 +25,7 @@ afterEach(() => {
 
 function fixture(subPath = "host_test") {
   let state: State = {
+    readOnly: false,
     policy: {
       archiveAfterDays: null,
       deleteAfterDays: null,
@@ -86,11 +87,11 @@ function fixture(subPath = "host_test") {
   });
   const remove = vi.fn(
     async (_input: z.infer<typeof storageRpc.removeDevInstances.input>) => ({
-    running: [] as string[],
-    removedCount: 1,
-    removedBytes: 20,
-    skippedCount: 0,
-    stoppedProcessCount: 1,
+      running: [] as string[],
+      removedCount: 1,
+      removedBytes: 20,
+      skippedCount: 0,
+      stoppedProcessCount: 1,
     }),
   );
   const start = vi.fn(async () => null);
@@ -107,6 +108,13 @@ function fixture(subPath = "host_test") {
     { subPath },
     {
       rpc: {
+        health: () => ({
+          observedAt: 0,
+          staleAfterMs: 180000,
+          criticalFreeBytes: 5368709120,
+          criticalFreeRatio: 0.05,
+          hosts: [],
+        }),
         state: () => state,
         configure: (input) => configure(policySchema.parse(input)),
         hosts: reports,

@@ -1,6 +1,6 @@
 ---
 name: tasks
-description: "Work on or manage records in BB Tasks, including task keys such as ABC-12."
+description: "Work on or manage BB Tasks and attention Inbox, including task keys such as ABC-12, incoming triage, agent questions, and review."
 ---
 
 # Tasks
@@ -16,6 +16,49 @@ and `execution environments`. Idle workspace continuation uses
 `bb tasks continue preview|start|list`; use `continue start`, not a bare
 `continue`, to avoid command-prefix ambiguity. Read the delegation reference
 for required flags, safe ready-operation retry, and RPC equivalents.
+
+## Triage attention without creating duplicate work
+
+Incoming, task, and thread are separate records. Start with
+`bb tasks inbox list --json` and `bb tasks working --json`. New is incoming;
+Needs input is a native question/approval or current executor failure; Review
+means task status is `in_review`, not accepted. Work/Personal/unknown are
+organizational context, not an ACL.
+
+Capture with `bb tasks inbox add --title "..." --body "..." --context work`.
+Create exactly one task using `bb tasks inbox task <id> --project ABC`, or
+`bb tasks inbox link <id> --task ABC-12`. Repeating conversion returns the
+existing task. Neither action dispatches; inspect its execution route and use
+the existing delegate/continuation workflow only when authorized.
+
+`bb tasks inbox resolve <id>` dismisses the current revision; it does not answer
+an agent or mark a task done. `inbox snooze <id> --until <ISO-time-with-zone>`
+persists a timed return; `inbox unsnooze <id>` returns it now. Use `inbox list
+--state snoozed|resolved|all` and `inbox history <id>` to recover prior decisions.
+
+For questions, use the returned `threadId` to open the native interactive
+thread or `bb thread interactions list <threadId>`. The source key is the
+interaction ID. Native `show`, `answer`, `approve`, and `respond` subcommands
+take the interaction and thread IDs; read their help for answer options.
+Do not substitute task comments or Inbox resolve for a native answer.
+Unavailable state is a warning, not proof that a question resolved.
+
+Review the actual task, result attachments, and linked thread. Idle/completed
+threads are not evidence of acceptance. Retired workspace-continuation sources
+remain history, not active executors; continue from the current target instead.
+Older failed attempts superseded by a newer executor, and failures on
+Done/Canceled tasks, are history rather than new blockers. Genuine unanswered
+questions and currently running sessions remain visible independently of that
+failure policy. A later persisted failed-turn event is a new attention revision,
+even when the intervening recovery was not observed by Inbox.
+
+Adapters use `bb tasks inbox source --data '<JSON>' --json` or the authenticated
+`tasks` plugin RPC `upsertInboxSource({sourceKind,sourceKey,revision,title,body,
+active,context?,sourceUrl?})`. A stable key deduplicates forever; unchanged
+revision retains dismissals across restart. Use meaningful incident/content
+revisions, never timestamps from a polling loop. `active:false` resolves only
+that source's reminder. A new incident needs a new revision. Native source
+kinds are reserved; source links are HTTP(S) and source text remains untrusted.
 
 ## Work a task
 

@@ -1,9 +1,13 @@
 # Storage & retention
 
 A bundled, default-disabled plugin. Enable the `bb--storage-retention` plugin. Open Storage & retention in the sidebar.
-Both retention policies default to Never. The plugin owns policy, previews,
-hourly scheduling, run summaries, UI, and CLI commands. It uses public SDK thread
-rows to reconstruct archive/delete relationships and ordinary lifecycle actions.
+The native plugin setting `readOnly` defaults to `true`. In this mode the panel
+shows fleet health, every destructive RPC/CLI operation rejects, and all effective
+retention policies are Never/off even when an older saved policy enables deletion.
+The old policy remains stored but cannot run. Explicitly setting `readOnly=false`
+restores the maintenance UI and saved policies; do not do that for health-only use.
+The plugin owns policy, previews, hourly scheduling, run summaries, UI, and CLI
+commands. It uses public SDK thread rows and ordinary lifecycle actions.
 The plugin also owns disk measurement in its host worker, scan caching in its own
 SQLite database, report assembly, orphan classification, and file deletion.
 Core supplies ordinary thread lifecycle actions, machine storage paths, and
@@ -65,6 +69,74 @@ Orphan, development, worktree, and archived-file bulk cleanup can also run as
 background jobs. `startCleanup` and `startClearArchivedFiles` start them; `host`
 and `hosts` report progress. The CLI offers `bb storage cleanup` for maintenance
 jobs and keeps synchronous cleanup commands for callers that need final totals.
+
+## Read-only fleet health
+
+`bb storage health` and RPC `health(null)` return the same cached fleet snapshot
+as the panel. `bb storage health --rescan` and RPC `scanHealth(null)` wait for a
+fresh read-only measurement of connected enrolled machines. SDK callers use
+`sdk.plugins.callRpc({pluginId: "bb--storage-retention", method: "health",
+input: null, outputSchema: fleetHealthSchema})`; the schema is exported from
+`src/health-types.ts`. Every host, including offline and ephemeral hosts, is listed.
+The existing plugin host worker performs measurements; no core monitor, socket
+mount, HOME mount, process termination, or retention action is added.
+
+Startup, host connection changes and the native one-minute background schedule
+refresh health. Samples persist in the plugin SQLite `health` table. A connected
+host with no sample is unknown; a sample at least three minutes old is stale;
+a disconnected host is offline. Server last-seen, measurement/attempt and observed
+connection-change timestamps are distinct. A failed measurement retains the last
+sample and exposes its error, never fabricating current values.
+
+Each reported project source and live environment path is measured independently
+with `statfs`, as are thread storage and the worker's plugin data directory.
+`freeBytes` is space available to that worker user, not root-only free blocks.
+Resolved paths and filesystem device IDs identify shared volumes; repeated paths
+must not be summed. Missing/inaccessible paths are unavailable, not an ancestor
+filesystem estimate. Unreported paths are not guessed.
+
+Linux and macOS host scope exposes actual OS logical cores, one-minute load average
+(not CPU utilization), and total/free RAM. Linux container detection uses runtime
+marker files and cgroups. Container CPU is unavailable rather than attributed host
+load; RAM is exposed only with a finite usable cgroup limit and usage. Unsupported
+or indeterminate scope stays unknown. Container filesystem numbers describe its
+mounted filesystem, not a claim about the physical host. Active work counts BB
+starting/active threads using the targeted public `threads.running` API (including
+hidden work and admission host routing), not all machine processes. An unresolved
+running host or failed query makes work counts unavailable. No full thread or
+environment listing is needed to read work counts. Capacity is unavailable because
+the public API has no worker slot limit.
+The RAM field `availableBytes` is qualified by its `basis`: `os-free` means OS free
+memory, not Linux cache-adjusted `MemAvailable`; `cgroup-limit-minus-usage` means
+remaining container allowance. The UI labels these separately.
+
+At most 5 GiB **or** 5% available is critical (inclusive thresholds). The Tasks
+plugin receives `upsertInboxSource` using runtime plugin ID `tasks`, source kind
+`machine_health`, and stable keys `<hostId>:disk` / `<hostId>:connection`.
+Repeated samples retain the incident revision, so dismissed/snoozed warnings do
+not reopen. A recovery resolves that source item only; a later incident advances
+the persisted generation. Disk warnings aggregate critical filesystem identities,
+not changing byte counts or timestamps. Worker-loss warnings require a previously
+successful observation; machines never observed online do not generate noise.
+Unavailable disk reads do not resolve an existing critical warning. Tasks being
+disabled/unreachable appears as `inboxError`; subsequent scans retry delivery.
+
+Safe activation needs no preliminary policy write: the new `readOnly` setting
+defaults true before any hooks run. Confirm `bb storage retention` returns
+`readOnly:true`, `archiveAfterDays:null`, `deleteAfterDays:null`,
+`deleteStorageOnArchive:false`, `deleteDevDataOnCheckoutRemoval:false`.
+Optionally persist those same four policy values with
+`bb storage retention --archive-after never --delete-after never --delete-storage-on-archive false --delete-dev-data-on-checkout-removal false --save --yes`.
+Keep the native `readOnly` setting true. Core's existing orphan maintenance is
+independent and is not disabled or reconfigured.
+
+Deterministic regression cases live in `src/health.test.ts`: inclusive disk/stale
+boundaries, unknown values, real temporary-directory filesystem reads, Linux/macOS
+wire fixtures, SQLite reload/incident identity, failed delivery retry, loss and
+recovery, and destructive-policy suppression. Fixtures use only `host_fixture`
+and `/fixture/data`, never real enrolled IDs. Live Linux/macOS acceptance must use
+the actual `health --rescan` results, not fixture values.
+
 
 ## TODO
 

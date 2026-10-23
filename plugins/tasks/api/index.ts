@@ -1,4 +1,5 @@
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
+import type { Database } from "better-sqlite3";
 import {
   createTasksStore,
   type Attachment as StoredAttachment,
@@ -50,6 +51,7 @@ interface SummaryRow {
 const MAX_THREAD_SEARCH_RESULTS = 10;
 
 export interface TasksApiStore {
+  readonly database: Database;
   readonly tasks: TasksStore;
   transaction<T>(operation: () => T): T;
   taskLabelIds(taskIds: readonly string[]): Map<string, string[]>;
@@ -64,6 +66,7 @@ export function createStore(bb: BbPluginApi): TasksApiStore {
   const tasks = createTasksStore(database);
 
   return {
+    database,
     tasks,
     transaction<T>(operation: () => T): T {
       return database.transaction(operation)();

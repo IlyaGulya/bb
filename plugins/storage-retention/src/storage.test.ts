@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import {
-  createFakePluginHost,
+  createFakePluginHost as createHost,
   makeHostResponse,
   makeThreadResponse,
 } from "@get-bb/plugin-sdk/testing";
@@ -19,6 +19,11 @@ import {
   hostStorageResponseSchema,
 } from "./storage-types.js";
 
+const createFakePluginHost: typeof createHost = (options) =>
+  createHost({
+    ...options,
+    settings: { ...options?.settings, readOnly: false },
+  });
 const directories: string[] = [];
 afterEach(async () => {
   await Promise.all(

@@ -324,6 +324,47 @@ const MIGRATIONS = [
       UPDATE task_list_revision SET revision = revision + 1 WHERE id = 1;
     END;
   `,
+  `
+    CREATE TABLE inbox_entries (
+      id TEXT PRIMARY KEY,
+      source_kind TEXT NOT NULL,
+      source_key TEXT NOT NULL,
+      revision TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      source_url TEXT,
+      context TEXT NOT NULL CHECK (context IN ('work', 'personal', 'unknown')),
+      lane TEXT NOT NULL CHECK (lane IN ('new', 'needs_input', 'review')),
+      reason TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('open', 'resolved', 'snoozed')),
+      active INTEGER NOT NULL CHECK (active IN (0, 1)),
+      snoozed_until TEXT,
+      task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+      thread_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (source_kind, source_key)
+    );
+    CREATE INDEX idx_inbox_state ON inbox_entries(state, snoozed_until);
+    CREATE INDEX idx_inbox_task ON inbox_entries(task_id);
+    CREATE TABLE inbox_decisions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      inbox_id TEXT NOT NULL REFERENCES inbox_entries(id) ON DELETE CASCADE,
+      revision TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      at TEXT NOT NULL
+    );
+    CREATE TRIGGER inbox_review_status_exit
+    AFTER UPDATE OF status ON tasks
+    WHEN OLD.status = 'in_review' AND NEW.status <> 'in_review' BEGIN
+      INSERT INTO inbox_decisions (inbox_id, revision, decision, at)
+        SELECT id, revision, 'source_resolved', NEW.updated_at FROM inbox_entries
+        WHERE source_kind = 'task_review' AND source_key = NEW.id AND active = 1;
+      UPDATE inbox_entries
+        SET active = 0, state = 'resolved', snoozed_until = NULL, updated_at = NEW.updated_at
+        WHERE source_kind = 'task_review' AND source_key = NEW.id AND active = 1;
+    END;
+  `,
 ] as const;
 
 export function initializeTasksSchema(db: PluginDatabase): void {

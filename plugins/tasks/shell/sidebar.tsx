@@ -250,6 +250,20 @@ export function TasksSidebar({
       <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 pt-2">
         <div className="space-y-px">
           <SidebarRow
+            active={route.kind === "inbox"}
+            onClick={() => onNavigate({ kind: "inbox" })}
+          >
+            <Icon name="ListTodo" className="size-3.5 shrink-0" />
+            <span className="flex-1">Inbox</span>
+          </SidebarRow>
+          <SidebarRow
+            active={route.kind === "working"}
+            onClick={() => onNavigate({ kind: "working" })}
+          >
+            <Icon name="Zap" className="size-3.5 shrink-0" />
+            <span className="flex-1">Working</span>
+          </SidebarRow>
+          <SidebarRow
             active={route.kind === "all"}
             onClick={() => onNavigate({ kind: "all" })}
           >

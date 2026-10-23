@@ -9,6 +9,7 @@ import { registerDelegation } from "./delegate";
 import { registerLifecycle } from "./lifecycle";
 import { registerMentions } from "./mentions";
 import { registerJiraSync } from "./jira";
+import { registerInbox } from "./inbox/index.js";
 
 const TASKS_PLUGIN_NAME = "Tasks";
 const TASKS_PLUGIN_VERSION = manifest.version;
@@ -31,7 +32,8 @@ export default async function plugin(bb: BbPluginApi) {
   registerTasksApi(bb, store);
   registerAttachments(bb, store.tasks);
   const jiraHandlers = registerJiraSync(bb, store);
-  registerTasksCli(bb, store, statusPayload(), jiraHandlers);
+  const inboxHandlers = registerInbox(bb, store);
+  registerTasksCli(bb, store, statusPayload(), jiraHandlers, inboxHandlers);
   registerDelegation(bb, store);
   registerMentions(bb, store);
   await registerLifecycle(bb, store);

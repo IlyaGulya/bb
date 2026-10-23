@@ -11,7 +11,10 @@ const DEFAULT_POLICY: Policy = {
 };
 const BATCH_LIMIT = 50;
 
-export function createService(bb: BbPluginApi) {
+export function createService(
+  bb: BbPluginApi,
+  readOnly: () => Promise<boolean> = async () => false,
+) {
   let disposed = false;
   let running = false;
   bb.onDispose(() => {
@@ -21,6 +24,7 @@ export function createService(bb: BbPluginApi) {
     if (disposed) throw new Error("Storage & retention plugin is disabled.");
   }
   async function readPolicy() {
+    if (await readOnly()) return DEFAULT_POLICY;
     const stored = await bb.storage.kv.get("policy");
     return stored === null || stored === undefined
       ? DEFAULT_POLICY
@@ -33,6 +37,7 @@ export function createService(bb: BbPluginApi) {
     ]);
     return {
       policy,
+      readOnly: await readOnly(),
       lastRun: lastRun == null ? null : runSchema.parse(lastRun),
     };
   }
@@ -52,6 +57,16 @@ export function createService(bb: BbPluginApi) {
   }
   async function configure(policy: Policy) {
     requireActive();
+    if (
+      (await readOnly()) &&
+      (policy.archiveAfterDays !== null ||
+        policy.deleteAfterDays !== null ||
+        policy.deleteStorageOnArchive ||
+        policy.deleteDevDataOnCheckoutRemoval)
+    )
+      throw new Error(
+        "Read-only mode requires all retention policies Never/off.",
+      );
     await bb.storage.kv.set("policy", policySchema.parse(policy));
     bb.realtime.publish("policy-changed", null);
     return state();

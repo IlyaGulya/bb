@@ -7,6 +7,8 @@ Turn a plan into tracked tasks, hand each task to an agent, and see the worker's
 - Markdown comments with a **Notify last responding agent** switch. The comment goes to the worker thread and resumes it when idle.
 - A **Delegate** menu that starts a worker thread from a preset. A preset sets the provider, model, reasoning level, permission mode, and instructions.
 - Live thread cards on each task and a **Task** panel action inside a thread.
+- **Inbox** with independent manual incoming, New / Needs input / Review, source/context links, create-once or link-existing task actions, snooze/return, and retained decisions.
+- **Working** separates current native agent activity from human attention. Questions open the original interactive thread; idle is not acceptance.
 
 ## How it works
 
@@ -17,5 +19,12 @@ Type `@` in the composer and choose **Tasks** to send a task as context. Agents 
 ## For agents
 
 The `bb tasks` CLI covers the full tracker: `create`, `list`, `show`, `update`, `move`, `comment`, `attachment`, `preset`, `delegate`, `attach`, `detach`, `threads`, `label`, `project`, and `folder`. Add `--json` for machine-readable output. The bundled `tasks` skill tells workers to read the task, comment at milestones, attach artifacts, and move finished work to `in_review`.
+
+Use `bb tasks inbox --help` for intake, linking, resolution, snooze, source
+revisions, and history; `bb tasks working --json` reports current native work.
+External adapters can upsert durable source attention through the authenticated
+`tasks` plugin's `upsertInboxSource` RPC. Work/Personal are organizational context,
+not permissions. Dismissing an inbox item never answers a question or accepts a
+task result.
 
 Presets are user-defined. Create at least one before you delegate.

@@ -3,6 +3,7 @@ const INVALIDATION_CHANNELS = [
   "projects:changed",
   "comments:changed",
   "threads:changed",
+  "inbox:changed",
 ] as const;
 
 export type InvalidationChannel = (typeof INVALIDATION_CHANNELS)[number];

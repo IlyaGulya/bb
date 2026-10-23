@@ -3,12 +3,54 @@ import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { storageRpc } from "./contract.js";
 import { createService } from "./service.js";
 import { registerCli } from "./cli.js";
+import { createHealth } from "./health.js";
 
 export default function plugin(bb: BbPluginApi) {
-  const service = createService(bb);
+  const settings = bb.settings.define({
+    readOnly: {
+      type: "boolean",
+      label: "Read-only fleet health (disables retention and cleanup)",
+      default: true,
+    },
+  });
+  const readOnly = async () => (await settings.get()).readOnly !== false;
+  const service = createService(bb, readOnly);
   const devCleanupEnabled = async () =>
     (await service.state()).policy.deleteDevDataOnCheckoutRemoval;
-  const storage = createStorage(bb, devCleanupEnabled);
+  const storage = createStorage(bb, devCleanupEnabled, readOnly);
+  const health = createHealth(bb);
+  bb.background.schedule("fleet-health", "* * * * *", () =>
+    health.scanAll().then(() => {}),
+  );
+  bb.background.service("fleet-health-recovery", {
+    async start(signal) {
+      const refresh = () => {
+        if (!signal.aborted)
+          void health
+            .scanAll()
+            .catch((error) => bb.log.warn(`Fleet health: ${String(error)}`));
+      };
+      const unsubscribe = bb.sdk.subscribe({
+        event: "host:changed",
+        callback: refresh,
+      });
+      const reconnect = bb.sdk.subscribe({
+        event: "realtime:connection",
+        callback: refresh,
+      });
+      refresh();
+      try {
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) resolve();
+          else
+            signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      } finally {
+        unsubscribe();
+        reconnect();
+      }
+    },
+  });
   bb.events.on("experimental_environment.removed", ({ removal }) =>
     removal.hostId === null
       ? undefined
@@ -71,6 +113,8 @@ export default function plugin(bb: BbPluginApi) {
     storage.clearPendingArchives(cleanupEnabled),
   );
   bb.rpc.register(storageRpc, {
+    health: () => health.fleet(),
+    scanHealth: () => health.scanAll(),
     startCleanup: storage.startCleanup,
     hosts: () => storage.hosts(),
     host: storage.host,
@@ -88,6 +132,6 @@ export default function plugin(bb: BbPluginApi) {
     preview: (policy) => service.preview(policy),
     configure: (policy) => service.configure(policy),
   });
-  registerCli(bb, service, storage);
+  registerCli(bb, service, storage, health);
   bb.background.schedule("retention", "0 * * * *", () => service.sweep());
 }

@@ -1,5 +1,6 @@
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { healthPathSchema, machineSampleSchema } from "./health-types.js";
 
 export const diskUsageInputSchema = z
   .object({
@@ -71,6 +72,10 @@ export const developerEntryInspectionSchema = z.object({
 });
 
 export const hostStorageContract = defineRpcContract({
+  health: {
+    input: z.object({ paths: z.array(healthPathSchema).max(500) }).strict(),
+    output: machineSampleSchema,
+  },
   inspectDeveloperEntries: {
     input: z
       .object({

@@ -6,6 +6,7 @@ import {
 } from "./storage-types.js";
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { fleetHealthSchema } from "./health-types.js";
 
 const daysSchema = z.number().int().min(1).max(3650).nullable();
 export const policySchema = z
@@ -26,6 +27,7 @@ export const runSchema = z.object({
 export type Run = z.infer<typeof runSchema>;
 export const stateSchema = z.object({
   policy: policySchema,
+  readOnly: z.boolean().default(true),
   lastRun: runSchema.nullable(),
 });
 export type State = z.infer<typeof stateSchema>;
@@ -36,6 +38,8 @@ export const previewSchema = z.object({
 export type Preview = z.infer<typeof previewSchema>;
 const machineInput = z.object({ hostId: z.string().min(1) }).strict();
 export const storageRpc = defineRpcContract({
+  health: { input: z.null(), output: fleetHealthSchema },
+  scanHealth: { input: z.null(), output: fleetHealthSchema },
   startCleanup: {
     input: z
       .object({

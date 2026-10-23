@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { hostStorageContract } from "./host-contract.js";
 import { measureDiskUsage } from "./disk-usage.js";
 import { isFsErrorWithCode } from "./fs-errors.js";
+import { measureCapacity, measureMachineHealth } from "./host-health.js";
 
 const STORAGE_ENTRY = /^(thr_[a-zA-Z0-9]+|\.bb-trash-[a-zA-Z0-9_-]+)$/;
 
@@ -31,6 +32,11 @@ function assertStorageEntry(rootPath: string, name: string) {
 export default experimental_defineHostEntry({
   contract: hostStorageContract,
   handlers: {
+    health: ({ paths }, context) =>
+      measureMachineHealth(
+        [...paths, { path: context.experimental_paths.dataDir, kind: "data" }],
+        context.signal,
+      ),
     inspectDeveloperEntries: (input, context) =>
       inspectDeveloperEntries(input, context.signal),
     removeDeveloperEntries: (input, context) =>
@@ -108,24 +114,7 @@ export default experimental_defineHostEntry({
       }
       return { removed };
     },
-    async capacity({ path: target }) {
-      if (!path.isAbsolute(target)) throw new Error("Invalid storage path");
-      for (let current = target; ; current = path.dirname(current)) {
-        try {
-          const stats = await fs.statfs(current);
-          return {
-            totalBytes: stats.blocks * stats.bsize,
-            freeBytes: stats.bavail * stats.bsize,
-          };
-        } catch (error) {
-          if (
-            !isFsErrorWithCode(error, "ENOENT") ||
-            current === path.dirname(current)
-          )
-            throw error;
-        }
-      }
-    },
+    capacity: ({ path: target }) => measureCapacity(target),
     async discard({ rootPath, names, recreate }, context) {
       for (const name of names) {
         assertStorageEntry(rootPath, name);

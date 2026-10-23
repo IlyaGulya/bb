@@ -20,6 +20,7 @@ import { EmptyState } from "../components/empty-state.js";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { TasksRefreshProvider } from "./refresh.js";
+import { InboxView, WorkingView } from "../views/inbox/index.js";
 
 const BOARD_MIN_WIDTH = 448;
 
@@ -48,6 +49,10 @@ function RouteOutlet({
   boardUsable: boolean;
 }) {
   switch (route.kind) {
+    case "inbox":
+      return <InboxView />;
+    case "working":
+      return <WorkingView />;
     case "all":
       return <ListView projectId={null} />;
     case "active":
@@ -185,7 +190,11 @@ function TasksAppShellContent({ subPath }: PluginNavPanelProps) {
           onBack={backFromTask}
         />
         <div className="min-h-0 flex-1 overflow-auto">
-          {noProjects && route.kind !== "task" && route.kind !== "manage" ? (
+          {noProjects &&
+          route.kind !== "task" &&
+          route.kind !== "manage" &&
+          route.kind !== "inbox" &&
+          route.kind !== "working" ? (
             <EmptyState
               icon="ListTodo"
               title="No projects yet"

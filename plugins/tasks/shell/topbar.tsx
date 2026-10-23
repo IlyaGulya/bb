@@ -188,6 +188,10 @@ export function TasksTopbar({
 
   const breadcrumb = (() => {
     switch (route.kind) {
+      case "inbox":
+        return <span className="font-semibold">Inbox</span>;
+      case "working":
+        return <span className="font-semibold">Working</span>;
       case "all":
         return (
           <span className="whitespace-nowrap font-semibold">All tasks</span>

@@ -77,8 +77,7 @@ function withoutRemoved(scan: Scan, removal: Removal): Scan {
       ),
     largeFiles: scan.largeFiles.filter(
       (entry) =>
-        !removal.entries.has(entry.name) &&
-        !removal.largeFiles.has(entry.name),
+        !removal.entries.has(entry.name) && !removal.largeFiles.has(entry.name),
     ),
     developerStorage: developer && {
       ...developer,
@@ -102,11 +101,13 @@ const isStorageEntry = (name: string) =>
 export function createStorage(
   bb: BbPluginApi,
   devCleanupEnabled: () => Promise<boolean>,
+  readOnly: () => Promise<boolean> = async () => false,
 ) {
   const db = bb.storage.database();
   bb.storage.migrate(db, [
     "CREATE TABLE scans (host_id TEXT PRIMARY KEY, result_json TEXT NOT NULL)",
     "CREATE TABLE archive_cleanup (thread_id TEXT PRIMARY KEY, archived_at INTEGER NOT NULL)",
+    "CREATE TABLE health (host_id TEXT PRIMARY KEY, result_json TEXT NOT NULL)",
   ]);
   const worker = bb.hosts.experimental_client({
     contract: hostStorageContract,
@@ -1061,10 +1062,7 @@ export function createStorage(
     void job.finally(() => jobs.delete(job));
     return job;
   }
-  async function removeMissingDevelopment(
-    hostId: string,
-    release: () => void,
-  ) {
+  async function removeMissingDevelopment(hostId: string, release: () => void) {
     let handedOff = false;
     try {
       await requireHost(hostId, true);
@@ -1240,7 +1238,11 @@ export function createStorage(
           "DELETE FROM archive_cleanup WHERE thread_id = ? AND archived_at = ?",
         ).run(entry.thread_id, entry.archived_at);
       } catch (error) {
-        if (error instanceof Error && "status" in error && error.status === 404) {
+        if (
+          error instanceof Error &&
+          "status" in error &&
+          error.status === 404
+        ) {
           cancelArchivedStorage(entry.thread_id);
           continue;
         }
@@ -1321,25 +1323,34 @@ export function createStorage(
     void job.finally(() => jobs.delete(job));
     return null;
   }
+  function writable<Args extends unknown[], Result>(
+    operation: (...args: Args) => Promise<Result>,
+  ) {
+    return async (...args: Args) => {
+      if (await readOnly())
+        throw new Error("Storage is in read-only mode; cleanup is disabled.");
+      return operation(...args);
+    };
+  }
   return {
-    startCleanup,
+    startCleanup: writable(startCleanup),
     host,
     hosts,
     scanHost,
     scanAll,
     reconcileDevelopmentStorage,
     cleanDevelopmentStorage,
-    removeOrphans,
-    clearLargeFiles,
-    startClearLargeFiles,
-    clearArchivedFiles,
-    startClearArchivedFiles,
-    removeDevInstances,
-    clearThread,
+    removeOrphans: writable(removeOrphans),
+    clearLargeFiles: writable(clearLargeFiles),
+    startClearLargeFiles: writable(startClearLargeFiles),
+    clearArchivedFiles: writable(clearArchivedFiles),
+    startClearArchivedFiles: writable(startClearArchivedFiles),
+    removeDevInstances: writable(removeDevInstances),
+    clearThread: writable(clearThread),
     queueArchivedStorage,
     cancelArchivedStorage,
     clearPendingArchives,
-    retryWorktreeCleanup,
+    retryWorktreeCleanup: writable(retryWorktreeCleanup),
   };
 }
 export type Storage = ReturnType<typeof createStorage>;

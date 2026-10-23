@@ -309,6 +309,9 @@ export function useTasksQuery<T>(
   useRealtime("threads:changed", (payload) =>
     scheduler.push("threads:changed", payload),
   );
+  useRealtime("inbox:changed", (payload) =>
+    scheduler.push("inbox:changed", payload),
+  );
   return { ...state, refresh };
 }
 

@@ -60,6 +60,103 @@ When run from a thread, the CLI preserves that agent thread and any explicit
 `--author`; notification still targets the prior latest responder rather than
 the newly recorded agent comment itself.
 
+## Inbox and Working
+
+Open **Tasks → Inbox** for **New**, **Needs input**, and **Review**. Incoming
+is a durable record independent of a task or thread. Capture a title, context,
+and optional original source link before deciding whether it merits a task.
+Work, Personal, and Unclassified are organization, not access control.
+
+Create one native task from an incoming item, or link an existing key. Repeating
+creation returns that same task; it does not spawn an agent. The incoming is
+resolved, with its original context and decision history retained. Open the task
+to configure its inherited/per-task execution route and use the existing dispatch
+flow. Attachments, Jira synchronization, and continuation remain native Tasks
+operations.
+
+**Working** shows linked native threads that are starting or working, excluding
+pending questions. **Needs input** links directly to the actual interactive
+thread for native questions/approvals or current executor failures. Resolve
+reminder never answers, approves, retries, or resumes a thread. Answer using
+the native thread controls, or `bb thread interactions list <threadId>`, then
+`show`, `answer`, `approve`, or `respond` with the interaction and thread IDs.
+Use those commands' help for response options; the Inbox source key is the
+native interaction ID. Do not answer a question by posting a task comment.
+
+Failure reminders apply only to the newest non-retired executor attachment of
+an open task. Older failed attempts and Done/Canceled task failures remain
+history, not new blockers. Real unanswered native interactions are still
+discovered on older attached sessions, and canonical running-thread discovery
+keeps genuinely active older sessions visible in Working. Failure revisions
+come from persisted native attempt/error events, so a later failed turn reopens
+attention even if its intervening recovery happened between Inbox sweeps.
+Unavailable failure-event reads preserve prior decisions and report a warning.
+
+`in_review` creates a Review item pointing to the task and latest non-retired
+result thread. Idle, completed, and deleted threads never mark the task accepted.
+Resolve dismisses only the review reminder: acceptance remains an explicit
+task status decision. Changed review content/result attachments reopen it;
+priority/timestamp-only changes do not. A completed workspace continuation's
+source is retained as history and excluded from current attention.
+
+Snooze chooses a future local time in the UI, or an ISO-8601 timestamp with
+timezone from the CLI. The server returns due entries within its 15-second
+sweep (also on reads/startup), independently of an open browser. Return now
+unsnoozes immediately. A meaningful new source revision wakes a snoozed item.
+Resolved/snoozed views and History expose previous decisions. Unavailable
+native reads are explicit warnings; they neither invent blockers nor silently
+resolve existing questions.
+
+```sh
+bb tasks inbox add --title "Investigate incoming" --body "Original context" --context work --json
+bb tasks inbox list --state open --json
+bb tasks inbox snooze <inbox-id> --until 2026-11-01T09:00:00+02:00
+bb tasks inbox list --state snoozed --json
+bb tasks inbox unsnooze <inbox-id>
+bb tasks inbox task <inbox-id> --project PROD --json
+bb tasks inbox link <another-inbox-id> --task PROD-1
+bb tasks inbox resolve <inbox-id>
+bb tasks inbox history <inbox-id> --json
+bb tasks working --json
+```
+
+The authenticated `tasks` plugin RPCs are `listInbox({state?,context?})`,
+`listWorking({})`, `createInbox({title,body?,context?,sourceUrl?})`,
+`decideInbox({id,action:'resolve'|'snooze'|'unsnooze',until?})`,
+`createInboxTask({id,projectId})`, `linkInboxTask({id,taskId})`, and
+`inboxHistory({id})`. Task/project IDs are native tracker IDs, not keys or
+code-project IDs. The CLI resolves keys/prefixes before invoking the same
+policy. Lists return `{items,warnings}`; mutations return `{item}`.
+
+External adapters use `bb.sdk.plugins.callRpc({pluginId:"tasks",
+method:"upsertInboxSource",input:{sourceKind,sourceKey,revision,title,body,
+active,context?,sourceUrl?}})`, or:
+
+```sh
+bb tasks inbox source --data '{"sourceKind":"machine_health","sourceKey":"host_example:disk","revision":"incident-1:critical","title":"Low disk","body":"Measured critical threshold","active":true,"context":"unknown"}' --json
+```
+
+This returns `{item,changed}`. `(sourceKind,sourceKey)` is a persistent unique
+identity. Replaying an unchanged revision does not emit another change event
+or reopen a dismissal, including after restart. Changes to body alone with
+the same revision are deliberately ignored. Send a new meaningful revision
+for a changed condition/new incident, never a polling timestamp. `active:false`
+resolves only this source's item, not its linked task. Reusing the same revision
+after recovery does not reopen it. Native source kinds `manual`,
+`native_interaction`, `native_failure`, and `task_review` are reserved.
+Original source URLs must be HTTP(S); all source text is untrusted context.
+
+## Changelog
+
+### 0.3.0
+
+- Add persistent unified Inbox and Working, native question/review projection,
+  manual intake, single-task conversion/linking, snooze/time return, history,
+  and equivalent validated RPC/CLI surfaces.
+- Add deduplicated external source revision ingestion and recovery, with
+  dismissal surviving restart. Append inbox schema migration without rewriting
+  existing task, attachment, Jira, or execution data.
+
 ## CLI reference
 
 Run `bb tasks --help` or `bb tasks <command> --help` for exact options; help
@@ -364,5 +461,5 @@ Tasks skill, which directs the worker to read and update the tracked task.
 ## Fast follow
 
 - Batch task-list enrichment for comments and attached-thread state.
-- Add notifications and an inbox for task activity.
+- Add push notifications for task activity.
 - Add a command palette entry for Tasks to cmd-K.
