@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import {
   mkdirSync,
   mkdtempSync,
@@ -21,6 +22,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { waitForProcessExit } from "@bb/config/child-process-exit";
 import { resolvePortFromEnv } from "@bb/config/runtime";
+import type { ServerMovedFile } from "@bb/server-archive";
 import {
   assertBbAppArtifacts,
   assertBbHostArtifacts,
@@ -1956,6 +1958,76 @@ describe("bb-app launcher", () => {
       "shutdown",
     );
   });
+
+  it.each(["takeover", "moved"] as const)(
+    "cancels an unready daemon before handling server %s, including late startup success",
+    async (outcome) => {
+      const supervisor = createFakeSupervisor();
+      const initialServerRun = supervisor.serverRuns[0];
+      const initialDaemonRun = supervisor.daemonRuns[0];
+      let movedFile: ServerMovedFile | null = null;
+      const restartSignals: AbortSignal[] = [];
+      let moved = false;
+      const supervision = superviseFullStackProcesses({
+        context: createTestStartContext(),
+        delayMilliseconds: immediateDelay,
+        isHealthyServerAnswering: async () => outcome === "takeover",
+        isShutdownRequested: supervisor.shutdownRequested,
+        onServerMoved: async (file) => {
+          expect(file).toBe(movedFile);
+          expect(supervisor.processes.daemonRun).toBeNull();
+          moved = true;
+          return "stopped";
+        },
+        processes: supervisor.processes,
+        readServerMovedFile: async () => movedFile,
+        startDaemon: async (signal) => {
+          if (signal === undefined) {
+            throw new Error("Expected cancellable daemon readiness");
+          }
+          restartSignals.push(signal);
+          const run = await supervisor.daemonStart();
+          if (!signal.aborted) await once(signal, "abort");
+          return run;
+        },
+        startServer: async () => {
+          throw new Error("Unexpected server restart after handover");
+        },
+      });
+
+      initialDaemonRun.exitWith({ code: 1, signal: null });
+      const pendingDaemon = await waitForProcessReplacement({
+        currentRun: () => supervisor.processes.daemonRun,
+        previousRun: initialDaemonRun,
+      });
+      if (outcome === "moved") {
+        movedFile = {
+          version: 1,
+          moveId: "recovery-move",
+          movedAt: 1_757_000_000_000,
+          fromHostId: "host-laptop",
+          toHostId: "host-desk",
+          toHostName: "desk",
+          serverUrl: "https://desk.example.com",
+          mode: "direct",
+          connectHandle: null,
+          oldCopyEntries: ["bb.db"],
+        };
+      }
+      initialServerRun.exitWith({ code: 1, signal: null });
+
+      await expect(supervision).resolves.toBe("stopped");
+      expect(restartSignals).toHaveLength(1);
+      expect(restartSignals[0]?.aborted).toBe(true);
+      expect(supervisor.daemonRuns).toHaveLength(2);
+      expect(supervisor.daemonRuns[1]).toBe(pendingDaemon);
+      expect(supervisor.daemonRuns[1]?.running).toBe(false);
+      expect(supervisor.daemonRuns[1]?.terminationSignals).toEqual(["SIGTERM"]);
+      expect(supervisor.processes.daemonRun).toBeNull();
+      expect(supervisor.processes.serverRun).toBeNull();
+      expect(moved).toBe(outcome === "moved");
+    },
+  );
 
   it("runs the bundled CLI with the launcher's own Node runtime", () => {
     expect(

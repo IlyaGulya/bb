@@ -13,6 +13,19 @@
 - API routes are under `/api/v1/`, for example `GET /api/v1/threads/:id`. Use `curl` against the server API to isolate frontend issues from server behavior.
 - Use the CLI to inspect state: `pnpm bb thread show <id>`, `pnpm bb project list`, `pnpm bb status`. From source, use `pnpm bb:dev`.
 
+## Full-stack launcher recovery
+
+The launcher observes server exit even while a replacement host daemon is
+retrying or waiting for readiness. Server exit cancels and drains that daemon
+attempt before normal server recovery, moved-mode handover or healthy-port
+takeover. Failed daemon attempts retain the retry backoff.
+
+For `ENOSPC`, restore disk capacity before expecting recovery. Inspect both
+service stdio logs: a running launcher is not proof that the server is alive.
+Do not delete a lock held by a live daemon. If manual recovery is necessary,
+stop the stack, take a protected consistent backup, and restart the same
+pinned version before considering any state migration.
+
 ## Desktop Browser Tab Recovery
 
 Saved desktop browser tabs keep their URL and owning host/window. Opening one
