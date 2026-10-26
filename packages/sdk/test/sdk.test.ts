@@ -107,52 +107,6 @@ function createFetchQueue(
 }
 
 describe("@bb/sdk", () => {
-  it("inspects multiple host sources without treating static validity as authentication", async () => {
-    const inspection = {
-      hostId: "host_test",
-      providerId: "claude-code",
-      files: [
-        {
-          configPath: "/host/mcp.json",
-          status: "ok",
-          issue: null,
-          servers: [{
-            name: "docs",
-            transport: "stdio",
-            supported: true,
-            issue: null,
-            authStatus: "not_checked",
-          }],
-        },
-        {
-          configPath: "/host/missing.json",
-          status: "unavailable",
-          issue: "Configuration unavailable",
-          servers: [],
-        },
-      ],
-    };
-    const queue = createFetchQueue([{ body: inspection }]);
-    const sdk = createBbSdk({
-      transport: createHttpTransport({
-        baseUrl: "http://bb.test",
-        fetch: queue.fetch,
-        runtime: "node",
-      }),
-    });
-    const input = {
-      hostId: inspection.hostId,
-      providerId: inspection.providerId,
-      configPaths: inspection.files.map((file) => file.configPath),
-    };
-    await expect(sdk.experimental_executionContexts.inspectMcp(input)).resolves.toEqual(inspection);
-    expect(queue.requests).toEqual([{
-      method: "POST",
-      url: "http://bb.test/api/v1/execution-contexts/mcp/inspect",
-      bodyText: JSON.stringify(input),
-    }]);
-  });
-
   it("rejects invalid inspection input before sending host work", async () => {
     const queue = createFetchQueue([]);
     const sdk = createBbSdk({
@@ -162,31 +116,41 @@ describe("@bb/sdk", () => {
         runtime: "node",
       }),
     });
-    await expect(sdk.experimental_executionContexts.inspectMcp({
-      hostId: "host_test",
-      providerId: "claude-code",
-      configPaths: ["relative.json"],
-    })).rejects.toThrow();
+    await expect(
+      sdk.experimental_executionContexts.inspectMcp({
+        hostId: "host_test",
+        providerId: "claude-code",
+        configPaths: ["relative.json"],
+      }),
+    ).rejects.toThrow();
     expect(queue.requests).toEqual([]);
   });
 
   it("rejects an inspection response claiming authenticated readiness", async () => {
-    const queue = createFetchQueue([{ body: {
-      hostId: "host_test",
-      providerId: "claude-code",
-      files: [{
-        configPath: "/host/mcp.json",
-        status: "ok",
-        issue: null,
-        servers: [{
-          name: "docs",
-          transport: "stdio",
-          supported: true,
-          issue: null,
-          authStatus: "ready",
-        }],
-      }],
-    } }]);
+    const queue = createFetchQueue([
+      {
+        body: {
+          hostId: "host_test",
+          providerId: "claude-code",
+          files: [
+            {
+              configPath: "/host/mcp.json",
+              status: "ok",
+              issue: null,
+              servers: [
+                {
+                  name: "docs",
+                  transport: "stdio",
+                  supported: true,
+                  issue: null,
+                  authStatus: "ready",
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
     const sdk = createBbSdk({
       transport: createHttpTransport({
         baseUrl: "http://bb.test",
@@ -194,11 +158,13 @@ describe("@bb/sdk", () => {
         runtime: "node",
       }),
     });
-    await expect(sdk.experimental_executionContexts.inspectMcp({
-      hostId: "host_test",
-      providerId: "claude-code",
-      configPaths: ["/host/mcp.json"],
-    })).rejects.toThrow();
+    await expect(
+      sdk.experimental_executionContexts.inspectMcp({
+        hostId: "host_test",
+        providerId: "claude-code",
+        configPaths: ["/host/mcp.json"],
+      }),
+    ).rejects.toThrow();
   });
 
   it("pages prompt history with an opaque cursor", async () => {

@@ -61,16 +61,22 @@ export function ThreadExecutionBindingCard({ threadId }: { threadId: string }) {
             <DetailRow label="Context MCP servers">
               {binding.data?.executionContext?.mcpServers.length
                 ? binding.data.executionContext.mcpServers.map((ref) => (
-                    <div key={`${ref.name}:${ref.configPath}`} className="break-all">
+                    <div
+                      key={`${ref.name}:${ref.configPath}`}
+                      className="break-all"
+                    >
                       <span className="font-medium">{ref.name}</span>
-                      <span className="block text-muted-foreground">{ref.configPath}</span>
+                      <span className="block text-muted-foreground">
+                        {ref.configPath}
+                      </span>
                     </div>
                   ))
                 : "None selected (native defaults unchanged)"}
             </DetailRow>
             <p className="mt-2 text-xs text-muted-foreground">
-              MCP sources and native authentication are local to the execution machine,
-              independently of the model connection. Authentication is not checked here.
+              MCP sources and native authentication are local to the execution
+              machine, independently of the model connection. Authentication is
+              not checked here.
             </p>
             <p className="mt-2 text-xs text-muted-foreground">
               Persisted when this thread was created. Context or connection

@@ -1955,7 +1955,9 @@ export const hostDaemonCommandRegistry = {
   "host.inspect_mcp_sources": defineHostDaemonCommandDescriptor({
     type: "host.inspect_mcp_sources",
     schema: hostInspectMcpSourcesCommandSchema,
-    resultSchema: z.object({ files: mcpConfigurationFilesInspectionSchema }).strict(),
+    resultSchema: z
+      .object({ files: mcpConfigurationFilesInspectionSchema })
+      .strict(),
     transport: "onlineRpc",
     retryable: true,
     flushEventsBeforeResult: false,

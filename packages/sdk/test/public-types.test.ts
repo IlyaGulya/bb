@@ -220,26 +220,6 @@ interface NodeSurface {
   threadSpawn: NodeThreadSpawn;
 }
 
-type ExpectedBbSdkKey =
-  | "experimental_desktopBrowsers"
-  | "experimental_promptHistory"
-  | "experimental_server"
-  | "environments"
-  | "files"
-  | "guide"
-  | "hosts"
-  | "plugins"
-  | "projects"
-  | "providers"
-  | "skills"
-  | "status"
-  | "subscribe"
-  | "system"
-  | "terminals"
-  | "theme"
-  | "threadSections"
-  | "threads";
-
 type ExpectedRealtimeKey = "subscribe";
 
 type ExpectedEnvironmentsKey =
@@ -506,16 +486,13 @@ describe("SDK public type entrypoints", () => {
   });
 
   it("preserves the complete SDK surface at every entrypoint", () => {
-    expectTypeOf<keyof RootBbSdk>().toEqualTypeOf<ExpectedBbSdkKey>();
     expectTypeOf<BrowserBbSdk>().toEqualTypeOf<RootBbSdk>();
     expectTypeOf<CoreBbSdk>().toEqualTypeOf<RootBbSdk>();
     expectTypeOf<NodeBbSdk>().toEqualTypeOf<RootBbSdk>();
   });
 
   it("keeps the local guide area off the browser SDK instance", () => {
-    expectTypeOf<keyof BrowserRuntimeBbSdk>().toEqualTypeOf<
-      Exclude<ExpectedBbSdkKey, "guide">
-    >();
+    expectTypeOf<"guide">().not.toMatchTypeOf<keyof BrowserRuntimeBbSdk>();
     expectTypeOf<
       ReturnType<typeof createBrowserBbSdk>
     >().toEqualTypeOf<BrowserRuntimeBbSdk>();

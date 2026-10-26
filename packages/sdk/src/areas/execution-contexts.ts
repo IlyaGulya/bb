@@ -102,15 +102,13 @@ export function createExecutionContextsArea({
       );
     },
     async getThreadBinding(input) {
-      return threadExecutionBindingSchema
-        .nullable()
-        .parse(
-          await transport.readJson(
-            api["thread-binding"][":id"].$get({
-              param: { id: input.threadId },
-            }),
-          ),
-        );
+      return threadExecutionBindingSchema.nullable().parse(
+        await transport.readJson(
+          api["thread-binding"][":id"].$get({
+            param: { id: input.threadId },
+          }),
+        ),
+      );
     },
   };
 }

@@ -68,7 +68,9 @@ export function registerExecutionContextCommands(
 
   context
     .command("mcp-inspect")
-    .description("Inspect host MCP configuration static validity; authentication is not checked")
+    .description(
+      "Inspect host MCP configuration static validity; authentication is not checked",
+    )
     .requiredOption("--machine <id>", "Machine hosting the configuration files")
     .requiredOption("--provider <id>", "Native provider ID")
     .requiredOption(
@@ -83,21 +85,27 @@ export function registerExecutionContextCommands(
       "\nReports static configuration validity only. Authentication is not checked. Paths refer to the selected host, not this CLI machine. No MCP connection is made.",
     )
     .action(
-      action(async (opts: JsonOutputOptions & {
-        machine: string;
-        provider: string;
-        config: string[];
-      }) => {
-        const input = inspectMcpRequestSchema.parse({
-          hostId: opts.machine,
-          providerId: opts.provider,
-          configPaths: opts.config,
-        });
-        print(
-          opts,
-          await createCliBbSdk(getUrl()).experimental_executionContexts.inspectMcp(input),
-        );
-      }),
+      action(
+        async (
+          opts: JsonOutputOptions & {
+            machine: string;
+            provider: string;
+            config: string[];
+          },
+        ) => {
+          const input = inspectMcpRequestSchema.parse({
+            hostId: opts.machine,
+            providerId: opts.provider,
+            configPaths: opts.config,
+          });
+          print(
+            opts,
+            await createCliBbSdk(
+              getUrl(),
+            ).experimental_executionContexts.inspectMcp(input),
+          );
+        },
+      ),
     );
 
   context

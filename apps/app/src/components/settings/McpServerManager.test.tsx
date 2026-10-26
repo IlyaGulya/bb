@@ -2,7 +2,14 @@
 
 import { useState } from "react";
 import type { ExecutionContext, McpConfigurationInspection } from "@bb/domain";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
@@ -30,13 +37,15 @@ function inspection(configPaths: string[]): McpConfigurationInspection {
       configPath,
       status: "ok",
       issue: null,
-      servers: [{
-        name: configPath === "/extra.json" ? "extra" : "shared",
-        transport: "stdio",
-        supported: true,
-        issue: null,
-        authStatus: "not_checked",
-      }],
+      servers: [
+        {
+          name: configPath === "/extra.json" ? "extra" : "shared",
+          transport: "stdio",
+          supported: true,
+          issue: null,
+          authStatus: "not_checked",
+        },
+      ],
     })),
   };
 }
@@ -83,18 +92,24 @@ describe("MCP server selection", () => {
     chooseMachine();
     await screen.findByRole("checkbox", { name: /shared · stdio/u });
     inspectPath("/extra.json");
-    const extra = await screen.findByRole<HTMLInputElement>("checkbox", { name: /extra · stdio/u });
+    const extra = await screen.findByRole<HTMLInputElement>("checkbox", {
+      name: /extra · stdio/u,
+    });
     fireEvent.click(extra);
     expect(extra.checked).toBe(true);
     expect(screen.getByRole("button", { name: "Remove extra" })).toBeTruthy();
 
-    vi.mocked(sdk.experimental_executionContexts.inspectMcp).mockRejectedValueOnce(
+    vi.mocked(
+      sdk.experimental_executionContexts.inspectMcp,
+    ).mockRejectedValueOnce(
       new Error("private-credential-in-raw-parser-error"),
     );
     fireEvent.click(screen.getByRole("button", { name: "Inspect config" }));
     await screen.findByRole("button", { name: "Retry inspection" });
 
-    const selected = within(screen.getByRole("list", { name: "Selected MCP servers" }));
+    const selected = within(
+      screen.getByRole("list", { name: "Selected MCP servers" }),
+    );
     expect(selected.getByText("/saved.json")).toBeTruthy();
     expect(selected.getByText("/extra.json")).toBeTruthy();
     expect(screen.queryByText(/private-credential/u)).toBeNull();
@@ -112,13 +127,21 @@ describe("MCP server selection", () => {
       name: /shared · stdio.*Name already selected/u,
     });
     expect(conflict.disabled).toBe(true);
-    expect(within(screen.getByRole("list", { name: "Selected MCP servers" })).queryByText("/other.json")).toBeNull();
+    expect(
+      within(
+        screen.getByRole("list", { name: "Selected MCP servers" }),
+      ).queryByText("/other.json"),
+    ).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Remove shared" }));
-    const replacement = await screen.findByRole<HTMLInputElement>("checkbox", { name: /shared · stdio/u });
+    const replacement = await screen.findByRole<HTMLInputElement>("checkbox", {
+      name: /shared · stdio/u,
+    });
     await waitFor(() => expect(replacement.disabled).toBe(false));
     fireEvent.click(replacement);
-    const selected = within(screen.getByRole("list", { name: "Selected MCP servers" }));
+    const selected = within(
+      screen.getByRole("list", { name: "Selected MCP servers" }),
+    );
     expect(selected.getByText("/other.json")).toBeTruthy();
     expect(selected.queryByText("/saved.json")).toBeNull();
   });
@@ -127,11 +150,16 @@ describe("MCP server selection", () => {
     machine.status = "disconnected";
     arrange();
     chooseMachine();
-    const path = screen.getByLabelText<HTMLInputElement>("Add from native config file");
+    const path = screen.getByLabelText<HTMLInputElement>(
+      "Add from native config file",
+    );
     fireEvent.change(path, { target: { value: "/later.json" } });
     expect(path.value).toBe("/later.json");
     expect(path.disabled).toBe(false);
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Inspect config" }).disabled).toBe(true);
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Inspect config" })
+        .disabled,
+    ).toBe(true);
     expect(screen.getByRole("button", { name: "Remove shared" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Remove shared" }));
     expect(screen.queryByRole("button", { name: "Remove shared" })).toBeNull();

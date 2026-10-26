@@ -6,7 +6,10 @@ import type {
   ProjectContextDefaults,
 } from "@bb/domain";
 import { validateSelectedMcpServers } from "@bb/domain";
-import { useMcpInspection, type McpInspectionQuery } from "@/hooks/useMcpInspection";
+import {
+  useMcpInspection,
+  type McpInspectionQuery,
+} from "@/hooks/useMcpInspection";
 import { sdk } from "@/lib/sdk";
 import {
   executionContextUnavailableReason,

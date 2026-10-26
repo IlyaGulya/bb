@@ -353,18 +353,22 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
     ],
   },
   "host.inspect_mcp_sources": {
-    files: [{
-      configPath: "/tmp/mcp.json",
-      status: "ok",
-      issue: null,
-      servers: [{
-        name: "tools",
-        transport: "stdio",
-        supported: true,
+    files: [
+      {
+        configPath: "/tmp/mcp.json",
+        status: "ok",
         issue: null,
-        authStatus: "not_checked",
-      }],
-    }],
+        servers: [
+          {
+            name: "tools",
+            transport: "stdio",
+            supported: true,
+            issue: null,
+            authStatus: "not_checked",
+          },
+        ],
+      },
+    ],
   },
   "host.inspect_git_source": {
     checkout: {
@@ -3765,19 +3769,63 @@ describe("metadata-only MCP inspection wire boundary", () => {
   it.each([
     { configPaths: ["relative.json"] },
     { configPaths: ["/tmp/invalid\0.json"] },
-    { configPaths: Array.from({ length: 17 }, (_, index) => `/tmp/${index}.json`) },
-    { content: "{\"mcpServers\":{}}" },
+    {
+      configPaths: Array.from(
+        { length: 17 },
+        (_, index) => `/tmp/${index}.json`,
+      ),
+    },
+    { content: '{"mcpServers":{}}' },
   ])("rejects unsafe or raw-source requests: %j", (override) => {
-    expect(hostDaemonOnlineRpcCommandSchema.safeParse({ ...command, ...override }).success).toBe(false);
+    expect(
+      hostDaemonOnlineRpcCommandSchema.safeParse({ ...command, ...override })
+        .success,
+    ).toBe(false);
   });
   it.each([
     { content: "private" },
     { issue: "Native parse diagnostic includes private credentials" },
-    { servers: [{ name: "private", transport: "http", supported: true, issue: null, authStatus: "ready" }] },
-    { servers: [{ name: "private", transport: "http", supported: true, issue: null, authStatus: "not_checked", headers: { Authorization: "private" } }] },
-  ])("rejects native payloads or readiness claims in results: %j", (override) => {
-    expect(hostDaemonCommandResultSchemaByType["host.inspect_mcp_sources"].safeParse({
-      files: [{ configPath: "/tmp/mcp.json", status: "ok", issue: null, servers: [], ...override }],
-    }).success).toBe(false);
-  });
+    {
+      servers: [
+        {
+          name: "private",
+          transport: "http",
+          supported: true,
+          issue: null,
+          authStatus: "ready",
+        },
+      ],
+    },
+    {
+      servers: [
+        {
+          name: "private",
+          transport: "http",
+          supported: true,
+          issue: null,
+          authStatus: "not_checked",
+          headers: { Authorization: "private" },
+        },
+      ],
+    },
+  ])(
+    "rejects native payloads or readiness claims in results: %j",
+    (override) => {
+      expect(
+        contract.hostDaemonOnlineRpcResultSchemaByType[
+          "host.inspect_mcp_sources"
+        ].safeParse({
+          files: [
+            {
+              configPath: "/tmp/mcp.json",
+              status: "ok",
+              issue: null,
+              servers: [],
+              ...override,
+            },
+          ],
+        }).success,
+      ).toBe(false);
+    },
+  );
 });

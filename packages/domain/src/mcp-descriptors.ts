@@ -13,28 +13,40 @@ const stdioFields = {
 };
 export const claudeSelectedMcpSchema = z.union([
   z.object({ ...stdioFields, ...claudeOptions }).strict(),
-  z.object({
-    type: z.enum(["http", "sse"]),
-    url: z.url(),
-    headers: stringMap.optional(),
-    ...claudeOptions,
-  }).strict(),
+  z
+    .object({
+      type: z.enum(["http", "sse"]),
+      url: z.url(),
+      headers: stringMap.optional(),
+      ...claudeOptions,
+    })
+    .strict(),
 ]);
-export const claudeMcpConfigSchema = z.object({
-  mcpServers: z.record(z.string(), z.unknown()),
-}).strict();
+export const claudeMcpConfigSchema = z
+  .object({
+    mcpServers: z.record(z.string(), z.unknown()),
+  })
+  .strict();
 export const ompSelectedMcpSchema = z.union([
   z.object(stdioFields).strict(),
-  z.object({
-    type: z.enum(["http", "sse"]),
-    url: z.url().refine((url) => {
-      const parsed = new URL(url);
-      return ["http:", "https:"].includes(parsed.protocol) && !parsed.username && !parsed.password;
-    }),
-    headers: stringMap.optional(),
-  }).strict(),
+  z
+    .object({
+      type: z.enum(["http", "sse"]),
+      url: z.url().refine((url) => {
+        const parsed = new URL(url);
+        return (
+          ["http:", "https:"].includes(parsed.protocol) &&
+          !parsed.username &&
+          !parsed.password
+        );
+      }),
+      headers: stringMap.optional(),
+    })
+    .strict(),
 ]);
-export const ompMcpConfigSchema = z.object({
-  $schema: z.string().optional(),
-  mcpServers: z.record(z.string(), z.unknown()),
-}).strict();
+export const ompMcpConfigSchema = z
+  .object({
+    $schema: z.string().optional(),
+    mcpServers: z.record(z.string(), z.unknown()),
+  })
+  .strict();

@@ -103,7 +103,8 @@ export function ExecutionBindingPicker({
           {executionHost ? ` · ${executionHost.status}` : ""}
         </p>
         <p className="break-words">
-          Context MCP: {mcpServers.length > 0
+          Context MCP:{" "}
+          {mcpServers.length > 0
             ? mcpServers.map((ref) => ref.name).join(", ")
             : "None selected (native defaults unchanged)"}
         </p>
@@ -129,8 +130,9 @@ export function ExecutionBindingPicker({
               Recheck MCP configuration
             </button>
             <p>
-              MCP configuration and native sign-in belong to this execution machine,
-              independently of the model connection. New sessions only; not per-tool permissions.
+              MCP configuration and native sign-in belong to this execution
+              machine, independently of the model connection. New sessions only;
+              not per-tool permissions.
             </p>
           </>
         ) : null}

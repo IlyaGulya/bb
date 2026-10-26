@@ -2,7 +2,10 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import type { McpConfigurationInspection } from "@bb/domain";
 import { sdk } from "@/lib/sdk";
 
-export type McpInspectionQuery = UseQueryResult<McpConfigurationInspection, Error>;
+export type McpInspectionQuery = UseQueryResult<
+  McpConfigurationInspection,
+  Error
+>;
 
 export function useMcpInspection({
   hostId,
@@ -26,7 +29,8 @@ export function useMcpInspection({
         configPaths: paths,
       });
     },
-    enabled: enabled && hostId !== null && providerId !== "" && paths.length > 0,
+    enabled:
+      enabled && hostId !== null && providerId !== "" && paths.length > 0,
     retry: false,
     staleTime: 0,
   });

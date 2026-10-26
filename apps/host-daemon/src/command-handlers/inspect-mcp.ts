@@ -15,8 +15,16 @@ import {
 import type { HostDaemonOnlineRpcResult } from "@bb/host-daemon-contract";
 import type { CommandOf } from "../command-dispatch-support.js";
 
-async function inspectFile(providerId: string, configPath: string): Promise<McpConfigurationFileInspection> {
-  const result: McpConfigurationFileInspection = { configPath, status: "invalid", issue: null, servers: [] };
+async function inspectFile(
+  providerId: string,
+  configPath: string,
+): Promise<McpConfigurationFileInspection> {
+  const result: McpConfigurationFileInspection = {
+    configPath,
+    status: "invalid",
+    issue: null,
+    servers: [],
+  };
   if (providerId !== "claude-code" && providerId !== "acp-omp") {
     result.issue = "Unsupported provider";
     return result;
@@ -27,7 +35,10 @@ async function inspectFile(providerId: string, configPath: string): Promise<McpC
   }
   let source: string;
   try {
-    const file = await open(configPath, constants.O_RDONLY | constants.O_NONBLOCK);
+    const file = await open(
+      configPath,
+      constants.O_RDONLY | constants.O_NONBLOCK,
+    );
     try {
       const stat = await file.stat();
       if (!stat.isFile()) {
@@ -38,15 +49,26 @@ async function inspectFile(providerId: string, configPath: string): Promise<McpC
         result.issue = "Configuration exceeds size limit";
         return result;
       }
-      const buffer = Buffer.allocUnsafe(MCP_INSPECTION_MAX_FILE_BYTES + 1);
+      const buffer = Buffer.allocUnsafe(
+        Math.min(stat.size + 1, MCP_INSPECTION_MAX_FILE_BYTES + 1),
+      );
       let length = 0;
       while (length < buffer.length) {
-        const { bytesRead } = await file.read(buffer, length, buffer.length - length, null);
+        const { bytesRead } = await file.read(
+          buffer,
+          length,
+          buffer.length - length,
+          null,
+        );
         if (bytesRead === 0) break;
         length += bytesRead;
       }
       if (length > MCP_INSPECTION_MAX_FILE_BYTES) {
         result.issue = "Configuration exceeds size limit";
+        return result;
+      }
+      if (length > stat.size) {
+        result.issue = "Configuration changed during inspection";
         return result;
       }
       source = buffer.toString("utf8", 0, length);
@@ -65,7 +87,9 @@ async function inspectFile(providerId: string, configPath: string): Promise<McpC
     result.issue = "Invalid JSON configuration";
     return result;
   }
-  const config = (providerId === "claude-code" ? claudeMcpConfigSchema : ompMcpConfigSchema).safeParse(json);
+  const config = (
+    providerId === "claude-code" ? claudeMcpConfigSchema : ompMcpConfigSchema
+  ).safeParse(json);
   if (!config.success) {
     result.issue = "Unsupported configuration structure";
     return result;
@@ -75,14 +99,22 @@ async function inspectFile(providerId: string, configPath: string): Promise<McpC
     result.issue = "Configuration exceeds server limit";
     return result;
   }
-  const schema = providerId === "claude-code" ? claudeSelectedMcpSchema : ompSelectedMcpSchema;
+  const schema =
+    providerId === "claude-code"
+      ? claudeSelectedMcpSchema
+      : ompSelectedMcpSchema;
   for (const [name, descriptor] of entries) {
     const selected = schema.safeParse(descriptor);
     const server: McpServerInspection = {
       name,
       transport: "unsupported",
       supported: selected.success && name !== "bb-bridge",
-      issue: name === "bb-bridge" ? "Reserved server name" : selected.success ? null : "Unsupported server descriptor",
+      issue:
+        name === "bb-bridge"
+          ? "Reserved server name"
+          : selected.success
+            ? null
+            : "Unsupported server descriptor",
       authStatus: "not_checked",
     };
     if (selected.success) server.transport = selected.data.type ?? "stdio";
@@ -100,6 +132,7 @@ export async function inspectHostMcpSources(
     configPaths: command.configPaths,
   });
   const files: McpConfigurationFileInspection[] = [];
-  for (const configPath of input.configPaths) files.push(await inspectFile(input.providerId, configPath));
+  for (const configPath of input.configPaths)
+    files.push(await inspectFile(input.providerId, configPath));
   return { files };
 }

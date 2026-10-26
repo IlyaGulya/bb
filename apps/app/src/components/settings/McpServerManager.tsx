@@ -42,13 +42,17 @@ export function McpServerManager({
   const canInspect =
     connected && configPath.trim() !== "" && !inspection.isFetching;
   return (
-    <section aria-label="MCP servers" className="space-y-3 rounded-md border p-3">
+    <section
+      aria-label="MCP servers"
+      className="space-y-3 rounded-md border p-3"
+    >
       <div>
         <h3 className="text-sm font-medium">MCP servers</h3>
         <p className="text-xs text-muted-foreground">
           Select named servers from native configuration on a preview machine.
-          Only names and file references are saved, independently of model accounts.
-          This does not bind the context to this machine. Changes apply to new sessions only.
+          Only names and file references are saved, independently of model
+          accounts. This does not bind the context to this machine. Changes
+          apply to new sessions only.
         </p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
@@ -85,7 +89,11 @@ export function McpServerManager({
       {hosts.isError ? (
         <p role="status" className="text-xs text-warning-text">
           Machines could not be loaded. Your selections are unchanged.{" "}
-          <button type="button" className="underline" onClick={() => void hosts.refetch()}>
+          <button
+            type="button"
+            className="underline"
+            onClick={() => void hosts.refetch()}
+          >
             Retry machines
           </button>
         </p>
@@ -93,7 +101,9 @@ export function McpServerManager({
       <div className="space-y-1">
         <p className="text-sm font-medium">Selected servers ({value.length})</p>
         {value.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No context MCP servers selected.</p>
+          <p className="text-xs text-muted-foreground">
+            No context MCP servers selected.
+          </p>
         ) : (
           <ul aria-label="Selected MCP servers" className="space-y-2">
             {value.map((ref, index) => {
@@ -101,13 +111,19 @@ export function McpServerManager({
                 ? validateSelectedMcpServers([ref], currentInspection)
                 : null;
               return (
-                <li key={`${ref.name}:${ref.configPath}:${index}`} className="flex items-start justify-between gap-2">
+                <li
+                  key={`${ref.name}:${ref.configPath}:${index}`}
+                  className="flex items-start justify-between gap-2"
+                >
                   <div className="min-w-0">
                     <p className="break-all text-sm font-medium">{ref.name}</p>
-                    <p className="break-all text-xs text-muted-foreground">{ref.configPath}</p>
+                    <p className="break-all text-xs text-muted-foreground">
+                      {ref.configPath}
+                    </p>
                     <p className="text-xs text-muted-foreground">
                       {currentInspection
-                        ? issue ?? "Configuration valid · authentication not checked"
+                        ? (issue ??
+                          "Configuration valid · authentication not checked")
                         : "Unchecked · authentication not checked"}
                     </p>
                   </div>
@@ -116,7 +132,13 @@ export function McpServerManager({
                     size="sm"
                     variant="ghost"
                     aria-label={`Remove ${ref.name}`}
-                    onClick={() => onChange(value.filter((_, selectedIndex) => selectedIndex !== index))}
+                    onClick={() =>
+                      onChange(
+                        value.filter(
+                          (_, selectedIndex) => selectedIndex !== index,
+                        ),
+                      )
+                    }
                   >
                     Remove
                   </Button>
@@ -127,7 +149,9 @@ export function McpServerManager({
         )}
       </div>
       {selectedIssue ? (
-        <p role="alert" className="text-xs text-warning-text">{selectedIssue}</p>
+        <p role="alert" className="text-xs text-warning-text">
+          {selectedIssue}
+        </p>
       ) : null}
       <label className="block space-y-1 text-sm">
         <span>Add from native config file</span>
@@ -154,14 +178,18 @@ export function McpServerManager({
       </Button>
       {!connected ? (
         <p role="status" className="text-xs text-muted-foreground">
-          Unchecked. Enter a path now and choose an online machine to inspect it.
-          Saved and unsaved server selections are kept while offline.
+          Unchecked. Enter a path now and choose an online machine to inspect
+          it. Saved and unsaved server selections are kept while offline.
         </p>
       ) : inspection.isError ? (
         <p role="status" className="text-xs text-warning-text">
           Inspection unavailable. Selections are unchanged; no configuration or
           authentication readiness has been confirmed.{" "}
-          <button type="button" className="underline" onClick={() => void inspection.refetch()}>
+          <button
+            type="button"
+            className="underline"
+            onClick={() => void inspection.refetch()}
+          >
             Retry inspection
           </button>
         </p>
@@ -174,40 +202,70 @@ export function McpServerManager({
               {file.issue ?? "Configuration could not be inspected."}
             </p>
           ) : file.servers.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No named MCP servers found.</p>
-          ) : file.servers.map((server, index) => {
-            const ref = { name: server.name, configPath: file.configPath };
-            const selected = value.some((entry) => entry.name === ref.name && entry.configPath === ref.configPath);
-            const conflict = value.some((entry) => entry.name === ref.name && entry.configPath !== ref.configPath);
-            const issue = validateSelectedMcpServers([ref], currentInspection);
-            return (
-              <label key={`${server.name}:${index}`} className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  checked={selected}
-                  disabled={!selected && (issue !== null || conflict)}
-                  onChange={(event) => onChange(event.target.checked
-                    ? [...value, ref]
-                    : value.filter((entry) => entry.name !== ref.name || entry.configPath !== ref.configPath))}
-                />
-                <span className="min-w-0">
-                  <span className="block break-all">{server.name} · {server.transport}</span>
-                  <span className="block text-xs text-muted-foreground">
-                    {conflict
-                      ? "Name already selected from another file; remove it first."
-                      : issue ?? "Configuration valid · authentication not checked"}
+            <p className="text-xs text-muted-foreground">
+              No named MCP servers found.
+            </p>
+          ) : (
+            file.servers.map((server, index) => {
+              const ref = { name: server.name, configPath: file.configPath };
+              const selected = value.some(
+                (entry) =>
+                  entry.name === ref.name &&
+                  entry.configPath === ref.configPath,
+              );
+              const conflict = value.some(
+                (entry) =>
+                  entry.name === ref.name &&
+                  entry.configPath !== ref.configPath,
+              );
+              const issue = validateSelectedMcpServers(
+                [ref],
+                currentInspection,
+              );
+              return (
+                <label
+                  key={`${server.name}:${index}`}
+                  className="flex items-start gap-2 text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={selected}
+                    disabled={!selected && (issue !== null || conflict)}
+                    onChange={(event) =>
+                      onChange(
+                        event.target.checked
+                          ? [...value, ref]
+                          : value.filter(
+                              (entry) =>
+                                entry.name !== ref.name ||
+                                entry.configPath !== ref.configPath,
+                            ),
+                      )
+                    }
+                  />
+                  <span className="min-w-0">
+                    <span className="block break-all">
+                      {server.name} · {server.transport}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {conflict
+                        ? "Name already selected from another file; remove it first."
+                        : (issue ??
+                          "Configuration valid · authentication not checked")}
+                    </span>
                   </span>
-                </span>
-              </label>
-            );
-          })}
+                </label>
+              );
+            })
+          )}
         </div>
       ))}
       <p className="text-xs text-muted-foreground">
-        Inspection does not connect to servers or check sign-in. Native authentication
-        stays on the execution machine. This is not a per-tool permission control.
-        The server validates the selected configuration again before starting a new session.
+        Inspection does not connect to servers or check sign-in. Native
+        authentication stays on the execution machine. This is not a per-tool
+        permission control. The server validates the selected configuration
+        again before starting a new session.
       </p>
     </section>
   );
