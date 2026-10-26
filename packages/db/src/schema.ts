@@ -17,6 +17,9 @@ import { threadCreateOriginValues } from "@bb/domain/thread-create-origin";
 import { threadOriginKindValues } from "@bb/domain/thread-origin-kind";
 import { threadVisibilityValues } from "@bb/domain/thread-visibility";
 import type {
+  ExecutionContext,
+  ModelConnection,
+  ThreadExecutionBinding,
   EnvironmentProviderSelection,
   JsonValue,
   EnvironmentStatus,
@@ -1339,3 +1342,31 @@ export const projectAttachmentBackfills = sqliteTable(
     error: text("error"),
   },
 );
+
+export const modelConnections = sqliteTable("model_connections", {
+  id: text("id").primaryKey(),
+  hostId: text("host_id").notNull().references(() => hosts.id, { onDelete: "restrict" }),
+  definition: text("definition", { mode: "json" }).$type<ModelConnection>().notNull(),
+});
+
+export const executionContexts = sqliteTable("execution_contexts", {
+  id: text("id").primaryKey(),
+  defaultModelConnectionId: text("default_model_connection_id").references(() => modelConnections.id, { onDelete: "restrict" }),
+  definition: text("definition", { mode: "json" }).$type<ExecutionContext>().notNull(),
+});
+
+export const executionContextProjects = sqliteTable("execution_context_projects", {
+  executionContextId: text("execution_context_id").notNull().references(() => executionContexts.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+}, (table) => [primaryKey({ columns: [table.executionContextId, table.projectId] })]);
+
+export const projectContextDefaults = sqliteTable("project_context_defaults", {
+  projectId: text("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
+  executionContextId: text("execution_context_id").references(() => executionContexts.id, { onDelete: "restrict" }),
+  modelConnectionId: text("model_connection_id").references(() => modelConnections.id, { onDelete: "restrict" }),
+});
+
+export const threadExecutionBindings = sqliteTable("thread_execution_bindings", {
+  threadId: text("thread_id").primaryKey().references(() => threads.id, { onDelete: "cascade" }),
+  snapshot: text("snapshot", { mode: "json" }).$type<ThreadExecutionBinding>().notNull(),
+});

@@ -1,3 +1,6 @@
+export type * from "./areas/execution-contexts.js";
+export type { ExecutionContext, ExecutionContextSnapshot, ModelConnection, ModelConnectionSnapshot, ProjectContextDefaults, ThreadExecutionBinding } from "@bb/domain";
+export type { CreateExecutionContextRequest, UpdateExecutionContextRequest, CreateModelConnectionRequest, UpdateModelConnectionRequest, SetProjectContextDefaultsRequest } from "@bb/server-contract";
 export type {
   CallerExecutionInputSource,
   ContextSnapshot,

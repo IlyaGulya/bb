@@ -1,0 +1,169 @@
+import { randomUUID } from "node:crypto";
+import {
+  deleteExecutionContext, deleteModelConnection, getExecutionContext, getHost,
+  getModelConnection, getProject, getProjectContextDefaults, isSqliteForeignKeyConstraint,
+  saveExecutionContext, saveModelConnection, setProjectContextDefaults,
+  type DbConnection,
+} from "@bb/db";
+import {
+  executionContextSchema, modelConnectionSchema,
+  type ExecutionContext, type ModelConnection, type ProjectContextDefaults,
+  type ResolvedThreadExecutionBinding,
+} from "@bb/domain";
+import type {
+  ParsedCreateExecutionContextRequest, UpdateExecutionContextRequest,
+  ParsedCreateModelConnectionRequest, UpdateModelConnectionRequest,
+} from "@bb/server-contract";
+import { ApiError } from "../errors.js";
+
+function requireProject(db: DbConnection, projectId: string): void {
+  const project = getProject(db, projectId);
+  if (!project || project.deletedAt !== null) throw new ApiError(404, "project_not_found", `Project ${projectId} is unavailable`);
+}
+
+export function requireExecutionContext(db: DbConnection, id: string): ExecutionContext {
+  const context = getExecutionContext(db, id);
+  if (!context) throw new ApiError(404, "execution_context_not_found", `Execution context ${id} does not exist; select an available context`);
+  return context;
+}
+
+export function requireModelConnection(db: DbConnection, id: string): ModelConnection {
+  const connection = getModelConnection(db, id);
+  if (!connection) throw new ApiError(404, "model_connection_not_found", `Model connection ${id} does not exist; select an available native connection`);
+  return connection;
+}
+
+function requireEnabledContext(context: ExecutionContext, projectId: string): void {
+  if (!context.enabled) throw new ApiError(409, "execution_context_disabled", `Execution context ${context.name} is disabled; enable it or select another context`);
+  if (!context.projectIds.includes(projectId)) throw new ApiError(400, "execution_context_project_mismatch", `Project ${projectId} is not a member of execution context ${context.name}; add project membership or select another context`);
+}
+
+export function resolveProjectExecutionContext(db: DbConnection, args: { projectId: string; executionContextId?: string }): ExecutionContext | null {
+  const id = args.executionContextId ?? getProjectContextDefaults(db, args.projectId).executionContextId;
+  if (!id) return null;
+  requireProject(db, args.projectId);
+  const context = requireExecutionContext(db, id);
+  requireEnabledContext(context, args.projectId);
+  return context;
+}
+
+function requireEnabledConnection(connection: ModelConnection): void {
+  if (connection.revoked) throw new ApiError(409, "model_connection_revoked", `Model connection ${connection.name} is revoked; select another native connection`);
+  if (!connection.enabled) throw new ApiError(409, "model_connection_disabled", `Model connection ${connection.name} is disabled; enable it or select another connection`);
+}
+
+function requireAvailableNativeHost(db: DbConnection, hostId: string): void {
+  const host = getHost(db, hostId);
+  if (!host || host.destroyedAt !== null || host.phase === "destroyed" || host.phase === "removing") throw new ApiError(409, "model_connection_host_unavailable", `Native execution host ${hostId} is unavailable; select an available host and connection`);
+}
+
+export interface ResolveThreadExecutionBindingArgs {
+  projectId: string;
+  hostId: string | null;
+  provider?: string;
+  executionContextId?: string;
+  modelConnectionId?: string;
+  presetExecutionContextId?: string | null;
+  presetModelConnectionId?: string | null;
+}
+
+export function resolveThreadExecutionBinding(db: DbConnection, args: ResolveThreadExecutionBindingArgs): ResolvedThreadExecutionBinding | null {
+  const defaults = getProjectContextDefaults(db, args.projectId);
+  const contextId = args.executionContextId ?? args.presetExecutionContextId ?? defaults.executionContextId;
+  const executionContext = contextId ? requireExecutionContext(db, contextId) : null;
+  const connectionId = args.modelConnectionId ?? args.presetModelConnectionId ?? defaults.modelConnectionId ?? executionContext?.defaultModelConnectionId;
+  if (!executionContext && !connectionId) return null;
+  requireProject(db, args.projectId);
+  if (!args.hostId) throw new ApiError(400, "execution_context_host_required", "Scoped context or model connection selection requires a concrete execution host; select an existing host environment");
+  requireAvailableNativeHost(db, args.hostId);
+  if (executionContext) requireEnabledContext(executionContext, args.projectId);
+  const modelConnection = connectionId ? requireModelConnection(db, connectionId) : null;
+  if (modelConnection) {
+    requireEnabledConnection(modelConnection);
+    if (modelConnection.hostId !== args.hostId) throw new ApiError(400, "model_connection_host_mismatch", `Connection ${modelConnection.name} belongs to host ${modelConnection.hostId}, not execution host ${args.hostId}; select a connection on the execution host`);
+    if (args.provider && modelConnection.provider !== args.provider) throw new ApiError(400, "model_connection_provider_mismatch", `Connection ${modelConnection.name} uses provider ${modelConnection.provider}, not ${args.provider}; select its provider or another connection`);
+  }
+  return { executionContext, modelConnection, createdAt: Date.now() };
+}
+
+export function assertThreadExecutionBindingAvailable(db: DbConnection, binding: ResolvedThreadExecutionBinding | null): void {
+  if (binding?.modelConnection) {
+    requireEnabledConnection(requireModelConnection(db, binding.modelConnection.id));
+    requireAvailableNativeHost(db, binding.modelConnection.hostId);
+  }
+  if (binding?.executionContext) {
+    const current = requireExecutionContext(db, binding.executionContext.id);
+    if (!current.enabled) throw new ApiError(409, "execution_context_disabled", `Execution context ${current.name} is disabled; enable it before continuing this thread`);
+  }
+}
+
+function validateContextDefinition(db: DbConnection, value: ExecutionContext): void {
+  for (const projectId of value.projectIds) requireProject(db, projectId);
+  if (new Set(value.projectIds).size !== value.projectIds.length) throw new ApiError(400, "duplicate_project_membership", "Execution context project membership must not contain duplicates");
+  if (value.defaultModelConnectionId) requireEnabledConnection(requireModelConnection(db, value.defaultModelConnectionId));
+  const previous = getExecutionContext(db, value.id);
+  if (previous) {
+    for (const projectId of previous.projectIds) {
+      if (!value.projectIds.includes(projectId) && getProjectContextDefaults(db, projectId).executionContextId === value.id) throw new ApiError(409, "execution_context_in_use", `Project ${projectId} defaults to this context; clear or replace its default before removing membership`);
+    }
+  }
+}
+
+export function createExecutionContextDefinition(db: DbConnection, input: ParsedCreateExecutionContextRequest): ExecutionContext {
+  const now = Date.now();
+  const value = executionContextSchema.parse({ ...input, id: randomUUID(), createdAt: now, updatedAt: now });
+  validateContextDefinition(db, value);
+  return saveExecutionContext(db, value);
+}
+
+export function updateExecutionContextDefinition(db: DbConnection, input: UpdateExecutionContextRequest): ExecutionContext {
+  const previous = requireExecutionContext(db, input.id);
+  const value = executionContextSchema.parse({ ...previous, ...input, updatedAt: Date.now() });
+  validateContextDefinition(db, value);
+  return saveExecutionContext(db, value);
+}
+
+function validateConnectionDefinition(db: DbConnection, value: ModelConnection): void {
+  const host = getHost(db, value.hostId);
+  if (!host) throw new ApiError(404, "host_not_found", `Native connection host ${value.hostId} does not exist`);
+  requireAvailableNativeHost(db, value.hostId);
+}
+
+export function createModelConnectionDefinition(db: DbConnection, input: ParsedCreateModelConnectionRequest): ModelConnection {
+  const now = Date.now();
+  const value = modelConnectionSchema.parse({ ...input, id: randomUUID(), createdAt: now, updatedAt: now });
+  validateConnectionDefinition(db, value);
+  return saveModelConnection(db, value);
+}
+
+export function updateModelConnectionDefinition(db: DbConnection, input: UpdateModelConnectionRequest): ModelConnection {
+  const previous = requireModelConnection(db, input.id);
+  const value = modelConnectionSchema.parse({ ...previous, ...input, updatedAt: Date.now() });
+  validateConnectionDefinition(db, value);
+  return saveModelConnection(db, value);
+}
+
+export function updateProjectContextDefaults(db: DbConnection, input: ProjectContextDefaults): ProjectContextDefaults {
+  requireProject(db, input.projectId);
+  if (input.executionContextId) requireEnabledContext(requireExecutionContext(db, input.executionContextId), input.projectId);
+  if (input.modelConnectionId) requireEnabledConnection(requireModelConnection(db, input.modelConnectionId));
+  return setProjectContextDefaults(db, input);
+}
+
+export function deleteContextDefinition(db: DbConnection, id: string): void {
+  try {
+    if (!deleteExecutionContext(db, id)) throw new ApiError(404, "execution_context_not_found", `Execution context ${id} does not exist`);
+  } catch (error) {
+    if (isSqliteForeignKeyConstraint(error)) throw new ApiError(409, "execution_context_in_use", "Clear or replace project context defaults before deleting this context; existing thread snapshots are preserved");
+    throw error;
+  }
+}
+
+export function deleteConnectionDefinition(db: DbConnection, id: string): void {
+  try {
+    if (!deleteModelConnection(db, id)) throw new ApiError(404, "model_connection_not_found", `Model connection ${id} does not exist`);
+  } catch (error) {
+    if (isSqliteForeignKeyConstraint(error)) throw new ApiError(409, "model_connection_in_use", "Clear or replace context/project connection defaults before deleting this connection; existing thread snapshots are preserved");
+    throw error;
+  }
+}

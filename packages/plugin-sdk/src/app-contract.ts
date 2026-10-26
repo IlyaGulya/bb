@@ -1,3 +1,4 @@
+export type { ExecutionContext, ExecutionContextSnapshot, ModelConnection, ModelConnectionSnapshot, ProjectContextDefaults, ThreadExecutionBinding } from "@bb/domain";
 import type {
   ComponentPropsWithRef,
   ComponentPropsWithoutRef,
@@ -3275,6 +3276,8 @@ export interface NewThreadRequest {
    * `bb.sdk.projects.list({ includePersonal: true })`.
    */
   projectId: string;
+  executionContextId?: string;
+  modelConnectionId?: string;
   providerId: string;
   model: string;
   reasoningLevel: ReasoningLevel;

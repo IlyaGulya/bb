@@ -1,3 +1,4 @@
+export * from "./execution-contexts.js";
 export * from "./context-snapshot.js";
 export * from "./active-thinking.js";
 export * from "./acp-cli.js";

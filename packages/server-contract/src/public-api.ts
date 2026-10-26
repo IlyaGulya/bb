@@ -1,3 +1,4 @@
+import { executionContextRoutes } from "./execution-context-routes.js";
 import {
   machineEnvironmentSetSchema,
   machineEnvironmentDeleteSchema,
@@ -445,6 +446,7 @@ type PathThreadInteractionId = {
 };
 
 export const publicApiRoutes = {
+  ...executionContextRoutes,
   promptHistory: {
     list: defineRoute({
       path: "/prompt-history",

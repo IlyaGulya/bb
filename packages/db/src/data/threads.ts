@@ -1,3 +1,4 @@
+import { persistThreadExecutionBinding } from "./execution-contexts.js";
 import { prepareCachedQuery } from "../connection.js";
 import { markThreadPruningPolicyWork } from "./thread-pruning-work.js";
 import { copyProjectAttachmentOwnership } from "./project-attachments.js";
@@ -19,6 +20,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 import type {
+  ResolvedThreadExecutionBinding,
   JsonObject,
   ReasoningLevel,
   ThreadChangeKind,
@@ -262,6 +264,7 @@ function upsertThreadTitleSearchSegments(
 
 export interface CreateThreadInput {
   projectId: string;
+  executionBinding?: ResolvedThreadExecutionBinding | null;
   environmentId?: string | null;
   providerId: string;
   title?: string | null;
@@ -377,6 +380,7 @@ export function createThread(
           metadata: input.pluginMetadata.metadata,
         });
       }
+      persistThreadExecutionBinding(tx, createdThread.id, input.executionBinding ?? null);
       return createdThread;
     },
     { behavior: "immediate" },

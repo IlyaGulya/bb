@@ -1,3 +1,4 @@
+export * from "./execution-contexts.js";
 export {
   createProject,
   ensurePersonalProject,
