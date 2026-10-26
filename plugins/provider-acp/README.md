@@ -82,13 +82,21 @@ npm CLI package. The native-prefixed variable survives BB's deliberate removal
 of inherited `BB_*` control variables. A standalone
 binary/wrapper is insufficient. The SDK must expose
 `EXPLICIT_CONTEXT_DISCOVERY_VERSION = 1`: use
-[`IlyaGulya/oh-my-pi` at `e1df29d`](https://github.com/IlyaGulya/oh-my-pi/commit/e1df29d)
-(`agentos/explicit-context-20261026`), based on 18.12.6. Point source installations
+[`IlyaGulya/oh-my-pi` at `e4c4903`](https://github.com/IlyaGulya/oh-my-pi/commit/e4c4903)
+(`agentos/native-model-errors-20261026`), based on 18.12.6. Point source installations
 at the prepared `packages/coding-agent` package, with its dependencies, generated
 assets and matching native bindings, not the monorepo root. Stock 18.12.6 does not
 satisfy this contract. The SDK stays host-installed, not vendored. Missing
 capabilities refuse startup, never fall back to ambient
 `omp acp`, another account, or inference through another provider.
+
+Use this revision or its descendants for terminal model-failure propagation:
+native `session/prompt` rejects with JSON-RPC `-32603` / `reason: model_error`,
+and BB's existing error path records a failed turn rather than successful
+`end_turn`. The diagnostic and native history remain inspectable; explicit
+retry/continuation keeps the session. Typed refusals and user cancellation
+retain their ACP outcomes. This changes neither native retry policy nor model
+authentication.
 
 Selected `settingsPaths` accept only the bridge's context-setting allowlist, not
 credentials, routing, discovery roots or memory configuration. `hooksPath` must

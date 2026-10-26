@@ -18,6 +18,10 @@
   model `configDir` and child-only broker references. Native session IDs/history
   survive load/fork; source receipts gate continuation without ambient fallback.
   Shared memory is disabled; discovery isolation is not a filesystem/storage ACL.
+- Adopt the native OMP terminal-model-error fix: ACP rejects failed model calls,
+  so BB records a failed turn instead of success. Preserve diagnostics, explicit
+  retry, native resume, typed refusals and cancellation; native retry policy is
+  unchanged. See the provider README for the prepared SDK revision.
 - Advance host-daemon protocol to 240 for scoped root/instruction semantics.
   These are unreleased source changes, not a production deployment.
 - **Tasks 0.4.0:** prepare an explicit multi-repository workspace asynchronously,
