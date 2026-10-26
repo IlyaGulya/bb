@@ -220,6 +220,8 @@ const presetSchema = z
     environmentKind: presetEnvironmentKindSchema,
     baseBranch: nullablePresetTargetSchema,
     machineId: nullablePresetTargetSchema,
+    executionContextId: nullablePresetTargetSchema,
+    modelConnectionId: nullablePresetTargetSchema,
     instructions: z.string(),
     builtin: z.boolean(),
     createdAt: z.string(),
@@ -348,6 +350,8 @@ const updatePresetInputSchema = z
     environmentKind: presetEnvironmentKindSchema.optional(),
     baseBranch: nullablePresetTargetSchema.optional(),
     machineId: nullablePresetTargetSchema.optional(),
+    executionContextId: nullablePresetTargetSchema.optional(),
+    modelConnectionId: nullablePresetTargetSchema.optional(),
     instructions: z.string().optional(),
   })
   .strict()
@@ -362,6 +366,8 @@ const updatePresetInputSchema = z
       input.environmentKind !== undefined ||
       input.baseBranch !== undefined ||
       input.machineId !== undefined ||
+      input.executionContextId !== undefined ||
+      input.modelConnectionId !== undefined ||
       input.instructions !== undefined,
     { message: "at least one preset field must be updated" },
   )
@@ -625,6 +631,8 @@ export const tasksRpcContract = defineRpcContract({
         environmentKind: presetEnvironmentKindSchema.default("project-default"),
         baseBranch: nullablePresetTargetSchema.default(null),
         machineId: nullablePresetTargetSchema.default(null),
+        executionContextId: nullablePresetTargetSchema.default(null),
+        modelConnectionId: nullablePresetTargetSchema.default(null),
         instructions: z.string().default(""),
       })
       .strict()

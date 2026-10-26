@@ -25,6 +25,8 @@ export async function readWorkspaceAgentContext(
     hostId: string;
     workspacePath: string;
     includeAgentInstructions: boolean;
+    includeSharedSkills?: boolean;
+    includeRepositoryInstructions?: boolean;
   },
 ): Promise<WorkspaceAgentContext> {
   const result = await callHostRetryableOnlineRpc(deps, {
@@ -34,13 +36,16 @@ export async function readWorkspaceAgentContext(
       type: "host.read_workspace_agent_context",
       rootPath: args.workspacePath,
       includeAgentInstructions: args.includeAgentInstructions,
+      includeRepositoryInstructions: args.includeRepositoryInstructions ?? false,
       projectSkillRead: {
         limit: 1_000,
         maxFileBytes: 10 * 1024 * 1024,
         maxContentBytes: 32 * 1024 * 1024,
         excludeNames: [...DEFAULT_PATH_LIST_EXCLUDE_NAMES],
       },
-      sharedSkillRoots: sharedSkillNativeRoots(deps),
+      sharedSkillRoots: args.includeSharedSkills === false
+        ? { user: [], project: [] }
+        : sharedSkillNativeRoots(deps),
     },
   });
   const skillsRootPath = joinHostPathSegments(

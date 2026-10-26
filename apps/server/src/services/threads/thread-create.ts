@@ -1,7 +1,12 @@
 import { requestThreadStorageDeletion } from "./thread-lifecycle.js";
 import { seedThreadSessionOptionSelections } from "./thread-session-options.js";
 import { assertEnvironmentPathAvailable } from "../environments/path-admission.js";
-import { markThreadDeleted, getEnvironment, getThread } from "@bb/db";
+import {
+  markThreadDeleted,
+  getEnvironment,
+  getThread,
+  getThreadExecutionBinding,
+} from "@bb/db";
 import {
   describeSessionOptionConflict,
   modelSessionOptionConflict,
@@ -67,6 +72,10 @@ import {
   getEnvironmentProvider,
   listEnvironmentCompositions,
 } from "../plugins/plugin-environment-provider-registry.js";
+import {
+  assertThreadExecutionBindingAvailable,
+  resolveThreadExecutionBinding,
+} from "../execution-contexts.js";
 
 type ThreadCreateDeps = LoggedPendingInteractionWorkSessionDeps;
 
@@ -672,25 +681,6 @@ export async function createThreadFromRequest(
       );
     }
   }
-  await deps.providerRegistry.whenRegistrationsSettled();
-  const {
-    executionDefaults,
-    providerId,
-    providerFallbackCandidates,
-    requestedModel,
-  } = resolveProjectExecutionDefaultsForCreate(deps, {
-    executionInputSources: requestInput.executionInputSources,
-    model: requestInput.model,
-    projectId: requestInput.projectId,
-    providerId: requestInput.providerId,
-  });
-  const {
-    originKind: _requestedOriginKind,
-    parentThreadId: _requestedParentThreadId,
-    pluginMetadata: _requestedPluginMetadata,
-    sourceThreadId: _requestedSourceThreadId,
-    ...requestRest
-  } = requestInput;
   const requestedEnvironment = await resolveCreateThreadEnvironment(deps, {
     parentThread:
       forkSourceEnvironmentId !== undefined
@@ -710,6 +700,117 @@ export async function createThreadFromRequest(
   ) {
     throw new ApiError(400, "invalid_request", "unknown environment provider");
   }
+  const resolvedEnvironment =
+    requestedEnvironment.type === "provider"
+      ? null
+      : resolveStableThreadRequestEnvironment(deps, {
+          allowUnmanagedPersonalProjectReuseEnvironmentId:
+            forkSourceEnvironmentId,
+          environment: requestedEnvironment,
+          projectId: requestInput.projectId,
+        });
+  const childHostId =
+    resolvedEnvironment !== null
+      ? childHostIdForResolvedEnvironment(resolvedEnvironment)
+      : requestedEnvironment.type === "provider" &&
+          requestedEnvironment.machine?.type === "existing"
+        ? requestedEnvironment.machine.hostId
+        : null;
+  const sourceBinding =
+    originKind === "fork" && sourceThread
+      ? getThreadExecutionBinding(deps.db, sourceThread.id)
+      : null;
+  if (
+    originKind === "fork" &&
+    ((requestInput.executionContextId !== undefined &&
+      requestInput.executionContextId !== sourceBinding?.executionContext?.id) ||
+      (requestInput.modelConnectionId !== undefined &&
+        requestInput.modelConnectionId !== sourceBinding?.modelConnection?.id))
+  ) {
+    throw new ApiError(
+      409,
+      "fork_execution_binding_conflict",
+      "Forking preserves the native session's context and model connection. Start a new thread to select a different binding.",
+    );
+  }
+  const executionBinding = originKind === "fork"
+    ? sourceBinding === null
+      ? null
+      : {
+          executionContext: sourceBinding.executionContext,
+          modelConnection: sourceBinding.modelConnection,
+          createdAt: Date.now(),
+        }
+    : resolveThreadExecutionBinding(deps.db, {
+    projectId: requestInput.projectId,
+    hostId: childHostId,
+    ...(requestInput.providerId === undefined
+      ? {}
+      : { provider: requestInput.providerId }),
+    ...(requestInput.executionContextId === undefined
+      ? {}
+      : { executionContextId: requestInput.executionContextId }),
+    ...(requestInput.modelConnectionId === undefined
+      ? {}
+      : { modelConnectionId: requestInput.modelConnectionId }),
+  });
+  if (sourceBinding !== null) {
+    assertThreadExecutionBindingAvailable(deps.db, sourceBinding);
+    if (
+      sourceThread &&
+      requestInput.providerId !== undefined &&
+      requestInput.providerId !== sourceThread.providerId
+    ) {
+      throw new ApiError(
+        409,
+        "fork_execution_binding_conflict",
+        "The selected provider cannot continue the bound native session. Start a new thread.",
+      );
+    }
+  }
+  const selectedProvider =
+    executionBinding?.modelConnection?.provider ??
+    (sourceBinding !== null ? sourceThread?.providerId : undefined) ??
+    requestInput.providerId;
+  await deps.providerRegistry.whenRegistrationsSettled();
+  const {
+    executionDefaults,
+    providerId,
+    providerFallbackCandidates,
+    requestedModel,
+  } = resolveProjectExecutionDefaultsForCreate(deps, {
+    executionInputSources: executionBinding?.modelConnection || sourceBinding !== null
+      ? { ...requestInput.executionInputSources, providerId: "explicit" }
+      : requestInput.executionInputSources,
+    model: requestInput.model,
+    projectId: requestInput.projectId,
+    providerId: selectedProvider,
+  });
+  if (
+    executionBinding !== null &&
+    providerId !== "claude-code" &&
+    providerId !== "acp-omp"
+  ) {
+    throw new ApiError(
+      409,
+      "execution_binding_provider_unsupported",
+      `Provider ${providerId} does not support explicit execution contexts or native account bindings. Choose Claude Code or OMP, or an unassigned legacy project.`,
+    );
+  }
+  if (executionBinding?.executionContext && providerId === "acp-omp") {
+    throw new ApiError(
+      409,
+      "execution_context_provider_unsupported",
+      "Native OMP ACP does not yet expose isolated context startup. Choose Claude Code for this scoped context, or use an unassigned legacy project; no ambient configuration was substituted.",
+    );
+  }
+  const {
+    originKind: _requestedOriginKind,
+    parentThreadId: _requestedParentThreadId,
+    pluginMetadata: _requestedPluginMetadata,
+    sourceThreadId: _requestedSourceThreadId,
+    ...requestRest
+  } = requestInput;
   const request: ThreadCreateServiceRequest = {
     ...requestRest,
     ...(hierarchyParentThreadId
@@ -724,6 +825,7 @@ export async function createThreadFromRequest(
     }),
     environment: requestedEnvironment,
     providerId,
+    executionBinding,
     titleFallback: deriveTitleFallback(requestInput.input),
   };
   if (
@@ -738,23 +840,6 @@ export async function createThreadFromRequest(
       request.title = forkTitle;
     }
   }
-  const resolvedEnvironment =
-    requestedEnvironment.type === "provider"
-      ? null
-      : resolveStableThreadRequestEnvironment(deps, {
-          allowUnmanagedPersonalProjectReuseEnvironmentId:
-            forkSourceEnvironmentId,
-          environment: requestedEnvironment,
-          projectId: request.projectId,
-        });
-  const childHostId =
-    resolvedEnvironment !== null
-      ? childHostIdForResolvedEnvironment(resolvedEnvironment)
-      : request.environment.type === "provider"
-        ? request.environment.machine?.type === "existing"
-          ? request.environment.machine.hostId
-          : null
-        : null;
   assertForkSourceHost(deps, {
     childHostId,
     originKind: request.originKind ?? null,
@@ -779,7 +864,8 @@ export async function createThreadFromRequest(
     executionDefaults,
     hostId: childHostId,
     providerId,
-    providerFallbackCandidates,
+    providerFallbackCandidates:
+      executionBinding === null ? providerFallbackCandidates : [],
     requestedModel,
   });
   if (

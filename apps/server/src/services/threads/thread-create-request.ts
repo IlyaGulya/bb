@@ -5,6 +5,7 @@ import type {
   ThreadCreateOrigin,
   ThreadOriginKind,
   ThreadVisibility,
+  ResolvedThreadExecutionBinding,
 } from "@bb/domain";
 import type {
   CreateThreadEnvironmentArgs,
@@ -36,6 +37,8 @@ export interface ThreadCreateServiceRequestInput {
   permissionMode?: CreateThreadRequest["permissionMode"];
   projectId: string;
   providerId?: CreateThreadRequest["providerId"];
+  executionContextId?: CreateThreadRequest["executionContextId"];
+  modelConnectionId?: CreateThreadRequest["modelConnectionId"];
   reasoningLevel?: CreateThreadRequest["reasoningLevel"];
   serviceTier?: CreateThreadRequest["serviceTier"];
   sessionOptions?: CreateThreadRequest["sessionOptions"];
@@ -53,6 +56,7 @@ export interface ThreadCreateServiceRequest extends Omit<
   environment: EnvironmentArgs | ProviderEnvironmentArgs;
   pluginMetadata: { pluginId: string; metadata: JsonObject } | null;
   providerId: string;
+  executionBinding: ResolvedThreadExecutionBinding | null;
   titleFallback: string | null;
   visibility: ThreadVisibility;
 }

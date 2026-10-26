@@ -17,7 +17,6 @@ import { listSharedSkills } from "./list-skills.js";
 import { resolveNonSymlinkDirectoryPath } from "./root-path.js";
 
 const PROJECT_SKILLS_RELATIVE_SEGMENTS = [".bb", "skills"] as const;
-const AGENT_INSTRUCTIONS_RELATIVE_SEGMENTS = [".bb", "AGENTS.md"] as const;
 type SkillReadPolicy =
   CommandOf<"host.read_workspace_agent_context">["projectSkillRead"];
 
@@ -197,13 +196,25 @@ async function readProjectSkillFiles(
   return { skills, truncated: directoryNames.length > policy.limit };
 }
 
-async function readAgentInstructions(rootPath: string): Promise<string | null> {
-  const content = await readContainedUtf8File({
-    filePath: path.join(rootPath, ...AGENT_INSTRUCTIONS_RELATIVE_SEGMENTS),
-    rootPath,
-  });
-  const trimmed = content?.trim() ?? "";
-  return trimmed.length > 0 ? trimmed : null;
+async function readAgentInstructions(
+  rootPath: string,
+  includeRepositoryInstructions: boolean,
+): Promise<string | null> {
+  const paths = includeRepositoryInstructions
+    ? ["AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md", ".bb/AGENTS.md"]
+    : [".bb/AGENTS.md"];
+  const sections = await Promise.all(paths.map(async (relativePath) => {
+    const content = await readContainedUtf8File({
+      filePath: path.join(rootPath, relativePath),
+      rootPath,
+    });
+    const trimmed = content?.trim() ?? "";
+    if (!trimmed) return null;
+    return includeRepositoryInstructions
+      ? `Repository instructions (${relativePath}):\n${trimmed}`
+      : trimmed;
+  }));
+  return sections.filter((section) => section !== null).join("\n\n") || null;
 }
 
 export async function readWorkspaceAgentContext(
@@ -215,7 +226,7 @@ export async function readWorkspaceAgentContext(
   const [projectSkills, agentInstructions, sharedSkills] = await Promise.all([
     readProjectSkillFiles(command.rootPath, command.projectSkillRead),
     command.includeAgentInstructions
-      ? readAgentInstructions(command.rootPath)
+      ? readAgentInstructions(command.rootPath, command.includeRepositoryInstructions)
       : Promise.resolve(null),
     listSharedSkills({
       cwd: command.rootPath,

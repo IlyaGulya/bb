@@ -369,6 +369,10 @@ const MIGRATIONS = [
   `,
   repositoryMigrations.join(";\n"),
   taskWorkflowMigration,
+  `
+    ALTER TABLE presets ADD COLUMN execution_context_id TEXT;
+    ALTER TABLE presets ADD COLUMN model_connection_id TEXT;
+  `,
 ] as const;
 
 export function initializeTasksSchema(db: PluginDatabase): void {

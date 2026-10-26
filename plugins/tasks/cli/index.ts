@@ -76,6 +76,19 @@ const MACHINE_OPTION = {
     "Enrolled machine that owns the file paths; defaults to the invoking thread's machine, otherwise the server's",
 } as const;
 
+const CONTEXT_OPTIONS = {
+  context: {
+    type: "string",
+    placeholder: "id",
+    description: "Execution context id; independent of the model account",
+  },
+  "model-connection": {
+    type: "string",
+    placeholder: "id",
+    description: "Native model connection id; does not change tool identities",
+  },
+} as const;
+
 const PROJECT_OPTION = {
   type: "string",
   placeholder: "prefix-or-id",
@@ -2363,6 +2376,8 @@ export function registerTasksCli(
                       "ENVIRONMENT",
                       "BASE BRANCH",
                       "MACHINE",
+                      "CONTEXT",
+                      "MODEL CONNECTION",
                       "BUILTIN",
                       "ID",
                     ],
@@ -2376,6 +2391,8 @@ export function registerTasksCli(
                       presetEnvironmentLabel(preset),
                       preset.baseBranch ?? "-",
                       preset.machineId ?? "-",
+                      preset.executionContextId ?? "-",
+                      preset.modelConnectionId ?? "-",
                       preset.builtin ? "yes" : "no",
                       preset.id,
                     ]),
@@ -2412,6 +2429,8 @@ export function registerTasksCli(
                     ["Environment", presetEnvironmentLabel(preset)],
                     ["Base branch", preset.baseBranch ?? "-"],
                     ["Machine", preset.machineId ?? "-"],
+                    ["Context", preset.executionContextId ?? "Inherited"],
+                    ["Model connection", preset.modelConnectionId ?? "Inherited"],
                     ["Instructions", preset.instructions || "-"],
                     ["Built in", preset.builtin ? "yes" : "no"],
                     ["ID", preset.id],
@@ -2483,6 +2502,7 @@ export function registerTasksCli(
               placeholder: "text",
               description: "Extra instructions prepended to every dispatch",
             },
+            ...CONTEXT_OPTIONS,
             json: JSON_OPTION,
           },
           run(input) {
@@ -2517,6 +2537,8 @@ export function registerTasksCli(
                       machine === undefined
                         ? null
                         : await resolveMachineId(domain, machine),
+                    executionContextId: input.options.context ?? null,
+                    modelConnectionId: input.options["model-connection"] ?? null,
                     instructions: input.options.instructions ?? "",
                   }),
                 ),
@@ -2589,6 +2611,15 @@ export function registerTasksCli(
               placeholder: "text",
               description: "Extra instructions prepended to every dispatch",
             },
+            ...CONTEXT_OPTIONS,
+            "clear-context": {
+              type: "boolean",
+              description: "Clear the preset context override and inherit project defaults",
+            },
+            "clear-model-connection": {
+              type: "boolean",
+              description: "Clear the preset connection override and inherit defaults",
+            },
             json: JSON_OPTION,
           },
           run(input) {
@@ -2597,6 +2628,10 @@ export function registerTasksCli(
                 await listPresets(domain),
                 input.positionals["name-or-id"],
               );
+              if (input.options.context !== undefined && input.options["clear-context"])
+                throw new CliError("Use either --context or --clear-context");
+              if (input.options["model-connection"] !== undefined && input.options["clear-model-connection"])
+                throw new CliError("Use either --model-connection or --clear-model-connection");
               const environmentOption = input.options.environment;
               const environmentKind = presetEnvironmentKind(
                 environmentOption,
@@ -2638,6 +2673,12 @@ export function registerTasksCli(
                         : machine === undefined
                           ? undefined
                           : await resolveMachineId(domain, machine),
+                    executionContextId: input.options["clear-context"]
+                      ? null
+                      : input.options.context,
+                    modelConnectionId: input.options["clear-model-connection"]
+                      ? null
+                      : input.options["model-connection"],
                     instructions: input.options.instructions,
                   }),
                 ),
@@ -2756,6 +2797,7 @@ export function registerTasksCli(
               required: true,
               description: "Execution profile name or id",
             },
+            ...CONTEXT_OPTIONS,
             json: JSON_OPTION,
           },
           run(input) {
@@ -2806,6 +2848,8 @@ export function registerTasksCli(
                           await listPresets(domain),
                           input.options.preset,
                         ).id,
+                        executionContextId: input.options.context,
+                        modelConnectionId: input.options["model-connection"],
                       },
                     }),
                   ),
@@ -3052,6 +3096,7 @@ export function registerTasksCli(
               description:
                 "Invocation-only execution target JSON: bbProjectId, hostId, workspace, presetId",
             },
+            ...CONTEXT_OPTIONS,
             instructions: {
               type: "string",
               placeholder: "text",
@@ -3078,6 +3123,8 @@ export function registerTasksCli(
                   delegationRpcContract.delegate.input.parse({
                     taskId: task.id,
                     presetId: preset?.id,
+                    executionContextId: input.options.context,
+                    modelConnectionId: input.options["model-connection"],
                     executionTarget:
                       input.options["execution-target"] === undefined
                         ? undefined

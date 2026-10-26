@@ -36,6 +36,7 @@ const skillFrontmatterSchema = z
 export interface ResolveInjectedSkillSourcesArgs {
   additionalSkillsRootPaths?: readonly string[];
   dataDir: string;
+  includeUserSkills?: boolean;
   pluginSkillRoots?: readonly PluginSkillRoot[];
   pluginSkillSelections?: ReadonlyMap<string, ReadonlySet<string>>;
   projectSkillSources?: readonly ProjectInjectedSkillSource[];
@@ -618,12 +619,14 @@ export function resolveSkillCatalogEntries(
     (source) => source.sourceType === "shared-user",
   );
 
-  const dataDirSources = readSkillsRoot({
-    logger,
-    skillTreeRegistry,
-    skillsRootPath: resolveDataDirSkillsRootPath(args.dataDir),
-    sourceType: "data-dir",
-  });
+  const dataDirSources = args.includeUserSkills === false
+    ? []
+    : readSkillsRoot({
+        logger,
+        skillTreeRegistry,
+        skillsRootPath: resolveDataDirSkillsRootPath(args.dataDir),
+        sourceType: "data-dir",
+      });
   const inheritedSourceGroups = (args.additionalSkillsRootPaths ?? []).map(
     (skillsRootPath) =>
       readSkillsRoot({

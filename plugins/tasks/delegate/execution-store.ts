@@ -12,6 +12,8 @@ const continuationRequestSchema = z
     includePaths: z.array(z.string()),
     branch: z.string().optional(),
     extraInstructions: z.string().optional(),
+    executionContextId: z.string().trim().min(1).optional(),
+    modelConnectionId: z.string().trim().min(1).optional(),
   })
   .strict();
 type ContinuationRequest = z.infer<typeof continuationRequestSchema>;

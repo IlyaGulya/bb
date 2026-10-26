@@ -17,6 +17,8 @@ import {
   deleteProjectSource,
   getProjectSourceByHost,
   getProjectSourceForProject,
+  getThread,
+  getThreadExecutionBinding,
   listProjectExecutionDefaultsByProjectIds,
   listPublicProjects,
   listProjectSourcesByProjectIds,
@@ -101,6 +103,10 @@ import {
   providerHasNativeRootSurface,
   scanProviderNativeRoots,
 } from "../services/providers/native-roots.js";
+import {
+  assertThreadExecutionBindingAvailable,
+  resolveProjectExecutionContext,
+} from "../services/execution-contexts.js";
 import { assertUsableHostId } from "../services/hosts/primary-host.js";
 import {
   resolveProjectCommandWorkspace,
@@ -739,6 +745,33 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
   get(routes.commands, async (context, query) => {
     const projectId = context.req.param("id");
     requirePublicProject(deps.db, projectId);
+    const thread = query.threadId ? getThread(deps.db, query.threadId) : null;
+    if (
+      query.threadId !== undefined &&
+      (thread === null || thread.projectId !== projectId || thread.deletedAt !== null)
+    ) {
+      throw new ApiError(404, "thread_not_found", "Thread not found in this project");
+    }
+    const binding = thread ? getThreadExecutionBinding(deps.db, thread.id) : null;
+    if (thread) {
+      assertThreadExecutionBindingAvailable(deps.db, binding);
+      if (
+        query.executionContextId !== undefined &&
+        query.executionContextId !== binding?.executionContext?.id
+      ) {
+        throw new ApiError(
+          409,
+          "thread_execution_context_mismatch",
+          "Command discovery must use this thread's persisted context.",
+        );
+      }
+    }
+    const executionContext = thread
+      ? binding?.executionContext ?? null
+      : resolveProjectExecutionContext(deps.db, {
+          projectId,
+          executionContextId: query.executionContextId,
+        });
 
     const registration = deps.providerRegistry.get(query.provider);
     if (registration === null || !providerHasCommandSurface(registration)) {
@@ -759,6 +792,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         registration,
         hostId: workspace.hostId,
         cwd: workspace.cwd,
+        executionContext,
       });
     };
     const readWorkspaceSkills = async (): Promise<
@@ -767,15 +801,18 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       workspace.cwd === null
         ? {
             projectSkillSources: [],
-            sharedSkills: await resolveSharedSkills(deps, {
-              hostId: workspace.hostId,
-              cwd: null,
-            }),
+            sharedSkills: executionContext === null
+              ? await resolveSharedSkills(deps, {
+                  hostId: workspace.hostId,
+                  cwd: null,
+                })
+              : { runtimeSources: [], summaries: [] },
           }
         : readWorkspaceAgentContext(deps, {
             hostId: workspace.hostId,
             workspacePath: workspace.cwd,
             includeAgentInstructions: false,
+            includeSharedSkills: executionContext === null,
           });
     const [result, workspaceSkills] = await Promise.all([
       listProviderCommands(),
@@ -784,6 +821,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
     const skillCatalog = resolveSkillCatalog(deps, {
       projectSkillSources: workspaceSkills.projectSkillSources,
       sharedSkillSources: workspaceSkills.sharedSkills.runtimeSources,
+      includeUserSkills: executionContext === null,
     });
     return context.json(
       buildCommandListResponse({

@@ -10,6 +10,7 @@ import {
 
 interface ResolveSkillCatalogSourcesArgs {
   pluginSkillSelections?: ReadonlyMap<string, ReadonlySet<string>>;
+  includeUserSkills?: boolean;
   projectSkillSources?: readonly ProjectInjectedSkillSource[];
   sharedSkillSources?: readonly SharedInjectedSkillSource[];
 }
@@ -20,10 +21,13 @@ export function resolveSkillCatalog(
 ): ResolvedSkillCatalogEntry[] {
   return resolveSkillCatalogEntries(deps.logger, {
     additionalSkillsRootPaths: [
-      ...deps.config.inheritedSkillsRootPaths,
+      ...(args.includeUserSkills === false
+        ? []
+        : deps.config.inheritedSkillsRootPaths),
       generatedSkillsRootPath(deps.config.dataDir),
     ],
     dataDir: deps.config.dataDir,
+    includeUserSkills: args.includeUserSkills ?? true,
     pluginSkillRoots: getPluginSkillRootContributions(),
     ...(args.pluginSkillSelections !== undefined
       ? { pluginSkillSelections: args.pluginSkillSelections }

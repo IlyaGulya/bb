@@ -30,6 +30,7 @@ import {
   requireIdleTask,
   resolveTaskExecution,
   targetSpawnEnvironment,
+  taskExecutionSelection,
   withTaskExecution,
 } from "./execution";
 import { RepositoryStore } from "../repositories/store";
@@ -468,6 +469,7 @@ export function handlers(
               : { serviceTier: execution.serviceTier }),
             permissionMode: execution.permissionMode,
             title,
+            ...taskExecutionSelection(preset, target, input),
             prompt,
           })
           .catch((error: unknown) => mapSpawnTargetError(error, preset));

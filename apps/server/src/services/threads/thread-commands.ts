@@ -1,4 +1,9 @@
-import { environments, hasStoredSpawnAgentToolCall, threads } from "@bb/db";
+import {
+  environments,
+  getThreadExecutionBinding,
+  hasStoredSpawnAgentToolCall,
+  threads,
+} from "@bb/db";
 import { and, eq, isNull } from "drizzle-orm";
 import {
   PromptInput,
@@ -48,6 +53,7 @@ import {
   requireBridgeLaunchForProviderId,
   resolveBridgeLaunchForProviderId,
 } from "../system/provider-bridge-launch.js";
+import { assertThreadExecutionBindingAvailable } from "../execution-contexts.js";
 
 type ExecutionOptionsRequest = ExistingThreadExecutionInputRequest;
 
@@ -211,6 +217,21 @@ function toRuntimeExecutionOptions(
       permissionMode,
       ...(promptMode !== undefined ? { promptMode } : {}),
     }) ?? {};
+  const binding = getThreadExecutionBinding(args.deps.db, args.threadId);
+  if (binding !== null) {
+    assertThreadExecutionBindingAvailable(args.deps.db, binding);
+    if (
+      binding.modelConnection !== null &&
+      (binding.modelConnection.hostId !== args.hostId ||
+        binding.modelConnection.provider !== args.providerId)
+    ) {
+      throw new ApiError(
+        409,
+        "model_connection_execution_mismatch",
+        "The thread's bound model connection belongs to a different host or provider. Start a new thread with a compatible connection.",
+      );
+    }
+  }
   const sessionOptions = resolvePendingThreadSessionOptions(
     args.deps.db,
     args.threadId,
@@ -221,7 +242,17 @@ function toRuntimeExecutionOptions(
     reasoningLevel: args.execution.reasoningLevel,
     ...(promptMode !== undefined ? { promptMode } : {}),
     ...(Object.keys(sessionOptions).length > 0 ? { sessionOptions } : {}),
-    providerOptions,
+    providerOptions: binding === null
+      ? providerOptions
+      : {
+          ...providerOptions,
+          ...(binding.executionContext === null
+            ? {}
+            : { executionContext: binding.executionContext }),
+          ...(binding.modelConnection === null
+            ? {}
+            : { modelConnection: binding.modelConnection }),
+        },
   };
   if (permissionMode === "full") {
     return {

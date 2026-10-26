@@ -6,7 +6,12 @@ import {
   resolveHostEnvironment,
   mergeHostAndProviderEnvironment,
 } from "../hosts/host-environment.js";
-import { getEnvironment, getHost, getProject } from "@bb/db";
+import {
+  getEnvironment,
+  getHost,
+  getProject,
+  getThreadExecutionBinding,
+} from "@bb/db";
 import type {
   DynamicTool,
   InstructionMode,
@@ -145,10 +150,14 @@ export async function resolveThreadRuntimeCommandConfig(
     throw new ApiError(404, "host_not_found", "Host not found");
   }
 
+  const executionContext =
+    getThreadExecutionBinding(deps.db, args.thread.id)?.executionContext ?? null;
   const workspaceAgentContext = await readWorkspaceAgentContext(deps, {
     includeAgentInstructions: true,
     hostId: args.environment.hostId,
     workspacePath,
+    includeSharedSkills: executionContext === null,
+    includeRepositoryInstructions: executionContext !== null,
   });
   markTurnTraceSpan("runtimeConfig.workspaceRead");
   const pluginSkillRoots = getPluginSkillRootContributions();
@@ -197,7 +206,7 @@ export async function resolveThreadRuntimeCommandConfig(
     skillIdsByPlugin,
   });
   markTurnTraceSpan("runtimeConfig.pluginConfig");
-  const contributedEnv = mergeHostAndProviderEnvironment(
+  let contributedEnv = mergeHostAndProviderEnvironment(
     await resolveHostEnvironment(deps, {
       hostId: host.id,
       projectId: project.id,
@@ -211,16 +220,33 @@ export async function resolveThreadRuntimeCommandConfig(
       },
     }),
   );
+  if (executionContext?.gitIdentity) {
+    const identity = executionContext.gitIdentity;
+    const variables: [string, string][] = [
+      ["GIT_AUTHOR_NAME", identity.name],
+      ["GIT_AUTHOR_EMAIL", identity.email],
+      ["GIT_COMMITTER_NAME", identity.name],
+      ["GIT_COMMITTER_EMAIL", identity.email],
+    ];
+    contributedEnv = mergeHostAndProviderEnvironment(contributedEnv,
+      variables.map(([name, value]) => ({
+        name,
+        value,
+        source: { core: "execution-context" as const },
+        reason: `Git identity from execution context ${executionContext.id}`,
+      })),
+    );
+  }
   markTurnTraceSpan("runtimeConfig.env");
   const injectedSkillSources = resolveSkillCatalog(deps, {
     projectSkillSources: workspaceAgentContext.projectSkillSources,
     sharedSkillSources: workspaceAgentContext.sharedSkills.runtimeSources,
     pluginSkillSelections: conditionalConfiguration.selectedSkillIdsByPlugin,
+    includeUserSkills: executionContext === null,
   }).map((entry) => entry.runtimeSource);
-  const dataDirAgentInstructions = readDataDirAgentInstructions(
-    deps.logger,
-    deps.config.dataDir,
-  );
+  const dataDirAgentInstructions = executionContext === null
+    ? readDataDirAgentInstructions(deps.logger, deps.config.dataDir)
+    : null;
   const dynamicToolContributions = resolveDynamicTools(
     conditionalConfiguration.tools,
   );
@@ -239,7 +265,9 @@ export async function resolveThreadRuntimeCommandConfig(
       );
     }
   }
-  for (const contribution of listPluginInstructionContributions()) {
+  for (const contribution of executionContext === null
+    ? listPluginInstructionContributions()
+    : []) {
     let text: string | null;
     try {
       text = contribution.provider({
@@ -280,7 +308,9 @@ export async function resolveThreadRuntimeCommandConfig(
   }
   if (workspaceAgentContext.agentInstructions) {
     instructionSections.push(
-      `The following workspace instructions come from ${WORKSPACE_AGENT_INSTRUCTIONS_RELATIVE_PATH}:`,
+      executionContext === null
+        ? `The following workspace instructions come from ${WORKSPACE_AGENT_INSTRUCTIONS_RELATIVE_PATH}:`
+        : "The following instructions come from the selected repository's AGENTS.md/CLAUDE.md/.bb/AGENTS.md:",
       workspaceAgentContext.agentInstructions,
     );
   }
@@ -290,6 +320,8 @@ export async function resolveThreadRuntimeCommandConfig(
         includeAgentInstructions: true,
         hostId: args.environment.hostId,
         workspacePath: rootPath,
+        includeSharedSkills: executionContext === null,
+        includeRepositoryInstructions: executionContext !== null,
       });
       instructionSections.push(
         `Bound repository: ${rootPath}. This is a separate Git root owned by this same executor.`,

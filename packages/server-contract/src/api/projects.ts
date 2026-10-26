@@ -310,6 +310,8 @@ export const projectCommandsQuerySchema = z
   .object({
     ...projectWorkspaceRoutingFields,
     provider: z.string().min(1),
+    executionContextId: z.string().min(1).optional(),
+    threadId: z.string().startsWith("thr_").optional(),
   })
   .partial({ hostId: true, environmentId: true })
   .strict()

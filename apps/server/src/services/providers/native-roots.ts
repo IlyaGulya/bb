@@ -1,5 +1,7 @@
 import {
   EMPTY_PROVIDER_RESOLVED_NATIVE_ROOTS,
+  EMPTY_PROVIDER_NATIVE_ROOTS,
+  type ExecutionContextSnapshot,
   providerNativeRootsAreEmpty,
   providerResolvedNativeRootsSchema,
   type ProviderNativeRootSet,
@@ -18,6 +20,7 @@ import {
 } from "../hosts/online-rpc.js";
 import { callPluginHostRpc } from "../plugins/plugin-host-rpc.js";
 import type { ProviderRegistration } from "./provider-registry.js";
+import { ApiError } from "../../errors.js";
 
 export const PROVIDER_NATIVE_ROOTS_CACHE_TTL_MS = 10_000;
 
@@ -125,12 +128,21 @@ function cacheKey(args: {
   providerId: string;
   hostId: string;
   cwd: string | null;
+  executionContext?: ExecutionContextSnapshot | null;
 }): string {
   return JSON.stringify([
     args.pluginId,
     args.providerId,
     args.hostId,
     args.cwd ?? "",
+    args.executionContext === undefined || args.executionContext === null
+      ? null
+      : [
+          args.executionContext.id,
+          args.executionContext.skillRoots,
+          args.executionContext.commandRoots,
+          args.executionContext.pluginRoots,
+        ],
   ]);
 }
 
@@ -139,6 +151,7 @@ interface ResolveNativeRootsArgs {
   hostId: string;
   cwd: string | null;
   timeoutMs: number;
+  executionContext?: ExecutionContextSnapshot | null;
 }
 
 async function callResolveNativeRoots(
@@ -151,6 +164,13 @@ async function callResolveNativeRoots(
   const fields = { pluginId, providerId, hostId: args.hostId, cwd: args.cwd };
   const artifact = deps.pluginHostArtifacts.get(pluginId);
   if (artifact === undefined) {
+    if (args.executionContext) {
+      throw new ApiError(
+        409,
+        "execution_context_roots_unavailable",
+        `Provider ${providerId} has no host root resolver for the selected context. Reconnect or update its execution host.`,
+      );
+    }
     deps.logger.warn(
       fields,
       `Plugin "${pluginId}" resolves native roots for provider "${providerId}" but has no live bb.host artifact; listing its declared roots only`,
@@ -163,13 +183,26 @@ async function callResolveNativeRoots(
         pluginId,
         contract: experimental_nativeRootsHostContract,
         method: "resolveNativeRoots",
-        input: { providerId, cwd: args.cwd },
+        input: {
+          providerId,
+          cwd: args.cwd,
+          ...(args.executionContext
+            ? { executionContext: args.executionContext }
+            : {}),
+        },
         hostId: args.hostId,
         timeoutMs: args.timeoutMs,
         artifact,
       }),
     );
   } catch (error) {
+    if (args.executionContext) {
+      throw new ApiError(
+        409,
+        "execution_context_roots_unavailable",
+        `The selected context's native roots could not be resolved on ${args.hostId}; no ambient roots were substituted.`,
+      );
+    }
     deps.logger.warn(
       { ...fields, err: error },
       `Plugin "${pluginId}" failed to resolve native roots for provider "${providerId}"; listing its declared roots only`,
@@ -184,6 +217,13 @@ export async function resolveProviderResolvedNativeRoots(
 ): Promise<ProviderResolvedNativeRoots> {
   const { registration } = args;
   if (!registration.resolvesNativeRoots) {
+    if (args.executionContext) {
+      throw new ApiError(
+        409,
+        "execution_context_roots_unsupported",
+        `Provider ${registration.info.id} does not support scoped native-root discovery.`,
+      );
+    }
     return EMPTY_PROVIDER_RESOLVED_NATIVE_ROOTS;
   }
   const pluginId = registration.pluginId;
@@ -192,6 +232,7 @@ export async function resolveProviderResolvedNativeRoots(
     providerId: registration.info.id,
     hostId: args.hostId,
     cwd: args.cwd,
+    executionContext: args.executionContext,
   });
   const registrationRevision = deps.providerRegistry.getRegistrationRevision();
   const cached = deps.providerNativeRoots.lookup(key, registrationRevision);
@@ -213,6 +254,13 @@ export async function resolveProviderNativeRootSet(
 ): Promise<ProviderNativeRootSet> {
   const { registration } = args;
   const resolved = await resolveProviderResolvedNativeRoots(deps, args);
+  if (args.executionContext) {
+    return {
+      skills: EMPTY_PROVIDER_NATIVE_ROOTS,
+      commands: EMPTY_PROVIDER_NATIVE_ROOTS,
+      resolved,
+    };
+  }
   return {
     skills: {
       user: [...registration.nativeSkillRoots.user],
@@ -239,6 +287,7 @@ interface ScanProviderNativeRootsArgs {
   registration: ProviderRegistration;
   hostId: string;
   cwd: string | null;
+  executionContext?: ExecutionContextSnapshot | null;
 }
 
 export function scanProviderNativeRoots(
@@ -259,6 +308,7 @@ export async function scanProviderNativeRoots(
     hostId: args.hostId,
     cwd: args.cwd,
     timeoutMs: budget.remainingMs(),
+    executionContext: args.executionContext,
   });
   const scan = {
     providerId: args.registration.info.id,

@@ -22,6 +22,8 @@ export const executionTargetSchema = z
         .strict(),
     ]),
     presetId: idSchema,
+    executionContextId: nonBlank.optional(),
+    modelConnectionId: nonBlank.optional(),
   })
   .strict();
 export type ExecutionTarget = z.infer<typeof executionTargetSchema>;

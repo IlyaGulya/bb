@@ -7,6 +7,7 @@ import {
   environmentThreads,
   requireIdleTask,
   targetSpawnEnvironment,
+  taskExecutionSelection,
   validateProfileAvailability,
   withTaskExecution,
 } from "../delegate/execution";
@@ -650,6 +651,7 @@ export function repositoryHandlers(
                 ? {}
                 : { serviceTier: preset.serviceTier }),
               permissionMode: preset.permissionMode,
+              ...taskExecutionSelection(preset, executions.target(task.id)),
               title: effects.title(task),
               prompt: effects.prompt(
                 task,

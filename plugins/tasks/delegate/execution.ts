@@ -10,6 +10,27 @@ type SpawnEnvironment = Parameters<
   BbPluginApi["sdk"]["threads"]["spawn"]
 >[0]["environment"];
 
+export function taskExecutionSelection(
+  preset: Pick<Preset, "executionContextId" | "modelConnectionId">,
+  target?: Pick<ExecutionTarget, "executionContextId" | "modelConnectionId"> | null,
+  request?: { executionContextId?: string; modelConnectionId?: string },
+): { executionContextId?: string; modelConnectionId?: string } {
+  const executionContextId =
+    request?.executionContextId ??
+    target?.executionContextId ??
+    preset.executionContextId ??
+    undefined;
+  const modelConnectionId =
+    request?.modelConnectionId ??
+    target?.modelConnectionId ??
+    preset.modelConnectionId ??
+    undefined;
+  return {
+    ...(executionContextId === undefined ? {} : { executionContextId }),
+    ...(modelConnectionId === undefined ? {} : { modelConnectionId }),
+  };
+}
+
 export async function resolveTaskExecution(
   bb: BbPluginApi,
   tasks: TasksStore,
@@ -55,6 +76,9 @@ export async function resolveTaskExecution(
   }
   const preset = resolved ? tasks.getPreset(resolved.presetId) : undefined;
   const workspace = resolved?.workspace;
+  if (resolved && preset) {
+    resolved = { ...resolved, ...taskExecutionSelection(preset, resolved) };
+  }
   const workspaceSummary =
     workspace?.kind === "managed-worktree"
       ? `isolated worktree (${workspace.baseBranch ?? "default branch"})`
@@ -66,7 +90,7 @@ export async function resolveTaskExecution(
     resolved,
     inherited: override === null,
     summary: resolved
-      ? `${override ? "Task override" : "Inherited"}: ${resolved.bbProjectId} · ${resolved.hostId} · ${workspaceSummary} · ${preset?.name ?? "Missing profile"}`
+      ? `${override ? "Task override" : "Inherited"}: ${resolved.bbProjectId} · ${resolved.hostId} · ${workspaceSummary} · ${preset?.name ?? "Missing profile"}${resolved.executionContextId ? ` · context ${resolved.executionContextId}` : ""}${resolved.modelConnectionId ? ` · connection ${resolved.modelConnectionId}` : ""}`
       : "Inherited: select a linked code project and an execution profile, or configure a task override",
   };
 }

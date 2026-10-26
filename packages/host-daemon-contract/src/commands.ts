@@ -204,6 +204,7 @@ export const hostDaemonContributedEnvEntrySchema = z
             "machine-git",
             "machine-environment",
             "project-environment",
+            "execution-context",
           ]),
         })
         .strict(),
@@ -756,6 +757,7 @@ const hostReadWorkspaceAgentContextCommandSchema = z
   .object({
     type: z.literal("host.read_workspace_agent_context"),
     includeAgentInstructions: z.boolean(),
+    includeRepositoryInstructions: z.boolean().default(false),
     projectSkillRead: z
       .object({
         limit: z.number().int().positive(),

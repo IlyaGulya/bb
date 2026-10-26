@@ -10,6 +10,7 @@ import {
   environmentThreads,
   requireIdleTask,
   targetSpawnEnvironment,
+  taskExecutionSelection,
   validateProfileAvailability,
   validateTargetHost,
   withTaskExecution,
@@ -352,6 +353,7 @@ export function continuationHandlers(
             },
             request: {
               includePaths: selected,
+              ...taskExecutionSelection(preset, executions.target(task.id)),
               ...(input.branch ? { branch: input.branch } : {}),
               ...(input.extraInstructions === undefined
                 ? {}
@@ -435,6 +437,7 @@ export function continuationHandlers(
               ? {}
               : { serviceTier: preset.serviceTier }),
             permissionMode: preset.permissionMode,
+            ...taskExecutionSelection(preset, null, ready.request),
             title: effects.title(task),
             prompt,
             pluginMetadata: {

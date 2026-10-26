@@ -161,6 +161,8 @@ interface PresetRow {
   environment_kind: PresetEnvironmentKind;
   base_branch: string | null;
   machine_id: string | null;
+  execution_context_id: string | null;
+  model_connection_id: string | null;
   instructions: string;
   builtin: number;
   created_at: string;
@@ -438,6 +440,8 @@ function presetFromRow(row: PresetRow): Preset {
     environmentKind: row.environment_kind,
     baseBranch: row.base_branch,
     machineId: row.machine_id,
+    executionContextId: row.execution_context_id,
+    modelConnectionId: row.model_connection_id,
     instructions: row.instructions,
     builtin: row.builtin === 1,
     createdAt: row.created_at,
@@ -1791,6 +1795,8 @@ export function createTasksStore(db: PluginDatabase) {
         PresetEnvironmentKind,
         string | null,
         string | null,
+        string | null,
+        string | null,
         string,
         number,
         string,
@@ -1800,9 +1806,9 @@ export function createTasksStore(db: PluginDatabase) {
       INSERT INTO presets (
         id, name, provider_id, model_id, reasoning_level, service_tier,
         permission_mode,
-        environment_kind, base_branch, machine_id, instructions, builtin,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        environment_kind, base_branch, machine_id, execution_context_id,
+        model_connection_id, instructions, builtin, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     ).run(
       id,
@@ -1815,6 +1821,8 @@ export function createTasksStore(db: PluginDatabase) {
       environment.environmentKind,
       environment.baseBranch,
       environment.machineId,
+      input.executionContextId ?? null,
+      input.modelConnectionId ?? null,
       input.instructions,
       input.builtin ? 1 : 0,
       nowIso(),
@@ -1851,6 +1859,8 @@ export function createTasksStore(db: PluginDatabase) {
         PresetEnvironmentKind,
         string | null,
         string | null,
+        string | null,
+        string | null,
         string,
         number,
         string,
@@ -1860,7 +1870,8 @@ export function createTasksStore(db: PluginDatabase) {
       UPDATE presets SET
         name = ?, provider_id = ?, model_id = ?, reasoning_level = ?,
         service_tier = ?, permission_mode = ?, environment_kind = ?, base_branch = ?,
-        machine_id = ?, instructions = ?, builtin = ?
+        machine_id = ?, execution_context_id = ?, model_connection_id = ?,
+        instructions = ?, builtin = ?
       WHERE id = ?
     `,
     ).run(
@@ -1883,6 +1894,12 @@ export function createTasksStore(db: PluginDatabase) {
       environment.environmentKind,
       environment.baseBranch,
       environment.machineId,
+      input.executionContextId === undefined
+        ? current.executionContextId
+        : input.executionContextId,
+      input.modelConnectionId === undefined
+        ? current.modelConnectionId
+        : input.modelConnectionId,
       input.instructions ?? current.instructions,
       (input.builtin ?? current.builtin) ? 1 : 0,
       id,
