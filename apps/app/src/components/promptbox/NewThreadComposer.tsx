@@ -1579,6 +1579,7 @@ export function NewThreadComposer({
     promptActions,
     environmentId: reuseEnvironmentId,
     hostId: projectHostId,
+    executionContextId: executionBinding.executionContextId,
     query: commandState.query,
     composerFocused: hasComposerFocused,
   });

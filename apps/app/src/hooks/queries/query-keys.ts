@@ -256,6 +256,8 @@ type ProjectCommandsQueryKey = readonly [
   string | undefined,
   string | null,
   string | null,
+  string | undefined,
+  string | undefined,
 ];
 type AllProjectCommandsQueryKeyPrefix = readonly [
   typeof PROJECT_COMMANDS_QUERY_KEY,
@@ -812,6 +814,8 @@ export function projectCommandsQueryKey(
   providerId: string | undefined,
   environmentId: string | null,
   hostId: string | null,
+  executionContextId?: string,
+  threadId?: string,
 ): ProjectCommandsQueryKey {
   return [
     PROJECT_COMMANDS_QUERY_KEY,
@@ -819,6 +823,8 @@ export function projectCommandsQueryKey(
     providerId,
     environmentId,
     hostId,
+    executionContextId,
+    threadId,
   ];
 }
 

@@ -23,6 +23,8 @@ interface UseCommandSuggestionsArgs {
   threadProviderCommands?: readonly ProviderCommand[] | null;
   environmentId: string | null;
   hostId?: string | null;
+  executionContextId?: string;
+  threadId?: string;
   query: string | null;
   composerFocused?: boolean;
 }
@@ -163,6 +165,8 @@ export function prefetchCommandCatalog(
     providerId: string | undefined;
     environmentId: string | null;
     hostId: string | null;
+    executionContextId?: string;
+    threadId?: string;
   },
 ): Promise<void> {
   return queryClient.prefetchQuery({
@@ -223,6 +227,8 @@ export function useCommandSuggestions(
       providerId: args.providerId,
       environmentId: args.environmentId,
       hostId: args.hostId ?? null,
+      executionContextId: args.executionContextId,
+      threadId: args.threadId,
     },
     { enabled: isActive },
   );
@@ -236,6 +242,8 @@ export function useCommandSuggestions(
   const prefetchProviderId = args.providerId;
   const prefetchEnvironmentId = args.environmentId;
   const prefetchHostId = args.hostId ?? null;
+  const prefetchExecutionContextId = args.executionContextId;
+  const prefetchThreadId = args.threadId;
   useEffect(() => {
     if (!shouldPrefetchCatalog) {
       return;
@@ -245,10 +253,14 @@ export function useCommandSuggestions(
       providerId: prefetchProviderId,
       environmentId: prefetchEnvironmentId,
       hostId: prefetchHostId,
+      executionContextId: prefetchExecutionContextId,
+      threadId: prefetchThreadId,
     });
   }, [
     prefetchEnvironmentId,
     prefetchHostId,
+    prefetchExecutionContextId,
+    prefetchThreadId,
     prefetchProjectId,
     prefetchProviderId,
     queryClient,
