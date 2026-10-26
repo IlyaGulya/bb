@@ -786,22 +786,20 @@ export async function createThreadFromRequest(
     projectId: requestInput.projectId,
     providerId: selectedProvider,
   });
-  if (
-    executionBinding !== null &&
-    providerId !== "claude-code" &&
-    providerId !== "acp-omp"
-  ) {
-    throw new ApiError(
-      409,
-      "execution_binding_provider_unsupported",
-      `Provider ${providerId} does not support explicit execution contexts or native account bindings. Choose Claude Code or OMP, or an unassigned legacy project.`,
-    );
-  }
-  if (executionBinding?.executionContext && providerId === "acp-omp") {
+  const bindingSupport = deps.providerRegistry.get(providerId)?.info.experimental_executionBindings;
+  if (executionBinding?.executionContext && !bindingSupport?.contexts) {
     throw new ApiError(
       409,
       "execution_context_provider_unsupported",
-      "Native OMP ACP does not yet expose isolated context startup. Choose Claude Code for this scoped context, or use an unassigned legacy project; no ambient configuration was substituted.",
+      bindingSupport?.contextUnavailableReason ??
+        `Provider ${providerId} does not declare scoped execution context support. Choose a compatible provider; no ambient context was substituted.`,
+    );
+  }
+  if (executionBinding?.modelConnection && !bindingSupport?.nativeConnections) {
+    throw new ApiError(
+      409,
+      "model_connection_provider_unsupported",
+      `Provider ${providerId} does not declare native account-reference support. Choose a compatible provider.`,
     );
   }
   const {

@@ -11,11 +11,11 @@ const fixtures = vi.hoisted(() => ({
   connections: [] as unknown[],
 }));
 vi.mock("@/lib/sdk", () => ({ sdk: {
-  executionContexts: {
+  experimental_executionContexts: {
     list: async () => fixtures.contexts,
     getProjectDefaults: async ({ projectId }: { projectId: string }) => ({ projectId, executionContextId: "work", modelConnectionId: null }),
   },
-  modelConnections: { list: async () => fixtures.connections },
+  experimental_modelConnections: { list: async () => fixtures.connections },
 } }));
 
 function wrapper({ children }: { children: ReactNode }) {

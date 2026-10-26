@@ -60,6 +60,8 @@ interface ProjectDiscoveryCommandOptions {
   limit?: string;
   provider?: string;
   query?: string;
+  executionContext?: string;
+  thread?: string;
 }
 
 interface ProjectPrepareMachineCommandOptions {
@@ -280,7 +282,7 @@ export function registerProjectCommands(
     .description("Show a project's context and connection defaults")
     .option("--json", "Print machine-readable JSON output")
     .action(action(async (projectId: string, opts: { json?: boolean }) => {
-      const result = await createCliBbSdk(getUrl()).executionContexts.getProjectDefaults({ projectId });
+      const result = await createCliBbSdk(getUrl()).experimental_executionContexts.getProjectDefaults({ projectId });
       if (!outputJson(opts, result)) console.log(JSON.stringify(result, null, 2));
     }));
   contextDefaults.command("set <project-id>")
@@ -297,7 +299,7 @@ export function registerProjectCommands(
         if (!trimmed) throw new Error("Default IDs must not be empty; use none to clear.");
         return trimmed === "none" ? null : trimmed;
       };
-      const result = await createCliBbSdk(getUrl()).executionContexts.setProjectDefaults({
+      const result = await createCliBbSdk(getUrl()).experimental_executionContexts.setProjectDefaults({
         projectId,
         executionContextId: parseDefault(opts.executionContext),
         modelConnectionId: parseDefault(opts.modelConnection),
@@ -585,6 +587,8 @@ export function registerProjectCommands(
   addProjectWorkspaceRoutingOptions(project.command("commands <id>"))
     .description("List provider commands and skills available to a project")
     .requiredOption("--provider <id>", "Provider ID")
+    .option("--execution-context <id>", "Discover only this execution context's native commands")
+    .option("--thread <id>", "Use this thread's persisted context instead of project defaults")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: ProjectDiscoveryCommandOptions) => {
@@ -593,6 +597,8 @@ export function registerProjectCommands(
           projectId: id,
           provider: opts.provider ?? "",
           ...(await resolveMachineEnvironmentRouting(opts, serverUrl)),
+          ...(opts.executionContext ? { executionContextId: opts.executionContext } : {}),
+          ...(opts.thread ? { threadId: opts.thread } : {}),
         });
         if (outputJson(opts, result)) return;
         console.log(JSON.stringify(result, null, 2));

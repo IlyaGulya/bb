@@ -33,7 +33,7 @@ export interface ResolvedThreadEnvironmentEntry {
   source:
     | "shell"
     | { plugin: string }
-    | { core: "machine-git" | "machine-environment" | "project-environment" };
+    | { core: "machine-git" | "machine-environment" | "project-environment" | "execution-context" };
   value: string | { masked: true };
   reason?: string;
 }

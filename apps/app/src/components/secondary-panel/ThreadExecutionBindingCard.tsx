@@ -5,7 +5,7 @@ import { sdk } from "@/lib/sdk";
 export function ThreadExecutionBindingCard({ threadId }: { threadId: string }) {
   const binding = useQuery({
     queryKey: ["thread-execution-binding", threadId],
-    queryFn: () => sdk.executionContexts.getThreadBinding({ threadId }),
+    queryFn: () => sdk.experimental_executionContexts.getThreadBinding({ threadId }),
     staleTime: Infinity,
   });
   return (

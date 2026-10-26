@@ -52,6 +52,16 @@ export function acpProviderDeclaration(
     ...(agent.visibility === undefined
       ? {}
       : { experimental_visibility: agent.visibility }),
+    ...(agent.id === "acp-omp"
+      ? {
+          experimental_executionBindings: {
+            contexts: false,
+            nativeConnections: true,
+            contextUnavailableReason:
+              "Native OMP ACP does not yet expose isolated context startup. Its ambient configuration will not be substituted.",
+          },
+        }
+      : {}),
     ...(agent.launch.nativeSkillRoots === undefined
       ? {}
       : {

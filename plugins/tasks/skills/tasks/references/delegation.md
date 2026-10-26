@@ -41,6 +41,41 @@ For an invocation-only route, `dispatch`/`delegate --execution-target '<json>'`
 accepts `{bbProjectId,hostId,workspace,presetId}` with exact ids, validated by the
 shared RPC schema. Prefer `execution set` for reusable persisted routing.
 
+## Context and native model connection
+
+The task target and preset expose independent `executionContextId` and
+`modelConnectionId` selectors. Context is not the physical worktree and does not
+choose an account implicitly:
+
+```sh
+bb tasks preset update "Native Claude" --context <context-id> \
+  --model-connection <connection-id>
+bb tasks execution set ABC-12 --bb-project proj_code --machine workstation \
+  --workspace managed-worktree --preset "Native Claude" \
+  --context <context-id> --model-connection <connection-id>
+bb tasks dispatch ABC-12 --context <context-id> --model-connection <connection-id>
+```
+
+An invocation selector wins over the saved task target, then the preset.
+Core's shared resolver applies project/context defaults afterward. A missing,
+revoked, incompatible-host/provider choice is refused without account fallback.
+`preset update --clear-context` / `--clear-model-connection` removes that preset
+override; do not combine a clear flag with its value flag. `execution clear`
+removes the complete target override. `execution get` includes saved/inherited
+selectors. The HTTP/RPC delegate input and execution-target JSON accept the same
+`executionContextId` / `modelConnectionId` fields.
+
+New attached threads retain their effective snapshots. These selectors do not
+hot-switch an existing attached conversation; inspect its Info binding before
+continuing it. Scoped OMP is currently refused because native ACP cannot exclude
+ambient startup context. Use a supported scoped Claude connection, not a silent
+OMP fallback. No claim of filesystem isolation follows from these selectors.
+
+Continuation resolves the saved task/preset selection for its new target
+session. A connection referencing a different machine must be explicitly
+replaced with an authorized target-local connection; native credentials are
+never transferred with project files.
+
 ## Continue idle work in a new native session
 
 ```sh

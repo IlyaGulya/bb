@@ -48,8 +48,8 @@ export interface CreateBbSdkWithGuideArgs extends CreateBbSdkArgs {
 }
 
 export interface BbSdkAreas extends BbRealtime {
-  executionContexts: ExecutionContextsArea;
-  modelConnections: ModelConnectionsArea;
+  experimental_executionContexts: ExecutionContextsArea;
+  experimental_modelConnections: ModelConnectionsArea;
   experimental_desktopBrowsers: ExperimentalDesktopBrowsersArea;
   experimental_promptHistory: ExperimentalPromptHistoryArea;
   experimental_server: ExperimentalServerArea;
@@ -82,8 +82,8 @@ export function createBbSdk(
     transport: args.transport,
   });
   const areas: BbSdkAreas = {
-    executionContexts: createExecutionContextsArea(sdkContext),
-    modelConnections: createModelConnectionsArea(sdkContext),
+    experimental_executionContexts: createExecutionContextsArea(sdkContext),
+    experimental_modelConnections: createModelConnectionsArea(sdkContext),
     experimental_desktopBrowsers: createDesktopBrowsersArea(sdkContext),
     experimental_promptHistory: createPromptHistoryArea(sdkContext),
     experimental_server: createServerArea(sdkContext),

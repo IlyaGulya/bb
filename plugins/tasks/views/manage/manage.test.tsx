@@ -1044,7 +1044,7 @@ describe("PresetDialog environment section", () => {
       app.navPanels[0]!,
       { subPath: "manage" },
       {
-        sdk: { executionContexts: { list: async () => [] }, modelConnections: { list: async () => [] } },
+        sdk: { experimental_executionContexts: { list: async () => [] }, experimental_modelConnections: { list: async () => [] } },
         rpc: {
           listProjects: () => ({ projects: [project] }),
           listFolders: () => ({ folders: [] }),

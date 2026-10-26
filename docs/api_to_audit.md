@@ -14,6 +14,35 @@ question.
 [provider-bridge-protocol.md](provider-bridge-protocol.md). An entry without
 a "Docs:" line has no owning doc, so it keeps the essential contract itself.
 
+## Scoped execution context roots and launch bindings
+
+`PluginProviderDeclaration.experimental_executionBindings` declares independent
+`contexts` / `nativeConnections` support and an optional context refusal reason.
+Core admission uses this declaration instead of branching on provider IDs.
+`sdk.experimental_executionContexts` and `sdk.experimental_modelConnections`
+expose CRUD/defaults/binding APIs; first-party UI, CLI and Tasks use the same
+backend resolver. No unprefixed compatibility aliases are exported.
+
+`experimental_nativeRootsHostContract.resolveNativeRoots` accepts an optional
+`executionContext` snapshot. Core uses that path for scoped command discovery;
+scoped roots replace declared ambient user/project roots, and a failed host
+resolver never falls back to ambient discovery. Unassigned legacy calls retain
+their previous behavior. Root caches include the context's declared roots.
+
+Core UI/CLI, the SDK and Tasks all create threads through the same persisted
+execution binding resolver. `executionContextId` / `modelConnectionId` on native
+thread creation and plugin new-thread requests are references, not credential
+material. Thread snapshots stay immutable and native sessions retain their
+identity; current disabled/revoked definitions still block new continuation.
+
+Docs: [configuration.md](configuration.md), [provider-plugin-api.md](provider-plugin-api.md).
+
+Before stabilizing this experimental root contract, prove native runtime
+coverage beyond scoped Claude, including OMP explicit-context startup; managed
+policy, account-cloud MCP, plugin/root precedence and file changes across
+reconnect; and actual concurrent native-subscription runs on supported hosts.
+Source tests and schema representability are not that deployment acceptance.
+
 ## Composer popups
 
 `ComposerCustomization.experimental_popups` registers `{ id, label, component }`

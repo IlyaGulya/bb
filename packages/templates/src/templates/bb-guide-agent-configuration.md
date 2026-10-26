@@ -10,12 +10,88 @@ Agent configuration
 bb reads agent configuration from the app data dir and from a project's .bb/
 directory. These files shape how agents behave in provider-backed threads.
 
+Explicit contexts and model connections:
+
+  Settings → Contexts & connections keeps logical execution context separate
+  from physical environment/worktree and model account. A context admits its
+  selected projects and declares instructions, skill/command/plugin roots,
+  settings/hooks files, direct MCP configuration references and optional Git
+  identity. No project membership means no project may dispatch it.
+
+  A model connection names a provider and execution host, with a native
+  configuration/profile reference or declared host broker environment-variable
+  names. It never stores OAuth, Keychain contents or a broker token. Native
+  auth remains on the execution host; connection selection does not sign in or
+  change the global login. Native providers may refuse unsupported references.
+
+    bb execution-context list --json
+    bb execution-context create --file context.json --json
+    bb execution-context show <id> --json
+    bb execution-context update <id> --file patch.json --json
+    bb model-connection create --file connection.json --json
+    bb model-connection list --json
+    bb model-connection show <id> --json
+    bb model-connection update <id> --file patch.json --json
+    bb project context-defaults get <project-id> --json
+    bb project context-defaults set <project-id> \
+      --execution-context <id|none> --model-connection <id|none>
+    bb thread spawn --project <project-id> --execution-context <id> \
+      --model-connection <id> --prompt "..."
+
+  Create/update JSON files are read from the CLI machine; referenced absolute
+  native configuration paths belong to the selected execution host. Context
+  input includes name, projectIds, instructions, skillRoots, commandRoots,
+  pluginRoots, settingsPaths, mcpServers [{name,configPath}], hooksPath,
+  autoMemory, gitIdentity {name,email} and defaultModelConnectionId. Model
+  connection input includes name, provider, hostId and nativeAuth
+  {configDir,profile,hostEnv}; hostEnv contains brokerUrlEnv/brokerTokenEnv
+  variable NAMES, not their values. Omitted create fields get native defaults;
+  update JSON is a patch. Both definition kinds support enabled; connections
+  also support revoked. Inspect `--help` for mutation/delete commands.
+
+  Selection precedence: explicit run choice, task/preset choice, project
+  default, then selected-context connection default. A selected connection must
+  match the provider and host. Work/Personal names never pair an account to a
+  context automatically. Clear project defaults with both selectors set to none.
+  A disabled/revoked/missing choice is an error, not permission to borrow a
+  different account. A thread retains its snapshots for reopen/followup;
+  changing a definition/default affects new threads, not its native session.
+
+  SDK equivalents: experimental_executionContexts.{list,get,create,update,delete},
+  experimental_modelConnections.{list,get,create,update,delete},
+  experimental_executionContexts.{getProjectDefaults,setProjectDefaults,getThreadBinding},
+  threads.spawn({executionContextId,modelConnectionId,...}). HTTP resources:
+  /api/v1/execution-contexts and /api/v1/model-connections.
+
+  Scoped Claude uses explicit configuration, not ambient user/ancestor
+  discovery: settingsPaths selects native JSON settings; hooksPath selects a
+  hooks JSON file; each mcpServers configPath selects its named direct MCP
+  descriptor. The BB bridge remains present. Account-provided cloud MCP import
+  and plugin auto-MCP discovery are off; selected direct MCP needs its own
+  supported authorization. Auto memory must remain false until scoped native
+  memory is supported. Required managed enterprise policy is not bypassed.
+  The selected repository's root AGENTS.md, CLAUDE.md, .claude/CLAUDE.md and
+  .bb/AGENTS.md are read within that root; ancestor/home instructions are not
+  substituted. Selected native-source changes are rejected for an existing
+  binding rather than silently changing its context.
+
+  Scoped OMP startup is currently refused before dispatch: native OMP ACP has
+  no complete explicit-context startup capability. Connection-only OMP may use
+  the host-native login or declared broker environment references; profile/
+  configDir account selection is refused because it also changes context and
+  session storage. This is not acceptance of the four-combination runtime
+  matrix. No live account or runtime migration is automatic.
+
+  Context filtering is not a filesystem sandbox or an ACL. Enabled BB tool
+  plugins and selected host capabilities still need their own access policy.
+  Existing threads/unassigned projects retain the legacy behavior below.
+
 User instructions (<dataDir>/AGENTS.md):
 
   Add an AGENTS.md file to the bb data dir (usually ~/.bb/AGENTS.md) to give
   every provider-backed thread across all projects default user-level
   instructions. bb reads <dataDir>/AGENTS.md and appends its contents to the
-  thread system prompt for all providers when a provider session starts.
+  thread system prompt for unassigned legacy threads when a provider session starts.
 
 Workspace instructions (.bb/AGENTS.md):
 
@@ -25,7 +101,7 @@ Workspace instructions (.bb/AGENTS.md):
   <dataDir>/AGENTS.md instructions, when a provider session starts. Track it with
   git so fresh managed worktrees include it.
 
-  Only the plural AGENTS.md is read, only from the exact data-dir and
+  In the legacy path only the plural AGENTS.md is read, only from the exact data-dir and
   workspace-root .bb/ locations above (bb does not walk parent directories), and
   an empty file is ignored. This is bb's own provider-agnostic instruction
   injection, separate from provider-native instruction files. Codex reads a

@@ -842,6 +842,40 @@ describe("tasks storage", () => {
     }
   });
 
+  it("retains the selected context when a preset connection is changed or cleared", async () => {
+    const { db, harness, store } = setup();
+    try {
+      const preset = store.createPreset({
+        name: "Independent account",
+        providerId: "claude-code",
+        modelId: "sonnet",
+        reasoningLevel: "high",
+        serviceTier: null,
+        permissionMode: "auto",
+        environmentKind: "project-default",
+        baseBranch: null,
+        machineId: null,
+        executionContextId: "work-context",
+        modelConnectionId: "work-account",
+        instructions: "Retain selected tools",
+      });
+      store.updatePreset(preset.id, { modelConnectionId: "personal-account" });
+      const reopened = createTasksStore(db);
+      expect(reopened.getPreset(preset.id)).toMatchObject({
+        executionContextId: "work-context",
+        modelConnectionId: "personal-account",
+        instructions: "Retain selected tools",
+      });
+      reopened.updatePreset(preset.id, { modelConnectionId: null });
+      expect(store.getPreset(preset.id)).toMatchObject({
+        executionContextId: "work-context",
+        modelConnectionId: null,
+      });
+    } finally {
+      await harness.dispose();
+    }
+  });
+
   it("rejects duplicate preset names", async () => {
     const { harness, store } = setup();
     try {

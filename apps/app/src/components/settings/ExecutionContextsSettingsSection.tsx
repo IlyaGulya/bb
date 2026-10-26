@@ -22,8 +22,8 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 export function ExecutionContextsSettingsSection() {
   const queryClient = useQueryClient();
-  const contexts = useQuery({ queryKey: ["execution-contexts"], queryFn: () => sdk.executionContexts.list() });
-  const connections = useQuery({ queryKey: ["model-connections"], queryFn: () => sdk.modelConnections.list() });
+  const contexts = useQuery({ queryKey: ["execution-contexts"], queryFn: () => sdk.experimental_executionContexts.list() });
+  const connections = useQuery({ queryKey: ["model-connections"], queryFn: () => sdk.experimental_modelConnections.list() });
   const [editor, setEditor] = useState<{ kind: "context"; value: ExecutionContext | null } | { kind: "connection"; value: ModelConnection | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const refresh = async () => {
@@ -36,8 +36,8 @@ export function ExecutionContextsSettingsSection() {
   const remove = async (kind: "context" | "connection", id: string) => {
     setError(null);
     try {
-      if (kind === "context") await sdk.executionContexts.delete({ id });
-      else await sdk.modelConnections.delete({ id });
+      if (kind === "context") await sdk.experimental_executionContexts.delete({ id });
+      else await sdk.experimental_modelConnections.delete({ id });
       await refresh();
     } catch (cause) { setError(getMutationErrorMessage({ error: cause, fallbackMessage: "Could not delete this definition." })); }
   };
@@ -68,12 +68,12 @@ export function ExecutionContextsSettingsSection() {
       <ProjectContextDefaultsEditor contexts={contexts.data ?? []} connections={connections.data ?? []} onSaved={refresh} />
       <ResponsiveDrawerShell open={editor !== null} onOpenChange={(open) => { if (!open) setEditor(null); }} srLabel={editor?.kind === "connection" ? "Model connection" : "Execution context"} contentClassName="max-w-xl">
         {editor?.kind === "context" ? <ContextEditor key={`context:${editor.value?.id ?? "new"}`} value={editor.value} connections={connections.data ?? []} onSave={async (fields) => {
-          if (editor.value) await sdk.executionContexts.update({ id: editor.value.id, ...fields });
-          else await sdk.executionContexts.create(fields);
+          if (editor.value) await sdk.experimental_executionContexts.update({ id: editor.value.id, ...fields });
+          else await sdk.experimental_executionContexts.create(fields);
           await refresh(); setEditor(null);
         }} /> : editor?.kind === "connection" ? <ConnectionEditor key={`connection:${editor.value?.id ?? "new"}`} value={editor.value} onSave={async (fields) => {
-          if (editor.value) await sdk.modelConnections.update({ id: editor.value.id, ...fields });
-          else await sdk.modelConnections.create(fields);
+          if (editor.value) await sdk.experimental_modelConnections.update({ id: editor.value.id, ...fields });
+          else await sdk.experimental_modelConnections.create(fields);
           await refresh(); setEditor(null);
         }} /> : null}
       </ResponsiveDrawerShell>
@@ -153,7 +153,7 @@ function ConnectionEditor({ value, onSave }: { value: ModelConnection | null; on
 function ProjectContextDefaultsEditor({ contexts, connections, onSaved }: { contexts: ExecutionContext[]; connections: ModelConnection[]; onSaved: () => Promise<void> }) {
   const projects = useSidebarNavigation();
   const [projectId, setProjectId] = useState("");
-  const defaults = useQuery({ queryKey: ["project-context-defaults", projectId], queryFn: () => sdk.executionContexts.getProjectDefaults({ projectId }), enabled: !!projectId });
+  const defaults = useQuery({ queryKey: ["project-context-defaults", projectId], queryFn: () => sdk.experimental_executionContexts.getProjectDefaults({ projectId }), enabled: !!projectId });
   return (
     <SettingsSection title="Project defaults" description="Default context and model connection are independent. Leave both unassigned to retain legacy behavior.">
       <Field label="Project">
@@ -172,7 +172,7 @@ function ProjectContextDefaultsEditor({ contexts, connections, onSaved }: { cont
 function ProjectDefaultsForm({ projectId, initialContextId, initialConnectionId, contexts, connections, onSaved }: { projectId: string; initialContextId: string | null; initialConnectionId: string | null; contexts: ExecutionContext[]; connections: ModelConnection[]; onSaved: () => Promise<void> }) {
   const [contextId, setContextId] = useState(initialContextId ?? "");
   const [connectionId, setConnectionId] = useState(initialConnectionId ?? "");
-  return <EditorForm title="Project binding defaults" onSave={async () => { await sdk.executionContexts.setProjectDefaults({ projectId, executionContextId: contextId || null, modelConnectionId: connectionId || null }); await onSaved(); }}>
+  return <EditorForm title="Project binding defaults" onSave={async () => { await sdk.experimental_executionContexts.setProjectDefaults({ projectId, executionContextId: contextId || null, modelConnectionId: connectionId || null }); await onSaved(); }}>
     <Field label="Default execution context"><select className={selectClass} value={contextId} onChange={(event) => setContextId(event.target.value)}><option value="">Unassigned</option>{contexts.map((entry) => <option key={entry.id} value={entry.id} disabled={!entry.enabled || !entry.projectIds.includes(projectId)}>{entry.name}{!entry.enabled ? " · disabled" : !entry.projectIds.includes(projectId) ? " · project not included" : ""}</option>)}</select></Field>
     <Field label="Default model connection"><select className={selectClass} value={connectionId} onChange={(event) => setConnectionId(event.target.value)}><option value="">Context/native default</option>{connections.map((entry) => <option key={entry.id} value={entry.id} disabled={!entry.enabled || entry.revoked}>{entry.name} · {entry.provider}{entry.revoked ? " · revoked" : !entry.enabled ? " · disabled" : ""}</option>)}</select></Field>
   </EditorForm>;

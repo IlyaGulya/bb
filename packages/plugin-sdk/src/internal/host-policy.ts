@@ -22,6 +22,7 @@ import {
   normalizeProviderNativeRoots,
   providerNativeRootsInputSchema,
   providerNativeRootsSchema,
+  providerExecutionBindingSupportSchema,
   type ProviderNativeRoots,
 } from "@bb/domain";
 import { PLUGIN_CLI_OUTPUT_MAX_BYTES } from "../backend-contract.js";
@@ -1304,6 +1305,7 @@ const READ_EXPERIMENTAL_PROVIDER_DECLARATION_FIELDS: ReadonlySet<string> =
     "experimental_nativeSkillRoots",
     "experimental_nativeCommandRoots",
     "experimental_resolvesNativeRoots",
+    "experimental_executionBindings",
   ]);
 
 const RENAMED_PROVIDER_FIELDS_SDK_VERSION = "0.4.16";
@@ -1582,6 +1584,9 @@ export function validatePluginProviderDeclaration(
       `provider "${id}" experimental_resolvesNativeRoots must be a boolean`,
     );
   }
+  const executionBindings = declaration.experimental_executionBindings === undefined
+    ? undefined
+    : providerExecutionBindingSupportSchema.parse(declaration.experimental_executionBindings);
   const deriveProviderOptions = declaration.deriveProviderOptions;
   if (
     deriveProviderOptions !== undefined &&
@@ -1600,6 +1605,9 @@ export function validatePluginProviderDeclaration(
       ? {}
       : { experimental_bridgeOptions: bridgeOptions }),
     experimental_visibility: visibility,
+    ...(executionBindings === undefined
+      ? {}
+      : { experimental_executionBindings: executionBindings }),
     maintenance: normalizedMaintenance,
     capabilities: normalizedCapabilities,
     composerActions,

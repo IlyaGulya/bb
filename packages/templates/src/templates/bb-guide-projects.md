@@ -32,6 +32,14 @@ A project maps to a code repository. All threads belong to a project.
   bb project update <id>                  Update a project
     --name <name>                         New name
 
+
+  bb project context-defaults get <id>    Inspect independent logical context/account defaults
+  bb project context-defaults set <id> \
+    --execution-context <id|none> --model-connection <id|none>
+
+  Both selectors are required for set; none clears that default. Definitions
+  and native-provider limits are documented in `bb guide agent-configuration`.
+  Defaults affect new threads only, not existing native conversations.
   bb project delete <id>                  Delete project and all threads
     --yes                                 Skip confirmation
 
@@ -54,6 +62,13 @@ Discovery:
     --machine <id-or-name>                Target project source machine
     --host <id-or-name>                   Alias for --machine
     --environment <id>                    Target environment workspace
+    --execution-context <id>              Commands/skills: selected scoped context
+    --thread <id>                         Commands/skills: persisted thread context
+
+  These two selectors apply to `commands`. When --thread is present its binding
+  wins; a conflicting explicit execution context is refused. Otherwise an
+  omitted context uses the project default. Native discovery cache entries are
+  scoped by declared roots, not shared with sibling contexts.
 
   The machine/host and environment selectors are mutually exclusive. An
   environment selects its owning machine and workspace; otherwise an explicit

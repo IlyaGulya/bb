@@ -66,6 +66,27 @@ This index lists every command path that the core CLI registers, including alias
 - `bb project preview-workspace-transfer`
 - `bb project transfer-workspace`
 - `bb project get-workspace-transfer`
+- `bb project context-defaults`
+- `bb project context-defaults get`
+- `bb project context-defaults set`
+
+## execution-context
+
+- `bb execution-context`
+- `bb execution-context list`
+- `bb execution-context show`
+- `bb execution-context create`
+- `bb execution-context update`
+- `bb execution-context delete`
+
+## model-connection
+
+- `bb model-connection`
+- `bb model-connection list`
+- `bb model-connection show`
+- `bb model-connection create`
+- `bb model-connection update`
+- `bb model-connection delete`
 
 ## prompt-history
 

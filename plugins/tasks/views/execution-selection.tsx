@@ -24,8 +24,8 @@ export function connectionUnavailable(connection: ModelConnection, provider?: st
 
 export function useExecutionSelections(open: boolean) {
   const sdk = useSdk();
-  const contexts = useTasksQuery(async () => open ? sdk.executionContexts.list() : [], [], [open]);
-  const connections = useTasksQuery(async () => open ? sdk.modelConnections.list() : [], [], [open]);
+  const contexts = useTasksQuery(async () => open ? sdk.experimental_executionContexts.list() : [], [], [open]);
+  const connections = useTasksQuery(async () => open ? sdk.experimental_modelConnections.list() : [], [], [open]);
   return { contexts, connections };
 }
 

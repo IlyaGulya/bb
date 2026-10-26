@@ -13,6 +13,7 @@ import type {
   ProviderErrorInfo,
   ProviderNativeRootInput,
   ProviderNativeRootsInputLike,
+  ProviderExecutionBindingSupport,
   ProviderRateLimitState,
   ReasoningLevel,
   ServiceTier,
@@ -1504,6 +1505,9 @@ export interface PluginProviderDeclaration {
    * discoverable with explicit status. `"always"` skips installation discovery.
    */
   experimental_visibility?: "always" | "installed";
+  /** Declares scoped context and native auth-reference support before a session
+   * exists. Absent means unsupported; runtime-specific readiness still applies. */
+  experimental_executionBindings?: ProviderExecutionBindingSupport;
   /**
    * The sessionless maintenance requests the provider's bridge implements
    * (docs/provider-plugin-api.md §1). Each defaults to false when omitted.

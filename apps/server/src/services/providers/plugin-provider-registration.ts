@@ -207,6 +207,9 @@ export function buildPluginProviderRegistration(args: {
     reasoningLevels: projectReasoningLevels(declaration),
     ...(serviceTiers === undefined ? {} : { serviceTiers }),
     ...(extensionKinds === undefined ? {} : { extensionKinds }),
+    ...(declaration.experimental_executionBindings === undefined
+      ? {}
+      : { experimental_executionBindings: declaration.experimental_executionBindings }),
   };
 
   const serverCapabilities: ProviderServerCapabilities = {

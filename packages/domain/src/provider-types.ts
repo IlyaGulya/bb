@@ -137,6 +137,13 @@ export const providerReadinessSchema = z.object({
 });
 export type ProviderReadiness = z.infer<typeof providerReadinessSchema>;
 
+export const providerExecutionBindingSupportSchema = z.object({
+  contexts: z.boolean(),
+  nativeConnections: z.boolean(),
+  contextUnavailableReason: z.string().trim().min(1).optional(),
+}).strict();
+export type ProviderExecutionBindingSupport = z.infer<typeof providerExecutionBindingSupportSchema>;
+
 export const providerInfoSchema = z.object({
   id: z.string(),
   pluginId: z.string().min(1),
@@ -158,6 +165,7 @@ export const providerInfoSchema = z.object({
   serviceTiers: z.array(providerOptionDescriptorSchema).optional(),
   reasoningLevels: z.array(providerOptionDescriptorSchema).optional(),
   extensionKinds: providerExtensionKindsSchema.optional(),
+  experimental_executionBindings: providerExecutionBindingSupportSchema.optional(),
 });
 export type ProviderInfo = z.infer<typeof providerInfoSchema>;
 

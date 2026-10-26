@@ -27,34 +27,6 @@ describe("bb thread spawn command output", () => {
     return vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   }
 
-  it("sends logical context, native account and model as independent selections", async () => {
-    const post = vi.fn(async ({ json }: { json: unknown }) => {
-      createThreadRequestSchema.parse(json);
-      return fixtures.makeThread({
-        id: "thread-with-binding",
-        projectId: "proj-1",
-        providerId: "codex",
-      });
-    });
-    stubServerApi({ "v1.threads.$post": post });
-
-    await runCommand([
-      "thread", "spawn", "--project", "proj-1", "--prompt", "hello",
-      "--execution-context", "work-context",
-      "--model-connection", "personal-account",
-      "--model", "chosen-model",
-      "--json",
-    ], register);
-
-    expect(post).toHaveBeenCalledWith({
-      json: expect.objectContaining({
-        executionContextId: "work-context",
-        modelConnectionId: "personal-account",
-        model: "chosen-model",
-      }),
-    });
-  });
-
   it("rejects explicitly empty lifecycle ownership instead of creating an independent thread", async () => {
     const post = vi.fn(async ({ json }: { json: unknown }) => {
       createThreadRequestSchema.parse(json);

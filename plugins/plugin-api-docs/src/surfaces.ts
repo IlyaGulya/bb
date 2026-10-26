@@ -1267,6 +1267,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Do what the [bb CLI](cli) and the app can do",
           "Have the threads it creates attributed to the plugin",
           "Start plugin updates in the background and follow their progress or rollback",
+          "Select independent execution context and native model-account references when creating a thread, and inspect its persisted binding",
         ],
         apiSymbols: [
           "BbPluginApi",
@@ -1283,6 +1284,9 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginBbSdk.threads.queuedMessages.experimental_holdForEdit",
           "PluginBbSdk.threads.queuedMessages.experimental_releaseEditHold",
           "PluginBbSdk.threads.experimental_listDescendants",
+          "PluginBbSdk.experimental_executionContexts",
+          "PluginBbSdk.experimental_modelConnections",
+          "PluginProviderDeclaration.experimental_executionBindings",
         ],
         firstParty: [
           "Account Pooler [Experimental]",

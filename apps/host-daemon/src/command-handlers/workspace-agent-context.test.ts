@@ -11,6 +11,7 @@ import { readWorkspaceAgentContext } from "./workspace-agent-context.js";
 const tempDirs: string[] = [];
 const readOptions = {
   includeAgentInstructions: true,
+  includeRepositoryInstructions: false,
   projectSkillRead: {
     limit: 1_000,
     maxFileBytes: 10 * 1024 * 1024,
@@ -43,6 +44,46 @@ function skillMarkdown(name: string): string {
 }
 
 describe("readWorkspaceAgentContext", () => {
+  it("reads only selected repository instructions without ancestor fallback", async () => {
+    const parent = await makeWorkspace();
+    const root = path.join(parent, "repository");
+    await writeFile(path.join(parent, "CLAUDE.md"), "PRIVATE_ANCESTOR");
+    await writeFile(path.join(root, "AGENTS.md"), "SELECTED_AGENT");
+    await writeFile(path.join(root, "CLAUDE.md"), "SELECTED_CLAUDE");
+    await writeFile(path.join(root, ".claude", "CLAUDE.md"), "SELECTED_CLAUDE_PROJECT");
+    await writeFile(path.join(root, ".bb", "AGENTS.md"), "SELECTED_BB");
+    const command = {
+      type: "host.read_workspace_agent_context" as const,
+      ...readOptions,
+      rootPath: root,
+      sharedSkillRoots: EMPTY_PROVIDER_NATIVE_ROOTS,
+    };
+    const scoped = await readWorkspaceAgentContext({
+      ...command,
+      includeRepositoryInstructions: true,
+    });
+    expect(scoped.agentInstructions).toContain("SELECTED_AGENT");
+    expect(scoped.agentInstructions).toContain("SELECTED_CLAUDE");
+    expect(scoped.agentInstructions).toContain("SELECTED_CLAUDE_PROJECT");
+    expect(scoped.agentInstructions).toContain("SELECTED_BB");
+    expect(scoped.agentInstructions).not.toContain("PRIVATE_ANCESTOR");
+    expect((await readWorkspaceAgentContext(command)).agentInstructions).toBe("SELECTED_BB");
+  });
+
+  it("refuses selected repository instruction links escaping the selected root", async () => {
+    const root = await makeWorkspace();
+    const outside = await makeWorkspace();
+    await writeFile(path.join(outside, "private.md"), "PRIVATE_CONTENT");
+    await fs.symlink(path.join(outside, "private.md"), path.join(root, "CLAUDE.md"));
+    await expect(readWorkspaceAgentContext({
+      type: "host.read_workspace_agent_context",
+      ...readOptions,
+      includeRepositoryInstructions: true,
+      rootPath: root,
+      sharedSkillRoots: EMPTY_PROVIDER_NATIVE_ROOTS,
+    })).rejects.toMatchObject({ code: "invalid_path" });
+  });
+
   it("reads the instructions and each direct project skill the way the server listed them", async () => {
     const root = await makeWorkspace();
     const skillsRoot = path.join(root, ".bb", "skills");

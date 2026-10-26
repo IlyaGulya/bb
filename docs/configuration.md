@@ -27,6 +27,38 @@ Launcher status output is plain when stdout is redirected, including in CI.
 Set `FORCE_COLOR=1` to request color or `NO_COLOR=1` to disable it; `NO_COLOR`
 takes precedence. In-place progress updates require a stdout TTY.
 
+## Independent execution contexts and model connections
+
+Settings → **Contexts & connections** manages logical context definitions,
+native model-account references and independent project defaults. The SDK and
+`bb execution-context`, `bb model-connection`, `bb project context-defaults` use
+the same persisted records. See the
+[agent-configuration guide](../packages/templates/src/templates/bb-guide-agent-configuration.md)
+for exact fields and CLI commands.
+
+A context's `projectIds` is an explicit membership list; `[]` admits no project.
+Work/Personal names are not account ownership rules or ACLs. Native configuration
+paths belong to the execution host. Never place tokens, OAuth stores or Keychain
+contents in a definition; `nativeAuth.hostEnv` contains only the names of
+separately provisioned native broker environment variables.
+
+Unassigned legacy projects retain their behavior. A created thread stores
+immutable effective snapshots; updating defaults does not change its native
+session or model account. Disabling/revoking a referenced definition blocks
+continuation without silently substituting an account. Forks preserve the source
+binding; a different context/account requires a new thread.
+
+Scoped Claude uses explicit sources, selected repository-root instructions and
+direct MCP rather than ambient user/ancestor settings or account-provided cloud
+MCP. Native enterprise-managed policy is preserved. Native auto-memory is
+unsupported for scoped contexts; keep `autoMemory: false`. OMP connection-only
+native/broker references are supported, but scoped OMP startup is refused until
+its native ACP runtime exposes complete explicit-context initialization. This
+release does not claim the full four-combination runtime matrix.
+
+This is configuration selection, not a filesystem sandbox or secret vault.
+Host-daemon protocol 240 gates the changed native-root/instruction semantics.
+
 ## Repository worktree hooks
 
 Commit `.bb-env-setup.sh` when a managed worktree needs repository setup.

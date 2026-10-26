@@ -31,15 +31,15 @@ export function useExecutionBindingSelection({
 }): ExecutionBindingSelection {
   const contexts = useQuery({
     queryKey: ["execution-contexts"],
-    queryFn: () => sdk.executionContexts.list(),
+    queryFn: () => sdk.experimental_executionContexts.list(),
   });
   const connections = useQuery({
     queryKey: ["model-connections"],
-    queryFn: () => sdk.modelConnections.list(),
+    queryFn: () => sdk.experimental_modelConnections.list(),
   });
   const defaults = useQuery({
     queryKey: ["project-context-defaults", projectId],
-    queryFn: () => sdk.executionContexts.getProjectDefaults({ projectId }),
+    queryFn: () => sdk.experimental_executionContexts.getProjectDefaults({ projectId }),
   });
   const [selection, setSelection] = useState<{
     projectId: string;
