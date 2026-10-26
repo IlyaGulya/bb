@@ -352,6 +352,20 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
       { name: "bb-cli", path: "/home/user/.agents/skills/bb-cli" },
     ],
   },
+  "host.inspect_mcp_sources": {
+    files: [{
+      configPath: "/tmp/mcp.json",
+      status: "ok",
+      issue: null,
+      servers: [{
+        name: "tools",
+        transport: "stdio",
+        supported: true,
+        issue: null,
+        authStatus: "not_checked",
+      }],
+    }],
+  },
   "host.inspect_git_source": {
     checkout: {
       kind: "branch",
@@ -3739,5 +3753,31 @@ describe("bounded file read contract", () => {
       hostDaemonOnlineRpcCommandSchema.safeParse({ ...command, ...override })
         .success,
     ).toBe(false);
+  });
+});
+
+describe("metadata-only MCP inspection wire boundary", () => {
+  const command = {
+    type: "host.inspect_mcp_sources",
+    providerId: "claude-code",
+    configPaths: ["/tmp/mcp.json"],
+  };
+  it.each([
+    { configPaths: ["relative.json"] },
+    { configPaths: ["/tmp/invalid\0.json"] },
+    { configPaths: Array.from({ length: 17 }, (_, index) => `/tmp/${index}.json`) },
+    { content: "{\"mcpServers\":{}}" },
+  ])("rejects unsafe or raw-source requests: %j", (override) => {
+    expect(hostDaemonOnlineRpcCommandSchema.safeParse({ ...command, ...override }).success).toBe(false);
+  });
+  it.each([
+    { content: "private" },
+    { issue: "Native parse diagnostic includes private credentials" },
+    { servers: [{ name: "private", transport: "http", supported: true, issue: null, authStatus: "ready" }] },
+    { servers: [{ name: "private", transport: "http", supported: true, issue: null, authStatus: "not_checked", headers: { Authorization: "private" } }] },
+  ])("rejects native payloads or readiness claims in results: %j", (override) => {
+    expect(hostDaemonCommandResultSchemaByType["host.inspect_mcp_sources"].safeParse({
+      files: [{ configPath: "/tmp/mcp.json", status: "ok", issue: null, servers: [], ...override }],
+    }).success).toBe(false);
   });
 });

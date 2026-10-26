@@ -74,6 +74,7 @@ import {
 } from "../plugins/plugin-environment-provider-registry.js";
 import {
   assertThreadExecutionBindingAvailable,
+  assertSelectedExecutionContextMcp,
   resolveThreadExecutionBinding,
 } from "../execution-contexts.js";
 
@@ -887,6 +888,11 @@ export async function createThreadFromRequest(
       selections: request.sessionOptions ?? {},
     },
   );
+  await assertSelectedExecutionContextMcp(deps, {
+    binding: executionBinding,
+    hostId: childHostId,
+    providerId: request.providerId,
+  });
 
   const { environmentId, environmentIntent } =
     await resolveThreadEnvironmentPlacement(deps, {

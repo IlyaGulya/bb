@@ -18,6 +18,7 @@ import {
   createModelConnectionDefinition,
   deleteConnectionDefinition,
   deleteContextDefinition,
+  inspectExecutionContextMcp,
   requireExecutionContext,
   requireModelConnection,
   updateExecutionContextDefinition,
@@ -32,6 +33,9 @@ export function registerExecutionContextRoutes(app: Hono, deps: AppDeps): void {
   });
   const contexts = publicApiRoutes.executionContexts;
   const connections = publicApiRoutes.modelConnections;
+  post(contexts.inspectMcp, async (context, input) =>
+    context.json(await inspectExecutionContextMcp(deps, input)),
+  );
   get(contexts.list, (context) => context.json(listExecutionContexts(deps.db)));
   get(contexts.get, (context) =>
     context.json(requireExecutionContext(deps.db, context.req.param("id"))),

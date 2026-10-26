@@ -7,12 +7,15 @@ import {
 } from "@bb/hono-typed-routes";
 import type {
   ExecutionContext,
+  InspectMcpRequest,
+  McpConfigurationInspection,
   ModelConnection,
   ProjectContextDefaults,
   ThreadExecutionBinding,
 } from "@bb/domain";
 import {
   createExecutionContextRequestSchema,
+  inspectMcpRequestSchema,
   updateExecutionContextRequestSchema,
   createModelConnectionRequestSchema,
   updateModelConnectionRequestSchema,
@@ -28,6 +31,14 @@ type IdInput = { param: { id: string } };
 
 export const executionContextRoutes = {
   executionContexts: {
+    inspectMcp: defineRoute({
+      path: "/execution-contexts/mcp/inspect",
+      method: "post",
+      request: jsonRequest<EmptyInput, InspectMcpRequest>(
+        inspectMcpRequestSchema,
+      ),
+      response: jsonResponse<McpConfigurationInspection>(),
+    }),
     list: defineRoute({
       path: "/execution-contexts",
       method: "get",

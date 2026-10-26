@@ -16,41 +16,13 @@ import {
 import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   executionContextSnapshotSchema,
+  ompMcpConfigSchema as mcpFile,
+  ompSelectedMcpSchema as selectedMcp,
   type ExecutionContextSnapshot,
 } from "@bb/domain";
 import { parseDocument } from "yaml";
 import { z } from "zod";
 
-const stringMap = z.record(z.string(), z.string());
-const stdioMcp = z
-  .object({
-    type: z.literal("stdio").optional(),
-    command: z.string().min(1),
-    args: z.array(z.string()).optional(),
-    env: stringMap.optional(),
-  })
-  .strict();
-const remoteMcp = z
-  .object({
-    type: z.enum(["http", "sse"]),
-    url: z.url().refine((url) => {
-      const parsed = new URL(url);
-      return (
-        ["http:", "https:"].includes(parsed.protocol) &&
-        !parsed.username &&
-        !parsed.password
-      );
-    }),
-    headers: stringMap.optional(),
-  })
-  .strict();
-const selectedMcp = z.union([stdioMcp, remoteMcp]);
-const mcpFile = z
-  .object({
-    $schema: z.string().optional(),
-    mcpServers: z.record(z.string(), z.unknown()),
-  })
-  .strict();
 const receiptSchema = z
   .object({ version: z.literal(1), digest: z.string().regex(/^[a-f0-9]{64}$/) })
   .strict();

@@ -16,6 +16,10 @@ import {
 import {
   executionContextSchema,
   modelConnectionSchema,
+  inspectMcpRequestSchema,
+  validateSelectedMcpServers,
+  type InspectMcpRequest,
+  type McpConfigurationInspection,
   type ExecutionContext,
   type ModelConnection,
   type ProjectContextDefaults,
@@ -28,6 +32,70 @@ import type {
   UpdateModelConnectionRequest,
 } from "@bb/server-contract";
 import { ApiError } from "../errors.js";
+import type { WorkSessionDeps } from "../types.js";
+import { callHostOnlineRpc } from "./hosts/online-rpc.js";
+
+export async function inspectExecutionContextMcp(
+  deps: WorkSessionDeps,
+  args: InspectMcpRequest,
+): Promise<McpConfigurationInspection> {
+  if (args.providerId !== "claude-code" && args.providerId !== "acp-omp")
+    throw new ApiError(
+      400,
+      "mcp_inspection_provider_unsupported",
+      "MCP configuration inspection is unavailable for this provider.",
+    );
+  if (!inspectMcpRequestSchema.safeParse(args).success)
+    throw new ApiError(
+      400,
+      "mcp_inspection_invalid_request",
+      "MCP inspection requires at most 16 absolute configuration paths.",
+    );
+  try {
+    const result = await callHostOnlineRpc(deps, {
+      hostId: args.hostId,
+      timeoutMs: 30_000,
+      command: {
+        type: "host.inspect_mcp_sources",
+        providerId: args.providerId,
+        configPaths: args.configPaths,
+      },
+    });
+    return { hostId: args.hostId, providerId: args.providerId, ...result };
+  } catch {
+    throw new ApiError(
+      409,
+      "mcp_inspection_unavailable",
+      "MCP configuration could not be inspected on the execution host.",
+    );
+  }
+}
+
+export async function assertSelectedExecutionContextMcp(
+  deps: WorkSessionDeps,
+  args: {
+    binding: ResolvedThreadExecutionBinding | null;
+    hostId: string | null;
+    providerId: string;
+  },
+): Promise<void> {
+  const refs = args.binding?.executionContext?.mcpServers ?? [];
+  if (refs.length === 0) return;
+  if (args.hostId === null)
+    throw new ApiError(
+      400,
+      "execution_context_host_required",
+      "Selected MCP servers require a concrete execution host.",
+    );
+  const inspection = await inspectExecutionContextMcp(deps, {
+    hostId: args.hostId,
+    providerId: args.providerId,
+    configPaths: [...new Set(refs.map((ref) => ref.configPath))],
+  });
+  const issue = validateSelectedMcpServers(refs, inspection);
+  if (issue !== null)
+    throw new ApiError(400, "execution_context_mcp_invalid", issue);
+}
 
 function requireProject(db: DbConnection, projectId: string): void {
   const project = getProject(db, projectId);

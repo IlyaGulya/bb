@@ -101,12 +101,18 @@ export type SetProjectContextDefaultsRequest = z.infer<
 >;
 export {
   executionContextSchema,
+  inspectMcpRequestSchema,
+  mcpConfigurationInspectionSchema,
   modelConnectionSchema,
   projectContextDefaultsSchema,
   threadExecutionBindingSchema,
 } from "@bb/domain";
 export type {
   ExecutionContext,
+  InspectMcpRequest,
+  McpConfigurationInspection,
+  McpConfigurationFileInspection,
+  McpServerInspection,
   ModelConnection,
   ProjectContextDefaults,
   ThreadExecutionBinding,

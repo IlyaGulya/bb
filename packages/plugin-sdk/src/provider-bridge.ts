@@ -44,6 +44,11 @@
 // ---------------------------------------------------------------------------
 
 export {
+  claudeMcpConfigSchema as experimental_claudeMcpConfigSchema,
+  claudeSelectedMcpSchema as experimental_claudeSelectedMcpSchema,
+} from "@bb/domain";
+
+export {
   PROVIDER_BRIDGE_EXPORT_NAME,
   experimental_defineProviderBridge,
 } from "@bb/provider-bridge-protocol/bridge-kit";

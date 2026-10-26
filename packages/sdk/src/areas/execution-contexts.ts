@@ -1,5 +1,7 @@
 import {
   executionContextSchema,
+  inspectMcpRequestSchema,
+  mcpConfigurationInspectionSchema,
   modelConnectionSchema,
   projectContextDefaultsSchema,
   threadExecutionBindingSchema,
@@ -10,6 +12,8 @@ import {
 } from "@bb/server-contract";
 import type {
   ExecutionContext,
+  InspectMcpRequest,
+  McpConfigurationInspection,
   ModelConnection,
   ProjectContextDefaults,
   ThreadExecutionBinding,
@@ -20,6 +24,7 @@ export interface ContextListArgs {
   signal?: AbortSignal;
 }
 export interface ExecutionContextsArea {
+  inspectMcp(args: InspectMcpRequest): Promise<McpConfigurationInspection>;
   list(args?: ContextListArgs): Promise<ExecutionContext[]>;
   get(args: { id: string }): Promise<ExecutionContext>;
   create(args: CreateExecutionContextRequest): Promise<ExecutionContext>;
@@ -48,6 +53,13 @@ export function createExecutionContextsArea({
 }: CreateSdkAreaArgs): ExecutionContextsArea {
   const api = transport.api.v1["execution-contexts"];
   return {
+    async inspectMcp(input) {
+      return mcpConfigurationInspectionSchema.parse(
+        await transport.readJson(
+          api.mcp.inspect.$post({ json: inspectMcpRequestSchema.parse(input) }),
+        ),
+      );
+    },
     async list(input) {
       return executionContextSchema
         .array()

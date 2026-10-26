@@ -1,5 +1,9 @@
 export type {
   ExecutionContext,
+  InspectMcpRequest,
+  McpConfigurationInspection,
+  McpConfigurationFileInspection,
+  McpServerInspection,
   ExecutionContextSnapshot,
   ModelConnection,
   ModelConnectionSnapshot,

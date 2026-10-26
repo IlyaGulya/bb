@@ -12,6 +12,8 @@ import {
 } from "./server-move.js";
 import {
   availableModelSchema,
+  inspectMcpRequestSchema,
+  mcpConfigurationFilesInspectionSchema,
   discoveredWorkspacePropertiesSchema,
   dynamicToolSchema,
   gitBranchOptionsSchema,
@@ -895,6 +897,11 @@ const hostInspectGitSourceCommandSchema = z
     path: z.string().min(1),
     remoteRefresh: z.enum(["background", "blocking"]),
   })
+  .strict();
+
+const hostInspectMcpSourcesCommandSchema = inspectMcpRequestSchema
+  .omit({ hostId: true })
+  .extend({ type: z.literal("host.inspect_mcp_sources") })
   .strict();
 
 const hostListBranchOptionsCommandSchema = z
@@ -1940,6 +1947,15 @@ export const hostDaemonCommandRegistry = {
     type: "host.inspect_git_source",
     schema: hostInspectGitSourceCommandSchema,
     resultSchema: gitSourceInspectionSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "host.inspect_mcp_sources": defineHostDaemonCommandDescriptor({
+    type: "host.inspect_mcp_sources",
+    schema: hostInspectMcpSourcesCommandSchema,
+    resultSchema: z.object({ files: mcpConfigurationFilesInspectionSchema }).strict(),
     transport: "onlineRpc",
     retryable: true,
     flushEventsBeforeResult: false,

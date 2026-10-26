@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { Command } from "commander";
 import {
   createExecutionContextRequestSchema,
+  inspectMcpRequestSchema,
   updateExecutionContextRequestSchema,
   createModelConnectionRequestSchema,
   updateModelConnectionRequestSchema,
@@ -64,6 +65,40 @@ export function registerExecutionContextCommands(
       "Manage logical instructions/tool contexts, not physical machine/workspace context",
     )
     .addHelpText("after", CONTEXT_HELP);
+
+  context
+    .command("mcp-inspect")
+    .description("Inspect host MCP configuration static validity; authentication is not checked")
+    .requiredOption("--machine <id>", "Machine hosting the configuration files")
+    .requiredOption("--provider <id>", "Native provider ID")
+    .requiredOption(
+      "--config <path>",
+      "Absolute configuration path on the host (repeatable)",
+      (value: string, previous: string[]) => [...previous, value],
+      [],
+    )
+    .option("--json", "Print machine-readable JSON output")
+    .addHelpText(
+      "after",
+      "\nReports static configuration validity only. Authentication is not checked. Paths refer to the selected host, not this CLI machine. No MCP connection is made.",
+    )
+    .action(
+      action(async (opts: JsonOutputOptions & {
+        machine: string;
+        provider: string;
+        config: string[];
+      }) => {
+        const input = inspectMcpRequestSchema.parse({
+          hostId: opts.machine,
+          providerId: opts.provider,
+          configPaths: opts.config,
+        });
+        print(
+          opts,
+          await createCliBbSdk(getUrl()).experimental_executionContexts.inspectMcp(input),
+        );
+      }),
+    );
 
   context
     .command("list")

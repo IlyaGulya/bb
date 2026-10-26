@@ -13,6 +13,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { isAbsolute, join } from "node:path";
+import {
+  experimental_claudeMcpConfigSchema as mcpConfigSchema,
+  experimental_claudeSelectedMcpSchema as selectedMcpSchema,
+} from "@get-bb/plugin-sdk/provider-bridge";
 import type {
   ExecutionContextSnapshot,
   ModelConnectionSnapshot,
@@ -26,31 +30,6 @@ import { z } from "zod";
 import { BB_BRIDGE_MCP_SERVER_NAME } from "../tool-classification.js";
 
 const stringMap = z.record(z.string(), z.string());
-const remoteMcpSchema = z
-  .object({
-    type: z.enum(["http", "sse"]),
-    url: z.url(),
-    headers: stringMap.optional(),
-    timeout: z.number().positive().optional(),
-    alwaysLoad: z.boolean().optional(),
-  })
-  .strict();
-const stdioMcpSchema = z
-  .object({
-    type: z.literal("stdio").optional(),
-    command: z.string().min(1),
-    args: z.array(z.string()).optional(),
-    env: stringMap.optional(),
-    timeout: z.number().positive().optional(),
-    alwaysLoad: z.boolean().optional(),
-  })
-  .strict();
-const mcpConfigSchema = z
-  .object({
-    mcpServers: z.record(z.string(), z.unknown()),
-  })
-  .strict();
-const selectedMcpSchema = z.union([stdioMcpSchema, remoteMcpSchema]);
 const objectSchema = z.record(z.string(), z.json());
 const receiptSchema = z
   .object({ version: z.literal(1), digest: z.string() })

@@ -7,6 +7,7 @@ import {
   deleteClaimedQueuedThreadMessageBatchInTransaction,
   getEnvironment,
   getThread,
+  getThreadExecutionBinding,
   isThreadQueueAutoSendPaused,
   listRunningThreads,
   type ClaimedQueuedThreadMessageRow,
@@ -88,6 +89,7 @@ import { resolveDispatchAuthor } from "./dispatch-author.js";
 import type { TurnRequestRetryMarker } from "./thread-events.js";
 import { restoreInterruptedThreadStartupRequest } from "./thread-provisioning.js";
 import { markTurnTraceSpan } from "../system/turn-trace.js";
+import { assertSelectedExecutionContextMcp } from "../execution-contexts.js";
 
 export const pendingThreadStartContextSchema = z.object({
   environmentIntent: threadProvisionEnvironmentIntentSchema,
@@ -745,6 +747,11 @@ async function admitPendingThread(
       `Thread ${args.thread.id} is pending but has no start context to dispatch`,
     );
   }
+  await assertSelectedExecutionContextMcp(deps, {
+    binding: getThreadExecutionBinding(deps.db, args.thread.id),
+    hostId: hostIdForEnvironmentIntent(deps, startContext.environmentIntent),
+    providerId: args.thread.providerId,
+  });
   const execution = await buildExecutionOptions(deps, args.payload, {
     threadId: args.thread.id,
   });

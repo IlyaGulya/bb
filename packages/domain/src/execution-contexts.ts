@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isAbsoluteHostPath } from "./host-path.js";
 
 const referencePathSchema = z
   .string()
@@ -108,3 +109,73 @@ export const threadExecutionBindingSchema = resolvedThreadExecutionBindingSchema
 export type ThreadExecutionBinding = z.infer<
   typeof threadExecutionBindingSchema
 >;
+
+export const MCP_INSPECTION_MAX_FILES = 16;
+export const MCP_INSPECTION_MAX_FILE_BYTES = 1024 * 1024;
+export const MCP_INSPECTION_MAX_SERVERS = 250;
+export const mcpConfigPathSchema = z.string().min(1)
+  .refine((path) => !path.includes("\0") && isAbsoluteHostPath(path), "MCP configuration paths must be absolute and contain no NUL");
+export const inspectMcpRequestSchema = z.object({
+  hostId: idSchema,
+  providerId: idSchema,
+  configPaths: z.array(mcpConfigPathSchema).max(MCP_INSPECTION_MAX_FILES),
+}).strict();
+export type InspectMcpRequest = z.infer<typeof inspectMcpRequestSchema>;
+export const mcpInspectionIssueSchema = z.enum([
+  "Unsupported provider",
+  "Configuration unavailable",
+  "Configuration must be a regular file",
+  "Configuration exceeds size limit",
+  "Invalid JSON configuration",
+  "Unsupported configuration structure",
+  "Configuration exceeds server limit",
+  "Unsupported server descriptor",
+  "Reserved server name",
+]);
+export const mcpServerInspectionSchema = z.object({
+  name: z.string(),
+  transport: z.enum(["stdio", "http", "sse", "unsupported"]),
+  supported: z.boolean(),
+  issue: mcpInspectionIssueSchema.nullable(),
+  authStatus: z.literal("not_checked"),
+}).strict();
+export const mcpConfigurationFileInspectionSchema = z.object({
+  configPath: mcpConfigPathSchema,
+  status: z.enum(["ok", "invalid", "unavailable"]),
+  issue: mcpInspectionIssueSchema.nullable(),
+  servers: z.array(mcpServerInspectionSchema).max(MCP_INSPECTION_MAX_SERVERS),
+}).strict();
+export const mcpConfigurationFilesInspectionSchema = z.array(mcpConfigurationFileInspectionSchema).max(MCP_INSPECTION_MAX_FILES);
+export const mcpConfigurationInspectionSchema = z.object({
+  hostId: idSchema,
+  providerId: idSchema,
+  files: mcpConfigurationFilesInspectionSchema,
+}).strict();
+export type McpServerInspection = z.infer<typeof mcpServerInspectionSchema>;
+export type McpConfigurationFileInspection = z.infer<typeof mcpConfigurationFileInspectionSchema>;
+export type McpConfigurationInspection = z.infer<typeof mcpConfigurationInspectionSchema>;
+
+export function validateSelectedMcpServers(
+  refs: readonly { name: string; configPath: string }[],
+  inspection: McpConfigurationInspection,
+): string | null {
+  if (refs.length === 0) return null;
+  if (!["claude-code", "acp-omp"].includes(inspection.providerId))
+    return "Selected MCP provider is unsupported";
+  const names = new Set<string>();
+  for (const ref of refs) {
+    if (ref.name === "bb-bridge") return "Selected MCP server name is reserved";
+    if (names.has(ref.name)) return "Selected MCP server names must be unique";
+    names.add(ref.name);
+    if (!mcpConfigPathSchema.safeParse(ref.configPath).success)
+      return "Selected MCP configuration path must be absolute";
+    const files = inspection.files.filter((file) => file.configPath === ref.configPath);
+    if (files.length !== 1 || files[0]?.status !== "ok")
+      return "Selected MCP configuration is invalid or unavailable";
+    const servers = files[0].servers.filter((server) => server.name === ref.name);
+    if (servers.length !== 1) return "Selected MCP server is missing";
+    if (!servers[0]?.supported || servers[0].transport === "unsupported" || servers[0].issue !== null)
+      return "Selected MCP server descriptor is unsupported";
+  }
+  return null;
+}
