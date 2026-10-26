@@ -23,10 +23,25 @@ Core admission uses this declaration instead of branching on provider IDs.
 expose CRUD/defaults/binding APIs; first-party UI, CLI and Tasks use the same
 backend resolver. No unprefixed compatibility aliases are exported.
 
+`experimental_executionContexts.inspectMcp({hostId, providerId, configPaths})`
+uses the same online-worker inspection as the context editor, new-thread
+preflight and `bb execution-context mcp-inspect`. `POST
+/api/v1/execution-contexts/mcp/inspect` returns `McpConfigurationInspection`:
+host/provider IDs and file/name/transport/support/fixed-issue metadata only.
+The worker accepts at most 16 regular absolute files, 1 MiB/file and 250
+servers/file. No raw configuration, commands, arguments, environment/headers,
+endpoint URLs or parser diagnostics cross this inspection boundary. It never
+connects or invokes tools; `authStatus: "not_checked"` must not become a ready
+claim. Initial and delayed admission reject invalid selected refs before
+thread/executor mutation. Empty refs and legacy launches are unchanged.
+
 Provider host artifacts validate the reserved snapshots through
 `experimental_executionContextSnapshotSchema` and
 `experimental_modelConnectionSnapshotSchema` from
 `@get-bb/plugin-sdk/provider-bridge`; they must not import private `@bb/domain`.
+`experimental_claudeMcpConfigSchema` and `experimental_claudeSelectedMcpSchema`
+share pure native descriptor validation with worker inspection; they do not
+add authorization controls or allow account-cloud proxy descriptors.
 
 `experimental_nativeRootsHostContract.resolveNativeRoots` accepts an optional
 `executionContext` snapshot. Core uses that path for scoped command discovery;
@@ -47,6 +62,10 @@ coverage beyond scoped Claude, including OMP explicit-context startup; managed
 policy, account-cloud MCP, plugin/root precedence and file changes across
 reconnect; and actual concurrent native-subscription runs on supported hosts.
 Source tests and schema representability are not that deployment acceptance.
+Also prove worker inspection limits, source replacement, offline/invalid-source
+selection retention, privacy of every failure path, and native credential
+rotation independently of model identity. Static inspection and tool discovery
+do not establish authenticated business-tool policy.
 
 ## Composer popups
 

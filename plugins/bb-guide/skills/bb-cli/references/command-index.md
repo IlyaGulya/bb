@@ -75,6 +75,7 @@ This index lists every command path that the core CLI registers, including alias
 - `bb execution-context`
 - `bb execution-context list`
 - `bb execution-context show`
+- `bb execution-context mcp-inspect`
 - `bb execution-context create`
 - `bb execution-context update`
 - `bb execution-context delete`

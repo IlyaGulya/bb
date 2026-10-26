@@ -28,6 +28,8 @@ Explicit contexts and model connections:
     bb execution-context create --file context.json --json
     bb execution-context show <id> --json
     bb execution-context update <id> --file patch.json --json
+    bb execution-context mcp-inspect --machine <host-id> \
+      --provider claude-code --config /absolute/path/mcp.json --json
     bb model-connection create --file connection.json --json
     bb model-connection list --json
     bb model-connection show <id> --json
@@ -57,11 +59,29 @@ Explicit contexts and model connections:
   different account. A thread retains its snapshots for reopen/followup;
   changing a definition/default affects new threads, not its native session.
 
-  SDK equivalents: experimental_executionContexts.{list,get,create,update,delete},
+  SDK equivalents: experimental_executionContexts.{list,get,create,update,delete,inspectMcp},
   experimental_modelConnections.{list,get,create,update,delete},
   experimental_executionContexts.{getProjectDefaults,setProjectDefaults,getThreadBinding},
   threads.spawn({executionContextId,modelConnectionId,...}). HTTP resources:
-  /api/v1/execution-contexts and /api/v1/model-connections.
+  /api/v1/execution-contexts and /api/v1/model-connections; static MCP inspection
+  is POST /api/v1/execution-contexts/mcp/inspect with {hostId,providerId,configPaths}.
+
+  The context editor's MCP servers section inspects a preview machine's native
+  file and selects individual names; the preview does not bind a host/account.
+  New-thread selection and thread Info show the effective names and execution
+  machine. Inspection parses only on that worker and returns file/name/transport/
+  support/fixed-issue metadata, never raw config, commands, args, environment,
+  headers, endpoint URLs or parse diagnostics. Use provider acp-omp for OMP
+  format; repeat --config for at most 16 regular absolute files (1 MiB/file,
+  250 servers/file). Offline/invalid files retain existing refs. Unsupported or
+  duplicate choices cannot be added; invalid selected sources refuse before
+  initial or delayed thread admission. Empty/legacy selections are unchanged.
+  Inspection does not connect or authenticate; authStatus stays not_checked.
+  Direct MCP credentials/cache remain separately provisioned on the execution
+  host, not in the model connection. A standard stdio bridge such as pinned
+  mcp-remote can reference an external private header file for supported HTTP
+  auth. Do not copy account-cloud connector tokens. Selection is not per-tool
+  permission policy; changing sources still requires a new native binding.
 
   Scoped Claude uses explicit configuration, not ambient user/ancestor
   discovery: settingsPaths selects native JSON settings; hooksPath selects a
@@ -75,12 +95,15 @@ Explicit contexts and model connections:
   substituted. Selected native-source changes are rejected for an existing
   binding rather than silently changing its context.
 
-  Scoped OMP startup is currently refused before dispatch: native OMP ACP has
-  no complete explicit-context startup capability. Connection-only OMP may use
-  the host-native login or declared broker environment references; profile/
-  configDir account selection is refused because it also changes context and
-  session storage. This is not acceptance of the four-combination runtime
-  matrix. No live account or runtime migration is automatic.
+  Scoped OMP requires the native host SDK under Bun with
+  EXPLICIT_CONTEXT_DISCOVERY_VERSION = 1. Install the AgentOS explicit-context
+  SDK and select it through the host's OMP_SDK_PATH or installed npm CLI package;
+  stock 18.12.6 and standalone binaries are insufficient. Native configDir or
+  declared child-only broker environment references select the model account
+  independently of context roots and fixed-host MCP auth. Shared memory is off;
+  native IDs/history remain native and unchanged-source receipts gate reopen.
+  Missing capabilities refuse before dispatch, without an ambient fallback.
+  This is not acceptance of the full real-account matrix or automatic migration.
 
   Context filtering is not a filesystem sandbox or an ACL. Enabled BB tool
   plugins and selected host capabilities still need their own access policy.

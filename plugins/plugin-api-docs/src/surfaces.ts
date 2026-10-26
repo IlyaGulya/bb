@@ -1268,6 +1268,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Have the threads it creates attributed to the plugin",
           "Start plugin updates in the background and follow their progress or rollback",
           "Select independent execution context and native model-account references when creating a thread, and inspect its persisted binding",
+          "Inspect named MCP configuration on the execution worker without returning native descriptors or credentials; validity is not authentication readiness",
         ],
         apiSymbols: [
           "BbPluginApi",
@@ -1285,10 +1286,13 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginBbSdk.threads.queuedMessages.experimental_releaseEditHold",
           "PluginBbSdk.threads.experimental_listDescendants",
           "PluginBbSdk.experimental_executionContexts",
+          "PluginBbSdk.experimental_executionContexts.inspectMcp",
           "PluginBbSdk.experimental_modelConnections",
           "PluginProviderDeclaration.experimental_executionBindings",
           "experimental_executionContextSnapshotSchema",
           "experimental_modelConnectionSnapshotSchema",
+          "experimental_claudeMcpConfigSchema",
+          "experimental_claudeSelectedMcpSchema",
         ],
         firstParty: [
           "Account Pooler [Experimental]",

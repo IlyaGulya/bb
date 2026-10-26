@@ -7,6 +7,15 @@
   task launches retain immutable effective bindings; definition edits do not
   switch existing sessions. Disabled/revoked selections fail without borrowing
   another account. Unassigned legacy projects keep their existing behavior.
+- Select named MCP servers from inspected worker-local configuration in the
+  context editor; show the effective servers and execution machine before
+  launch and the immutable selection in thread Info. Preserve selections on
+  unavailable sources; refuse duplicate/unsupported choices.
+- Add metadata-only worker MCP inspection to the SDK, plugin SDK and
+  `bb execution-context mcp-inspect`. Parsing stays on the selected worker;
+  native commands, arguments, environment/headers, URLs and parser diagnostics
+  never enter the inspection response. Static validity is not sign-in proof.
+  Invalid selected sources refuse before initial or delayed thread admission.
 - Scoped Claude Code loads explicit native roots/settings/hooks/direct MCP,
   disables account-provided Claude.ai MCP import and ambient user sources, and
   retains the mandatory BB bridge and native authentication. Repository-root
@@ -22,8 +31,9 @@
   so BB records a failed turn instead of success. Preserve diagnostics, explicit
   retry, native resume, typed refusals and cancellation; native retry policy is
   unchanged. See the provider README for the prepared SDK revision.
-- Advance host-daemon protocol to 240 for scoped root/instruction semantics.
-  These are unreleased source changes, not a production deployment.
+- Advance host-daemon protocol to 241 for bounded MCP inspection and scoped
+  root/instruction semantics. These are unreleased source changes, not a
+  production deployment.
 - **Tasks 0.4.0:** prepare an explicit multi-repository workspace asynchronously,
   retain per-root checkpoints and failures, then start one coherent writer on
   the selected machine only after every required root verifies.

@@ -48,6 +48,61 @@ session or model account. Disabling/revoking a referenced definition blocks
 continuation without silently substituting an account. Forks preserve the source
 binding; a different context/account requires a new thread.
 
+### Selecting named MCP servers
+
+The context editor's **MCP servers** section is separate from advanced native
+settings. Choose a preview machine and native format, inspect an absolute
+configuration path, then select individual server names. Saved selections remain
+`mcpServers: [{name, configPath}]`; choosing a preview machine does not bind the
+context to that machine or to a model account. Unavailable sources preserve
+existing selections. Duplicate names across files and unsupported descriptors
+cannot be added.
+
+The new-thread picker shows the effective server names and execution machine;
+thread Info shows the immutable selection. Both use the actual execution host,
+not the model connection's configuration directory. Invalid selections refuse
+before creating a thread or starting its executor, including delayed dispatch.
+Empty selections and unassigned legacy projects keep their existing behavior.
+
+Inspect the same metadata through the CLI or SDK:
+
+```bash
+bb execution-context mcp-inspect --machine <host-id> \
+  --provider claude-code --config /absolute/path/mcp.json --json
+```
+
+Use `--provider acp-omp` for OMP format and repeat `--config` for additional
+sources. `experimental_executionContexts.inspectMcp({hostId, providerId,
+configPaths})` and `POST /api/v1/execution-contexts/mcp/inspect` share the same
+online-worker operation. It accepts at most 16 regular files, 1 MiB per file and
+250 server entries per file. Parsing happens on the worker: only names,
+transport/support metadata, file references and fixed issues return to Core.
+Commands, arguments, environment/header values, endpoint URLs, raw files and
+parser diagnostics do not. Inspection never connects, invokes tools, signs in
+or submits a model prompt; `authStatus` remains `not_checked`.
+
+Direct MCP authorization must be provisioned independently on the execution
+host. For an HTTP service needing unsupported native authorization controls,
+the licensed [mcp-remote](https://github.com/punkpeye/mcp-remote) bridge can expose
+standard stdio MCP without replacing the native model runtime. The worker pilot
+used **mcp-remote 0.15.2** through an absolute Node executable and proxy-script
+path, with `--header-file` pointing to a separate mode-0600 file in a private
+directory. Its optional `MCP_REMOTE_CONFIG_DIR` belongs to this MCP service,
+not the model account. Never inline credentials in context definitions,
+arguments, Git or Core settings. External header-file rotation can retain the
+same selection; release the loaded runtime before reconnecting.
+
+Atlassian's [v2 API-token authentication](https://support.atlassian.com/atlassian-ai-gateway/docs/configure-authentication-via-api-token/)
+requires an already authorized token and organization permission. A pilot
+connected and listed 21 tools with both the existing Team model profile and
+an empty model profile, without a model prompt or business-tool invocation.
+That is connection/tool-discovery proof, not authorization for business writes
+or every Confluence operation. The official Slack MCP still requires an
+approved OAuth client/connection; do not extract Claude.ai connector tokens.
+Configuration validity is neither authentication readiness nor per-tool policy.
+
+### Native provider boundaries
+
 Scoped Claude uses explicit sources, selected repository-root instructions and
 direct MCP rather than ambient user/ancestor settings or account-provided cloud
 MCP. Native enterprise-managed policy is preserved. Native auto-memory is
@@ -76,7 +131,8 @@ synthetic loopback checks; live deployment is unchanged.
 
 This is configuration/session discovery selection, not a filesystem sandbox,
 session-storage ACL or secret vault.
-Host-daemon protocol 240 gates the changed native-root/instruction semantics.
+Host-daemon protocol 241 gates worker-local MCP inspection and the earlier
+scoped native-root/instruction semantics.
 
 ## Repository worktree hooks
 
