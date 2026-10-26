@@ -10,10 +10,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ExecutionContextSnapshot } from "@bb/domain";
 
 export interface ClaudeSkillPluginRoot {
   id: string;
   path: string;
+  shape?: "skills" | "commands";
+  name?: string;
 }
 
 interface ClaudePluginManifest {
@@ -22,14 +25,15 @@ interface ClaudePluginManifest {
   version: string;
   description: string;
   author: { name: string };
-  skills: string;
+  skills?: string;
+  commands?: string;
 }
 
 const MANIFEST_SCHEMA = "https://anthropic.com/claude-code/plugin.schema.json";
 
 function pluginDirectoryName(root: ClaudeSkillPluginRoot): string {
   return createHash("sha256")
-    .update(`${root.id}\0${root.path}`)
+    .update(`${root.id}\0${root.path}${root.shape === "commands" ? "\0commands" : ""}`)
     .digest("hex")
     .slice(0, 16);
 }
@@ -48,6 +52,18 @@ function pluginNameFor(
   return `${CLAUDE_SKILL_PLUGIN_NAME}-${directory.slice(0, 8)}`;
 }
 
+export function buildClaudeContextRoots(context: ExecutionContextSnapshot): (ClaudeSkillPluginRoot & { name: string })[] {
+  const roots: ClaudeSkillPluginRoot[] = [
+    ...context.skillRoots.map((path, index) => ({
+      id: `${context.id}:skills:${index}`, path, shape: "skills" as const,
+    })),
+    ...context.commandRoots.map((path, index) => ({
+      id: `${context.id}:commands:${index}`, path, shape: "commands" as const,
+    })),
+  ];
+  return roots.map((root) => ({ ...root, name: `bb-context-${pluginDirectoryName(root)}` }));
+}
+
 export function ensureClaudeSkillPlugin(args: {
   pluginsRoot: string;
   root: ClaudeSkillPluginRoot;
@@ -56,7 +72,7 @@ export function ensureClaudeSkillPlugin(args: {
   const directory = pluginDirectoryName(args.root);
   const pluginPath = join(args.pluginsRoot, directory);
   const takenNames = args.takenNames ?? new Map<string, string>();
-  const name = pluginNameFor(args.root, takenNames);
+  const name = args.root.name ?? pluginNameFor(args.root, takenNames);
   takenNames.set(name, directory);
   mkdirSync(join(pluginPath, ".claude-plugin"), { recursive: true });
   const manifest: ClaudePluginManifest = {
@@ -65,14 +81,14 @@ export function ensureClaudeSkillPlugin(args: {
     version: "0.1.0",
     description: `Skills injected by bb (${args.root.id}).`,
     author: { name: "bb" },
-    skills: "./skills",
+    ...(args.root.shape === "commands" ? { commands: "./commands" } : { skills: "./skills" }),
   };
   writeFileSync(
     join(pluginPath, ".claude-plugin", "plugin.json"),
     `${JSON.stringify(manifest, null, 2)}\n`,
     "utf8",
   );
-  const skillsLink = join(pluginPath, "skills");
+  const skillsLink = join(pluginPath, args.root.shape ?? "skills");
   let current: string | null = null;
   try {
     current = lstatSync(skillsLink).isSymbolicLink()

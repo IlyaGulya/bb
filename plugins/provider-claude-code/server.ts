@@ -63,6 +63,7 @@ export default function plugin(bb: BbPluginApi) {
     },
     ...CLAUDE_NATIVE_ROOTS_DECLARATION,
     maintenance: { health: true, usage: true, installation: true },
+    experimental_executionBindings: { contexts: true, nativeConnections: true },
     capabilities: {
       supportsServiceTier: true,
       supportsNativeUserQuestion: true,

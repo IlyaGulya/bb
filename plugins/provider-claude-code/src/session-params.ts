@@ -11,6 +11,12 @@ import {
 } from "@get-bb/plugin-sdk/provider-bridge";
 import { z } from "zod";
 import {
+  executionContextSnapshotSchema,
+  modelConnectionSnapshotSchema,
+  type ExecutionContextSnapshot,
+  type ModelConnectionSnapshot,
+} from "@bb/domain";
+import {
   toClaudePermissionMode,
   type ClaudePermissionMode,
 } from "./interactive-contract.js";
@@ -80,6 +86,8 @@ export type ClaudeSessionExecutionOptions = RuntimePermissionPolicy & {
   memoryEnabled?: boolean | undefined;
   providerSubagentsEnabled?: boolean | undefined;
   skillRoots?: readonly ClaudeCodeSkillRoot[] | undefined;
+  executionContext?: ExecutionContextSnapshot;
+  modelConnection?: ModelConnectionSnapshot;
 };
 
 function resolveClaudeSessionPermissionMode(
@@ -141,6 +149,8 @@ function buildInternalSessionParams(
     memoryEnabled: args.options.memoryEnabled,
     providerSubagentsEnabled: args.options.providerSubagentsEnabled,
     ...(dynamicTools && dynamicTools.length > 0 ? { dynamicTools } : {}),
+    ...(args.options.executionContext ? { executionContext: args.options.executionContext } : {}),
+    ...(args.options.modelConnection ? { modelConnection: args.options.modelConnection } : {}),
   };
 }
 
@@ -153,6 +163,8 @@ const claudeProviderOptionsSchema = z
     sandboxEnabled: z.boolean().optional(),
     memoryEnabled: z.boolean().optional(),
     providerSubagentsEnabled: z.boolean().optional(),
+    executionContext: executionContextSnapshotSchema.optional(),
+    modelConnection: modelConnectionSnapshotSchema.optional(),
     additionalWorkspaceWriteRoots: z.array(z.string()).optional(),
   })
   .passthrough();
@@ -197,8 +209,10 @@ export function buildClaudeSessionParams(
       chromeEnabled: providerOptions.chromeEnabled ?? false,
       disable1MContext: providerOptions.disable1MContext ?? false,
       sandboxEnabled: providerOptions.sandboxEnabled ?? true,
-      memoryEnabled: providerOptions.memoryEnabled,
+      memoryEnabled: providerOptions.executionContext ? false : providerOptions.memoryEnabled,
       providerSubagentsEnabled: providerOptions.providerSubagentsEnabled,
+      executionContext: providerOptions.executionContext,
+      modelConnection: providerOptions.modelConnection,
     },
   });
 }
@@ -252,8 +266,10 @@ export function buildClaudeTurnParams(
     chromeEnabled: providerOptions.chromeEnabled,
     disable1MContext: providerOptions.disable1MContext,
     sandboxEnabled: providerOptions.sandboxEnabled,
-    memoryEnabled: providerOptions.memoryEnabled,
+    memoryEnabled: providerOptions.executionContext ? false : providerOptions.memoryEnabled,
     providerSubagentsEnabled: providerOptions.providerSubagentsEnabled,
+    ...(providerOptions.executionContext ? { executionContext: providerOptions.executionContext } : {}),
+    ...(providerOptions.modelConnection ? { modelConnection: providerOptions.modelConnection } : {}),
     ...(config ? { config } : {}),
     permissionMode: toClaudePermissionMode(args.options),
     permissionScope: args.options.permissionScope,

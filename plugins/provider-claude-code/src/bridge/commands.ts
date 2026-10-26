@@ -19,6 +19,7 @@ import {
   providerInstallationStatusParamsSchema,
 } from "@get-bb/plugin-sdk/provider-bridge";
 import { z } from "zod";
+import { executionContextSnapshotSchema, modelConnectionSnapshotSchema } from "@bb/domain";
 import { claudePermissionModeSchema } from "../interactive-contract.js";
 
 const bridgeInstructionModeSchema = z.enum(instructionModeValues);
@@ -33,6 +34,7 @@ const bridgeAdditionalWorkspaceWriteRootsSchema = z
 const bridgeClaudeLocalPluginSchema = z.object({
   type: z.literal("local"),
   path: z.string(),
+  skipMcpDiscovery: z.boolean().optional(),
 });
 const bridgeClaudePluginsSchema = z
   .array(bridgeClaudeLocalPluginSchema)
@@ -60,6 +62,8 @@ export const claudeThreadStartParamsSchema = z.object({
   providerSubagentsEnabled: z.boolean().optional(),
   instructionMode: bridgeInstructionModeSchema,
   dynamicTools: z.array(dynamicToolSchema).optional(),
+  executionContext: executionContextSnapshotSchema.optional(),
+  modelConnection: modelConnectionSnapshotSchema.optional(),
 });
 
 export const claudeThreadResumeParamsSchema =
@@ -94,6 +98,8 @@ export const claudeTurnStartParamsSchema = z.object({
   additionalWorkspaceWriteRoots: z.array(z.string()),
   permissionEscalation: bridgePermissionEscalationSchema,
   claudeCodePermissionMode: z.literal("plan").optional(),
+  executionContext: executionContextSnapshotSchema.optional(),
+  modelConnection: modelConnectionSnapshotSchema.optional(),
 });
 
 export const claudeTurnSteerParamsSchema = claudeTurnStartParamsSchema

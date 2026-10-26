@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import {
   query,
   type CanUseTool,
-  type McpSdkServerConfigWithInstance,
   type Options,
   type Query,
   type Settings,
@@ -33,7 +32,7 @@ export interface SdkSessionOptions {
   allowBypassPermissions: boolean;
   sandbox?: Options["sandbox"];
   hooks?: Options["hooks"];
-  mcpServers?: Record<string, McpSdkServerConfigWithInstance>;
+  mcpServers?: Options["mcpServers"];
   allowedTools?: string[];
   canUseTool?: CanUseTool;
   env?: NodeJS.ProcessEnv;
@@ -42,6 +41,9 @@ export interface SdkSessionOptions {
   thinking?: Options["thinking"];
   settings?: Options["settings"];
   extraArgs?: Options["extraArgs"];
+  settingSources?: Options["settingSources"];
+  strictMcpConfig?: boolean;
+  verifyContextSources?: () => void;
   recordThreadId?: () => string;
 }
 
@@ -226,6 +228,7 @@ export class SdkSession {
   }
 
   start(resumeSessionId?: string): void {
+    this.options.verifyContextSources?.();
     if (resumeSessionId) {
       this.sessionId = resumeSessionId;
     } else if (this.options.sessionId) {
@@ -260,7 +263,10 @@ export class SdkSession {
           }
         : {}),
       includePartialMessages: true,
-      settingSources: ["user", "project", "local"],
+      settingSources: this.options.settingSources ?? ["user", "project", "local"],
+      ...(this.options.strictMcpConfig !== undefined
+        ? { strictMcpConfig: this.options.strictMcpConfig }
+        : {}),
       persistSession: true,
       env: this.options.env ?? process.env,
       stderr: onStderr,

@@ -93,6 +93,7 @@ import {
   type PermissionEscalationWorkContext,
 } from "./session-options.js";
 import {
+  buildClaudeContextRoots,
   createClaudeSkillPluginsRoot,
   ensureClaudeSkillPlugin,
 } from "./skill-plugins.js";
@@ -119,6 +120,11 @@ import {
   getSuggestedRules,
   toPendingInteractionPermissionProfile,
 } from "../interactive-contract.js";
+import {
+  ClaudeContextStore,
+  buildClaudeSessionEnvironment,
+  mergeClaudeMcpServers,
+} from "./execution-context.js";
 
 const promptInputItemSchema = z.discriminatedUnion("type", [
   z.object({
@@ -363,6 +369,7 @@ function nextInteractiveRequestId(): string {
 let configuredSkillRoots: ClaudeCodeSkillRoot[] | null = null;
 let skillPluginsRoot: string | null = null;
 let bridgeTempDir: string | null = null;
+let contextStore: ClaudeContextStore | null = null;
 
 function assembleSkillPlugins(
   roots: readonly { id: string; path: string }[],
@@ -983,15 +990,31 @@ function toSessionConstructionConfig(
       permissionScope: params.permissionScope,
       plugins: params.plugins,
       sandboxEnabled: params.sandboxEnabled,
+      executionContext: params.executionContext,
+      modelConnection: params.modelConnection,
+      contextFiles: resolveContextFiles(params),
     },
   };
+}
+
+function resolveContextFiles(params: SessionConstructionParams) {
+  if (!params.executionContext && !params.modelConnection) return undefined;
+  if (!contextStore) {
+    throw new Error("Claude scoped execution requires the provider host data directory.");
+  }
+  return contextStore.resolve({
+    threadId: params.threadId,
+    executionContext: params.executionContext,
+    modelConnection: params.modelConnection,
+    resume: "providerThreadId" in params,
+  });
 }
 
 function toInitialLiveSessionSettings(
   params: SessionConstructionParams,
 ): ClaudeLiveSessionSettings {
   return {
-    memoryEnabled: params.memoryEnabled ?? true,
+    memoryEnabled: params.executionContext ? false : (params.memoryEnabled ?? true),
     ...(params.model !== undefined ? { model: params.model } : {}),
     providerSubagentsEnabled: params.providerSubagentsEnabled ?? true,
     ...(params.reasoningLevel !== undefined
@@ -1664,7 +1687,11 @@ function applyTurnEnvironment(
     config,
   };
   attachment.sessionOptions.env = {
-    ...buildSessionEnv(envOverrides),
+    ...buildClaudeSessionEnvironment({
+      env: buildSessionEnv(envOverrides),
+      executionContext: attachment.sessionConstructionConfig.sessionOptions.executionContext,
+      modelConnection: attachment.sessionConstructionConfig.sessionOptions.modelConnection,
+    }),
     CLAUDE_CODE_DISABLE_1M_CONTEXT: attachment.sessionConstructionConfig
       .sessionOptions.disable1MContext
       ? "1"
@@ -2230,7 +2257,7 @@ function attachThreadSession(
       params.dynamicTools,
       createForwardToolCall(() => threadIdRef.current),
     );
-    sessionOptions.mcpServers = { [BB_BRIDGE_MCP_SERVER_NAME]: mcpServer };
+    sessionOptions.mcpServers = mergeClaudeMcpServers(sessionOptions.mcpServers, mcpServer);
     sessionOptions.allowedTools = getAllowedToolNames(params.dynamicTools);
   }
 
@@ -2368,14 +2395,29 @@ async function handleThreadFork(
 function toClaudeSessionParams(
   params: z.infer<typeof canonicalThreadStartParamsSchema>,
 ): Record<string, unknown> {
-  return buildClaudeSessionParams({
+  const context = params.options.providerOptions?.executionContext;
+  const scoped = context !== undefined;
+  const parsed = buildClaudeSessionParams({
     threadId: params.threadId,
     cwd: params.cwd,
     options: params.options,
     instructionMode: params.instructionMode,
     dynamicTools: params.dynamicTools,
-    skillRoots: configuredSkillRoots ?? undefined,
+    skillRoots: scoped ? undefined : (configuredSkillRoots ?? undefined),
   });
+  const construction = claudeThreadStartParamsSchema.parse(parsed);
+  if (construction.executionContext) {
+    const takenNames = new Map<string, string>();
+    const roots = buildClaudeContextRoots(construction.executionContext);
+    construction.plugins = [
+      ...roots.map((root) => ({
+        type: "local" as const,
+        path: ensureClaudeSkillPlugin({ pluginsRoot: requireSkillPluginsRoot(), root, takenNames }),
+      })),
+      ...construction.executionContext.pluginRoots.map((path) => ({ type: "local" as const, path })),
+    ];
+  }
+  return construction;
 }
 
 async function runTurnInput(
@@ -2392,6 +2434,20 @@ async function runTurnInput(
 
   const attachment = threadAttachments.get(params.threadId);
   if (attachment) {
+    const bound = attachment.sessionConstructionConfig.sessionOptions;
+    if (
+      !isDeepStrictEqual(bound.executionContext, params.executionContext) ||
+      !isDeepStrictEqual(bound.modelConnection, params.modelConnection)
+    ) {
+      throw new Error("Claude thread execution context and model connection are immutable; create a new thread to change either selection.");
+    }
+    attachment.sessionOptions.verifyContextSources?.();
+    if (bound.executionContext) {
+      if (params.memoryEnabled === true || params.chromeEnabled === true) {
+        throw new Error("Scoped Claude execution cannot enable shared auto-memory or Claude in Chrome.");
+      }
+      params.memoryEnabled = false;
+    }
     if ("config" in params) {
       applyTurnEnvironment(attachment, params.config);
     }
@@ -2721,6 +2777,7 @@ export const experimental_providerBridge = experimental_defineProviderBridge({
   handleLine,
   start: (context) => {
     bridgeTempDir = context.tempDir;
+    contextStore = new ClaudeContextStore(context.dataDir);
   },
   onSigterm: () => {
     shutdownGracefully(

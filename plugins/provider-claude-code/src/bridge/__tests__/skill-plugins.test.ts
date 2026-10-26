@@ -103,4 +103,16 @@ describe("claude skill plugins", () => {
     expect(nameOf(a)).toBe(CLAUDE_SKILL_PLUGIN_NAME);
     expect(nameOf(b)).toMatch(/^bb-global-skills-[0-9a-f]{8}$/u);
   });
+
+  it("keeps selected command roots separate from skill roots with the same identity", () => {
+    const pluginsRoot = createClaudeSkillPluginsRoot(baseDir);
+    const source = stageSkills("shared");
+    writeFileSync(join(source, "selected.md"), "Selected native command");
+    const skills = ensureClaudeSkillPlugin({ pluginsRoot, root: { id: "same", path: source } });
+    const commands = ensureClaudeSkillPlugin({ pluginsRoot, root: { id: "same", path: source, shape: "commands" } });
+    expect(commands).not.toBe(skills);
+    expect(readlinkSync(join(commands, "commands"))).toBe(source);
+    expect(JSON.parse(readFileSync(join(commands, ".claude-plugin", "plugin.json"), "utf8"))).toMatchObject({ commands: "./commands" });
+    expect(JSON.parse(readFileSync(join(skills, ".claude-plugin", "plugin.json"), "utf8"))).toMatchObject({ skills: "./skills" });
+  });
 });
