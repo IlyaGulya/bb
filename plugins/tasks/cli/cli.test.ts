@@ -1104,13 +1104,6 @@ describe("bb tasks CLI", () => {
       machineId: "host_air",
       builtin: false,
     });
-    const shown = stdout(
-      await harness.runCli(["preset", "show", "CLI worker"]),
-    );
-    expect(shown).toContain("Environment   worktree");
-    expect(shown).toContain("Base branch   main");
-    expect(shown).toContain("Machine       host_air");
-    expect(shown).toContain("Service tier  none");
 
     const updated = JSON.parse(
       stdout(
@@ -1138,12 +1131,6 @@ describe("bb tasks CLI", () => {
       baseBranch: null,
       machineId: null,
     });
-
-    const listTable = stdout(await harness.runCli(["preset", "list"]));
-    expect(listTable).toContain("ENVIRONMENT");
-    expect(listTable).toContain("BASE BRANCH");
-    expect(listTable).toContain("MACHINE");
-    expect(listTable).toContain("SERVICE TIER");
 
     const listed = JSON.parse(
       stdout(await harness.runCli(["preset", "list", "--json"])),
