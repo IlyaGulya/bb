@@ -10,6 +10,7 @@ import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
 import { useHosts } from "@/hooks/queries/host-queries";
 import { sdk } from "@/lib/sdk";
 import { getMutationErrorMessage } from "@/lib/mutation-errors";
+import { McpServerManager } from "./McpServerManager";
 
 type ContextFields = Omit<ExecutionContext, "id" | "createdAt" | "updatedAt">;
 type ConnectionFields = Omit<ModelConnection, "id" | "createdAt" | "updatedAt">;
@@ -343,11 +344,6 @@ function ContextEditor({
     defaultModelConnectionId: value?.defaultModelConnectionId ?? null,
   }));
   const projects = useSidebarNavigation();
-  const [mcpText, setMcpText] = useState(() =>
-    draft.mcpServers
-      .map((entry) => `${entry.name}=${entry.configPath}`)
-      .join("\n"),
-  );
   const [rootTexts, setRootTexts] = useState(() => ({
     skillRoots: draft.skillRoots.join("\n"),
     commandRoots: draft.commandRoots.join("\n"),
@@ -359,28 +355,16 @@ function ContextEditor({
   return (
     <EditorForm
       title={value ? "Edit execution context" : "New execution context"}
-      onSave={() => {
-        const mcpServers = lines(mcpText).map((line) => {
-          const separator = line.indexOf("=");
-          if (separator <= 0 || !line.slice(separator + 1).trim())
-            throw new Error(
-              "Each MCP reference must be name=/absolute/config/path.",
-            );
-          return {
-            name: line.slice(0, separator).trim(),
-            configPath: line.slice(separator + 1).trim(),
-          };
-        });
-        return onSave({
+      onSave={() =>
+        onSave({
           ...draft,
           name: draft.name.trim(),
-          mcpServers,
           skillRoots: lines(rootTexts.skillRoots),
           commandRoots: lines(rootTexts.commandRoots),
           pluginRoots: lines(rootTexts.pluginRoots),
           settingsPaths: lines(rootTexts.settingsPaths),
-        });
-      }}
+        })
+      }
     >
       <Field label="Name">
         <Input
@@ -457,6 +441,10 @@ function ContextEditor({
           ))}
         </select>
       </Field>
+      <McpServerManager
+        value={draft.mcpServers}
+        onChange={(refs) => set("mcpServers", refs)}
+      />
       <details className="space-y-3">
         <summary className="cursor-pointer text-sm font-medium">
           Native context configuration
@@ -495,13 +483,6 @@ function ContextEditor({
             />
           </Field>
         ))}
-        <Field label="Direct MCP configuration references (name=path)">
-          <Textarea
-            value={mcpText}
-            onChange={(event) => setMcpText(event.target.value)}
-            placeholder="tools=/absolute/path/mcp.json"
-          />
-        </Field>
         <Field label="Hooks configuration path">
           <Input
             value={draft.hooksPath ?? ""}

@@ -6,6 +6,7 @@ import {
   modelConnectionUnavailableReason,
 } from "@/lib/execution-binding-selection";
 import { getSettingsRoutePath } from "@/lib/route-paths";
+import { useHosts } from "@/hooks/queries/host-queries";
 
 export function ExecutionBindingPicker({
   selection,
@@ -20,6 +21,10 @@ export function ExecutionBindingPicker({
   hostId: string | null;
   disabled: boolean;
 }) {
+  const hosts = useHosts();
+  const executionHost = hosts.data?.find((host) => host.id === hostId);
+  const mcpServers = selection.effectiveContext?.mcpServers ?? [];
+  const inspection = selection.mcpInspection;
   const contexts = selection.contexts.data ?? [];
   const connections = selection.connections.data ?? [];
   const defaultContext = contexts.find(
@@ -91,6 +96,44 @@ export function ExecutionBindingPicker({
         >
           Manage contexts and connections
         </Link>
+      </div>
+      <div className="space-y-1 text-xs text-muted-foreground">
+        <p className="break-all">
+          Execution machine: {executionHost?.name ?? hostId ?? "Not selected"}
+          {executionHost ? ` · ${executionHost.status}` : ""}
+        </p>
+        <p className="break-words">
+          Context MCP: {mcpServers.length > 0
+            ? mcpServers.map((ref) => ref.name).join(", ")
+            : "None selected (native defaults unchanged)"}
+        </p>
+        {mcpServers.length > 0 ? (
+          <>
+            <p role="status">
+              {hostId === null
+                ? "Unchecked · choose an execution machine."
+                : inspection.isFetching
+                  ? "Checking configuration on the execution machine…"
+                  : inspection.isError || !inspection.data
+                    ? "Unchecked · inspection unavailable. The server must validate before launch."
+                    : selection.mcpIssue
+                      ? "Configuration issue · resolve before launch."
+                      : "Configuration valid · authentication not checked."}
+            </p>
+            <button
+              type="button"
+              className="underline underline-offset-2"
+              disabled={disabled || hostId === null || inspection.isFetching}
+              onClick={() => void inspection.refetch()}
+            >
+              Recheck MCP configuration
+            </button>
+            <p>
+              MCP configuration and native sign-in belong to this execution machine,
+              independently of the model connection. New sessions only; not per-tool permissions.
+            </p>
+          </>
+        ) : null}
       </div>
       {selection.unavailableReason ? (
         <p role="status" className="text-xs text-warning-text">

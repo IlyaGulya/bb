@@ -5,6 +5,8 @@ import type {
   ModelConnection,
   ProjectContextDefaults,
 } from "@bb/domain";
+import { validateSelectedMcpServers } from "@bb/domain";
+import { useMcpInspection, type McpInspectionQuery } from "@/hooks/useMcpInspection";
 import { sdk } from "@/lib/sdk";
 import {
   executionContextUnavailableReason,
@@ -19,6 +21,9 @@ export interface ExecutionBindingSelection {
   modelConnectionId: string | undefined;
   effectiveContextId: string | null | undefined;
   effectiveConnectionId: string | null | undefined;
+  effectiveContext: ExecutionContext | undefined;
+  mcpInspection: McpInspectionQuery;
+  mcpIssue: string | null;
   unavailableReason: string | null;
   selectContext: (id: string) => void;
   selectConnection: (id: string) => void;
@@ -69,6 +74,16 @@ export function useExecutionBindingSelection({
   const connection = connections.data?.find(
     (entry) => entry.id === effectiveConnectionId,
   );
+  const mcpServers = context?.mcpServers ?? [];
+  const mcpInspection = useMcpInspection({
+    hostId,
+    providerId,
+    configPaths: mcpServers.map((ref) => ref.configPath),
+  });
+  const mcpIssue =
+    mcpInspection.data && !mcpInspection.isError && !mcpInspection.isFetching
+      ? validateSelectedMcpServers(mcpServers, mcpInspection.data)
+      : null;
   const unavailableReason =
     contexts.isError || connections.isError || defaults.isError
       ? "Execution context settings could not be loaded. Retry before starting a thread."
@@ -79,6 +94,10 @@ export function useExecutionBindingSelection({
             : null) ??
           (effectiveConnectionId
             ? modelConnectionUnavailableReason(connection, providerId, hostId)
+            : null) ??
+          mcpIssue ??
+          (mcpServers.length > 0 && mcpInspection.isFetching
+            ? "Checking selected MCP configuration…"
             : null));
   return {
     contexts,
@@ -88,6 +107,9 @@ export function useExecutionBindingSelection({
     modelConnectionId,
     effectiveContextId,
     effectiveConnectionId,
+    effectiveContext: context,
+    mcpInspection,
+    mcpIssue,
     unavailableReason,
     selectContext: (id: string) =>
       setSelection((current) => ({
