@@ -66,18 +66,49 @@ passes their values only to the child as `OMP_AUTH_BROKER_URL` and
 login. The stored snapshot contains variable names, never their values. Changing
 the selected connection on an active thread is refused.
 
-OMP profile/config-directory references are not authentication-only references:
-native OMP uses them for settings, instructions, skills and session storage too.
-The bridge therefore rejects them as model-connection selectors rather than
-silently replacing the execution context.
+`nativeAuth.configDir` selects an existing native authentication/model directory
+on the execution host, including its `models.yml` and default model role when BB
+does not name a model. It does not supply context settings, roots or session
+storage. Native profiles are not supported selectors; use explicit configDir or
+broker references. Do not copy auth stores or swap HOME/profile directories.
+MCP authentication always uses the fixed host native auth source, independently
+of the selected LLM source; selecting an LLM account does not select a cloud MCP
+identity.
 
-Scoped startup requires Bun and a host-installed OMP SDK exposing the public
-session factory and ACP mode. If either is unavailable, install Bun and a
-compatible native OMP package on the selected host; the bridge refuses with an
-actionable capability error rather than falling back to ambient `omp acp`.
-The SDK remains host-installed, not vendored into this provider. Context
-selection does not swap authentication, copy credentials, or change global
-native settings. Isolation selects configuration; it is not a filesystem sandbox.
+Scoped startup requires Bun and the host-installed
+`@oh-my-pi/pi-coding-agent` SDK directory, selected with absolute
+`OMP_SDK_PATH` in the execution host environment, or found beside the installed
+npm CLI package. The native-prefixed variable survives BB's deliberate removal
+of inherited `BB_*` control variables. A standalone
+binary/wrapper is insufficient. The SDK must expose
+`EXPLICIT_CONTEXT_DISCOVERY_VERSION = 1`: use
+[`IlyaGulya/oh-my-pi` at `e1df29d`](https://github.com/IlyaGulya/oh-my-pi/commit/e1df29d)
+(`agentos/explicit-context-20261026`), based on 18.12.6. Point source installations
+at the prepared `packages/coding-agent` package, with its dependencies, generated
+assets and matching native bindings, not the monorepo root. Stock 18.12.6 does not
+satisfy this contract. The SDK stays host-installed, not vendored. Missing
+capabilities refuse startup, never fall back to ambient
+`omp acp`, another account, or inference through another provider.
+
+Selected `settingsPaths` accept only the bridge's context-setting allowlist, not
+credentials, routing, discovery roots or memory configuration. `hooksPath` must
+point to a native JS/TS default extension factory or native `omp`/`pi.extensions`
+package; Claude command-hook JSON and shell-hook directories are not native OMP
+hooks. Selected packages retain native extensions, agents, custom tools and MCP;
+explicit direct MCP servers compose with package MCP. Scoped shared memory is
+unsupported: keep `autoMemory: false`.
+Direct references accept stdio command/args/env or HTTP/SSE URL/headers and retain
+native environment-value resolution. Select a native package for other native
+MCP options such as OAuth, timeouts or cwd; unsupported direct-reference options
+are rejected, not silently discarded. ACP client/proxy headers and env are final
+literal values, kept separate from native configuration references.
+
+Native new/load/fork preserve native session IDs and history. The host provider
+data directory holds source receipts: resume/fork/followup require the original
+receipt and unchanged selected sources/binding. Restore those originals or start
+a new thread; missing receipts never authorize ambient resume. Session storage
+remains native to the host, not the selected model configDir. Configuration/session
+discovery isolation is not a filesystem sandbox or session-storage ACL.
 
 The OMP host root resolver returns only the selected absolute `skillRoots`,
 `commandRoots`, and the skills/commands of explicitly selected `pluginRoots`.
@@ -89,5 +120,7 @@ does not read ambient OMP/Pi/Codex/OpenCode/Claude, home, or ancestor roots.
 Unbound legacy discovery and native transcript handling remain unchanged.
 
 Provider capability metadata advertises scoped contexts and native account
-references. Runtime startup/resume/fork acceptance must be established with the
-native SDK smoke fixtures; discovery fixtures alone do not establish it.
+references. Discovery alone does not prove runtime acceptance. Real work
+subscriptions, cloud MCP identities and macOS acceptance remain separate from
+synthetic loopback evidence; these unreleased changes do not change the live
+deployment.

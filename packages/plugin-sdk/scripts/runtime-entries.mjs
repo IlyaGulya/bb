@@ -30,6 +30,9 @@ export function runtimeEntries(packageExports) {
       source: entry.source.slice(2),
       output: entry.import.slice(2),
       external: [...PACKAGE_EXTERNALS, ...(EXTRA_EXTERNALS[subpath] ?? [])],
+      ...(subpath === "./provider-bridge/acp"
+        ? { banner: NODE_ESM_REQUIRE_BANNER }
+        : {}),
     })),
     {
       source: "../provider-bridge-protocol/src/bridge-worker-entry.ts",

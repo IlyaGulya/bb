@@ -12,10 +12,12 @@
   retains the mandatory BB bridge and native authentication. Repository-root
   instructions and explicit Git identity are independent of the model account.
   Context source changes require a new thread; managed policy remains native.
-- Native OMP supports child-only references to existing broker environment
-  variables, but scoped OMP context startup is refused: the installed native
-  ACP runtime still discovers ambient configuration. The full four-combination
-  runtime matrix is not accepted until that native capability is available.
+- Scoped OMP uses Bun and the host native SDK with explicit-discovery marker 1
+  (the AgentOS native fork; stock 18.12.6 is insufficient). Context roots,
+  allowlisted settings, native hooks and selected MCP stay independent of native
+  model `configDir` and child-only broker references. Native session IDs/history
+  survive load/fork; source receipts gate continuation without ambient fallback.
+  Shared memory is disabled; discovery isolation is not a filesystem/storage ACL.
 - Advance host-daemon protocol to 240 for scoped root/instruction semantics.
   These are unreleased source changes, not a production deployment.
 - **Tasks 0.4.0:** prepare an explicit multi-repository workspace asynchronously,

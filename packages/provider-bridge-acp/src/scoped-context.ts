@@ -1,11 +1,13 @@
 import {
   executionContextSnapshotSchema,
   modelConnectionSnapshotSchema,
+  type ExecutionContextSnapshot,
   type ModelConnectionSnapshot,
 } from "@bb/domain";
 import { isDeepStrictEqual } from "node:util";
 
 export interface AcpScopedOptions {
+  executionContext: ExecutionContextSnapshot | null;
   modelConnection: ModelConnectionSnapshot | null;
   env: Record<string, string>;
 }
@@ -41,14 +43,22 @@ export function resolveAcpScopedOptions(args: {
         "The selected execution context is disabled. Select an enabled execution context.",
       );
     }
-    throw new Error(
-      args.dialectId === "omp"
-        ? "Native OMP ACP cannot isolate this execution context: its CLI loads ambient global/project settings and instructions before ACP session creation. --config is an overlay, not an isolation boundary; --profile also changes context and session storage. A native OMP explicit-context discovery capability is required. No scoped launch or prompt was permitted."
-        : "This native ACP provider does not support isolated execution contexts. Select a provider with native context isolation support.",
-    );
+    if (args.dialectId !== "omp") {
+      throw new Error(
+        "This native ACP provider does not support isolated execution contexts. Select a provider with native context isolation support.",
+      );
+    }
+  }
+  const executionContext = context?.success ? context.data : null;
+  const env: Record<string, string> = {};
+  if (executionContext?.gitIdentity) {
+    env.GIT_AUTHOR_NAME = executionContext.gitIdentity.name;
+    env.GIT_COMMITTER_NAME = executionContext.gitIdentity.name;
+    env.GIT_AUTHOR_EMAIL = executionContext.gitIdentity.email;
+    env.GIT_COMMITTER_EMAIL = executionContext.gitIdentity.email;
   }
   if (connection === null || !connection.success) {
-    return { modelConnection: null, env: {} };
+    return { executionContext, modelConnection: null, env };
   }
   const snapshot = connection.data;
   if (!snapshot.enabled || snapshot.revoked) {
@@ -62,16 +72,16 @@ export function resolveAcpScopedOptions(args: {
     );
   }
   if (
-    snapshot.nativeAuth.configDir !== null ||
-    snapshot.nativeAuth.profile !== null
+    snapshot.nativeAuth.profile !== null ||
+    (snapshot.nativeAuth.configDir !== null && executionContext === null)
   ) {
     throw new Error(
-      "OMP configDir/profile cannot select only authentication: they also change instructions, settings, skills and native session storage. Use the host's existing native OMP source or declared broker host environment references instead.",
+      "OMP profile selection is not auth-only. An explicit native auth configDir requires a scoped execution context; otherwise context and session storage would change too.",
     );
   }
   const refs = snapshot.nativeAuth.hostEnv;
   if (refs === null) {
-    return { modelConnection: snapshot, env: {} };
+    return { executionContext, modelConnection: snapshot, env };
   }
   const url = args.env[refs.brokerUrlEnv];
   const token = args.env[refs.brokerTokenEnv];
@@ -98,8 +108,9 @@ export function resolveAcpScopedOptions(args: {
     );
   }
   return {
+    executionContext,
     modelConnection: snapshot,
-    env: { OMP_AUTH_BROKER_URL: url, OMP_AUTH_BROKER_TOKEN: token },
+    env: { ...env, OMP_AUTH_BROKER_URL: url, OMP_AUTH_BROKER_TOKEN: token },
   };
 }
 

@@ -51,12 +51,31 @@ binding; a different context/account requires a new thread.
 Scoped Claude uses explicit sources, selected repository-root instructions and
 direct MCP rather than ambient user/ancestor settings or account-provided cloud
 MCP. Native enterprise-managed policy is preserved. Native auto-memory is
-unsupported for scoped contexts; keep `autoMemory: false`. OMP connection-only
-native/broker references are supported, but scoped OMP startup is refused until
-its native ACP runtime exposes complete explicit-context initialization. This
-release does not claim the full four-combination runtime matrix.
+unsupported for scoped contexts; keep `autoMemory: false`.
 
-This is configuration selection, not a filesystem sandbox or secret vault.
+Scoped OMP runs the native SDK ACP loop under Bun. Install the patched host SDK
+from `IlyaGulya/oh-my-pi` branch `agentos/explicit-context-20261026` and set
+`OMP_SDK_PATH` in the execution host environment to its absolute package directory,
+or use its installed npm CLI
+package. It must export `EXPLICIT_CONTEXT_DISCOVERY_VERSION = 1`; stock 18.12.6
+and standalone binaries are insufficient. Choose execution context and model
+connection independently. `nativeAuth.configDir` selects existing native model
+auth/configuration; broker references name existing host variables passed only
+to the child. Neither imports context roots nor relocates native session storage.
+Do not copy credentials or swap HOME/profiles.
+
+OMP loads selected roots, allowlisted settings, native extension hooks and
+direct/package MCP, not ambient user/ancestor configuration. Claude command-hook
+JSON is not an OMP native extension. MCP auth stays on the fixed host native
+source, independent of the LLM source. Shared memory is disabled. Native IDs and
+history remain native; continuation requires unchanged sources and the host
+provider source receipt. Missing capabilities/receipts refuse without ambient or
+inference fallback. See [ACP setup](../plugins/provider-acp/README.md#omp-context-and-account-bindings).
+Real work-subscription, cloud-MCP and macOS acceptance are not established by
+synthetic loopback checks; live deployment is unchanged.
+
+This is configuration/session discovery selection, not a filesystem sandbox,
+session-storage ACL or secret vault.
 Host-daemon protocol 240 gates the changed native-root/instruction semantics.
 
 ## Repository worktree hooks

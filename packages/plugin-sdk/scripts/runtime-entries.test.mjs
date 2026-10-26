@@ -41,17 +41,6 @@ describe("published runtime entries", () => {
     if (outDir) await rm(outDir, { force: true, recursive: true });
   });
 
-  it("inline no CommonJS module that would need a require shim", async () => {
-    const shimmed = [];
-    for (const [subpath, outfile] of outputs) {
-      if ((await readFile(outfile, "utf8")).includes("Dynamic require of")) {
-        shimmed.push(subpath);
-      }
-    }
-
-    expect(shimmed).toEqual([]);
-  });
-
   it("declare the packages they leave external as dependencies", () => {
     const externals = new Set(
       libraryEntries

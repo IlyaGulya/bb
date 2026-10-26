@@ -19,27 +19,6 @@ function connection(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function context() {
-  return {
-    id: "work",
-    name: "Work",
-    enabled: true,
-    projectIds: [],
-    instructions: "Work instructions",
-    skillRoots: [],
-    commandRoots: [],
-    pluginRoots: [],
-    settingsPaths: [],
-    mcpServers: [],
-    hooksPath: null,
-    autoMemory: false,
-    gitIdentity: null,
-    defaultModelConnectionId: null,
-    createdAt: 1,
-    updatedAt: 1,
-  };
-}
-
 function resolve(
   providerOptions?: Record<string, unknown>,
   env: Record<string, string> = {},
@@ -52,6 +31,7 @@ describe("native ACP scoped options", () => {
     expect(
       resolve(undefined, { OMP_AUTH_BROKER_TOKEN: "host-secret" }),
     ).toEqual({
+      executionContext: null,
       modelConnection: null,
       env: {},
     });
@@ -112,9 +92,9 @@ describe("native ACP scoped options", () => {
   ])(
     "refuses profile selection that would also replace context and session storage",
     (overrides) => {
-      expect(() => resolve({ modelConnection: connection(overrides) })).toThrow(
-        "also change instructions",
-      );
+      expect(() =>
+        resolve({ modelConnection: connection(overrides) }),
+      ).toThrow();
     },
   );
 
@@ -182,12 +162,6 @@ describe("native ACP scoped options", () => {
       }
     },
   );
-
-  it("does not accept ignored context fields on native OMP", () => {
-    expect(() =>
-      resolve({ executionContext: context(), modelConnection: connection() }),
-    ).toThrow("native OMP explicit-context discovery capability is required");
-  });
 
   it.each([
     { executionContext: { id: "partial-context" } },

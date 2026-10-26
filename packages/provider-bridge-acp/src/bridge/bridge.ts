@@ -8,7 +8,14 @@ import { acpLaunchSpecSchema, type AcpLaunchSpec } from "../launch-spec.js";
 import {
   assertAcpConnectionUnchanged,
   resolveAcpScopedOptions,
+  type AcpScopedOptions,
 } from "../scoped-context.js";
+import {
+  prepareOmpScopedLaunch,
+  runOmpScopedAcp,
+  type OmpScopedLaunch,
+} from "../omp-native-runtime.js";
+import type { OmpContextFiles } from "../omp-context-files.js";
 import {
   BRIDGE_INBOUND_REQUEST_METHODS,
   BRIDGE_JSON_RPC_ERRORS,
@@ -176,6 +183,7 @@ interface AcpThreadSession {
   bbThreadId: string;
   construction: AcpSessionParams;
   nativeConfig: AcpNativeConfigState;
+  nativeContextFiles?: OmpContextFiles;
   providerThreadId: string;
   cwd: string;
   dialect: AcpDialect;
@@ -212,6 +220,7 @@ type AcpDeferredStartEmitter = (
 const sessionsByBbThreadId = new Map<string, AcpThreadSession>();
 const agentConnections = new Set<AcpAgentConnection>();
 let shuttingDown = false;
+let scopedDataDir: string | undefined;
 
 function createBridgeAgentConnection(
   options: Parameters<typeof createAcpAgentConnection>[0],
@@ -1808,11 +1817,29 @@ async function startAgentSession(
       ? { OPENCODE_CLIENT: "acp", OPENCODE_ENABLE_QUESTION_TOOL: "false" }
       : {}),
   };
+  let scopedLaunch: OmpScopedLaunch | null = null;
+  if (params.executionContext) {
+    if (dialect.id !== "omp")
+      throw new Error(
+        "This ACP provider does not support native execution contexts.",
+      );
+    if (!scopedDataDir)
+      throw new Error(
+        "The scoped ACP provider data directory is unavailable; native startup was refused.",
+      );
+    scopedLaunch = prepareOmpScopedLaunch({
+      params,
+      dataDir: scopedDataDir,
+      artifactPath: fileURLToPath(import.meta.url),
+      resume: request.kind === "resume",
+      env: childEnv,
+    });
+  }
   const connection = createBridgeAgentConnection({
-    command: params.agent.command,
-    args: launch.args,
+    command: scopedLaunch?.command ?? params.agent.command,
+    args: scopedLaunch?.args ?? launch.args,
     cwd: params.cwd,
-    env: childEnv,
+    env: scopedLaunch?.env ?? childEnv,
     recordThreadId: bbThreadId,
     onNotification: (method, notificationParams) =>
       handleAgentNotification(session, method, notificationParams),
@@ -1839,6 +1866,7 @@ async function startAgentSession(
     bbThreadId,
     construction: params,
     nativeConfig: { configOptions: undefined, models: undefined },
+    nativeContextFiles: scopedLaunch?.files,
     providerThreadId: "",
     cwd: params.cwd,
     dialect,
@@ -1850,7 +1878,9 @@ async function startAgentSession(
       permissionMode: params.permissionMode,
       workspaceWriteRoots: params.workspaceWriteRoots,
     },
-    pendingInstructions: params.instructions,
+    pendingInstructions: params.executionContext
+      ? undefined
+      : params.instructions,
     activePromptKind: null,
     compactionAgentMessage: "",
     queuedInputs: [],
@@ -1886,6 +1916,15 @@ async function startAgentSession(
       initializeResult.agentCapabilities?.loadSession ?? false;
     const supportsFork =
       initializeResult.agentCapabilities?.sessionCapabilities?.fork != null;
+    if (
+      request.kind === "resume" &&
+      params.executionContext &&
+      !supportsLoadSession
+    ) {
+      throw new Error(
+        "The native scoped OMP session cannot be restored by this SDK; no fresh session was substituted.",
+      );
+    }
     if (request.kind === "fork" && !supportsFork) {
       throw new Error(
         `ACP agent "${agentLabel}" does not advertise session/fork support.`,
@@ -1952,7 +1991,8 @@ async function startAgentSession(
         loadedModels = configState?.models;
         rememberGrokContextWindow(session, configState?.models);
         sessionId = request.resumeProviderThreadId;
-      } catch {
+      } catch (error) {
+        if (params.executionContext) throw error;
         sessionId = undefined;
         session.loading = false;
         session.loadingSessionId = undefined;
@@ -2271,6 +2311,27 @@ function runTurn(
   })();
 }
 
+function assertScopedSessionBinding(
+  session: AcpThreadSession,
+  next: AcpScopedOptions,
+): void {
+  assertAcpConnectionUnchanged(
+    session.construction.modelConnection ?? null,
+    next.modelConnection,
+  );
+  if (
+    !isDeepStrictEqual(
+      session.construction.executionContext ?? null,
+      next.executionContext,
+    )
+  ) {
+    throw new Error(
+      "An active native ACP session cannot change its execution context. Create a new thread with the selected context.",
+    );
+  }
+  session.nativeContextFiles?.verify();
+}
+
 function reconcileExecutionSettings(
   session: AcpThreadSession,
   options: BridgeExecutionOptions,
@@ -2284,10 +2345,7 @@ function reconcileExecutionSettings(
     launchSpec,
     options.envVars,
   );
-  assertAcpConnectionUnchanged(
-    session.construction.modelConnection ?? null,
-    scoped.modelConnection,
-  );
+  assertScopedSessionBinding(session, scoped);
   const envVars =
     Object.keys(options.envVars ?? {}).length > 0
       ? {
@@ -2317,6 +2375,12 @@ function reconcileExecutionSettings(
         );
   const construction: AcpSessionParams = {
     ...session.construction,
+    ...(session.construction.executionContext
+      ? {
+          instructions:
+            options.instructions ?? session.construction.instructions,
+        }
+      : {}),
     modelSelection: modelParams.modelSelection,
     launchReasoningLevel: modelParams.launchReasoningLevel,
     envVars,
@@ -2341,6 +2405,14 @@ function reconcileExecutionSettings(
   const restart =
     session.connection.exited ||
     session.restartAfterCancelError ||
+    (session.construction.executionContext !== undefined &&
+      session.construction.executionContext !== null &&
+      (construction.permissionMode !== session.construction.permissionMode ||
+        construction.instructions !== session.construction.instructions ||
+        !isDeepStrictEqual(
+          construction.workspaceWriteRoots,
+          session.construction.workspaceWriteRoots,
+        ))) ||
     launchArgsChanged ||
     !isDeepStrictEqual(envVars ?? {}, session.construction.envVars ?? {});
   cancelPendingPermissions(session);
@@ -2912,6 +2984,7 @@ async function handleRequest(
         params.options.providerOptions,
       );
       const sessionParams = buildAcpSessionParams({
+        executionContext: scoped.executionContext,
         modelConnection: scoped.modelConnection,
         additionalWorkspaceWriteRoots: decodeAdditionalWorkspaceWriteRoots(
           params.options.providerOptions,
@@ -2997,10 +3070,7 @@ async function handleRequest(
         decodeLaunchSpec(params.options.providerOptions),
         params.options.envVars,
       );
-      assertAcpConnectionUnchanged(
-        session.construction.modelConnection ?? null,
-        scoped.modelConnection,
-      );
+      assertScopedSessionBinding(session, scoped);
       session.queuedInputs.push({
         clientRequestId: params.clientRequestId,
         input: params.input,
@@ -3126,7 +3196,19 @@ if (process.argv.includes("--mcp-stdio")) {
   runAcpDynamicToolMcpServer();
 }
 
+if (process.argv.includes("--omp-scoped-acp")) {
+  void runOmpScopedAcp().catch((error: unknown) => {
+    process.stderr.write(
+      `Native OMP scoped ACP: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    process.exit(1);
+  });
+}
+
 export const experimental_providerBridge = experimental_defineProviderBridge({
+  start: ({ dataDir }) => {
+    scopedDataDir = dataDir;
+  },
   handleLine,
   onClose: shutdownBridge,
   onSigterm: shutdownBridge,

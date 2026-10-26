@@ -14,35 +14,54 @@ import {
   writeFileSync,
 } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import type { ExecutionContextSnapshot } from "@bb/domain";
+import {
+  executionContextSnapshotSchema,
+  type ExecutionContextSnapshot,
+} from "@bb/domain";
 import { parseDocument } from "yaml";
 import { z } from "zod";
 
 const stringMap = z.record(z.string(), z.string());
-const stdioMcp = z.object({
-  type: z.literal("stdio").optional(),
-  command: z.string().min(1),
-  args: z.array(z.string()).optional(),
-  env: stringMap.optional(),
-}).strict();
-const remoteMcp = z.object({
-  type: z.enum(["http", "sse"]),
-  url: z.url().refine((url) => {
-    const parsed = new URL(url);
-    return ["http:", "https:"].includes(parsed.protocol) && !parsed.username && !parsed.password;
-  }),
-  headers: stringMap.optional(),
-}).strict();
+const stdioMcp = z
+  .object({
+    type: z.literal("stdio").optional(),
+    command: z.string().min(1),
+    args: z.array(z.string()).optional(),
+    env: stringMap.optional(),
+  })
+  .strict();
+const remoteMcp = z
+  .object({
+    type: z.enum(["http", "sse"]),
+    url: z.url().refine((url) => {
+      const parsed = new URL(url);
+      return (
+        ["http:", "https:"].includes(parsed.protocol) &&
+        !parsed.username &&
+        !parsed.password
+      );
+    }),
+    headers: stringMap.optional(),
+  })
+  .strict();
 const selectedMcp = z.union([stdioMcp, remoteMcp]);
-const mcpFile = z.object({
-  $schema: z.string().optional(),
-  mcpServers: z.record(z.string(), z.unknown()),
-}).strict();
-const receiptSchema = z.object({ version: z.literal(1), digest: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+const mcpFile = z
+  .object({
+    $schema: z.string().optional(),
+    mcpServers: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+const receiptSchema = z
+  .object({ version: z.literal(1), digest: z.string().regex(/^[a-f0-9]{64}$/) })
+  .strict();
 
-/** The subset of native MCP configuration represented losslessly by ACP. */
 export type OmpDirectMcpServer =
-  | { type: "stdio"; command: string; args: string[]; env: Record<string, string> }
+  | {
+      type: "stdio";
+      command: string;
+      args: string[];
+      env: Record<string, string>;
+    }
   | { type: "http" | "sse"; url: string; headers: Record<string, string> };
 
 export interface OmpContextFiles {
@@ -50,9 +69,7 @@ export interface OmpContextFiles {
   contextFiles: Array<{ path: string; content: string }>;
   skillRoots: string[];
   commandRoots: string[];
-  /** Actual importable extension entries, not package directories. */
   extensionPaths: string[];
-  /** Selected package roots for native explicit-only sibling capability discovery. */
   pluginRoots: string[];
   mcpServers: Record<string, OmpDirectMcpServer>;
   verify: () => void;
@@ -65,8 +82,6 @@ export interface ResolveOmpContextArgs {
   resume: boolean;
 }
 
-// Native Settings.isolated consumes setting IDs. This deliberately bounded
-// subset cannot introduce credentials, providers, undisclosed roots or memory.
 const supportedSettings: Record<string, z.ZodType> = {
   "compaction.enabled": z.boolean(),
   "compaction.midTurnEnabled": z.boolean(),
@@ -77,7 +92,15 @@ const supportedSettings: Record<string, z.ZodType> = {
   "compaction.thresholdTokens": z.number().finite(),
   "contextPromotion.enabled": z.boolean(),
   extendedContext: z.boolean(),
-  defaultThinkingLevel: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "auto"]),
+  defaultThinkingLevel: z.enum([
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "auto",
+  ]),
   hideThinkingBlock: z.boolean(),
   expandThinkingBlocks: z.boolean(),
   proseOnlyThinking: z.boolean(),
@@ -101,13 +124,17 @@ const supportedSettings: Record<string, z.ZodType> = {
 
 function absolute(path: string): void {
   if (!isAbsolute(path) || path.includes("\0")) {
-    throw new Error("OMP selected context paths and cwd must be host-absolute paths without NUL.");
+    throw new Error(
+      "OMP selected context paths and cwd must be host-absolute paths without NUL.",
+    );
   }
 }
 
 function object(value: unknown, path: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`OMP selected context file must contain an object: ${path}`);
+    throw new Error(
+      `OMP selected context file must contain an object: ${path}`,
+    );
   }
   return value as Record<string, unknown>;
 }
@@ -122,7 +149,9 @@ function readObject(path: string, yaml = false): Record<string, unknown> {
     if (document.errors.length) throw new Error("invalid YAML");
     return object(document.toJS({ maxAliasCount: 100 }), path);
   } catch {
-    throw new Error(`OMP selected context file is not a readable ${yaml ? "native YAML/JSON" : "JSON"} object: ${path}`);
+    throw new Error(
+      `OMP selected context file is not a readable ${yaml ? "native YAML/JSON" : "JSON"} object: ${path}`,
+    );
   }
 }
 
@@ -131,16 +160,31 @@ function readSettings(path: string): Record<string, unknown> {
   const visit = (value: Record<string, unknown>, prefix: string): void => {
     for (const [name, entry] of Object.entries(value)) {
       const key = prefix ? `${prefix}.${name}` : name;
-      const schema = Object.hasOwn(supportedSettings, key) ? supportedSettings[key] : undefined;
+      const schema = Object.hasOwn(supportedSettings, key)
+        ? supportedSettings[key]
+        : undefined;
       if (schema) {
         const parsed = schema.safeParse(entry);
-        if (!parsed.success) throw new Error(`OMP scoped setting '${key}' has an invalid native value in ${path}.`);
-        if (Object.hasOwn(result, key)) throw new Error(`OMP scoped setting '${key}' is declared twice in ${path}.`);
+        if (!parsed.success)
+          throw new Error(
+            `OMP scoped setting '${key}' has an invalid native value in ${path}.`,
+          );
+        if (Object.hasOwn(result, key))
+          throw new Error(
+            `OMP scoped setting '${key}' is declared twice in ${path}.`,
+          );
         result[key] = parsed.data;
-      } else if (Object.keys(supportedSettings).some((id) => id.startsWith(`${key}.`)) && entry && typeof entry === "object" && !Array.isArray(entry)) {
+      } else if (
+        Object.keys(supportedSettings).some((id) => id.startsWith(`${key}.`)) &&
+        entry &&
+        typeof entry === "object" &&
+        !Array.isArray(entry)
+      ) {
         visit(entry as Record<string, unknown>, key);
       } else {
-        throw new Error(`OMP scoped settings do not support '${key}' in ${path}. Credentials, auth/provider routing, discovery roots, hooks, and memory must not be supplied through settings; select explicit execution-context references instead.`);
+        throw new Error(
+          `OMP scoped settings do not support '${key}' in ${path}. Credentials, auth/provider routing, discovery roots, hooks, and memory must not be supplied through settings; select explicit execution-context references instead.`,
+        );
       }
     }
   };
@@ -148,28 +192,47 @@ function readSettings(path: string): Record<string, unknown> {
   return result;
 }
 
-function hashPath(hash: Hash, path: string, ancestors: Set<string>, buffer: Buffer): void {
+function hashPath(
+  hash: Hash,
+  path: string,
+  ancestors: Set<string>,
+  buffer: Buffer,
+): void {
   absolute(path);
   const real = realpathSync(path);
-  if (ancestors.has(real)) throw new Error("OMP selected context roots contain a symlink cycle.");
+  if (ancestors.has(real))
+    throw new Error("OMP selected context roots contain a symlink cycle.");
   const stat = statSync(real);
   hash.update(path).update("\0").update(real).update("\0");
   if (stat.isDirectory()) {
     hash.update("directory\0");
     ancestors.add(real);
-    for (const name of readdirSync(real).sort()) hashPath(hash, join(path, name), ancestors, buffer);
+    for (const name of readdirSync(real).sort())
+      hashPath(hash, join(path, name), ancestors, buffer);
     ancestors.delete(real);
     return;
   }
-  if (!stat.isFile()) throw new Error("OMP selected context roots must contain only regular files and directories; special files are unsupported.");
-  // Nonblocking open prevents a replaced file/FIFO from hanging admission.
-  const fd = openSync(real, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  if (!stat.isFile())
+    throw new Error(
+      "OMP selected context roots must contain only regular files and directories; special files are unsupported.",
+    );
+  const fd = openSync(
+    real,
+    constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW,
+  );
   try {
     const opened = fstatSync(fd);
-    if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino) throw new Error("OMP selected context source changed during admission.");
-    hash.update("file\0").update(String(opened.mode)).update("\0").update(String(opened.size)).update("\0");
+    if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino)
+      throw new Error("OMP selected context source changed during admission.");
+    hash
+      .update("file\0")
+      .update(String(opened.mode))
+      .update("\0")
+      .update(String(opened.size))
+      .update("\0");
     let bytes: number;
-    while ((bytes = readSync(fd, buffer, 0, buffer.length, null)) > 0) hash.update(buffer.subarray(0, bytes));
+    while ((bytes = readSync(fd, buffer, 0, buffer.length, null)) > 0)
+      hash.update(buffer.subarray(0, bytes));
   } finally {
     closeSync(fd);
   }
@@ -177,37 +240,49 @@ function hashPath(hash: Hash, path: string, ancestors: Set<string>, buffer: Buff
 }
 
 function sourceDigest(args: ResolveOmpContextArgs): string {
-  const hash = createHash("sha256").update(JSON.stringify({ cwd: args.cwd, executionContext: args.executionContext }));
+  const hash = createHash("sha256").update(
+    JSON.stringify({ cwd: args.cwd, executionContext: args.executionContext }),
+  );
   const context = args.executionContext;
   const paths = new Set([
-    ...context.settingsPaths, ...context.skillRoots, ...context.commandRoots,
-    ...context.pluginRoots, ...context.mcpServers.map((server) => server.configPath),
+    ...context.settingsPaths,
+    ...context.skillRoots,
+    ...context.commandRoots,
+    ...context.pluginRoots,
+    ...context.mcpServers.map((server) => server.configPath),
     ...(context.hooksPath ? [context.hooksPath] : []),
   ]);
   const buffer = Buffer.allocUnsafe(64 * 1024);
   try {
     for (const path of paths) hashPath(hash, path, new Set(), buffer);
   } catch (error) {
-    throw new Error("OMP selected context source is missing, unreadable or unsafe. Restore the original selected sources or create a new thread; ambient files will not be substituted.", { cause: error });
+    throw new Error(
+      "OMP selected context source is missing, unreadable or unsafe. Restore the original selected sources or create a new thread; ambient files will not be substituted.",
+      { cause: error },
+    );
   }
   return hash.digest("hex");
 }
 
 function directory(path: string): void {
   absolute(path);
-  if (!statSync(path).isDirectory()) throw new Error(`OMP selected root must be a directory: ${path}`);
+  if (!statSync(path).isDirectory())
+    throw new Error(`OMP selected root must be a directory: ${path}`);
 }
 
 function indexEntry(path: string): string | undefined {
-  return ["index.ts", "index.js"].map((name) => join(path, name)).find((file) => existsSync(file) && statSync(file).isFile());
+  return ["index.ts", "index.js"]
+    .map((name) => join(path, name))
+    .find((file) => existsSync(file) && statSync(file).isFile());
 }
 
-// Mirrors native configured-extension precedence: omp/pi.extensions manifest,
-// index.ts/index.js, then one-level .ts/.js files and indexed child packages.
 function extensionEntries(path: string): string[] {
   absolute(path);
   if (!statSync(path).isDirectory()) {
-    if (!/\.(?:ts|js|mts|mjs|cts|cjs)$/.test(path)) throw new Error(`OMP hooks/extensions require a native JavaScript/TypeScript module exporting a default extension factory, not JSON command hooks: ${path}`);
+    if (!/\.(?:ts|js|mts|mjs|cts|cjs)$/.test(path))
+      throw new Error(
+        `OMP hooks/extensions require a native JavaScript/TypeScript module exporting a default extension factory, not JSON command hooks: ${path}`,
+      );
     return [path];
   }
   const declared = (dir: string): string[] | undefined => {
@@ -215,17 +290,34 @@ function extensionEntries(path: string): string[] {
     if (!existsSync(manifestPath)) return undefined;
     const pkg = readObject(manifestPath);
     const manifest = pkg.omp ?? pkg.pi;
-    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return undefined;
+    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest))
+      return undefined;
     const entries = (manifest as Record<string, unknown>).extensions;
-    if (entries === undefined || (Array.isArray(entries) && entries.length === 0)) return undefined;
-    if (!Array.isArray(entries) || entries.some((entry) => typeof entry !== "string" || !entry)) throw new Error(`OMP package extensions must be a nonempty array of module paths: ${manifestPath}`);
+    if (
+      entries === undefined ||
+      (Array.isArray(entries) && entries.length === 0)
+    )
+      return undefined;
+    if (
+      !Array.isArray(entries) ||
+      entries.some((entry) => typeof entry !== "string" || !entry)
+    )
+      throw new Error(
+        `OMP package extensions must be a nonempty array of module paths: ${manifestPath}`,
+      );
     return entries.map((entry) => {
       const candidate = resolve(dir, entry as string);
       const rel = relative(realpathSync(path), realpathSync(candidate));
-      if (rel === ".." || rel.startsWith("../") || isAbsolute(rel)) throw new Error(`OMP extension manifest entries must remain inside their selected root: ${manifestPath}`);
+      if (rel === ".." || rel.startsWith("../") || isAbsolute(rel))
+        throw new Error(
+          `OMP extension manifest entries must remain inside their selected root: ${manifestPath}`,
+        );
       if (statSync(candidate).isDirectory()) {
         const index = indexEntry(candidate);
-        if (!index) throw new Error(`OMP declared extension directory requires index.ts or index.js: ${candidate}`);
+        if (!index)
+          throw new Error(
+            `OMP declared extension directory requires index.ts or index.js: ${candidate}`,
+          );
         return index;
       }
       return candidate;
@@ -238,24 +330,44 @@ function extensionEntries(path: string): string[] {
   const entries: string[] = [];
   for (const name of readdirSync(path)) {
     const child = join(path, name);
-    if (statSync(child).isDirectory()) entries.push(...(declared(child) ?? (indexEntry(child) ? [indexEntry(child)!] : [])));
+    if (statSync(child).isDirectory())
+      entries.push(
+        ...(declared(child) ?? (indexEntry(child) ? [indexEntry(child)!] : [])),
+      );
     else if (/\.(?:ts|js)$/.test(name)) entries.push(child);
   }
   return entries;
 }
 
-function readMcp(context: ExecutionContextSnapshot): Record<string, OmpDirectMcpServer> {
+function readMcp(
+  context: ExecutionContextSnapshot,
+): Record<string, OmpDirectMcpServer> {
   const servers: Record<string, OmpDirectMcpServer> = Object.create(null);
   for (const server of context.mcpServers) {
-    if (server.name === "bb-bridge" || Object.hasOwn(servers, server.name)) throw new Error("OMP selected MCP names must be unique and cannot replace bb-bridge.");
+    if (server.name === "bb-bridge" || Object.hasOwn(servers, server.name))
+      throw new Error(
+        "OMP selected MCP names must be unique and cannot replace bb-bridge.",
+      );
     const config = mcpFile.safeParse(readObject(server.configPath));
-    if (!config.success || !Object.hasOwn(config.data.mcpServers, server.name)) throw new Error(`OMP selected MCP configuration must define '${server.name}' in mcpServers with no unsupported top-level controls: ${server.configPath}`);
+    if (!config.success || !Object.hasOwn(config.data.mcpServers, server.name))
+      throw new Error(
+        `OMP selected MCP configuration must define '${server.name}' in mcpServers with no unsupported top-level controls: ${server.configPath}`,
+      );
     const selected = selectedMcp.safeParse(config.data.mcpServers[server.name]);
-    if (!selected.success) throw new Error(`OMP selected MCP server '${server.name}' has unsupported native transport/options. ACP supports only stdio command/args/env or http/sse url/headers; timeout, auth/oauth, cwd, enabled and other native options cannot be silently discarded.`);
+    if (!selected.success)
+      throw new Error(
+        `OMP selected MCP server '${server.name}' has unsupported direct-reference transport/options. Direct references support stdio command/args/env or http/sse url/headers. Use an explicitly selected native package for timeout, auth/oauth, cwd, enabled and other native options; they cannot be silently discarded.`,
+      );
     const value = selected.data;
-    servers[server.name] = "command" in value
-      ? { type: "stdio", command: value.command, args: value.args ?? [], env: value.env ?? {} }
-      : { type: value.type, url: value.url, headers: value.headers ?? {} };
+    servers[server.name] =
+      "command" in value
+        ? {
+            type: "stdio",
+            command: value.command,
+            args: value.args ?? [],
+            env: value.env ?? {},
+          }
+        : { type: value.type, url: value.url, headers: value.headers ?? {} };
   }
   return servers;
 }
@@ -264,54 +376,87 @@ function receiptDigest(path: string): string {
   try {
     return receiptSchema.parse(JSON.parse(readFileSync(path, "utf8"))).digest;
   } catch {
-    throw new Error("OMP scoped thread has an invalid host source receipt. Restore the provider data directory or create a new thread; native resume was not attempted.");
+    throw new Error(
+      "OMP scoped thread has an invalid host source receipt. Restore the provider data directory or create a new thread; native resume was not attempted.",
+    );
   }
 }
 
 export class OmpContextStore {
-  private readonly prepared = new Map<string, { digest: string; files: OmpContextFiles }>();
+  private readonly prepared = new Map<
+    string,
+    { digest: string; files: OmpContextFiles }
+  >();
 
   constructor(private readonly directory: string) {}
 
   resolve(input: ResolveOmpContextArgs): OmpContextFiles {
     absolute(input.cwd);
-    // Retain an immutable binding even if the caller later mutates its snapshot.
-    const args: ResolveOmpContextArgs = { ...input, executionContext: structuredClone(input.executionContext) };
+    const args: ResolveOmpContextArgs = {
+      ...input,
+      executionContext: executionContextSnapshotSchema.parse(
+        input.executionContext,
+      ),
+    };
     const context = args.executionContext;
-    if (!context.enabled) throw new Error("The selected OMP execution context is disabled.");
-    if (context.autoMemory) throw new Error("OMP scoped auto-memory has no isolated native memory namespace. Set execution-context autoMemory to false; shared account/project memory will not be loaded.");
+    if (!context.enabled)
+      throw new Error("The selected OMP execution context is disabled.");
+    if (context.autoMemory)
+      throw new Error(
+        "OMP scoped auto-memory has no isolated native memory namespace. Set execution-context autoMemory to false; shared account/project memory will not be loaded.",
+      );
     const digest = sourceDigest(args);
     const cached = this.prepared.get(args.threadId);
-    if (cached && cached.digest !== digest) throw new Error("OMP thread execution context or selected sources changed. Restore the original sources or create a new thread; the existing native session keeps its immutable binding.");
+    if (cached && cached.digest !== digest)
+      throw new Error(
+        "OMP thread execution context or selected sources changed. Restore the original sources or create a new thread; the existing native session keeps its immutable binding.",
+      );
     const receipts = join(this.directory, "execution-contexts");
-    const receiptPath = join(receipts, `${createHash("sha256").update(args.threadId).digest("hex")}.json`);
+    const receiptPath = join(
+      receipts,
+      `${createHash("sha256").update(args.threadId).digest("hex")}.json`,
+    );
     if (existsSync(receiptPath)) {
-      if (receiptDigest(receiptPath) !== digest) throw new Error("OMP selected context files or binding changed since this thread started. Restore the original sources or create a new thread; native resume was not attempted.");
+      if (receiptDigest(receiptPath) !== digest)
+        throw new Error(
+          "OMP selected context files or binding changed since this thread started. Restore the original sources or create a new thread; native resume was not attempted.",
+        );
     } else if (args.resume || cached) {
-      throw new Error("OMP cannot resume a scoped thread without its host source receipt. Restore the provider data directory or create a new thread; ambient context will not be substituted.");
+      throw new Error(
+        "OMP cannot resume a scoped thread without its host source receipt. Restore the provider data directory or create a new thread; ambient context will not be substituted.",
+      );
     }
     if (cached) return cached.files;
-    const settingsOverrides = Object.assign(Object.create(null), ...context.settingsPaths.map(readSettings)) as Record<string, unknown>;
-    // These controls are mandatory, never user-overridable discovery overlays.
+    const settingsOverrides = Object.assign(
+      Object.create(null),
+      ...context.settingsPaths.map(readSettings),
+    ) as Record<string, unknown>;
     Object.assign(settingsOverrides, {
-      "memory.backend": "off", "memories.enabled": false,
-      "mnemopi.autoRecall": false, "mnemopi.autoRetain": false,
+      "memory.backend": "off",
+      "memories.enabled": false,
+      "mnemopi.autoRecall": false,
+      "mnemopi.autoRetain": false,
       "mcp.enableProjectConfig": false,
       "bash.direnv": "off",
     });
-    for (const root of [...context.skillRoots, ...context.commandRoots]) directory(root);
-    const hookEntries = context.hooksPath ? extensionEntries(context.hooksPath) : [];
+    for (const root of [...context.skillRoots, ...context.commandRoots])
+      directory(root);
+    const hookEntries = context.hooksPath
+      ? extensionEntries(context.hooksPath)
+      : [];
     if (context.hooksPath && hookEntries.length === 0) {
-      throw new Error(`OMP hooksPath contains no native extension modules: ${context.hooksPath}. Select a .ts/.js extension exporting a default factory, or a native omp/pi.extensions package; Claude command-hook JSON and shell hook directories are not interchangeable.`);
+      throw new Error(
+        `OMP hooksPath contains no native extension modules: ${context.hooksPath}. Select a .ts/.js extension exporting a default factory, or a native omp/pi.extensions package; Claude command-hook JSON and shell hook directories are not interchangeable.`,
+      );
     }
-    const extensionPaths = [...new Set([
-      ...context.pluginRoots.flatMap(extensionEntries),
-      ...hookEntries,
-    ])];
+    const extensionPaths = [
+      ...new Set([
+        ...context.pluginRoots.flatMap(extensionEntries),
+        ...hookEntries,
+      ]),
+    ];
     const files: OmpContextFiles = {
       settingsOverrides,
-      // BB already injects selected inline/repository instructions. An explicit
-      // empty SDK list prevents native home/ancestor discovery and duplication.
       contextFiles: [],
       skillRoots: [...context.skillRoots],
       commandRoots: [...context.commandRoots],
@@ -319,18 +464,32 @@ export class OmpContextStore {
       pluginRoots: [...context.pluginRoots],
       mcpServers: readMcp(context),
       verify: () => {
-        if (sourceDigest(args) !== digest) throw new Error("OMP selected context sources changed while this thread was active. Restore them or create a new thread before continuing.");
-        if (!existsSync(receiptPath) || receiptDigest(receiptPath) !== digest) throw new Error("OMP active thread source receipt is missing or changed. Restore the provider data directory or create a new thread.");
+        if (sourceDigest(args) !== digest)
+          throw new Error(
+            "OMP selected context sources changed while this thread was active. Restore them or create a new thread before continuing.",
+          );
+        if (!existsSync(receiptPath) || receiptDigest(receiptPath) !== digest)
+          throw new Error(
+            "OMP active thread source receipt is missing or changed. Restore the provider data directory or create a new thread.",
+          );
       },
     };
-    // Detect source changes between hashing and parsing before creating a receipt.
-    if (sourceDigest(args) !== digest) throw new Error("OMP selected context sources changed during admission; retry with stable original sources.");
+    if (sourceDigest(args) !== digest)
+      throw new Error(
+        "OMP selected context sources changed during admission; retry with stable original sources.",
+      );
     mkdirSync(receipts, { recursive: true, mode: 0o700 });
     try {
-      writeFileSync(receiptPath, JSON.stringify({ version: 1, digest }), { flag: "wx", mode: 0o600 });
+      writeFileSync(receiptPath, JSON.stringify({ version: 1, digest }), {
+        flag: "wx",
+        mode: 0o600,
+      });
     } catch (error) {
       if (!existsSync(receiptPath)) throw error;
-      if (receiptDigest(receiptPath) !== digest) throw new Error("A concurrent OMP launch has a different context binding for this thread.");
+      if (receiptDigest(receiptPath) !== digest)
+        throw new Error(
+          "A concurrent OMP launch has a different context binding for this thread.",
+        );
     }
     this.prepared.set(args.threadId, { digest, files });
     return files;

@@ -108,6 +108,19 @@ bridges validate them with `experimental_executionContextSnapshotSchema` and
 must preserve the binding and native session identity; current disabled/revoked
 definitions still refuse continuation.
 
+The scoped OMP bridge uses Bun and a host native SDK exporting
+`EXPLICIT_CONTEXT_DISCOVERY_VERSION = 1` (not stock 18.12.6), selected through
+`OMP_SDK_PATH` in the execution host environment or the installed npm CLI package. Its execution-context sources
+are independent of native model `configDir`/broker references. Preserve native
+IDs/history and host source receipts across load/fork; changed sources or missing
+receipts refuse rather than importing ambient context. Selected native package
+MCP composes with client MCP through the SDK's optional `AcpSessionHandle.mcp`
+contract (`manager`, `configureServers`); factory `options.mcpServers` supplies
+initial client servers. ACP delegates configuration and owns teardown instead of
+replacing the factory's manager. MCP auth remains the fixed host native source,
+not the selected LLM source. This is discovery isolation, not a storage ACL; see
+[OMP setup and limits](../plugins/provider-acp/README.md#omp-context-and-account-bindings).
+
 Each `model/list` entry may carry `supportedServiceTiers: [{ id, label?,
 description? }]`, the tiers that model accepts besides `default`. bb offers
 only the ids the declaration also lists, preferring the entry's label and

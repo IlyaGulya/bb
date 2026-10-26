@@ -1,5 +1,6 @@
 import type {
   DynamicTool,
+  ExecutionContextSnapshot,
   ModelConnectionSnapshot,
   PermissionMode,
   ReasoningLevel,
@@ -80,6 +81,7 @@ export interface AcpSessionParams {
   instructions?: string;
   dynamicTools?: readonly DynamicTool[];
   modelConnection?: ModelConnectionSnapshot | null;
+  executionContext?: ExecutionContextSnapshot | null;
 }
 
 function sanitizeAcpSkillDescription(description: string): string {
@@ -290,6 +292,7 @@ interface BuildAcpSessionParamsArgs {
   threadId: string;
   parameterizedModelPicker: boolean;
   modelConnection?: ModelConnectionSnapshot | null;
+  executionContext?: ExecutionContextSnapshot | null;
 }
 
 export function buildAcpSessionParams(
@@ -310,6 +313,9 @@ export function buildAcpSessionParams(
   return {
     threadId: args.threadId,
     ...(args.modelConnection ? { modelConnection: args.modelConnection } : {}),
+    ...(args.executionContext
+      ? { executionContext: args.executionContext }
+      : {}),
     cwd,
     agent: {
       command: launchSpec.command,
