@@ -2430,7 +2430,10 @@ export function registerTasksCli(
                     ["Base branch", preset.baseBranch ?? "-"],
                     ["Machine", preset.machineId ?? "-"],
                     ["Context", preset.executionContextId ?? "Inherited"],
-                    ["Model connection", preset.modelConnectionId ?? "Inherited"],
+                    [
+                      "Model connection",
+                      preset.modelConnectionId ?? "Inherited",
+                    ],
                     ["Instructions", preset.instructions || "-"],
                     ["Built in", preset.builtin ? "yes" : "no"],
                     ["ID", preset.id],
@@ -2538,7 +2541,8 @@ export function registerTasksCli(
                         ? null
                         : await resolveMachineId(domain, machine),
                     executionContextId: input.options.context ?? null,
-                    modelConnectionId: input.options["model-connection"] ?? null,
+                    modelConnectionId:
+                      input.options["model-connection"] ?? null,
                     instructions: input.options.instructions ?? "",
                   }),
                 ),
@@ -2614,11 +2618,13 @@ export function registerTasksCli(
             ...CONTEXT_OPTIONS,
             "clear-context": {
               type: "boolean",
-              description: "Clear the preset context override and inherit project defaults",
+              description:
+                "Clear the preset context override and inherit project defaults",
             },
             "clear-model-connection": {
               type: "boolean",
-              description: "Clear the preset connection override and inherit defaults",
+              description:
+                "Clear the preset connection override and inherit defaults",
             },
             json: JSON_OPTION,
           },
@@ -2628,10 +2634,18 @@ export function registerTasksCli(
                 await listPresets(domain),
                 input.positionals["name-or-id"],
               );
-              if (input.options.context !== undefined && input.options["clear-context"])
+              if (
+                input.options.context !== undefined &&
+                input.options["clear-context"]
+              )
                 throw new CliError("Use either --context or --clear-context");
-              if (input.options["model-connection"] !== undefined && input.options["clear-model-connection"])
-                throw new CliError("Use either --model-connection or --clear-model-connection");
+              if (
+                input.options["model-connection"] !== undefined &&
+                input.options["clear-model-connection"]
+              )
+                throw new CliError(
+                  "Use either --model-connection or --clear-model-connection",
+                );
               const environmentOption = input.options.environment;
               const environmentKind = presetEnvironmentKind(
                 environmentOption,

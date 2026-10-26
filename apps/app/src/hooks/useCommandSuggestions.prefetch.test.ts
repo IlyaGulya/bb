@@ -45,12 +45,27 @@ describe("useCommandSuggestions catalog prefetch", () => {
       environmentId: "env-1",
       hostId: null,
     };
-    await prefetchCommandCatalog(queryClient, { ...routing, executionContextId: "work" });
-    await prefetchCommandCatalog(queryClient, { ...routing, executionContextId: "personal" });
-    await prefetchCommandCatalog(queryClient, { ...routing, threadId: "thread-work" });
-    await prefetchCommandCatalog(queryClient, { ...routing, threadId: "thread-personal" });
+    await prefetchCommandCatalog(queryClient, {
+      ...routing,
+      executionContextId: "work",
+    });
+    await prefetchCommandCatalog(queryClient, {
+      ...routing,
+      executionContextId: "personal",
+    });
+    await prefetchCommandCatalog(queryClient, {
+      ...routing,
+      threadId: "thread-work",
+    });
+    await prefetchCommandCatalog(queryClient, {
+      ...routing,
+      threadId: "thread-personal",
+    });
     expect(sdk.projects.commands).toHaveBeenCalledTimes(4);
-    await prefetchCommandCatalog(queryClient, { ...routing, threadId: "thread-personal" });
+    await prefetchCommandCatalog(queryClient, {
+      ...routing,
+      threadId: "thread-personal",
+    });
     expect(sdk.projects.commands).toHaveBeenCalledTimes(4);
   });
 });

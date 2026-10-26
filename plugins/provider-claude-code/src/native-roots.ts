@@ -1,7 +1,10 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
-import { executionContextSnapshotSchema, type ExecutionContextSnapshot } from "@bb/domain";
+import {
+  experimental_executionContextSnapshotSchema as executionContextSnapshotSchema,
+  type ExecutionContextSnapshot,
+} from "@get-bb/plugin-sdk/provider-bridge";
 import type { PluginProviderDeclaration } from "@get-bb/plugin-sdk";
 import {
   experimental_filterResolvedNativeRoots,
@@ -43,44 +46,79 @@ interface ClaudeNativeRootsArgs extends ExperimentalClaudePluginRootsArgs {
   executionContext?: ExecutionContextSnapshot;
 }
 
-async function resolveScopedRoots(context: ExecutionContextSnapshot): Promise<ExperimentalVendorPluginRoots> {
-  const plugins = await Promise.all(context.pluginRoots.map(async (rootPath) => {
-    const manifest = z.object({
-      name: z.string().min(1),
-      skills: z.union([z.string(), z.array(z.string())]).optional(),
-      commands: z.union([z.string(), z.array(z.string())]).optional(),
-    }).parse(JSON.parse(await readFile(path.join(rootPath, ".claude-plugin", "plugin.json"), "utf8")));
-    return { rootPath, ...manifest, origin: "project" as const };
-  }));
-  const pluginRoots = await experimental_resolveVendorPluginRoots({ plugins, layout: "claude" });
+async function resolveScopedRoots(
+  context: ExecutionContextSnapshot,
+): Promise<ExperimentalVendorPluginRoots> {
+  const plugins = await Promise.all(
+    context.pluginRoots.map(async (rootPath) => {
+      const manifest = z
+        .object({
+          name: z.string().min(1),
+          skills: z.union([z.string(), z.array(z.string())]).optional(),
+          commands: z.union([z.string(), z.array(z.string())]).optional(),
+        })
+        .parse(
+          JSON.parse(
+            await readFile(
+              path.join(rootPath, ".claude-plugin", "plugin.json"),
+              "utf8",
+            ),
+          ),
+        );
+      return { rootPath, ...manifest, origin: "project" as const };
+    }),
+  );
+  const pluginRoots = await experimental_resolveVendorPluginRoots({
+    plugins,
+    layout: "claude",
+  });
   const injectedRoots = buildClaudeContextRoots(context);
   const roots = {
     skills: [
-      ...injectedRoots.filter((root) => root.shape === "skills").map((root): ClaudeResolvedRoot => ({
-        path: root.path, origin: "project", shape: "skills", namePrefix: `${root.name}:`,
-      })),
+      ...injectedRoots
+        .filter((root) => root.shape === "skills")
+        .map((root): ClaudeResolvedRoot => ({
+          path: root.path,
+          origin: "project",
+          shape: "skills",
+          namePrefix: `${root.name}:`,
+        })),
       ...pluginRoots.skills,
     ],
     commands: [
-      ...injectedRoots.filter((root) => root.shape === "commands").map((root): ClaudeResolvedRoot => ({
-        path: root.path, origin: "project", shape: "commands", namePrefix: `${root.name}:`,
-      })),
+      ...injectedRoots
+        .filter((root) => root.shape === "commands")
+        .map((root): ClaudeResolvedRoot => ({
+          path: root.path,
+          origin: "project",
+          shape: "commands",
+          namePrefix: `${root.name}:`,
+        })),
       ...pluginRoots.commands,
     ],
   };
-  const filtered = experimental_filterResolvedNativeRoots(roots, { warn: console.warn });
-  if (filtered.dropped.length > 0 || filtered.truncated.skills > 0 || filtered.truncated.commands > 0) {
-    throw new Error("Claude selected context contains unsupported native roots; scoped roots were not replaced with ambient ones.");
+  const filtered = experimental_filterResolvedNativeRoots(roots, {
+    warn: console.warn,
+  });
+  if (
+    filtered.dropped.length > 0 ||
+    filtered.truncated.skills > 0 ||
+    filtered.truncated.commands > 0
+  ) {
+    throw new Error(
+      "Claude selected context contains unsupported native roots; scoped roots were not replaced with ambient ones.",
+    );
   }
   return filtered.answer;
 }
-
 
 export async function resolveClaudeNativeRoots(
   args: ClaudeNativeRootsArgs,
 ): Promise<ExperimentalVendorPluginRoots> {
   if (args.executionContext !== undefined) {
-    return resolveScopedRoots(executionContextSnapshotSchema.parse(args.executionContext));
+    return resolveScopedRoots(
+      executionContextSnapshotSchema.parse(args.executionContext),
+    );
   }
   const plugins = await experimental_resolveClaudePluginRoots(args);
   const userSkillsRoot: ClaudeResolvedRoot = {

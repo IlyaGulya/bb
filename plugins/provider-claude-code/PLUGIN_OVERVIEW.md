@@ -50,4 +50,3 @@ a filesystem sandbox or proof of live subscription/cloud-MCP isolation.
 See `bb guide agent-configuration` and the repository's
 [configuration reference](../../docs/configuration.md#independent-execution-contexts-and-model-connections)
 for persisted UI/CLI/SDK fields, precedence and current limits.
-

@@ -8,14 +8,12 @@ import {
   type ServiceTier,
   type RuntimePermissionPolicy,
   buildShellEnvOverrides,
-} from "@get-bb/plugin-sdk/provider-bridge";
-import { z } from "zod";
-import {
-  executionContextSnapshotSchema,
-  modelConnectionSnapshotSchema,
+  experimental_executionContextSnapshotSchema as executionContextSnapshotSchema,
+  experimental_modelConnectionSnapshotSchema as modelConnectionSnapshotSchema,
   type ExecutionContextSnapshot,
   type ModelConnectionSnapshot,
-} from "@bb/domain";
+} from "@get-bb/plugin-sdk/provider-bridge";
+import { z } from "zod";
 import {
   toClaudePermissionMode,
   type ClaudePermissionMode,
@@ -149,8 +147,12 @@ function buildInternalSessionParams(
     memoryEnabled: args.options.memoryEnabled,
     providerSubagentsEnabled: args.options.providerSubagentsEnabled,
     ...(dynamicTools && dynamicTools.length > 0 ? { dynamicTools } : {}),
-    ...(args.options.executionContext ? { executionContext: args.options.executionContext } : {}),
-    ...(args.options.modelConnection ? { modelConnection: args.options.modelConnection } : {}),
+    ...(args.options.executionContext
+      ? { executionContext: args.options.executionContext }
+      : {}),
+    ...(args.options.modelConnection
+      ? { modelConnection: args.options.modelConnection }
+      : {}),
   };
 }
 
@@ -209,7 +211,9 @@ export function buildClaudeSessionParams(
       chromeEnabled: providerOptions.chromeEnabled ?? false,
       disable1MContext: providerOptions.disable1MContext ?? false,
       sandboxEnabled: providerOptions.sandboxEnabled ?? true,
-      memoryEnabled: providerOptions.executionContext ? false : providerOptions.memoryEnabled,
+      memoryEnabled: providerOptions.executionContext
+        ? false
+        : providerOptions.memoryEnabled,
       providerSubagentsEnabled: providerOptions.providerSubagentsEnabled,
       executionContext: providerOptions.executionContext,
       modelConnection: providerOptions.modelConnection,
@@ -266,14 +270,21 @@ export function buildClaudeTurnParams(
     chromeEnabled: providerOptions.chromeEnabled,
     disable1MContext: providerOptions.disable1MContext,
     sandboxEnabled: providerOptions.sandboxEnabled,
-    memoryEnabled: providerOptions.executionContext ? false : providerOptions.memoryEnabled,
+    memoryEnabled: providerOptions.executionContext
+      ? false
+      : providerOptions.memoryEnabled,
     providerSubagentsEnabled: providerOptions.providerSubagentsEnabled,
-    ...(providerOptions.executionContext ? { executionContext: providerOptions.executionContext } : {}),
-    ...(providerOptions.modelConnection ? { modelConnection: providerOptions.modelConnection } : {}),
+    ...(providerOptions.executionContext
+      ? { executionContext: providerOptions.executionContext }
+      : {}),
+    ...(providerOptions.modelConnection
+      ? { modelConnection: providerOptions.modelConnection }
+      : {}),
     ...(config ? { config } : {}),
     permissionMode: toClaudePermissionMode(args.options),
     permissionScope: args.options.permissionScope,
-    additionalWorkspaceWriteRoots: providerOptions.additionalWorkspaceWriteRoots ?? [],
+    additionalWorkspaceWriteRoots:
+      providerOptions.additionalWorkspaceWriteRoots ?? [],
     permissionEscalation: args.options.permissionEscalation,
     ...(providerOptions.claudeCodePermissionMode !== undefined
       ? { claudeCodePermissionMode: providerOptions.claudeCodePermissionMode }

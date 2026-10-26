@@ -1287,6 +1287,8 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginBbSdk.experimental_executionContexts",
           "PluginBbSdk.experimental_modelConnections",
           "PluginProviderDeclaration.experimental_executionBindings",
+          "experimental_executionContextSnapshotSchema",
+          "experimental_modelConnectionSnapshotSchema",
         ],
         firstParty: [
           "Account Pooler [Experimental]",

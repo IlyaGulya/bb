@@ -242,17 +242,18 @@ function toRuntimeExecutionOptions(
     reasoningLevel: args.execution.reasoningLevel,
     ...(promptMode !== undefined ? { promptMode } : {}),
     ...(Object.keys(sessionOptions).length > 0 ? { sessionOptions } : {}),
-    providerOptions: binding === null
-      ? providerOptions
-      : {
-          ...providerOptions,
-          ...(binding.executionContext === null
-            ? {}
-            : { executionContext: binding.executionContext }),
-          ...(binding.modelConnection === null
-            ? {}
-            : { modelConnection: binding.modelConnection }),
-        },
+    providerOptions:
+      binding === null
+        ? providerOptions
+        : {
+            ...providerOptions,
+            ...(binding.executionContext === null
+              ? {}
+              : { executionContext: binding.executionContext }),
+            ...(binding.modelConnection === null
+              ? {}
+              : { modelConnection: binding.modelConnection }),
+          },
   };
   if (permissionMode === "full") {
     return {

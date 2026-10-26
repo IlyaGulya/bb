@@ -4713,9 +4713,6 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.3.245
         version: 0.3.245(@anthropic-ai/sdk@0.93.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.29.0(zod@4.6.5))(zod@4.6.5)
-      '@bb/domain':
-        specifier: workspace:*
-        version: link:../../packages/domain
       '@get-bb/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk

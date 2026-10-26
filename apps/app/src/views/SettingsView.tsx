@@ -1227,9 +1227,7 @@ export function SettingsView() {
   } else if (activeSection === "providers") {
     content = (
       <ProvidersSettingsSection
-        disabled={
-          systemConfigQuery.data === undefined
-        }
+        disabled={systemConfigQuery.data === undefined}
         generalSettings={generalSettings}
         onGeneralSettingsChange={(next) =>
           updateGeneralSettingsMutation.mutateAsync(next)
@@ -1322,9 +1320,7 @@ export function SettingsView() {
   } else if (activeSection === "experiments") {
     content = (
       <ExperimentsSettingsSection
-        disabled={
-          systemConfigQuery.data === undefined
-        }
+        disabled={systemConfigQuery.data === undefined}
         experiments={experiments}
         performanceDiagnosticsAvailable={
           systemConfigQuery.data?.performanceDiagnosticsAvailable ?? false
@@ -1372,9 +1368,7 @@ export function SettingsView() {
             })
           }
           desktopBrowserAvailable={desktopBrowserAvailable}
-          generalSettingsDisabled={
-            systemConfigQuery.data === undefined
-          }
+          generalSettingsDisabled={systemConfigQuery.data === undefined}
           managedBranchPrefix={generalSettings.managedBranchPrefix}
           onManagedBranchPrefixChange={async (prefix) => {
             await updateGeneralSettingsMutation.mutateAsync({
@@ -1411,9 +1405,7 @@ export function SettingsView() {
             })
           }
           enabled={generalSettings.showDiagnosticEvents}
-          disabled={
-            systemConfigQuery.data === undefined
-          }
+          disabled={systemConfigQuery.data === undefined}
           onEnabledChange={(enabled) =>
             updateGeneralSettingsMutation.mutate({
               showDiagnosticEvents: enabled,

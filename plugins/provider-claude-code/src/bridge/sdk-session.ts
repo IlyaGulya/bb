@@ -28,6 +28,7 @@ export interface SdkSessionOptions {
   additionalDirectories?: readonly string[];
   effort?: Options["effort"];
   sessionId?: string;
+  forkSource?: { sessionId: string; upToMessageId?: string };
   permissionMode?: ClaudePermissionMode;
   allowBypassPermissions: boolean;
   sandbox?: Options["sandbox"];
@@ -263,7 +264,11 @@ export class SdkSession {
           }
         : {}),
       includePartialMessages: true,
-      settingSources: this.options.settingSources ?? ["user", "project", "local"],
+      settingSources: this.options.settingSources ?? [
+        "user",
+        "project",
+        "local",
+      ],
       ...(this.options.strictMcpConfig !== undefined
         ? { strictMcpConfig: this.options.strictMcpConfig }
         : {}),
@@ -284,6 +289,15 @@ export class SdkSession {
       ...(resumeSessionId ? { resume: resumeSessionId } : {}),
       ...(!resumeSessionId && this.options.sessionId
         ? { sessionId: this.options.sessionId }
+        : {}),
+      ...(!resumeSessionId && this.options.forkSource
+        ? {
+            resume: this.options.forkSource.sessionId,
+            forkSession: true,
+            ...(this.options.forkSource.upToMessageId
+              ? { resumeSessionAt: this.options.forkSource.upToMessageId }
+              : {}),
+          }
         : {}),
       ...(this.options.model ? { model: this.options.model } : {}),
       ...(this.options.additionalDirectories

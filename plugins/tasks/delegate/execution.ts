@@ -12,7 +12,10 @@ type SpawnEnvironment = Parameters<
 
 export function taskExecutionSelection(
   preset: Pick<Preset, "executionContextId" | "modelConnectionId">,
-  target?: Pick<ExecutionTarget, "executionContextId" | "modelConnectionId"> | null,
+  target?: Pick<
+    ExecutionTarget,
+    "executionContextId" | "modelConnectionId"
+  > | null,
   request?: { executionContextId?: string; modelConnectionId?: string },
 ): { executionContextId?: string; modelConnectionId?: string } {
   const executionContextId =

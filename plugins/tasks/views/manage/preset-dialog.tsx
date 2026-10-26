@@ -28,7 +28,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "./shared.js";
-import { ExecutionSelectionFields, executionSelectionsValid, useExecutionSelections } from "../execution-selection.js";
+import {
+  ExecutionSelectionFields,
+  executionSelectionsValid,
+  useExecutionSelections,
+} from "../execution-selection.js";
 
 type ReasoningLevel = ExperimentalProviderModelPickerValue["reasoningLevel"];
 type EnvironmentKind = (typeof PRESET_ENVIRONMENT_KINDS)[number];
@@ -169,7 +173,13 @@ export function PresetDialog({
     draft.name.trim() !== "" &&
     draft.providerId.trim() !== "" &&
     draft.modelId.trim() !== "" &&
-    executionSelectionsValid(selections, draft.executionContextId ?? "", draft.modelConnectionId ?? "", draft.providerId, draft.environmentKind === "new-worktree" ? draft.machineId : undefined) &&
+    executionSelectionsValid(
+      selections,
+      draft.executionContextId ?? "",
+      draft.modelConnectionId ?? "",
+      draft.providerId,
+      draft.environmentKind === "new-worktree" ? draft.machineId : undefined,
+    ) &&
     !submitting;
   const pickerValue: ExperimentalProviderModelPickerValue = {
     providerId: draft.providerId,
@@ -229,7 +239,11 @@ export function PresetDialog({
             onContextChange={(id) => set("executionContextId", id)}
             onConnectionChange={(id) => set("modelConnectionId", id)}
             provider={draft.providerId}
-            hostId={draft.environmentKind === "new-worktree" ? draft.machineId : undefined}
+            hostId={
+              draft.environmentKind === "new-worktree"
+                ? draft.machineId
+                : undefined
+            }
           />
           <div className="grid grid-cols-2 gap-3">
             <Field label="Permissions">

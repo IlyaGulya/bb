@@ -209,7 +209,10 @@ export function buildPluginProviderRegistration(args: {
     ...(extensionKinds === undefined ? {} : { extensionKinds }),
     ...(declaration.experimental_executionBindings === undefined
       ? {}
-      : { experimental_executionBindings: declaration.experimental_executionBindings }),
+      : {
+          experimental_executionBindings:
+            declaration.experimental_executionBindings,
+        }),
   };
 
   const serverCapabilities: ProviderServerCapabilities = {

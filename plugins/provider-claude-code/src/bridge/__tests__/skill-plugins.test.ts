@@ -108,11 +108,25 @@ describe("claude skill plugins", () => {
     const pluginsRoot = createClaudeSkillPluginsRoot(baseDir);
     const source = stageSkills("shared");
     writeFileSync(join(source, "selected.md"), "Selected native command");
-    const skills = ensureClaudeSkillPlugin({ pluginsRoot, root: { id: "same", path: source } });
-    const commands = ensureClaudeSkillPlugin({ pluginsRoot, root: { id: "same", path: source, shape: "commands" } });
+    const skills = ensureClaudeSkillPlugin({
+      pluginsRoot,
+      root: { id: "same", path: source },
+    });
+    const commands = ensureClaudeSkillPlugin({
+      pluginsRoot,
+      root: { id: "same", path: source, shape: "commands" },
+    });
     expect(commands).not.toBe(skills);
     expect(readlinkSync(join(commands, "commands"))).toBe(source);
-    expect(JSON.parse(readFileSync(join(commands, ".claude-plugin", "plugin.json"), "utf8"))).toMatchObject({ commands: "./commands" });
-    expect(JSON.parse(readFileSync(join(skills, ".claude-plugin", "plugin.json"), "utf8"))).toMatchObject({ skills: "./skills" });
+    expect(
+      JSON.parse(
+        readFileSync(join(commands, ".claude-plugin", "plugin.json"), "utf8"),
+      ),
+    ).toMatchObject({ commands: "./commands" });
+    expect(
+      JSON.parse(
+        readFileSync(join(skills, ".claude-plugin", "plugin.json"), "utf8"),
+      ),
+    ).toMatchObject({ skills: "./skills" });
   });
 });

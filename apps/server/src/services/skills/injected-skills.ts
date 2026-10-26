@@ -615,20 +615,22 @@ export function resolveSkillCatalogEntries(
   const sharedProjectSources = (args.sharedSkillSources ?? []).filter(
     (source) => source.sourceType === "shared-project",
   );
-  const sharedUserSources = args.includeUserSkills === false
-    ? []
-    : (args.sharedSkillSources ?? []).filter(
-        (source) => source.sourceType === "shared-user",
-      );
+  const sharedUserSources =
+    args.includeUserSkills === false
+      ? []
+      : (args.sharedSkillSources ?? []).filter(
+          (source) => source.sourceType === "shared-user",
+        );
 
-  const dataDirSources = args.includeUserSkills === false
-    ? []
-    : readSkillsRoot({
-        logger,
-        skillTreeRegistry,
-        skillsRootPath: resolveDataDirSkillsRootPath(args.dataDir),
-        sourceType: "data-dir",
-      });
+  const dataDirSources =
+    args.includeUserSkills === false
+      ? []
+      : readSkillsRoot({
+          logger,
+          skillTreeRegistry,
+          skillsRootPath: resolveDataDirSkillsRootPath(args.dataDir),
+          sourceType: "data-dir",
+        });
   const inheritedSourceGroups = (args.additionalSkillsRootPaths ?? []).map(
     (skillsRootPath) =>
       readSkillsRoot({

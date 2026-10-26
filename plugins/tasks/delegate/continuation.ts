@@ -114,6 +114,7 @@ export function continuationHandlers(
           environmentId: continuation.receipt.environmentId,
         },
         presetId: preset.id,
+        ...taskExecutionSelection(preset, null, continuation.request),
       });
       effects.comment({
         taskId: task.id,

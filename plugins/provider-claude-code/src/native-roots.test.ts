@@ -2,10 +2,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ExperimentalVendorPluginRoots } from "@get-bb/plugin-sdk/host";
-import { executionContextSnapshotSchema } from "@bb/domain";
+import { experimental_executionContextSnapshotSchema as executionContextSnapshotSchema } from "@get-bb/plugin-sdk/provider-bridge";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveClaudeNativeRoots } from "./native-roots.js";
-import { buildClaudeContextRoots, ensureClaudeSkillPlugin } from "./bridge/skill-plugins.js";
+import {
+  buildClaudeContextRoots,
+  ensureClaudeSkillPlugin,
+} from "./bridge/skill-plugins.js";
 
 interface Fixture {
   cwd: string;
@@ -207,34 +210,68 @@ describe("scoped Claude native roots", () => {
     await mkdir(path.join(selectedPlugin, "skills"), { recursive: true });
     await writePlugin(siblingPlugin, { name: "sibling" });
     await mkdir(path.join(siblingPlugin, "skills"), { recursive: true });
-    await mkdir(path.join(fixture.homeDir, ".claude", "skills"), { recursive: true });
-    await writeJson(path.join(fixture.claudeDir, "plugins", "installed_plugins.json"), {
-      version: 2,
-      plugins: { "sibling@market": [{ scope: "user", installPath: siblingPlugin }] },
+    await mkdir(path.join(fixture.homeDir, ".claude", "skills"), {
+      recursive: true,
     });
+    await writeJson(
+      path.join(fixture.claudeDir, "plugins", "installed_plugins.json"),
+      {
+        version: 2,
+        plugins: {
+          "sibling@market": [{ scope: "user", installPath: siblingPlugin }],
+        },
+      },
+    );
     const executionContext = executionContextSnapshotSchema.parse({
-      id: "selected", name: "Selected", createdAt: 1, updatedAt: 1,
-      skillRoots: [selectedSkills], commandRoots: [selectedCommands], pluginRoots: [selectedPlugin],
+      id: "selected",
+      name: "Selected",
+      createdAt: 1,
+      updatedAt: 1,
+      skillRoots: [selectedSkills],
+      commandRoots: [selectedCommands],
+      pluginRoots: [selectedPlugin],
     });
     const roots = await resolveClaudeNativeRoots({
-      cwd: fixture.cwd, homeDir: fixture.homeDir,
-      env: { CLAUDE_CONFIG_DIR: fixture.claudeDir }, executionContext,
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      env: { CLAUDE_CONFIG_DIR: fixture.claudeDir },
+      executionContext,
     });
-    expect(skillPaths(roots)).toEqual([selectedSkills, path.join(selectedPlugin, "skills")]);
+    expect(skillPaths(roots)).toEqual([
+      selectedSkills,
+      path.join(selectedPlugin, "skills"),
+    ]);
     expect(commandPaths(roots)).toEqual([selectedCommands]);
     expect(roots.skills.every((root) => root.origin === "project")).toBe(true);
-    const commandRoot = buildClaudeContextRoots(executionContext).find((root) => root.shape === "commands")!;
+    const commandRoot = buildClaudeContextRoots(executionContext).find(
+      (root) => root.shape === "commands",
+    )!;
     const commandPlugin = ensureClaudeSkillPlugin({
-      pluginsRoot: path.join(tempRoot, "runtime-plugins"), root: commandRoot,
+      pluginsRoot: path.join(tempRoot, "runtime-plugins"),
+      root: commandRoot,
     });
-    const manifest = JSON.parse(await readFile(path.join(commandPlugin, ".claude-plugin", "plugin.json"), "utf8"));
+    const manifest = JSON.parse(
+      await readFile(
+        path.join(commandPlugin, ".claude-plugin", "plugin.json"),
+        "utf8",
+      ),
+    );
     expect(roots.commands[0]?.namePrefix).toBe(`${manifest.name}:`);
     const empty = await resolveClaudeNativeRoots({
-      cwd: fixture.cwd, homeDir: fixture.homeDir, env: {},
-      executionContext: { ...executionContext, skillRoots: [], commandRoots: [], pluginRoots: [] },
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      env: {},
+      executionContext: {
+        ...executionContext,
+        skillRoots: [],
+        commandRoots: [],
+        pluginRoots: [],
+      },
     });
     expect(empty).toEqual({ skills: [], commands: [] });
-    expect(skillPaths(await resolve(fixture, fixture.cwd))).toContain(path.join(siblingPlugin, "skills"));
+    expect(skillPaths(await resolve(fixture, fixture.cwd))).toContain(
+      path.join(siblingPlugin, "skills"),
+    );
   });
 });
 

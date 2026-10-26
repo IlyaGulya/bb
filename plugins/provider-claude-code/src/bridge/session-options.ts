@@ -3,12 +3,13 @@ import {
   type ReasoningLevel,
   type ServiceTier,
   type RuntimePermissionScope,
+  type ExecutionContextSnapshot,
+  type ModelConnectionSnapshot,
 } from "@get-bb/plugin-sdk/provider-bridge";
 import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import type { Options, Settings } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudePermissionMode } from "../interactive-contract.js";
-import type { ExecutionContextSnapshot, ModelConnectionSnapshot } from "@bb/domain";
 import {
   buildClaudeSessionEnvironment,
   mergeClaudeSettings,
@@ -94,7 +95,9 @@ export function toSdkEffort(
 
 function buildFlagSettings(params: BuildSessionOptionsArgs): Settings {
   return {
-    autoMemoryEnabled: params.executionContext ? false : (params.memoryEnabled ?? true),
+    autoMemoryEnabled: params.executionContext
+      ? false
+      : (params.memoryEnabled ?? true),
     enableWorkflows: params.workflowsEnabled,
     ultracode: params.reasoningLevel === "ultracode",
     fastMode: params.serviceTier === "fast",
@@ -254,7 +257,9 @@ export function buildSessionOptions(
   env: NodeJS.ProcessEnv,
 ): SdkSessionOptions {
   if (params.executionContext && !params.contextFiles) {
-    throw new Error("Scoped Claude execution requires prepared thread-owned context files; ambient native settings cannot be substituted.");
+    throw new Error(
+      "Scoped Claude execution requires prepared thread-owned context files; ambient native settings cannot be substituted.",
+    );
   }
   const sessionEnv = buildClaudeSessionEnvironment({
     env,
@@ -262,21 +267,25 @@ export function buildSessionOptions(
     modelConnection: params.modelConnection,
   });
   if (params.executionContext && params.chromeEnabled) {
-    throw new Error("Claude in Chrome is not supported in a scoped execution context; disable it to avoid importing an unselected browser tool identity.");
+    throw new Error(
+      "Claude in Chrome is not supported in a scoped execution context; disable it to avoid importing an unselected browser tool identity.",
+    );
   }
   const baseInstructions = [
     params.baseInstructions,
     params.executionContext?.instructions,
-  ].filter((value) => value && value.length > 0).join("\n\n");
+  ]
+    .filter((value) => value && value.length > 0)
+    .join("\n\n");
   const systemPrompt: Exclude<Options["systemPrompt"], undefined> =
     params.instructionMode === "replace"
-      ? (params.executionContext ? (baseInstructions || "You are a helpful coding assistant.") : (params.baseInstructions ?? "You are a helpful coding assistant."))
+      ? params.executionContext
+        ? baseInstructions || "You are a helpful coding assistant."
+        : (params.baseInstructions ?? "You are a helpful coding assistant.")
       : {
           type: "preset",
           preset: "claude_code",
-          ...(baseInstructions.length > 0
-            ? { append: baseInstructions }
-            : {}),
+          ...(baseInstructions.length > 0 ? { append: baseInstructions } : {}),
         };
   const model = params.model;
   const sandbox = mergeClaudeSettings(
@@ -286,7 +295,9 @@ export function buildSessionOptions(
   const additionalDirectories = isWorkspaceWriteSession(params)
     ? (params.additionalWorkspaceWriteRoots ?? [])
     : [];
-  const pathToClaudeCodeExecutable = resolveClaudeCodeExecutable({ env: sessionEnv });
+  const pathToClaudeCodeExecutable = resolveClaudeCodeExecutable({
+    env: sessionEnv,
+  });
   if (params.executionContext) {
     requireClaudeCloudImportControl(pathToClaudeCodeExecutable ?? undefined);
   }
@@ -317,13 +328,20 @@ export function buildSessionOptions(
           mcpServers: params.contextFiles?.mcpServers ?? {},
         }
       : {}),
-    ...(params.contextFiles ? { verifyContextSources: params.contextFiles.verify } : {}),
+    ...(params.contextFiles
+      ? { verifyContextSources: params.contextFiles.verify }
+      : {}),
     ...(extraArgs ? { extraArgs } : {}),
     ...(pathToClaudeCodeExecutable ? { pathToClaudeCodeExecutable } : {}),
     ...(params.plugins
-      ? { plugins: params.executionContext
-          ? params.plugins.map((plugin) => ({ ...plugin, skipMcpDiscovery: true }))
-          : params.plugins }
+      ? {
+          plugins: params.executionContext
+            ? params.plugins.map((plugin) => ({
+                ...plugin,
+                skipMcpDiscovery: true,
+              }))
+            : params.plugins,
+        }
       : {}),
     ...(sandbox ? { sandbox } : {}),
     ...(additionalDirectories.length > 0

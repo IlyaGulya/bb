@@ -2279,7 +2279,11 @@ function reconcileExecutionSettings(
     throw new Error('ACP does not support permission mode "auto".');
   }
   const launchSpec = decodeLaunchSpec(options.providerOptions);
-  const scoped = resolveScopedOptions(options.providerOptions, launchSpec);
+  const scoped = resolveScopedOptions(
+    options.providerOptions,
+    launchSpec,
+    options.envVars,
+  );
   assertAcpConnectionUnchanged(
     session.construction.modelConnection ?? null,
     scoped.modelConnection,
@@ -2713,6 +2717,7 @@ function decodeLaunchSpec(
 function resolveScopedOptions(
   providerOptions: Record<string, unknown> | undefined,
   launchSpec: AcpLaunchSpec | null,
+  envVars?: Record<string, string>,
 ) {
   return resolveAcpScopedOptions({
     providerOptions,
@@ -2720,7 +2725,7 @@ function resolveScopedOptions(
       dialectId: decodeDialectId(providerOptions),
       command: launchSpec?.command ?? "",
     }).id,
-    env: process.env,
+    env: { ...process.env, ...launchSpec?.env, ...envVars },
   });
 }
 
@@ -2901,6 +2906,7 @@ async function handleRequest(
       const scoped = resolveScopedOptions(
         params.options.providerOptions,
         launchSpec,
+        params.options.envVars,
       );
       const modelPicker = decodeAcpModelPickerOptions(
         params.options.providerOptions,
@@ -2989,6 +2995,7 @@ async function handleRequest(
       const scoped = resolveScopedOptions(
         params.options.providerOptions,
         decodeLaunchSpec(params.options.providerOptions),
+        params.options.envVars,
       );
       assertAcpConnectionUnchanged(
         session.construction.modelConnection ?? null,

@@ -203,17 +203,19 @@ async function readAgentInstructions(
   const paths = includeRepositoryInstructions
     ? ["AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md", ".bb/AGENTS.md"]
     : [".bb/AGENTS.md"];
-  const sections = await Promise.all(paths.map(async (relativePath) => {
-    const content = await readContainedUtf8File({
-      filePath: path.join(rootPath, relativePath),
-      rootPath,
-    });
-    const trimmed = content?.trim() ?? "";
-    if (!trimmed) return null;
-    return includeRepositoryInstructions
-      ? `Repository instructions (${relativePath}):\n${trimmed}`
-      : trimmed;
-  }));
+  const sections = await Promise.all(
+    paths.map(async (relativePath) => {
+      const content = await readContainedUtf8File({
+        filePath: path.join(rootPath, relativePath),
+        rootPath,
+      });
+      const trimmed = content?.trim() ?? "";
+      if (!trimmed) return null;
+      return includeRepositoryInstructions
+        ? `Repository instructions (${relativePath}):\n${trimmed}`
+        : trimmed;
+    }),
+  );
   return sections.filter((section) => section !== null).join("\n\n") || null;
 }
 
@@ -226,7 +228,10 @@ export async function readWorkspaceAgentContext(
   const [projectSkills, agentInstructions, sharedSkills] = await Promise.all([
     readProjectSkillFiles(command.rootPath, command.projectSkillRead),
     command.includeAgentInstructions
-      ? readAgentInstructions(command.rootPath, command.includeRepositoryInstructions)
+      ? readAgentInstructions(
+          command.rootPath,
+          command.includeRepositoryInstructions,
+        )
       : Promise.resolve(null),
     listSharedSkills({
       cwd: command.rootPath,

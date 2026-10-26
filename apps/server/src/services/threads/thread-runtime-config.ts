@@ -151,7 +151,8 @@ export async function resolveThreadRuntimeCommandConfig(
   }
 
   const executionContext =
-    getThreadExecutionBinding(deps.db, args.thread.id)?.executionContext ?? null;
+    getThreadExecutionBinding(deps.db, args.thread.id)?.executionContext ??
+    null;
   const workspaceAgentContext = await readWorkspaceAgentContext(deps, {
     includeAgentInstructions: true,
     hostId: args.environment.hostId,
@@ -228,7 +229,8 @@ export async function resolveThreadRuntimeCommandConfig(
       ["GIT_COMMITTER_NAME", identity.name],
       ["GIT_COMMITTER_EMAIL", identity.email],
     ];
-    contributedEnv = mergeHostAndProviderEnvironment(contributedEnv,
+    contributedEnv = mergeHostAndProviderEnvironment(
+      contributedEnv,
       variables.map(([name, value]) => ({
         name,
         value,
@@ -244,9 +246,10 @@ export async function resolveThreadRuntimeCommandConfig(
     pluginSkillSelections: conditionalConfiguration.selectedSkillIdsByPlugin,
     includeUserSkills: executionContext === null,
   }).map((entry) => entry.runtimeSource);
-  const dataDirAgentInstructions = executionContext === null
-    ? readDataDirAgentInstructions(deps.logger, deps.config.dataDir)
-    : null;
+  const dataDirAgentInstructions =
+    executionContext === null
+      ? readDataDirAgentInstructions(deps.logger, deps.config.dataDir)
+      : null;
   const dynamicToolContributions = resolveDynamicTools(
     conditionalConfiguration.tools,
   );

@@ -1,4 +1,9 @@
-import { prepareMachine, previewWorkspaceTransfer, transferWorkspace, getWorkspaceTransfer } from "../services/projects/workspace-transfer.js";
+import {
+  prepareMachine,
+  previewWorkspaceTransfer,
+  transferWorkspace,
+  getWorkspaceTransfer,
+} from "../services/projects/workspace-transfer.js";
 import {
   projectMachineEnvironmentView,
   replaceMachineEnvironment,
@@ -555,10 +560,24 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
     return context.json({ ok: true });
   });
 
-  post(routes.prepareMachine, async (context, payload) => context.json(await prepareMachine(deps, context.req.param("id"), payload)));
-  post(routes.previewWorkspaceTransfer, async (context, payload) => context.json(await previewWorkspaceTransfer(deps, context.req.param("id"), payload)));
-  post(routes.transferWorkspace, async (context, payload) => context.json(await transferWorkspace(deps, context.req.param("id"), payload)));
-  get(routes.getWorkspaceTransfer, async (context) => context.json(await getWorkspaceTransfer(deps, context.req.param("operationId"))));
+  post(routes.prepareMachine, async (context, payload) =>
+    context.json(await prepareMachine(deps, context.req.param("id"), payload)),
+  );
+  post(routes.previewWorkspaceTransfer, async (context, payload) =>
+    context.json(
+      await previewWorkspaceTransfer(deps, context.req.param("id"), payload),
+    ),
+  );
+  post(routes.transferWorkspace, async (context, payload) =>
+    context.json(
+      await transferWorkspace(deps, context.req.param("id"), payload),
+    ),
+  );
+  get(routes.getWorkspaceTransfer, async (context) =>
+    context.json(
+      await getWorkspaceTransfer(deps, context.req.param("operationId")),
+    ),
+  );
 
   post(routes.createSource, async (context, payload) => {
     const projectId = context.req.param("id");
@@ -748,11 +767,19 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
     const thread = query.threadId ? getThread(deps.db, query.threadId) : null;
     if (
       query.threadId !== undefined &&
-      (thread === null || thread.projectId !== projectId || thread.deletedAt !== null)
+      (thread === null ||
+        thread.projectId !== projectId ||
+        thread.deletedAt !== null)
     ) {
-      throw new ApiError(404, "thread_not_found", "Thread not found in this project");
+      throw new ApiError(
+        404,
+        "thread_not_found",
+        "Thread not found in this project",
+      );
     }
-    const binding = thread ? getThreadExecutionBinding(deps.db, thread.id) : null;
+    const binding = thread
+      ? getThreadExecutionBinding(deps.db, thread.id)
+      : null;
     if (thread) {
       assertThreadExecutionBindingAvailable(deps.db, binding);
       if (
@@ -767,7 +794,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       }
     }
     const executionContext = thread
-      ? binding?.executionContext ?? null
+      ? (binding?.executionContext ?? null)
       : resolveProjectExecutionContext(deps.db, {
           projectId,
           executionContextId: query.executionContextId,
@@ -801,12 +828,13 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       workspace.cwd === null
         ? {
             projectSkillSources: [],
-            sharedSkills: executionContext === null
-              ? await resolveSharedSkills(deps, {
-                  hostId: workspace.hostId,
-                  cwd: null,
-                })
-              : { runtimeSources: [], summaries: [] },
+            sharedSkills:
+              executionContext === null
+                ? await resolveSharedSkills(deps, {
+                    hostId: workspace.hostId,
+                    cwd: null,
+                  })
+                : { runtimeSources: [], summaries: [] },
           }
         : readWorkspaceAgentContext(deps, {
             hostId: workspace.hostId,

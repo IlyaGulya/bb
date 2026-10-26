@@ -40,13 +40,18 @@ function context() {
   };
 }
 
-function resolve(providerOptions?: Record<string, unknown>, env: Record<string, string> = {}) {
+function resolve(
+  providerOptions?: Record<string, unknown>,
+  env: Record<string, string> = {},
+) {
   return resolveAcpScopedOptions({ providerOptions, dialectId: "omp", env });
 }
 
 describe("native ACP scoped options", () => {
   it("preserves legacy launches without selecting or copying an account", () => {
-    expect(resolve(undefined, { OMP_AUTH_BROKER_TOKEN: "host-secret" })).toEqual({
+    expect(
+      resolve(undefined, { OMP_AUTH_BROKER_TOKEN: "host-secret" }),
+    ).toEqual({
       modelConnection: null,
       env: {},
     });
@@ -62,21 +67,33 @@ describe("native ACP scoped options", () => {
   });
 
   it("resolves broker host references without moving native profiles or mutating the host", () => {
-    const hostEnv = { WORK_BROKER: "https://broker.example", WORK_TOKEN: "reference-value" };
-    const result = resolve({
-      modelConnection: connection({
-        nativeAuth: {
-          configDir: null,
-          profile: null,
-          hostEnv: { brokerUrlEnv: "WORK_BROKER", brokerTokenEnv: "WORK_TOKEN" },
-        },
-      }),
-    }, hostEnv);
+    const hostEnv = {
+      WORK_BROKER: "https://broker.example",
+      WORK_TOKEN: "reference-value",
+    };
+    const result = resolve(
+      {
+        modelConnection: connection({
+          nativeAuth: {
+            configDir: null,
+            profile: null,
+            hostEnv: {
+              brokerUrlEnv: "WORK_BROKER",
+              brokerTokenEnv: "WORK_TOKEN",
+            },
+          },
+        }),
+      },
+      hostEnv,
+    );
     expect(result.env).toEqual({
       OMP_AUTH_BROKER_URL: "https://broker.example",
       OMP_AUTH_BROKER_TOKEN: "reference-value",
     });
-    expect(hostEnv).toEqual({ WORK_BROKER: "https://broker.example", WORK_TOKEN: "reference-value" });
+    expect(hostEnv).toEqual({
+      WORK_BROKER: "https://broker.example",
+      WORK_TOKEN: "reference-value",
+    });
     expect(result.modelConnection?.nativeAuth.hostEnv).toEqual({
       brokerUrlEnv: "WORK_BROKER",
       brokerTokenEnv: "WORK_TOKEN",
@@ -84,41 +101,78 @@ describe("native ACP scoped options", () => {
   });
 
   it.each([
-    { nativeAuth: { configDir: "/other-native-profile", profile: null, hostEnv: null } },
+    {
+      nativeAuth: {
+        configDir: "/other-native-profile",
+        profile: null,
+        hostEnv: null,
+      },
+    },
     { nativeAuth: { configDir: null, profile: "personal", hostEnv: null } },
-  ])("refuses profile selection that would also replace context and session storage", (overrides) => {
-    expect(() => resolve({ modelConnection: connection(overrides) })).toThrow("also change instructions");
-  });
+  ])(
+    "refuses profile selection that would also replace context and session storage",
+    (overrides) => {
+      expect(() => resolve({ modelConnection: connection(overrides) })).toThrow(
+        "also change instructions",
+      );
+    },
+  );
 
-  it.each([{ enabled: false }, { revoked: true }])("refuses unavailable native connections", (overrides) => {
-    expect(() => resolve({ modelConnection: connection(overrides) })).toThrow("disabled or revoked");
-  });
+  it.each([{ enabled: false }, { revoked: true }])(
+    "refuses unavailable native connections",
+    (overrides) => {
+      expect(() => resolve({ modelConnection: connection(overrides) })).toThrow(
+        "disabled or revoked",
+      );
+    },
+  );
 
   it("refuses missing explicit broker references rather than falling back to ambient login", () => {
-    expect(() => resolve({
-      modelConnection: connection({
-        nativeAuth: {
-          configDir: null,
-          profile: null,
-          hostEnv: { brokerUrlEnv: "MISSING_URL", brokerTokenEnv: "MISSING_TOKEN" },
+    expect(() =>
+      resolve(
+        {
+          modelConnection: connection({
+            nativeAuth: {
+              configDir: null,
+              profile: null,
+              hostEnv: {
+                brokerUrlEnv: "MISSING_URL",
+                brokerTokenEnv: "MISSING_TOKEN",
+              },
+            },
+          }),
         },
-      }),
-    }, { OMP_AUTH_BROKER_URL: "https://ambient.example", OMP_AUTH_BROKER_TOKEN: "ambient" }))
-      .toThrow("native login fallback is disabled");
+        {
+          OMP_AUTH_BROKER_URL: "https://ambient.example",
+          OMP_AUTH_BROKER_TOKEN: "ambient",
+        },
+      ),
+    ).toThrow("native login fallback is disabled");
   });
 
-  it.each(["file:///local", "https://user:password@broker.example", "not-a-url"])(
+  it.each([
+    "file:///local",
+    "https://user:password@broker.example",
+    "not-a-url",
+  ])(
     "refuses an invalid native broker URL without exposing its value",
     (url) => {
-      const run = () => resolve({
-        modelConnection: connection({
-          nativeAuth: {
-            configDir: null,
-            profile: null,
-            hostEnv: { brokerUrlEnv: "URL_REF", brokerTokenEnv: "TOKEN_REF" },
+      const run = () =>
+        resolve(
+          {
+            modelConnection: connection({
+              nativeAuth: {
+                configDir: null,
+                profile: null,
+                hostEnv: {
+                  brokerUrlEnv: "URL_REF",
+                  brokerTokenEnv: "TOKEN_REF",
+                },
+              },
+            }),
           },
-        }),
-      }, { URL_REF: url, TOKEN_REF: "secret" });
+          { URL_REF: url, TOKEN_REF: "secret" },
+        );
       expect(run).toThrow("HTTP or HTTPS URL");
       try {
         run();
@@ -130,8 +184,9 @@ describe("native ACP scoped options", () => {
   );
 
   it("does not accept ignored context fields on native OMP", () => {
-    expect(() => resolve({ executionContext: context(), modelConnection: connection() }))
-      .toThrow("native OMP explicit-context discovery capability is required");
+    expect(() =>
+      resolve({ executionContext: context(), modelConnection: connection() }),
+    ).toThrow("native OMP explicit-context discovery capability is required");
   });
 
   it.each([
@@ -142,21 +197,30 @@ describe("native ACP scoped options", () => {
   });
 
   it("rejects provider/account mismatches", () => {
-    expect(() => resolve({ modelConnection: connection({ provider: "claude-code" }) }))
-      .toThrow("shipped acp-omp");
-    expect(() => resolveAcpScopedOptions({
-      providerOptions: { modelConnection: connection() },
-      dialectId: "opencode",
-      env: {},
-    })).toThrow("shipped acp-omp");
+    expect(() =>
+      resolve({ modelConnection: connection({ provider: "claude-code" }) }),
+    ).toThrow("shipped acp-omp");
+    expect(() =>
+      resolveAcpScopedOptions({
+        providerOptions: { modelConnection: connection() },
+        dialectId: "opencode",
+        env: {},
+      }),
+    ).toThrow("shipped acp-omp");
   });
 
   it("keeps active and resumed selections immutable", () => {
     const original = resolve({ modelConnection: connection() }).modelConnection;
     const same = resolve({ modelConnection: connection() }).modelConnection;
     expect(() => assertAcpConnectionUnchanged(original, same)).not.toThrow();
-    expect(() => assertAcpConnectionUnchanged(original, null)).toThrow("cannot change");
-    const changed = resolve({ modelConnection: connection({ id: "other-account" }) }).modelConnection;
-    expect(() => assertAcpConnectionUnchanged(original, changed)).toThrow("cannot change");
+    expect(() => assertAcpConnectionUnchanged(original, null)).toThrow(
+      "cannot change",
+    );
+    const changed = resolve({
+      modelConnection: connection({ id: "other-account" }),
+    }).modelConnection;
+    expect(() => assertAcpConnectionUnchanged(original, changed)).toThrow(
+      "cannot change",
+    );
   });
 });

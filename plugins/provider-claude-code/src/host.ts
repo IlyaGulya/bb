@@ -1,5 +1,5 @@
 import os from "node:os";
-import { executionContextSnapshotSchema } from "@bb/domain";
+import { experimental_executionContextSnapshotSchema as executionContextSnapshotSchema } from "@get-bb/plugin-sdk/provider-bridge";
 import {
   experimental_defineHostEntry,
   experimental_nativeRootsHostContract,
@@ -16,9 +16,11 @@ export default experimental_defineHostEntry({
         cwd: input.cwd,
         homeDir: os.homedir(),
         env: process.env,
-        executionContext: executionContextSnapshotSchema.optional().parse(
-          "executionContext" in input ? input.executionContext : undefined,
-        ),
+        executionContext: executionContextSnapshotSchema
+          .optional()
+          .parse(
+            "executionContext" in input ? input.executionContext : undefined,
+          ),
       }),
   },
 });

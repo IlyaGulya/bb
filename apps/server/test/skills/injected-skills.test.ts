@@ -121,29 +121,42 @@ function expectedTreeSource(args: {
 describe("injected skill source discovery", () => {
   it("does not inject user or shared-user skills into an explicitly scoped catalog", async () => {
     const dataDir = await makeTempDir();
-    await writeSkill({ rootPath: path.join(dataDir, "skills"), name: "private-user" });
+    await writeSkill({
+      rootPath: path.join(dataDir, "skills"),
+      name: "private-user",
+    });
     const { logger } = createCapturingLogger();
     const projectSkill = resolveProjectSkillSourceFromContent(logger, {
       candidatePath: "/repository/.bb/skills/selected-project",
       directoryName: "selected-project",
-      content: "---\nname: selected-project\ndescription: Selected project only\n---\nProject body",
+      content:
+        "---\nname: selected-project\ndescription: Selected project only\n---\nProject body",
     })!;
     const args = {
       dataDir,
       projectSkillSources: [projectSkill],
-      sharedSkillSources: [{
-        kind: "host-path" as const,
-        sourceType: "shared-user" as const,
-        name: "private-shared",
-        description: "Private shared instructions",
-        sourceRootPath: "/private/shared",
-        skillFilePath: "/private/shared/SKILL.md",
-      }],
+      sharedSkillSources: [
+        {
+          kind: "host-path" as const,
+          sourceType: "shared-user" as const,
+          name: "private-shared",
+          description: "Private shared instructions",
+          sourceRootPath: "/private/shared",
+          skillFilePath: "/private/shared/SKILL.md",
+        },
+      ],
     };
-    expect(resolveInjectedSkillSources(logger, args).map((source) => source.name).sort())
-      .toEqual(["private-shared", "private-user", "selected-project"]);
-    expect(resolveInjectedSkillSources(logger, { ...args, includeUserSkills: false }).map((source) => source.name))
-      .toEqual(["selected-project"]);
+    expect(
+      resolveInjectedSkillSources(logger, args)
+        .map((source) => source.name)
+        .sort(),
+    ).toEqual(["private-shared", "private-user", "selected-project"]);
+    expect(
+      resolveInjectedSkillSources(logger, {
+        ...args,
+        includeUserSkills: false,
+      }).map((source) => source.name),
+    ).toEqual(["selected-project"]);
   });
 
   it("hashes trees deterministically and includes content, paths, and modes", async () => {

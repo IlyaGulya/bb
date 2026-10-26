@@ -1,4 +1,9 @@
-import { createExecutionContextsArea, createModelConnectionsArea, type ExecutionContextsArea, type ModelConnectionsArea } from "./areas/execution-contexts.js";
+import {
+  createExecutionContextsArea,
+  createModelConnectionsArea,
+  type ExecutionContextsArea,
+  type ModelConnectionsArea,
+} from "./areas/execution-contexts.js";
 import {
   createDesktopBrowsersArea,
   type ExperimentalDesktopBrowsersArea,

@@ -723,7 +723,8 @@ export async function createThreadFromRequest(
   if (
     originKind === "fork" &&
     ((requestInput.executionContextId !== undefined &&
-      requestInput.executionContextId !== sourceBinding?.executionContext?.id) ||
+      requestInput.executionContextId !==
+        sourceBinding?.executionContext?.id) ||
       (requestInput.modelConnectionId !== undefined &&
         requestInput.modelConnectionId !== sourceBinding?.modelConnection?.id))
   ) {
@@ -733,27 +734,28 @@ export async function createThreadFromRequest(
       "Forking preserves the native session's context and model connection. Start a new thread to select a different binding.",
     );
   }
-  const executionBinding = originKind === "fork"
-    ? sourceBinding === null
-      ? null
-      : {
-          executionContext: sourceBinding.executionContext,
-          modelConnection: sourceBinding.modelConnection,
-          createdAt: Date.now(),
-        }
-    : resolveThreadExecutionBinding(deps.db, {
-    projectId: requestInput.projectId,
-    hostId: childHostId,
-    ...(requestInput.providerId === undefined
-      ? {}
-      : { provider: requestInput.providerId }),
-    ...(requestInput.executionContextId === undefined
-      ? {}
-      : { executionContextId: requestInput.executionContextId }),
-    ...(requestInput.modelConnectionId === undefined
-      ? {}
-      : { modelConnectionId: requestInput.modelConnectionId }),
-  });
+  const executionBinding =
+    originKind === "fork"
+      ? sourceBinding === null
+        ? null
+        : {
+            executionContext: sourceBinding.executionContext,
+            modelConnection: sourceBinding.modelConnection,
+            createdAt: Date.now(),
+          }
+      : resolveThreadExecutionBinding(deps.db, {
+          projectId: requestInput.projectId,
+          hostId: childHostId,
+          ...(requestInput.providerId === undefined
+            ? {}
+            : { provider: requestInput.providerId }),
+          ...(requestInput.executionContextId === undefined
+            ? {}
+            : { executionContextId: requestInput.executionContextId }),
+          ...(requestInput.modelConnectionId === undefined
+            ? {}
+            : { modelConnectionId: requestInput.modelConnectionId }),
+        });
   if (sourceBinding !== null) {
     assertThreadExecutionBindingAvailable(deps.db, sourceBinding);
     if (
@@ -779,14 +781,16 @@ export async function createThreadFromRequest(
     providerFallbackCandidates,
     requestedModel,
   } = resolveProjectExecutionDefaultsForCreate(deps, {
-    executionInputSources: executionBinding?.modelConnection || sourceBinding !== null
-      ? { ...requestInput.executionInputSources, providerId: "explicit" }
-      : requestInput.executionInputSources,
+    executionInputSources:
+      executionBinding?.modelConnection || sourceBinding !== null
+        ? { ...requestInput.executionInputSources, providerId: "explicit" }
+        : requestInput.executionInputSources,
     model: requestInput.model,
     projectId: requestInput.projectId,
     providerId: selectedProvider,
   });
-  const bindingSupport = deps.providerRegistry.get(providerId)?.info.experimental_executionBindings;
+  const bindingSupport =
+    deps.providerRegistry.get(providerId)?.info.experimental_executionBindings;
   if (executionBinding?.executionContext && !bindingSupport?.contexts) {
     throw new ApiError(
       409,

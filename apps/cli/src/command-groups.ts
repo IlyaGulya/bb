@@ -49,12 +49,14 @@ export const CORE_COMMAND_GROUPS: readonly CommandGroup[] = [
   group(
     "execution-context",
     () => import("./commands/execution-context.js"),
-    (m) => (program, deps) => m.registerExecutionContextCommands(program, deps.getUrl),
+    (m) => (program, deps) =>
+      m.registerExecutionContextCommands(program, deps.getUrl),
   ),
   group(
     "model-connection",
     () => import("./commands/execution-context.js"),
-    (m) => (program, deps) => m.registerModelConnectionCommands(program, deps.getUrl),
+    (m) => (program, deps) =>
+      m.registerModelConnectionCommands(program, deps.getUrl),
   ),
   group(
     "prompt-history",

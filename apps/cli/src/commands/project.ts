@@ -277,44 +277,82 @@ export function registerProjectCommands(
     .description("Upload and download server-managed project attachments");
   const contextDefaults = project
     .command("context-defaults")
-    .description("Get or set independent logical execution-context and native model-connection defaults");
-  contextDefaults.command("get <project-id>")
+    .description(
+      "Get or set independent logical execution-context and native model-connection defaults",
+    );
+  contextDefaults
+    .command("get <project-id>")
     .description("Show a project's context and connection defaults")
     .option("--json", "Print machine-readable JSON output")
-    .action(action(async (projectId: string, opts: { json?: boolean }) => {
-      const result = await createCliBbSdk(getUrl()).experimental_executionContexts.getProjectDefaults({ projectId });
-      if (!outputJson(opts, result)) console.log(JSON.stringify(result, null, 2));
-    }));
-  contextDefaults.command("set <project-id>")
+    .action(
+      action(async (projectId: string, opts: { json?: boolean }) => {
+        const result = await createCliBbSdk(
+          getUrl(),
+        ).experimental_executionContexts.getProjectDefaults({ projectId });
+        if (!outputJson(opts, result))
+          console.log(JSON.stringify(result, null, 2));
+      }),
+    );
+  contextDefaults
+    .command("set <project-id>")
     .description("Set both defaults; use none to clear either selection")
-    .requiredOption("--execution-context <id-or-none>", "Logical context ID, or none to clear")
-    .requiredOption("--model-connection <id-or-none>", "Native connection ID, or none to clear")
+    .requiredOption(
+      "--execution-context <id-or-none>",
+      "Logical context ID, or none to clear",
+    )
+    .requiredOption(
+      "--model-connection <id-or-none>",
+      "Native connection ID, or none to clear",
+    )
     .option("--json", "Print machine-readable JSON output")
-    .action(action(async (
-      projectId: string,
-      opts: { executionContext: string; modelConnection: string; json?: boolean },
-    ) => {
-      const parseDefault = (value: string): string | null => {
-        const trimmed = value.trim();
-        if (!trimmed) throw new Error("Default IDs must not be empty; use none to clear.");
-        return trimmed === "none" ? null : trimmed;
-      };
-      const result = await createCliBbSdk(getUrl()).experimental_executionContexts.setProjectDefaults({
-        projectId,
-        executionContextId: parseDefault(opts.executionContext),
-        modelConnectionId: parseDefault(opts.modelConnection),
-      });
-      if (!outputJson(opts, result)) console.log(JSON.stringify(result, null, 2));
-    }));
+    .action(
+      action(
+        async (
+          projectId: string,
+          opts: {
+            executionContext: string;
+            modelConnection: string;
+            json?: boolean;
+          },
+        ) => {
+          const parseDefault = (value: string): string | null => {
+            const trimmed = value.trim();
+            if (!trimmed)
+              throw new Error(
+                "Default IDs must not be empty; use none to clear.",
+              );
+            return trimmed === "none" ? null : trimmed;
+          };
+          const result = await createCliBbSdk(
+            getUrl(),
+          ).experimental_executionContexts.setProjectDefaults({
+            projectId,
+            executionContextId: parseDefault(opts.executionContext),
+            modelConnectionId: parseDefault(opts.modelConnection),
+          });
+          if (!outputJson(opts, result))
+            console.log(JSON.stringify(result, null, 2));
+        },
+      ),
+    );
 
   project
     .command("prepare-machine")
     .description("Prepare a project source and report actual machine readiness")
     .requiredOption("--project <id>", "Project ID")
     .requiredOption("--host <id>", "Target machine ID")
-    .requiredOption("--target-path <path>", "Project path on the target machine")
-    .option("--source-host <id>", "Project source machine for selected file copies")
-    .option("--copy-path <path...>", "Explicit relative files to copy; repeatable")
+    .requiredOption(
+      "--target-path <path>",
+      "Project path on the target machine",
+    )
+    .option(
+      "--source-host <id>",
+      "Project source machine for selected file copies",
+    )
+    .option(
+      "--copy-path <path...>",
+      "Explicit relative files to copy; repeatable",
+    )
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: ProjectPrepareMachineCommandOptions) => {
@@ -332,36 +370,57 @@ export function registerProjectCommands(
 
   project
     .command("preview-workspace-transfer")
-    .description("Inspect an idle workspace before selecting extra files to transfer")
+    .description(
+      "Inspect an idle workspace before selecting extra files to transfer",
+    )
     .requiredOption("--project <id>", "Project ID")
     .requiredOption("--source-environment <id>", "Source environment ID")
     .requiredOption("--host <id>", "Target machine ID")
     .option("--json", "Print machine-readable JSON output")
     .action(
-      action(async (opts: Pick<ProjectWorkspaceTransferCommandOptions, "project" | "host" | "sourceEnvironment" | "json">) => {
-        const result = await createCliBbSdk(getUrl()).projects.previewWorkspaceTransfer({
-          projectId: opts.project,
-          sourceEnvironmentId: opts.sourceEnvironment,
-          targetHostId: opts.host,
-        });
-        if (outputJson(opts, result)) return;
-        console.log(JSON.stringify(result, null, 2));
-      }),
+      action(
+        async (
+          opts: Pick<
+            ProjectWorkspaceTransferCommandOptions,
+            "project" | "host" | "sourceEnvironment" | "json"
+          >,
+        ) => {
+          const result = await createCliBbSdk(
+            getUrl(),
+          ).projects.previewWorkspaceTransfer({
+            projectId: opts.project,
+            sourceEnvironmentId: opts.sourceEnvironment,
+            targetHostId: opts.host,
+          });
+          if (outputJson(opts, result)) return;
+          console.log(JSON.stringify(result, null, 2));
+        },
+      ),
     );
 
   project
     .command("transfer-workspace")
-    .description("Copy an idle workspace to a new path without moving live sessions")
+    .description(
+      "Copy an idle workspace to a new path without moving live sessions",
+    )
     .requiredOption("--project <id>", "Project ID")
     .requiredOption("--source-environment <id>", "Source environment ID")
     .requiredOption("--host <id>", "Target machine ID")
-    .requiredOption("--target-path <path>", "New workspace path on the target machine")
+    .requiredOption(
+      "--target-path <path>",
+      "New workspace path on the target machine",
+    )
     .option("--branch <name>", "Explicit target branch")
-    .option("--include-path <path...>", "Explicit untracked or ignored files; repeatable")
+    .option(
+      "--include-path <path...>",
+      "Explicit untracked or ignored files; repeatable",
+    )
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: ProjectWorkspaceTransferCommandOptions) => {
-        const result = await createCliBbSdk(getUrl()).projects.transferWorkspace({
+        const result = await createCliBbSdk(
+          getUrl(),
+        ).projects.transferWorkspace({
           projectId: opts.project,
           sourceEnvironmentId: opts.sourceEnvironment,
           targetHostId: opts.host,
@@ -381,7 +440,9 @@ export function registerProjectCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: { operationId: string; json?: boolean }) => {
-        const result = await createCliBbSdk(getUrl()).projects.getWorkspaceTransfer({
+        const result = await createCliBbSdk(
+          getUrl(),
+        ).projects.getWorkspaceTransfer({
           operationId: opts.operationId,
         });
         if (outputJson(opts, result)) return;
@@ -587,8 +648,14 @@ export function registerProjectCommands(
   addProjectWorkspaceRoutingOptions(project.command("commands <id>"))
     .description("List provider commands and skills available to a project")
     .requiredOption("--provider <id>", "Provider ID")
-    .option("--execution-context <id>", "Discover only this execution context's native commands")
-    .option("--thread <id>", "Use this thread's persisted context instead of project defaults")
+    .option(
+      "--execution-context <id>",
+      "Discover only this execution context's native commands",
+    )
+    .option(
+      "--thread <id>",
+      "Use this thread's persisted context instead of project defaults",
+    )
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: ProjectDiscoveryCommandOptions) => {
@@ -597,7 +664,9 @@ export function registerProjectCommands(
           projectId: id,
           provider: opts.provider ?? "",
           ...(await resolveMachineEnvironmentRouting(opts, serverUrl)),
-          ...(opts.executionContext ? { executionContextId: opts.executionContext } : {}),
+          ...(opts.executionContext
+            ? { executionContextId: opts.executionContext }
+            : {}),
           ...(opts.thread ? { threadId: opts.thread } : {}),
         });
         if (outputJson(opts, result)) return;

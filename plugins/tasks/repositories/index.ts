@@ -20,6 +20,7 @@ import {
   type RepositoryReceipt,
 } from "../shared/repositories";
 import { RepositoryStore } from "./store";
+import { ExecutionStore } from "../delegate/execution-store";
 
 export interface RepositoryEffects {
   prompt(task: Task, preset: Preset, instructions?: string): string;
@@ -41,6 +42,7 @@ export function repositoryHandlers(
   effects: RepositoryEffects,
 ): RepositoryHandlers {
   const checkpoints = new RepositoryStore(store);
+  const executions = new ExecutionStore(store.database);
   const requireTask = (id: string) => {
     const task = store.tasks.getTask(id);
     if (!task) throw new Error(`Task not found: ${id}`);

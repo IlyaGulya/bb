@@ -17,9 +17,10 @@ import {
   providerMaintenanceParamsSchema,
   providerInstallationRunParamsSchema,
   providerInstallationStatusParamsSchema,
+  experimental_executionContextSnapshotSchema as executionContextSnapshotSchema,
+  experimental_modelConnectionSnapshotSchema as modelConnectionSnapshotSchema,
 } from "@get-bb/plugin-sdk/provider-bridge";
 import { z } from "zod";
-import { executionContextSnapshotSchema, modelConnectionSnapshotSchema } from "@bb/domain";
 import { claudePermissionModeSchema } from "../interactive-contract.js";
 
 const bridgeInstructionModeSchema = z.enum(instructionModeValues);

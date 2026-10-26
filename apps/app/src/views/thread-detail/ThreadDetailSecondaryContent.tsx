@@ -157,7 +157,12 @@ function ThreadDetailSecondaryContentBody({
             }
             onToggleConversationCollapse={onToggleMainCollapse}
             resizablePanelId={resizablePanelId}
-            metadataContent={<div className="flex min-h-0 flex-1 flex-col"><ThreadExecutionBindingCard threadId={metadata.thread.id} />{metadataContent}</div>}
+            metadataContent={
+              <div className="flex min-h-0 flex-1 flex-col">
+                <ThreadExecutionBindingCard threadId={metadata.thread.id} />
+                {metadataContent}
+              </div>
+            }
           />
         )}
       />

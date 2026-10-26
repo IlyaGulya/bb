@@ -23,6 +23,11 @@ Core admission uses this declaration instead of branching on provider IDs.
 expose CRUD/defaults/binding APIs; first-party UI, CLI and Tasks use the same
 backend resolver. No unprefixed compatibility aliases are exported.
 
+Provider host artifacts validate the reserved snapshots through
+`experimental_executionContextSnapshotSchema` and
+`experimental_modelConnectionSnapshotSchema` from
+`@get-bb/plugin-sdk/provider-bridge`; they must not import private `@bb/domain`.
+
 `experimental_nativeRootsHostContract.resolveNativeRoots` accepts an optional
 `executionContext` snapshot. Core uses that path for scoped command discovery;
 scoped roots replace declared ambient user/project roots, and a failed host

@@ -169,11 +169,13 @@ vi.mock("@/lib/sdk", () => ({
   sdk: {
     experimental_executionContexts: {
       list: vi.fn().mockResolvedValue([]),
-      getProjectDefaults: vi.fn().mockImplementation(async ({ projectId }: { projectId: string }) => ({
-        projectId,
-        executionContextId: null,
-        modelConnectionId: null,
-      })),
+      getProjectDefaults: vi
+        .fn()
+        .mockImplementation(async ({ projectId }: { projectId: string }) => ({
+          projectId,
+          executionContextId: null,
+          modelConnectionId: null,
+        })),
     },
     experimental_modelConnections: { list: vi.fn().mockResolvedValue([]) },
     projects: { attachments: { copy: mocks.copyAttachments } },

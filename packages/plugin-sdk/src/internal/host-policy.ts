@@ -1584,9 +1584,12 @@ export function validatePluginProviderDeclaration(
       `provider "${id}" experimental_resolvesNativeRoots must be a boolean`,
     );
   }
-  const executionBindings = declaration.experimental_executionBindings === undefined
-    ? undefined
-    : providerExecutionBindingSupportSchema.parse(declaration.experimental_executionBindings);
+  const executionBindings =
+    declaration.experimental_executionBindings === undefined
+      ? undefined
+      : providerExecutionBindingSupportSchema.parse(
+          declaration.experimental_executionBindings,
+        );
   const deriveProviderOptions = declaration.deriveProviderOptions;
   if (
     deriveProviderOptions !== undefined &&

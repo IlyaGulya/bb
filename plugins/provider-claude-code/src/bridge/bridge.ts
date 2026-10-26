@@ -1000,7 +1000,9 @@ function toSessionConstructionConfig(
 function resolveContextFiles(params: SessionConstructionParams) {
   if (!params.executionContext && !params.modelConnection) return undefined;
   if (!contextStore) {
-    throw new Error("Claude scoped execution requires the provider host data directory.");
+    throw new Error(
+      "Claude scoped execution requires the provider host data directory.",
+    );
   }
   return contextStore.resolve({
     threadId: params.threadId,
@@ -1014,7 +1016,9 @@ function toInitialLiveSessionSettings(
   params: SessionConstructionParams,
 ): ClaudeLiveSessionSettings {
   return {
-    memoryEnabled: params.executionContext ? false : (params.memoryEnabled ?? true),
+    memoryEnabled: params.executionContext
+      ? false
+      : (params.memoryEnabled ?? true),
     ...(params.model !== undefined ? { model: params.model } : {}),
     providerSubagentsEnabled: params.providerSubagentsEnabled ?? true,
     ...(params.reasoningLevel !== undefined
@@ -1689,8 +1693,10 @@ function applyTurnEnvironment(
   attachment.sessionOptions.env = {
     ...buildClaudeSessionEnvironment({
       env: buildSessionEnv(envOverrides),
-      executionContext: attachment.sessionConstructionConfig.sessionOptions.executionContext,
-      modelConnection: attachment.sessionConstructionConfig.sessionOptions.modelConnection,
+      executionContext:
+        attachment.sessionConstructionConfig.sessionOptions.executionContext,
+      modelConnection:
+        attachment.sessionConstructionConfig.sessionOptions.modelConnection,
     }),
     CLAUDE_CODE_DISABLE_1M_CONTEXT: attachment.sessionConstructionConfig
       .sessionOptions.disable1MContext
@@ -2251,13 +2257,27 @@ function attachThreadSession(
   if (!resume) {
     sessionOptions.sessionId = providerThreadId;
   }
+  if (
+    "sourceProviderThreadId" in params &&
+    (params.executionContext || params.modelConnection)
+  ) {
+    sessionOptions.forkSource = {
+      sessionId: params.sourceProviderThreadId,
+      ...(params.sourceProviderCheckpointId === undefined
+        ? {}
+        : { upToMessageId: params.sourceProviderCheckpointId }),
+    };
+  }
   sessionOptions.canUseTool = createCanUseTool(threadIdRef);
   if (params.dynamicTools && params.dynamicTools.length > 0) {
     const mcpServer = buildBridgeMcpServer(
       params.dynamicTools,
       createForwardToolCall(() => threadIdRef.current),
     );
-    sessionOptions.mcpServers = mergeClaudeMcpServers(sessionOptions.mcpServers, mcpServer);
+    sessionOptions.mcpServers = mergeClaudeMcpServers(
+      sessionOptions.mcpServers,
+      mcpServer,
+    );
     sessionOptions.allowedTools = getAllowedToolNames(params.dynamicTools);
   }
 
@@ -2374,6 +2394,10 @@ async function handleThreadFork(
       threadId,
     });
   }
+  if (params.executionContext || params.modelConnection) {
+    attachThreadSession(id, params, randomUUID(), false);
+    return;
+  }
 
   let forkedProviderThreadId: string;
   try {
@@ -2412,9 +2436,16 @@ function toClaudeSessionParams(
     construction.plugins = [
       ...roots.map((root) => ({
         type: "local" as const,
-        path: ensureClaudeSkillPlugin({ pluginsRoot: requireSkillPluginsRoot(), root, takenNames }),
+        path: ensureClaudeSkillPlugin({
+          pluginsRoot: requireSkillPluginsRoot(),
+          root,
+          takenNames,
+        }),
       })),
-      ...construction.executionContext.pluginRoots.map((path) => ({ type: "local" as const, path })),
+      ...construction.executionContext.pluginRoots.map((path) => ({
+        type: "local" as const,
+        path,
+      })),
     ];
   }
   return construction;
@@ -2439,12 +2470,16 @@ async function runTurnInput(
       !isDeepStrictEqual(bound.executionContext, params.executionContext) ||
       !isDeepStrictEqual(bound.modelConnection, params.modelConnection)
     ) {
-      throw new Error("Claude thread execution context and model connection are immutable; create a new thread to change either selection.");
+      throw new Error(
+        "Claude thread execution context and model connection are immutable; create a new thread to change either selection.",
+      );
     }
     attachment.sessionOptions.verifyContextSources?.();
     if (bound.executionContext) {
       if (params.memoryEnabled === true || params.chromeEnabled === true) {
-        throw new Error("Scoped Claude execution cannot enable shared auto-memory or Claude in Chrome.");
+        throw new Error(
+          "Scoped Claude execution cannot enable shared auto-memory or Claude in Chrome.",
+        );
       }
       params.memoryEnabled = false;
     }

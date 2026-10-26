@@ -1518,9 +1518,10 @@ export function NewThreadComposer({
   const projectHostId =
     reuseEnvironmentId !== null ? null : (providerHostId ?? primaryHostId);
   const bindingEnvironment = useEnvironment(reuseEnvironmentId);
-  const bindingHostId = reuseEnvironmentId === null
-    ? projectHostId
-    : (bindingEnvironment.data?.hostId ?? null);
+  const bindingHostId =
+    reuseEnvironmentId === null
+      ? projectHostId
+      : (bindingEnvironment.data?.hostId ?? null);
   const executionBinding = useExecutionBindingSelection({
     projectId,
     providerId: selectedProviderId,
@@ -1637,24 +1638,26 @@ export function NewThreadComposer({
     : (selectedEnvironment ??
       (selectionScope === "new-thread" ? seed?.environment : undefined) ??
       null);
-  const submissionReadinessReason = executionBinding.unavailableReason ?? resolveNewThreadSubmitDisabledReason({
-    environmentProviderInputsBlocker:
-      machineProviderInputs.blockedReason ?? environmentProviderInputsBlocker,
-    environmentSetupRequiredReason:
-      environmentSetupRequiredReason ?? machineServerAccessReason,
-    isCopyingAttachments,
-    isLoadingModels,
-    isSubmitting,
-    isUploading,
-    modelLoadError,
-    projectDefaultsStatus: projectDefaultsState.status,
-    projectDefaultsUnavailable,
-    promptInputEmpty: false,
-    providerDisplayName: selectedProviderDisplayName,
-    selectedProviderId,
-    selectedThreadModel,
-    submissionEnvironmentUnavailable: submissionEnvironment === null,
-  });
+  const submissionReadinessReason =
+    executionBinding.unavailableReason ??
+    resolveNewThreadSubmitDisabledReason({
+      environmentProviderInputsBlocker:
+        machineProviderInputs.blockedReason ?? environmentProviderInputsBlocker,
+      environmentSetupRequiredReason:
+        environmentSetupRequiredReason ?? machineServerAccessReason,
+      isCopyingAttachments,
+      isLoadingModels,
+      isSubmitting,
+      isUploading,
+      modelLoadError,
+      projectDefaultsStatus: projectDefaultsState.status,
+      projectDefaultsUnavailable,
+      promptInputEmpty: false,
+      providerDisplayName: selectedProviderDisplayName,
+      selectedProviderId,
+      selectedThreadModel,
+      submissionEnvironmentUnavailable: submissionEnvironment === null,
+    });
   const submitDisabledReason =
     submissionReadinessReason ??
     (promptInputEmpty ? "Enter a prompt or attach a file." : null);
@@ -1694,8 +1697,12 @@ export function NewThreadComposer({
         model: selectedThreadModel,
         reasoningLevel,
         permissionMode,
-        ...(executionBinding.executionContextId === undefined ? {} : { executionContextId: executionBinding.executionContextId }),
-        ...(executionBinding.modelConnectionId === undefined ? {} : { modelConnectionId: executionBinding.modelConnectionId }),
+        ...(executionBinding.executionContextId === undefined
+          ? {}
+          : { executionContextId: executionBinding.executionContextId }),
+        ...(executionBinding.modelConnectionId === undefined
+          ? {}
+          : { modelConnectionId: executionBinding.modelConnectionId }),
         ...(supportsServiceTier && serviceTier ? { serviceTier } : {}),
         ...(Object.keys(sessionOptionSelections).length > 0
           ? { sessionOptions: sessionOptionSelections }
@@ -2122,7 +2129,18 @@ export function NewThreadComposer({
                   }
                 />
               )),
-            header: <>{options.header}<ExecutionBindingPicker selection={executionBinding} projectId={projectId} providerId={selectedProviderId} hostId={bindingHostId} disabled={isSubmitting} /></>,
+            header: (
+              <>
+                {options.header}
+                <ExecutionBindingPicker
+                  selection={executionBinding}
+                  projectId={projectId}
+                  providerId={selectedProviderId}
+                  hostId={bindingHostId}
+                  disabled={isSubmitting}
+                />
+              </>
+            ),
           }}
           project={{
             projects: projectOptions,

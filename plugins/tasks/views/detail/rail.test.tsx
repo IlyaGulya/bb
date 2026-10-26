@@ -104,7 +104,12 @@ const TARGET: ExecutionTarget = {
   workspace: { kind: "project-checkout" },
   presetId: PROFILE.id,
 };
-const EXECUTION = { override: TARGET, resolved: TARGET, inherited: false, summary: "bb monorepo · Target machine · Project checkout · Code profile" };
+const EXECUTION = {
+  override: TARGET,
+  resolved: TARGET,
+  inherited: false,
+  summary: "bb monorepo · Target machine · Project checkout · Code profile",
+};
 
 function railProps(
   linkedBbProjectId: string | null,
@@ -143,19 +148,38 @@ describe("project rail control", () => {
 });
 
 describe("task execution rail control", () => {
-
   it("keeps routing errors visible in the editor", async () => {
-    const slot = renderSlot({ component: RailHarness }, { ...railProps(null), presets: [PROFILE], execution: EXECUTION }, {
-      sdk: { experimental_executionContexts: { list: async () => [] }, experimental_modelConnections: { list: async () => [] } },
-      rpc: {
-        listBbProjects: () => ({ bbProjects: [{ id: BB_PROJECT_ID, name: "bb monorepo" }] }),
-        listMachines: () => ({ machines: [{ id: "host_target", name: "Target machine" }] }),
-        setTaskExecution: () => { throw new Error("Target provider unavailable"); },
+    const slot = renderSlot(
+      { component: RailHarness },
+      { ...railProps(null), presets: [PROFILE], execution: EXECUTION },
+      {
+        sdk: {
+          experimental_executionContexts: { list: async () => [] },
+          experimental_modelConnections: { list: async () => [] },
+        },
+        rpc: {
+          listBbProjects: () => ({
+            bbProjects: [{ id: BB_PROJECT_ID, name: "bb monorepo" }],
+          }),
+          listMachines: () => ({
+            machines: [{ id: "host_target", name: "Target machine" }],
+          }),
+          setTaskExecution: () => {
+            throw new Error("Target provider unavailable");
+          },
+        },
       },
-    });
-    fireEvent.click(slot.getByRole("button", { name: "Configure task execution" }));
-    fireEvent.click(await slot.findByRole("button", { name: "Save execution target" }));
-    expect(await slot.findByRole("alert")).toHaveProperty("textContent", "Target provider unavailable");
+    );
+    fireEvent.click(
+      slot.getByRole("button", { name: "Configure task execution" }),
+    );
+    fireEvent.click(
+      await slot.findByRole("button", { name: "Save execution target" }),
+    );
+    expect(await slot.findByRole("alert")).toHaveProperty(
+      "textContent",
+      "Target provider unavailable",
+    );
     expect(slot.getByRole("combobox", { name: "Code project" })).toBeTruthy();
   });
 });
@@ -164,21 +188,50 @@ describe("task workspace execution modes", () => {
   it.each([
     { kind: "managed-worktree", baseBranch: "release" },
     { kind: "project-checkout" },
-  ] as const)("saves $kind without changing the existing profile", async (workspace) => {
-    const slot = renderSlot({ component: RailHarness }, { ...railProps(null), presets: [PROFILE], execution: EXECUTION }, {
-      sdk: { experimental_executionContexts: { list: async () => [] }, experimental_modelConnections: { list: async () => [] } },
-      rpc: {
-        listBbProjects: () => ({ bbProjects: [{ id: BB_PROJECT_ID, name: "bb monorepo" }] }),
-        listMachines: () => ({ machines: [{ id: "host_target", name: "Target machine" }] }),
-        setTaskExecution: () => EXECUTION,
-      },
-    });
-    fireEvent.click(slot.getByRole("button", { name: "Configure task execution" }));
-    fireEvent.change(await slot.findByRole("combobox", { name: "Workspace" }), { target: { value: workspace.kind } });
-    if (workspace.kind === "managed-worktree") {
-      fireEvent.change(slot.getByRole("textbox", { name: "Base branch (optional)" }), { target: { value: workspace.baseBranch } });
-    }
-    fireEvent.click(slot.getByRole("button", { name: "Save execution target" }));
-    await waitFor(() => expect(slot.rpcCalls).toContainEqual({ method: "setTaskExecution", input: { taskId: task.id, target: { ...TARGET, workspace } } }));
-  });
+  ] as const)(
+    "saves $kind without changing the existing profile",
+    async (workspace) => {
+      const slot = renderSlot(
+        { component: RailHarness },
+        { ...railProps(null), presets: [PROFILE], execution: EXECUTION },
+        {
+          sdk: {
+            experimental_executionContexts: { list: async () => [] },
+            experimental_modelConnections: { list: async () => [] },
+          },
+          rpc: {
+            listBbProjects: () => ({
+              bbProjects: [{ id: BB_PROJECT_ID, name: "bb monorepo" }],
+            }),
+            listMachines: () => ({
+              machines: [{ id: "host_target", name: "Target machine" }],
+            }),
+            setTaskExecution: () => EXECUTION,
+          },
+        },
+      );
+      fireEvent.click(
+        slot.getByRole("button", { name: "Configure task execution" }),
+      );
+      fireEvent.change(
+        await slot.findByRole("combobox", { name: "Workspace" }),
+        { target: { value: workspace.kind } },
+      );
+      if (workspace.kind === "managed-worktree") {
+        fireEvent.change(
+          slot.getByRole("textbox", { name: "Base branch (optional)" }),
+          { target: { value: workspace.baseBranch } },
+        );
+      }
+      fireEvent.click(
+        slot.getByRole("button", { name: "Save execution target" }),
+      );
+      await waitFor(() =>
+        expect(slot.rpcCalls).toContainEqual({
+          method: "setTaskExecution",
+          input: { taskId: task.id, target: { ...TARGET, workspace } },
+        }),
+      );
+    },
+  );
 });

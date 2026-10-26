@@ -22,36 +22,95 @@ export function ExecutionBindingPicker({
 }) {
   const contexts = selection.contexts.data ?? [];
   const connections = selection.connections.data ?? [];
-  const defaultContext = contexts.find((entry) => entry.id === selection.defaults.data?.executionContextId);
-  const defaultConnection = connections.find((entry) => entry.id === selection.effectiveConnectionId);
+  const defaultContext = contexts.find(
+    (entry) => entry.id === selection.defaults.data?.executionContextId,
+  );
+  const defaultConnection = connections.find(
+    (entry) => entry.id === selection.effectiveConnectionId,
+  );
   const contextOptions: PickerOption<string>[] = [
-    { value: "", label: `Context: ${defaultContext?.name ?? "Project default"}`, description: defaultContext ? "Project default" : "Legacy behavior when no project default is assigned" },
+    {
+      value: "",
+      label: `Context: ${defaultContext?.name ?? "Project default"}`,
+      description: defaultContext
+        ? "Project default"
+        : "Legacy behavior when no project default is assigned",
+    },
     ...contexts.map((entry) => {
       const reason = executionContextUnavailableReason(entry, projectId);
-      return { value: entry.id, label: entry.name, disabled: reason !== null, disabledReason: reason ?? undefined };
+      return {
+        value: entry.id,
+        label: entry.name,
+        disabled: reason !== null,
+        disabledReason: reason ?? undefined,
+      };
     }),
   ];
   const connectionOptions: PickerOption<string>[] = [
-    { value: "", label: `Connection: ${defaultConnection?.name ?? "Native default"}`, description: "Use context/project defaults, independently of the selected context" },
+    {
+      value: "",
+      label: `Connection: ${defaultConnection?.name ?? "Native default"}`,
+      description:
+        "Use context/project defaults, independently of the selected context",
+    },
     ...connections.map((entry) => {
-      const reason = modelConnectionUnavailableReason(entry, providerId, hostId);
-      return { value: entry.id, label: entry.name, description: `${entry.provider} · ${entry.hostId}`, disabled: reason !== null, disabledReason: reason ?? undefined };
+      const reason = modelConnectionUnavailableReason(
+        entry,
+        providerId,
+        hostId,
+      );
+      return {
+        value: entry.id,
+        label: entry.name,
+        description: `${entry.provider} · ${entry.hostId}`,
+        disabled: reason !== null,
+        disabledReason: reason ?? undefined,
+      };
     }),
   ];
   return (
     <div className="space-y-1 px-2 py-1">
       <div className="flex flex-wrap items-center gap-1">
-        <OptionPicker label="Execution context" value={selection.executionContextId ?? ""} options={contextOptions} onChange={selection.selectContext} disabled={disabled} />
-        <OptionPicker label="Model connection" value={selection.modelConnectionId ?? ""} options={connectionOptions} onChange={selection.selectConnection} disabled={disabled} />
-        <Link className="text-xs text-muted-foreground underline underline-offset-2" to={getSettingsRoutePath("execution-contexts")}>Manage contexts and connections</Link>
+        <OptionPicker
+          label="Execution context"
+          value={selection.executionContextId ?? ""}
+          options={contextOptions}
+          onChange={selection.selectContext}
+          disabled={disabled}
+        />
+        <OptionPicker
+          label="Model connection"
+          value={selection.modelConnectionId ?? ""}
+          options={connectionOptions}
+          onChange={selection.selectConnection}
+          disabled={disabled}
+        />
+        <Link
+          className="text-xs text-muted-foreground underline underline-offset-2"
+          to={getSettingsRoutePath("execution-contexts")}
+        >
+          Manage contexts and connections
+        </Link>
       </div>
-      {selection.unavailableReason ? <p role="status" className="text-xs text-warning-text">{selection.unavailableReason}</p> : null}
-      {selection.contexts.isError || selection.connections.isError || selection.defaults.isError ? (
-        <button type="button" className="text-xs underline" onClick={() => {
-          void selection.contexts.refetch();
-          void selection.connections.refetch();
-          void selection.defaults.refetch();
-        }}>Retry context settings</button>
+      {selection.unavailableReason ? (
+        <p role="status" className="text-xs text-warning-text">
+          {selection.unavailableReason}
+        </p>
+      ) : null}
+      {selection.contexts.isError ||
+      selection.connections.isError ||
+      selection.defaults.isError ? (
+        <button
+          type="button"
+          className="text-xs underline"
+          onClick={() => {
+            void selection.contexts.refetch();
+            void selection.connections.refetch();
+            void selection.defaults.refetch();
+          }}
+        >
+          Retry context settings
+        </button>
       ) : null}
     </div>
   );

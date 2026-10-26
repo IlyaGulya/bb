@@ -162,7 +162,11 @@ export const resolveOmpNativeRoots: AcpNativeRootsResolver = async (args) => {
               `OMP execution-context skill root is unavailable or not a directory: ${rootPath}`,
             );
           }
-          return skillsRoot({ origin: "project", path: rootPath, recursive: false });
+          return skillsRoot({
+            origin: "project",
+            path: rootPath,
+            recursive: false,
+          });
         }),
       ),
     };

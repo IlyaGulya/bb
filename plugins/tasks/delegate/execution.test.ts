@@ -389,6 +389,53 @@ describe("task execution routing", () => {
 });
 
 describe("task native workspace continuation", () => {
+  it.each([false, true])(
+    "retains independent task context/account routing after attachment (recovered=%s)",
+    async (recovered) => {
+      const {
+        bb,
+        harness,
+        store,
+        task,
+        preset,
+        target,
+        input,
+        state,
+        attachSource,
+      } = setup();
+      attachSource();
+      store.tasks.updatePreset(preset.id, {
+        executionContextId: "preset-context",
+        modelConnectionId: "preset-account",
+      });
+      new ExecutionStore(bb.storage.database()).setTarget(task.id, {
+        ...target,
+        executionContextId: "task-context",
+        modelConnectionId: "target-native-account",
+      });
+      state.spawnAmbiguous = recovered;
+      await harness.callRpc("continueTask", input);
+      store.tasks.updatePreset(preset.id, {
+        executionContextId: "later-preset-context",
+        modelConnectionId: "later-preset-account",
+      });
+      const reopened = handlers(bb, store);
+      expect(
+        await reopened.getTaskExecution({ taskId: task.id }),
+      ).toMatchObject({
+        inherited: false,
+        override: {
+          executionContextId: "task-context",
+          modelConnectionId: "target-native-account",
+          workspace: {
+            kind: "existing-environment",
+            environmentId: "env_target",
+          },
+        },
+      });
+    },
+  );
+
   it("requires an attached idle source and exact preview file choices", async () => {
     const { harness, input, attachSource, state } = setup();
     await expect(harness.callRpc("continueTask", input)).rejects.toThrow(

@@ -94,6 +94,20 @@ bb.providers.register({
 // => { dispose(): void }
 ```
 
+Declare `experimental_executionBindings: { contexts, nativeConnections,
+contextUnavailableReason? }` only for launch modes the bridge actually supports.
+An absent declaration is unsupported. Core rejects unsupported explicit or
+defaulted bindings before creating a thread; it never substitutes another
+provider or ambient context.
+
+Core reserves `providerOptions.executionContext` and
+`providerOptions.modelConnection` for frozen, validated thread snapshots. Provider
+bridges validate them with `experimental_executionContextSnapshotSchema` and
+`experimental_modelConnectionSnapshotSchema` from
+`@get-bb/plugin-sdk/provider-bridge`, not private `@bb/*` imports. Continue and fork
+must preserve the binding and native session identity; current disabled/revoked
+definitions still refuse continuation.
+
 Each `model/list` entry may carry `supportedServiceTiers: [{ id, label?,
 description? }]`, the tiers that model accepts besides `default`. bb offers
 only the ids the declaration also lists, preferring the entry's label and

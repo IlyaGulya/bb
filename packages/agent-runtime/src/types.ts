@@ -30,7 +30,13 @@ export interface AgentRuntimeContributedEnvEntry {
   value: string | { serverPath: string };
   source:
     | { plugin: string }
-    | { core: "machine-git" | "machine-environment" | "project-environment" | "execution-context" };
+    | {
+        core:
+          | "machine-git"
+          | "machine-environment"
+          | "project-environment"
+          | "execution-context";
+      };
   reason: string;
 }
 

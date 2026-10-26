@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExecutionContextSnapshot } from "@bb/domain";
+import type { ExecutionContextSnapshot } from "@get-bb/plugin-sdk/provider-bridge";
 
 export interface ClaudeSkillPluginRoot {
   id: string;
@@ -33,7 +33,9 @@ const MANIFEST_SCHEMA = "https://anthropic.com/claude-code/plugin.schema.json";
 
 function pluginDirectoryName(root: ClaudeSkillPluginRoot): string {
   return createHash("sha256")
-    .update(`${root.id}\0${root.path}${root.shape === "commands" ? "\0commands" : ""}`)
+    .update(
+      `${root.id}\0${root.path}${root.shape === "commands" ? "\0commands" : ""}`,
+    )
     .digest("hex")
     .slice(0, 16);
 }
@@ -52,16 +54,25 @@ function pluginNameFor(
   return `${CLAUDE_SKILL_PLUGIN_NAME}-${directory.slice(0, 8)}`;
 }
 
-export function buildClaudeContextRoots(context: ExecutionContextSnapshot): (ClaudeSkillPluginRoot & { name: string })[] {
+export function buildClaudeContextRoots(
+  context: ExecutionContextSnapshot,
+): (ClaudeSkillPluginRoot & { name: string })[] {
   const roots: ClaudeSkillPluginRoot[] = [
     ...context.skillRoots.map((path, index) => ({
-      id: `${context.id}:skills:${index}`, path, shape: "skills" as const,
+      id: `${context.id}:skills:${index}`,
+      path,
+      shape: "skills" as const,
     })),
     ...context.commandRoots.map((path, index) => ({
-      id: `${context.id}:commands:${index}`, path, shape: "commands" as const,
+      id: `${context.id}:commands:${index}`,
+      path,
+      shape: "commands" as const,
     })),
   ];
-  return roots.map((root) => ({ ...root, name: `bb-context-${pluginDirectoryName(root)}` }));
+  return roots.map((root) => ({
+    ...root,
+    name: `bb-context-${pluginDirectoryName(root)}`,
+  }));
 }
 
 export function ensureClaudeSkillPlugin(args: {
@@ -81,7 +92,9 @@ export function ensureClaudeSkillPlugin(args: {
     version: "0.1.0",
     description: `Skills injected by bb (${args.root.id}).`,
     author: { name: "bb" },
-    ...(args.root.shape === "commands" ? { commands: "./commands" } : { skills: "./skills" }),
+    ...(args.root.shape === "commands"
+      ? { commands: "./commands" }
+      : { skills: "./skills" }),
   };
   writeFileSync(
     join(pluginPath, ".claude-plugin", "plugin.json"),

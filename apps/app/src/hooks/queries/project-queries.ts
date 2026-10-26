@@ -299,7 +299,9 @@ export function projectCommandsQueryOptions(args: UseProjectCommandsArgs) {
         projectId: requireProjectId(args.projectId, "useProjectCommands"),
         provider: requireProviderId(args.providerId, "useProjectCommands"),
         signal,
-        ...(args.executionContextId === undefined ? {} : { executionContextId: args.executionContextId }),
+        ...(args.executionContextId === undefined
+          ? {}
+          : { executionContextId: args.executionContextId }),
         ...(args.threadId === undefined ? {} : { threadId: args.threadId }),
         ...(args.environmentId !== null
           ? { environmentId: args.environmentId }

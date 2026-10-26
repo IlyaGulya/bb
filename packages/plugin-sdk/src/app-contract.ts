@@ -1,4 +1,11 @@
-export type { ExecutionContext, ExecutionContextSnapshot, ModelConnection, ModelConnectionSnapshot, ProjectContextDefaults, ThreadExecutionBinding } from "@bb/domain";
+export type {
+  ExecutionContext,
+  ExecutionContextSnapshot,
+  ModelConnection,
+  ModelConnectionSnapshot,
+  ProjectContextDefaults,
+  ThreadExecutionBinding,
+} from "@bb/domain";
 import type {
   ComponentPropsWithRef,
   ComponentPropsWithoutRef,

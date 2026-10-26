@@ -98,6 +98,30 @@ export const SETTINGS_SEARCH_INDEX: Record<
       },
     ],
   },
+  "execution-contexts": {
+    keywords: [
+      "workspaces",
+      "accounts",
+      "work",
+      "personal",
+      "native auth",
+      "MCP",
+    ],
+    settings: [
+      {
+        title: "Execution contexts",
+        keywords: ["projects", "instructions", "skills", "hooks"],
+      },
+      {
+        title: "Model connections",
+        keywords: ["account", "subscription", "provider", "machine"],
+      },
+      {
+        title: "Project defaults",
+        keywords: ["context", "connection", "inheritance"],
+      },
+    ],
+  },
   providers: {
     keywords: ["agents", "models"],
     settings: [

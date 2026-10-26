@@ -8,7 +8,11 @@ import {
 } from "@bb/server-contract";
 import { action } from "../action.js";
 import { createCliBbSdk } from "../client.js";
-import { confirmDestructiveAction, outputJson, type JsonOutputOptions } from "./helpers.js";
+import {
+  confirmDestructiveAction,
+  outputJson,
+  type JsonOutputOptions,
+} from "./helpers.js";
 
 interface FileOptions extends JsonOutputOptions {
   file: string;
@@ -50,83 +54,208 @@ contains host environment variable names only, never broker URLs or token values
 Example: bb model-connection create --file work-account.json --json
 `;
 
-export function registerExecutionContextCommands(program: Command, getUrl: () => string): void {
-  const context = program.command("execution-context")
-    .description("Manage logical instructions/tool contexts, not physical machine/workspace context")
+export function registerExecutionContextCommands(
+  program: Command,
+  getUrl: () => string,
+): void {
+  const context = program
+    .command("execution-context")
+    .description(
+      "Manage logical instructions/tool contexts, not physical machine/workspace context",
+    )
     .addHelpText("after", CONTEXT_HELP);
 
-  context.command("list").description("List execution contexts")
+  context
+    .command("list")
+    .description("List execution contexts")
     .option("--json", "Print machine-readable JSON output")
-    .action(action(async (opts: JsonOutputOptions) => {
-      print(opts, await createCliBbSdk(getUrl()).experimental_executionContexts.list());
-    }));
-  context.command("show <id>").description("Show an execution context definition")
+    .action(
+      action(async (opts: JsonOutputOptions) => {
+        print(
+          opts,
+          await createCliBbSdk(getUrl()).experimental_executionContexts.list(),
+        );
+      }),
+    );
+  context
+    .command("show <id>")
+    .description("Show an execution context definition")
     .option("--json", "Print machine-readable JSON output")
-    .action(action(async (id: string, opts: JsonOutputOptions) => {
-      print(opts, await createCliBbSdk(getUrl()).experimental_executionContexts.get({ id }));
-    }));
-  context.command("create").description("Create an execution context from a validated JSON file")
+    .action(
+      action(async (id: string, opts: JsonOutputOptions) => {
+        print(
+          opts,
+          await createCliBbSdk(getUrl()).experimental_executionContexts.get({
+            id,
+          }),
+        );
+      }),
+    );
+  context
+    .command("create")
+    .description("Create an execution context from a validated JSON file")
     .requiredOption("--file <path>", "Local JSON definition file")
     .option("--json", "Print machine-readable JSON output")
     .addHelpText("after", CONTEXT_HELP)
-    .action(action(async (opts: FileOptions) => {
-      const input = createExecutionContextRequestSchema.parse(await readDefinition(opts.file));
-      print(opts, await createCliBbSdk(getUrl()).experimental_executionContexts.create(input));
-    }));
-  context.command("update <id>").description("Patch an execution context from a validated JSON file")
-    .requiredOption("--file <path>", "Local JSON file containing only fields to change")
+    .action(
+      action(async (opts: FileOptions) => {
+        const input = createExecutionContextRequestSchema.parse(
+          await readDefinition(opts.file),
+        );
+        print(
+          opts,
+          await createCliBbSdk(getUrl()).experimental_executionContexts.create(
+            input,
+          ),
+        );
+      }),
+    );
+  context
+    .command("update <id>")
+    .description("Patch an execution context from a validated JSON file")
+    .requiredOption(
+      "--file <path>",
+      "Local JSON file containing only fields to change",
+    )
     .option("--json", "Print machine-readable JSON output")
     .addHelpText("after", CONTEXT_HELP)
-    .action(action(async (id: string, opts: FileOptions) => {
-      const input = updateExecutionContextRequestSchema.omit({ id: true }).parse(await readDefinition(opts.file));
-      print(opts, await createCliBbSdk(getUrl()).experimental_executionContexts.update({ id, ...input }));
-    }));
-  context.command("delete <id>").description("Delete an execution context")
+    .action(
+      action(async (id: string, opts: FileOptions) => {
+        const input = updateExecutionContextRequestSchema
+          .omit({ id: true })
+          .parse(await readDefinition(opts.file));
+        print(
+          opts,
+          await createCliBbSdk(getUrl()).experimental_executionContexts.update({
+            id,
+            ...input,
+          }),
+        );
+      }),
+    );
+  context
+    .command("delete <id>")
+    .description("Delete an execution context")
     .option("--yes", "Skip confirmation")
     .option("--json", "Print machine-readable JSON output")
-    .action(action(async (id: string, opts: JsonOutputOptions & { yes?: boolean }) => {
-      if (!opts.yes && !await confirmDestructiveAction(`Delete execution context ${id}?`)) return;
-      await createCliBbSdk(getUrl()).experimental_executionContexts.delete({ id });
-      if (!outputJson(opts, { id, deleted: true })) console.log(`Deleted execution context ${id}`);
-    }));
+    .action(
+      action(
+        async (id: string, opts: JsonOutputOptions & { yes?: boolean }) => {
+          if (
+            !opts.yes &&
+            !(await confirmDestructiveAction(`Delete execution context ${id}?`))
+          )
+            return;
+          await createCliBbSdk(getUrl()).experimental_executionContexts.delete({
+            id,
+          });
+          if (!outputJson(opts, { id, deleted: true }))
+            console.log(`Deleted execution context ${id}`);
+        },
+      ),
+    );
 }
 
-export function registerModelConnectionCommands(program: Command, getUrl: () => string): void {
-  const connection = program.command("model-connection")
-    .description("Manage native provider account references independently of execution contexts and models")
+export function registerModelConnectionCommands(
+  program: Command,
+  getUrl: () => string,
+): void {
+  const connection = program
+    .command("model-connection")
+    .description(
+      "Manage native provider account references independently of execution contexts and models",
+    )
     .addHelpText("after", CONNECTION_HELP);
-  connection.command("list").description("List model connections")
+  connection
+    .command("list")
+    .description("List model connections")
     .option("--json", "Print machine-readable JSON output")
-    .action(action(async (opts: JsonOutputOptions) => {
-      print(opts, await createCliBbSdk(getUrl()).experimental_modelConnections.list());
-    }));
-  connection.command("show <id>").description("Show a model connection definition")
+    .action(
+      action(async (opts: JsonOutputOptions) => {
+        print(
+          opts,
+          await createCliBbSdk(getUrl()).experimental_modelConnections.list(),
+        );
+      }),
+    );
+  connection
+    .command("show <id>")
+    .description("Show a model connection definition")
     .option("--json", "Print machine-readable JSON output")
-    .action(action(async (id: string, opts: JsonOutputOptions) => {
-      print(opts, await createCliBbSdk(getUrl()).experimental_modelConnections.get({ id }));
-    }));
-  connection.command("create").description("Create a native model connection from a validated JSON file")
-    .requiredOption("--file <path>", "Local JSON definition file; native references only, no credentials")
+    .action(
+      action(async (id: string, opts: JsonOutputOptions) => {
+        print(
+          opts,
+          await createCliBbSdk(getUrl()).experimental_modelConnections.get({
+            id,
+          }),
+        );
+      }),
+    );
+  connection
+    .command("create")
+    .description("Create a native model connection from a validated JSON file")
+    .requiredOption(
+      "--file <path>",
+      "Local JSON definition file; native references only, no credentials",
+    )
     .option("--json", "Print machine-readable JSON output")
     .addHelpText("after", CONNECTION_HELP)
-    .action(action(async (opts: FileOptions) => {
-      const input = createModelConnectionRequestSchema.parse(await readDefinition(opts.file));
-      print(opts, await createCliBbSdk(getUrl()).experimental_modelConnections.create(input));
-    }));
-  connection.command("update <id>").description("Patch a model connection from a validated JSON file")
-    .requiredOption("--file <path>", "Local JSON file containing only fields to change")
+    .action(
+      action(async (opts: FileOptions) => {
+        const input = createModelConnectionRequestSchema.parse(
+          await readDefinition(opts.file),
+        );
+        print(
+          opts,
+          await createCliBbSdk(getUrl()).experimental_modelConnections.create(
+            input,
+          ),
+        );
+      }),
+    );
+  connection
+    .command("update <id>")
+    .description("Patch a model connection from a validated JSON file")
+    .requiredOption(
+      "--file <path>",
+      "Local JSON file containing only fields to change",
+    )
     .option("--json", "Print machine-readable JSON output")
     .addHelpText("after", CONNECTION_HELP)
-    .action(action(async (id: string, opts: FileOptions) => {
-      const input = updateModelConnectionRequestSchema.omit({ id: true }).parse(await readDefinition(opts.file));
-      print(opts, await createCliBbSdk(getUrl()).experimental_modelConnections.update({ id, ...input }));
-    }));
-  connection.command("delete <id>").description("Delete a model connection")
+    .action(
+      action(async (id: string, opts: FileOptions) => {
+        const input = updateModelConnectionRequestSchema
+          .omit({ id: true })
+          .parse(await readDefinition(opts.file));
+        print(
+          opts,
+          await createCliBbSdk(getUrl()).experimental_modelConnections.update({
+            id,
+            ...input,
+          }),
+        );
+      }),
+    );
+  connection
+    .command("delete <id>")
+    .description("Delete a model connection")
     .option("--yes", "Skip confirmation")
     .option("--json", "Print machine-readable JSON output")
-    .action(action(async (id: string, opts: JsonOutputOptions & { yes?: boolean }) => {
-      if (!opts.yes && !await confirmDestructiveAction(`Delete model connection ${id}?`)) return;
-      await createCliBbSdk(getUrl()).experimental_modelConnections.delete({ id });
-      if (!outputJson(opts, { id, deleted: true })) console.log(`Deleted model connection ${id}`);
-    }));
+    .action(
+      action(
+        async (id: string, opts: JsonOutputOptions & { yes?: boolean }) => {
+          if (
+            !opts.yes &&
+            !(await confirmDestructiveAction(`Delete model connection ${id}?`))
+          )
+            return;
+          await createCliBbSdk(getUrl()).experimental_modelConnections.delete({
+            id,
+          });
+          if (!outputJson(opts, { id, deleted: true }))
+            console.log(`Deleted model connection ${id}`);
+        },
+      ),
+    );
 }

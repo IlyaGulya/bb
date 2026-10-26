@@ -560,19 +560,25 @@ export const publicApiRoutes = {
     prepareMachine: defineRoute({
       path: "/projects/:id/prepare-machine",
       method: "post",
-      request: jsonRequest<PathProjectId, PrepareMachineRequest>(prepareMachineRequestSchema),
+      request: jsonRequest<PathProjectId, PrepareMachineRequest>(
+        prepareMachineRequestSchema,
+      ),
       response: jsonResponse<PrepareMachineResponse>(),
     }),
     previewWorkspaceTransfer: defineRoute({
       path: "/projects/:id/preview-workspace-transfer",
       method: "post",
-      request: jsonRequest<PathProjectId, PreviewWorkspaceTransferRequest>(previewWorkspaceTransferRequestSchema),
+      request: jsonRequest<PathProjectId, PreviewWorkspaceTransferRequest>(
+        previewWorkspaceTransferRequestSchema,
+      ),
       response: jsonResponse<PreviewWorkspaceTransferResponse>(),
     }),
     transferWorkspace: defineRoute({
       path: "/projects/:id/transfer-workspace",
       method: "post",
-      request: jsonRequest<PathProjectId, TransferWorkspaceRequest>(transferWorkspaceRequestSchema),
+      request: jsonRequest<PathProjectId, TransferWorkspaceRequest>(
+        transferWorkspaceRequestSchema,
+      ),
       response: jsonResponse<TransferWorkspaceResponse>(),
     }),
     getWorkspaceTransfer: defineRoute({
