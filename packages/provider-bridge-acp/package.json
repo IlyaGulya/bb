@@ -25,6 +25,7 @@
     "@bb/domain": "workspace:*",
     "@bb/provider-bridge-protocol": "workspace:*",
     "zod": "^4.3.6",
+    "yaml": "^2.9.0",
     "@bb/process-utils": "workspace:*"
   },
   "devDependencies": {
