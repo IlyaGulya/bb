@@ -55,10 +55,8 @@ export function acpProviderDeclaration(
     ...(agent.id === "acp-omp"
       ? {
           experimental_executionBindings: {
-            contexts: false,
+            contexts: true,
             nativeConnections: true,
-            contextUnavailableReason:
-              "Native OMP ACP does not yet expose isolated context startup. Its ambient configuration will not be substituted.",
           },
         }
       : {}),

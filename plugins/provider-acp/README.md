@@ -49,8 +49,10 @@ per-agent dialects and the bridge process, is `packages/provider-bridge-acp`.
 
 ## OMP context and account bindings
 
-The shipped `acp-omp` provider still starts native `omp acp`. Its bridge consumes
-the reserved `providerOptions.executionContext` and `providerOptions.modelConnection`
+Unassigned `acp-omp` launches retain native `omp acp`. Scoped native ACP instead
+uses the host-installed native OMP SDK's public session factory and ACP mode,
+under Bun; it does not replace the native agent loop. The bridge consumes the
+reserved `providerOptions.executionContext` and `providerOptions.modelConnection`
 snapshots on discovery, start, resume, fork and followup; invalid or unsupported
 selections fail before an agent is launched or a prompt is submitted.
 
@@ -69,19 +71,23 @@ native OMP uses them for settings, instructions, skills and session storage too.
 The bridge therefore rejects them as model-connection selectors rather than
 silently replacing the execution context.
 
-The inspected native OMP 18.12.6 CLI has no complete isolated-context launch seam.
-Its `--config` / `PI_CONFIG_FILES` values overlay ambient global and project
-settings; ACP session creation also rediscovers project settings and title
-instructions. Although ACP owns the MCP server list, that alone does not isolate
-instructions, extensions or settings. Scoped execution-context launches are
-therefore refused with an actionable native-capability error. Full Work/Personal
-context execution requires a native explicit-context capability that disables
-ambient discovery before startup and preserves the supplied immutable resources
-on session creation and continuation; this is not provided by a new BB adapter.
+Scoped startup requires Bun and a host-installed OMP SDK exposing the public
+session factory and ACP mode. If either is unavailable, install Bun and a
+compatible native OMP package on the selected host; the bridge refuses with an
+actionable capability error rather than falling back to ambient `omp acp`.
+The SDK remains host-installed, not vendored into this provider. Context
+selection does not swap authentication, copy credentials, or change global
+native settings. Isolation selects configuration; it is not a filesystem sandbox.
 
-The OMP host root resolver accepts the selected execution context and returns
-only its absolute `skillRoots`, including an empty list for an empty selection.
-It does not read ambient OMP/Pi/Codex/OpenCode/Claude-plugin roots in that mode.
-The host layer must pass the snapshot and exclude static/default native roots
-and sibling instruction/MCP injection as well. Unbound legacy launches retain
-their existing behavior and native transcript/continuation handling.
+The OMP host root resolver returns only the selected absolute `skillRoots`,
+`commandRoots`, and the skills/commands of explicitly selected `pluginRoots`.
+Plugins expose native OMP extension-package sibling `skills/` and `commands/`
+directories, not Claude manifest extras; extension entrypoints are resolved by
+the native factory. No ambient plugin registry is consulted. Empty selections return no roots.
+Missing or relative selected root directories are refused. Scoped discovery
+does not read ambient OMP/Pi/Codex/OpenCode/Claude, home, or ancestor roots.
+Unbound legacy discovery and native transcript handling remain unchanged.
+
+Provider capability metadata advertises scoped contexts and native account
+references. Runtime startup/resume/fork acceptance must be established with the
+native SDK smoke fixtures; discovery fixtures alone do not establish it.

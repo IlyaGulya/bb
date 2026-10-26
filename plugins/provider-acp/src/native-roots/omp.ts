@@ -146,30 +146,43 @@ async function resolveOmpConfiguredSkillRoots(
   );
 }
 
+async function requireScopedDirectory(rootPath: string, kind: string): Promise<void> {
+  if (!path.isAbsolute(rootPath)) {
+    throw new Error(`OMP execution-context ${kind} roots must be absolute host paths.`);
+  }
+  const root = await stat(rootPath).catch(() => null);
+  if (!root?.isDirectory()) {
+    throw new Error(
+      `OMP execution-context ${kind} root is unavailable or not a directory: ${rootPath}`,
+    );
+  }
+}
+
 export const resolveOmpNativeRoots: AcpNativeRootsResolver = async (args) => {
   if (args.executionContext) {
-    return {
-      skills: await Promise.all(
-        args.executionContext.skillRoots.map(async (rootPath) => {
-          if (!path.isAbsolute(rootPath)) {
-            throw new Error(
-              "OMP execution-context skill roots must be absolute host paths.",
-            );
-          }
-          const root = await stat(rootPath).catch(() => null);
-          if (!root?.isDirectory()) {
-            throw new Error(
-              `OMP execution-context skill root is unavailable or not a directory: ${rootPath}`,
-            );
-          }
-          return skillsRoot({
-            origin: "project",
-            path: rootPath,
-            recursive: false,
-          });
-        }),
-      ),
-    };
+    const context = args.executionContext;
+    const skills = await Promise.all(context.skillRoots.map(async (rootPath) => {
+      await requireScopedDirectory(rootPath, "skill");
+      return skillsRoot({ origin: "project", path: rootPath, recursive: false });
+    }));
+    const commands = await Promise.all((context.commandRoots ?? []).map(async (rootPath) => {
+      await requireScopedDirectory(rootPath, "command");
+      return { origin: "project" as const, path: rootPath, recursive: true };
+    }));
+    for (const rootPath of context.pluginRoots ?? []) {
+      await requireScopedDirectory(rootPath, "plugin");
+      // Native OMP extension packages discover sibling directories, not
+      // Claude manifest component entries or a root SKILL.md.
+      const skillPath = path.join(rootPath, "skills");
+      const commandPath = path.join(rootPath, "commands");
+      if ((await stat(skillPath).catch(() => null))?.isDirectory()) {
+        skills.push(skillsRoot({ origin: "project", path: skillPath, recursive: true }));
+      }
+      if ((await stat(commandPath).catch(() => null))?.isDirectory()) {
+        commands.push({ origin: "project", path: commandPath, recursive: true });
+      }
+    }
+    return { skills, commands };
   }
   const agentDir = resolveOmpAgentDir(args.homeDir, args.env);
   const userRoot = (rootPath: string): AcpResolvedSkillRoot =>

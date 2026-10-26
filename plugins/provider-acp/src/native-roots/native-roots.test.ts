@@ -132,6 +132,75 @@ describe("omp", () => {
     expect(empty).toEqual([]);
   });
 
+  it("selects physical command and plugin fixtures without sibling or ambient roots", async () => {
+    const selected = home("work");
+    const sibling = home("personal");
+    for (const root of [
+      selected,
+      sibling,
+      home(".omp", "agent"),
+      home(".pi", "agent"),
+      home(".claude"),
+      path.join(tempRoot, ".omp"),
+      path.join(cwd, ".omp"),
+    ]) {
+      await writeSkill(path.join(root, "skills"), "private-skill");
+      await writeFileEnsuringDir(path.join(root, "commands", "private.md"), "private");
+      await writeSkill(path.join(root, "plugin", "skills"), "plugin-skill");
+      await writeFileEnsuringDir(path.join(root, "plugin", "commands", "plugin.md"), "plugin");
+    }
+    const plugin = path.join(selected, "plugin");
+    await writeFileEnsuringDir(path.join(plugin, "package.json"), JSON.stringify({
+      name: "work-tools", omp: { extensions: ["index.ts"] },
+    }));
+    await writeFileEnsuringDir(
+      path.join(plugin, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "work-tools", skills: ["extra-skills"], commands: ["extra-commands"] }),
+    );
+    await writeSkill(path.join(plugin, "extra-skills"), "extra");
+    await writeFileEnsuringDir(path.join(plugin, "extra-commands", "extra.md"), "extra");
+    const answer = await resolveOmpNativeRoots({
+      ...argsFor({ OMP_PROFILE: "bad profile!", CLAUDE_CONFIG_DIR: home(".claude") }),
+      executionContext: {
+        skillRoots: [path.join(selected, "skills")],
+        commandRoots: [path.join(selected, "commands")],
+        pluginRoots: [plugin],
+      },
+    });
+    expect(experimental_nativeRootsResolveOutputSchema.safeParse(answer).success).toBe(true);
+    expect(answer.skills?.map((root) => root.path)).toEqual([
+      path.join(selected, "skills"),
+      path.join(plugin, "skills"),
+    ]);
+    expect(answer.commands?.map((root) => root.path)).toEqual([
+      path.join(selected, "commands"),
+      path.join(plugin, "commands"),
+    ]);
+    expect(answer.skills?.[1]).toMatchObject({ recursive: true });
+    expect(answer.commands?.[1].namePrefix).toBeUndefined();
+    expect(await resolveOmpNativeRoots({
+      ...argsFor({ OMP_PROFILE: "bad profile!" }),
+      executionContext: { skillRoots: [], commandRoots: [], pluginRoots: [] },
+    })).toEqual({ skills: [], commands: [] });
+  });
+
+  it.each(["commandRoots", "pluginRoots"] as const)("refuses invalid selected %s", async (kind) => {
+    await expect(resolveOmpNativeRoots({
+      ...argsFor(),
+      executionContext: { skillRoots: [], [kind]: ["relative"] },
+    })).rejects.toThrow("absolute host paths");
+    await expect(resolveOmpNativeRoots({
+      ...argsFor(),
+      executionContext: { skillRoots: [], [kind]: [home("missing")] },
+    })).rejects.toThrow("unavailable or not a directory");
+    const file = home("not-a-directory");
+    await writeFileEnsuringDir(file, "file");
+    await expect(resolveOmpNativeRoots({
+      ...argsFor(),
+      executionContext: { skillRoots: [], [kind]: [file] },
+    })).rejects.toThrow("unavailable or not a directory");
+  });
+
   it("refuses relative scoped skill roots instead of resolving ambient paths", async () => {
     await expect(
       resolveOmpNativeRoots({
