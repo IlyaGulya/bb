@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "./shared.js";
+import { ExecutionSelectionFields, executionSelectionsValid, useExecutionSelections } from "../execution-selection.js";
 
 type ReasoningLevel = ExperimentalProviderModelPickerValue["reasoningLevel"];
 type EnvironmentKind = (typeof PRESET_ENVIRONMENT_KINDS)[number];
@@ -75,6 +76,8 @@ export interface PresetDraft {
   baseBranch: string;
   machineId: string;
   instructions: string;
+  executionContextId?: string;
+  modelConnectionId?: string;
 }
 
 const EMPTY_PRESET_DRAFT: PresetDraft = {
@@ -102,6 +105,8 @@ function presetDraft(preset: Preset): PresetDraft {
     baseBranch: preset.baseBranch ?? "",
     machineId: preset.machineId ?? "",
     instructions: preset.instructions,
+    executionContextId: preset.executionContextId ?? "",
+    modelConnectionId: preset.modelConnectionId ?? "",
   };
 }
 
@@ -124,6 +129,8 @@ export async function savePresetDraft(
     baseBranch: worktree && baseBranch !== "" ? baseBranch : null,
     machineId: worktree && machineId !== "" ? machineId : null,
     instructions: draft.instructions,
+    executionContextId: draft.executionContextId || null,
+    modelConnectionId: draft.modelConnectionId || null,
   };
   if (editing) {
     await rpc.call("updatePreset", { presetId: editing.id, ...fields });
@@ -148,6 +155,7 @@ export function PresetDialog({
   );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const selections = useExecutionSelections(open);
   const set = <K extends keyof PresetDraft>(key: K, value: PresetDraft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
 
@@ -161,6 +169,7 @@ export function PresetDialog({
     draft.name.trim() !== "" &&
     draft.providerId.trim() !== "" &&
     draft.modelId.trim() !== "" &&
+    executionSelectionsValid(selections, draft.executionContextId ?? "", draft.modelConnectionId ?? "", draft.providerId, draft.environmentKind === "new-worktree" ? draft.machineId : undefined) &&
     !submitting;
   const pickerValue: ExperimentalProviderModelPickerValue = {
     providerId: draft.providerId,
@@ -213,6 +222,15 @@ export function PresetDialog({
               className="h-8 max-w-full"
             />
           </Field>
+          <ExecutionSelectionFields
+            selections={selections}
+            executionContextId={draft.executionContextId ?? ""}
+            modelConnectionId={draft.modelConnectionId ?? ""}
+            onContextChange={(id) => set("executionContextId", id)}
+            onConnectionChange={(id) => set("modelConnectionId", id)}
+            provider={draft.providerId}
+            hostId={draft.environmentKind === "new-worktree" ? draft.machineId : undefined}
+          />
           <div className="grid grid-cols-2 gap-3">
             <Field label="Permissions">
               <PermissionModePicker

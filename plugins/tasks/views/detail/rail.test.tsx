@@ -93,6 +93,8 @@ const PROFILE: Preset = {
   baseBranch: null,
   machineId: null,
   instructions: "",
+  executionContextId: null,
+  modelConnectionId: null,
   builtin: false,
   createdAt: "2026-07-15T00:00:00.000Z",
 };
@@ -144,6 +146,7 @@ describe("task execution rail control", () => {
 
   it("keeps routing errors visible in the editor", async () => {
     const slot = renderSlot({ component: RailHarness }, { ...railProps(null), presets: [PROFILE], execution: EXECUTION }, {
+      sdk: { executionContexts: { list: async () => [] }, modelConnections: { list: async () => [] } },
       rpc: {
         listBbProjects: () => ({ bbProjects: [{ id: BB_PROJECT_ID, name: "bb monorepo" }] }),
         listMachines: () => ({ machines: [{ id: "host_target", name: "Target machine" }] }),
@@ -163,6 +166,7 @@ describe("task workspace execution modes", () => {
     { kind: "project-checkout" },
   ] as const)("saves $kind without changing the existing profile", async (workspace) => {
     const slot = renderSlot({ component: RailHarness }, { ...railProps(null), presets: [PROFILE], execution: EXECUTION }, {
+      sdk: { executionContexts: { list: async () => [] }, modelConnections: { list: async () => [] } },
       rpc: {
         listBbProjects: () => ({ bbProjects: [{ id: BB_PROJECT_ID, name: "bb monorepo" }] }),
         listMachines: () => ({ machines: [{ id: "host_target", name: "Target machine" }] }),

@@ -7,6 +7,7 @@ import {
 } from "@/components/plugin/plugin-composer-host";
 import { SecondaryPanelLayout } from "@/components/secondary-panel/SecondaryPanelLayout";
 import { LazyThreadSecondaryPanel } from "@/components/secondary-panel/lazySecondaryPanelComponents";
+import { ThreadExecutionBindingCard } from "@/components/secondary-panel/ThreadExecutionBindingCard";
 import {
   ThreadMetadataCard,
   ThreadMetadataContent,
@@ -156,7 +157,7 @@ function ThreadDetailSecondaryContentBody({
             }
             onToggleConversationCollapse={onToggleMainCollapse}
             resizablePanelId={resizablePanelId}
-            metadataContent={metadataContent}
+            metadataContent={<div className="flex min-h-0 flex-1 flex-col"><ThreadExecutionBindingCard threadId={metadata.thread.id} />{metadataContent}</div>}
           />
         )}
       />

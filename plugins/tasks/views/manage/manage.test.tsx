@@ -914,6 +914,8 @@ function presetRow(overrides: Record<string, unknown> = {}) {
     baseBranch: "main",
     machineId: "mach_1",
     instructions: "",
+    executionContextId: null,
+    modelConnectionId: null,
     builtin: false,
     createdAt: "2026-07-15T00:00:00.000Z",
     ...overrides,
@@ -1011,6 +1013,26 @@ describe("savePresetDraft", () => {
       machineId: null,
     });
   });
+
+  it("preserves independent context and account selections without changing the model", async () => {
+    const { calls, rpc } = captureRpc();
+    await savePresetDraft(rpc, null, {
+      ...draft,
+      executionContextId: "context_work",
+      modelConnectionId: "connection_personal",
+    });
+    expect(calls[0]!.input).toMatchObject({
+      providerId: draft.providerId,
+      modelId: draft.modelId,
+      executionContextId: "context_work",
+      modelConnectionId: "connection_personal",
+    });
+    await savePresetDraft(rpc, presetRow() as never, draft);
+    expect(calls[1]!.input).toMatchObject({
+      executionContextId: null,
+      modelConnectionId: null,
+    });
+  });
 });
 
 describe("PresetDialog environment section", () => {
@@ -1022,6 +1044,7 @@ describe("PresetDialog environment section", () => {
       app.navPanels[0]!,
       { subPath: "manage" },
       {
+        sdk: { executionContexts: { list: async () => [] }, modelConnections: { list: async () => [] } },
         rpc: {
           listProjects: () => ({ projects: [project] }),
           listFolders: () => ({ folders: [] }),

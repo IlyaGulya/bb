@@ -167,6 +167,15 @@ vi.mock("@/hooks/queries/plugin-settings-queries", () => ({
 
 vi.mock("@/lib/sdk", () => ({
   sdk: {
+    executionContexts: {
+      list: vi.fn().mockResolvedValue([]),
+      getProjectDefaults: vi.fn().mockImplementation(async ({ projectId }: { projectId: string }) => ({
+        projectId,
+        executionContextId: null,
+        modelConnectionId: null,
+      })),
+    },
+    modelConnections: { list: vi.fn().mockResolvedValue([]) },
     projects: { attachments: { copy: mocks.copyAttachments } },
     system: {
       experimental_recordTelemetryEvent: vi

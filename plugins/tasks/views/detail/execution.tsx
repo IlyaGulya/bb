@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ResponsiveDrawerShell } from "@/components/ui/responsive-overlay";
+import { ExecutionSelectionFields, executionSelectionsValid, useExecutionSelections } from "../execution-selection.js";
 
 const fieldClass = "flex flex-col gap-1 text-sm";
 const selectClass =
@@ -42,6 +43,10 @@ export function ExecutionTargetControl({
   const [baseBranch, setBaseBranch] = useState("");
   const [environmentId, setEnvironmentId] = useState("");
   const [presetId, setPresetId] = useState("");
+  const [executionContextId, setExecutionContextId] = useState("");
+  const [modelConnectionId, setModelConnectionId] = useState("");
+  const selections = useExecutionSelections(open);
+  const selectedPreset = presets?.find((entry) => entry.id === presetId);
   const projects = useTasksQuery(
     async (query) => (await query.call("listBbProjects")).bbProjects,
     ["projects:changed"],
@@ -81,6 +86,8 @@ export function ExecutionTargetControl({
         : "",
     );
     setPresetId(target?.presetId ?? presets?.[0]?.id ?? "");
+    setExecutionContextId(target?.executionContextId ?? "");
+    setModelConnectionId(target?.modelConnectionId ?? "");
     setError(null);
     setOpen(true);
   };
@@ -105,7 +112,8 @@ export function ExecutionTargetControl({
     !!projectId &&
     !!hostId &&
     !!presetId &&
-    (kind !== "existing-environment" || validEnvironment);
+    (kind !== "existing-environment" || validEnvironment) &&
+    executionSelectionsValid(selections, executionContextId || selectedPreset?.executionContextId || "", modelConnectionId || selectedPreset?.modelConnectionId || "", selectedPreset?.providerId, hostId, projectId);
   const resolved = execution?.resolved;
   const resolvedProject = projects.data?.find(
     (entry) => entry.id === resolved?.bbProjectId,
@@ -143,6 +151,8 @@ export function ExecutionTargetControl({
       <p className="mt-1 break-words text-xs text-muted-foreground">
         {summary}
       </p>
+      {resolved?.executionContextId ? <p className="text-xs text-muted-foreground">Execution context: {selections.contexts.data?.find((entry) => entry.id === resolved.executionContextId)?.name ?? resolved.executionContextId} · {resolved.executionContextId}</p> : null}
+      {resolved?.modelConnectionId ? <p className="text-xs text-muted-foreground">Model connection: {selections.connections.data?.find((entry) => entry.id === resolved.modelConnectionId)?.name ?? resolved.modelConnectionId} · {resolved.modelConnectionId}</p> : null}
       {execution ? (
         <p className="text-xs text-muted-foreground">
           {execution.inherited
@@ -179,7 +189,11 @@ export function ExecutionTargetControl({
                         : {}),
                     }
                   : { kind };
-            void save({ bbProjectId: projectId, hostId, workspace, presetId });
+            void save({
+              bbProjectId: projectId, hostId, workspace, presetId,
+              ...(executionContextId ? { executionContextId } : {}),
+              ...(modelConnectionId ? { modelConnectionId } : {}),
+            });
           }}
         >
           <h3 className="font-semibold">Task execution</h3>
@@ -294,6 +308,21 @@ export function ExecutionTargetControl({
                 ))}
               </select>
             </label>
+            <ExecutionSelectionFields
+              selections={selections}
+              executionContextId={executionContextId}
+              modelConnectionId={modelConnectionId}
+              onContextChange={setExecutionContextId}
+              onConnectionChange={setModelConnectionId}
+              provider={selectedPreset?.providerId}
+              hostId={hostId}
+              projectId={projectId}
+            />
+            {selectedPreset?.executionContextId ? <p className="text-xs text-muted-foreground">Profile context default: {selectedPreset.executionContextId}</p> : null}
+            {selectedPreset?.modelConnectionId ? <p className="text-xs text-muted-foreground">Profile connection default: {selectedPreset.modelConnectionId}</p> : null}
+            {!executionSelectionsValid(selections, executionContextId || selectedPreset?.executionContextId || "", modelConnectionId || selectedPreset?.modelConnectionId || "", selectedPreset?.providerId, hostId, projectId) ? (
+              <p role="alert" className="text-sm text-destructive">The selected or inherited context/account is unavailable or incompatible with this code project, provider, or host. Choose a compatible override or update the profile; no fallback will be used.</p>
+            ) : null}
           </fieldset>
           {[error, projects.error, machines.error, environments.error]
             .filter(Boolean)

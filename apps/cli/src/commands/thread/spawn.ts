@@ -57,6 +57,8 @@ interface ThreadSpawnCommandOptions {
   parentThread?: string;
   provider?: string;
   model?: string;
+  executionContext?: string;
+  modelConnection?: string;
   reasoningLevel?: string;
   title?: string;
   lifecycleOwnerThread?: string;
@@ -374,6 +376,14 @@ export function registerSpawnCommand(
       "Model ID for the thread. Omit to use the project's remembered default for the resolved provider",
     )
     .option(
+      "--execution-context <id>",
+      "Logical instructions/tool context, independent of --model and physical --environment",
+    )
+    .option(
+      "--model-connection <id>",
+      "Native provider account connection, independent of --execution-context and --model",
+    )
+    .option(
       "--reasoning-level <level>",
       "Reasoning level id the model lists: low, medium, high, xhigh, max, or a provider-specific id",
     )
@@ -582,6 +592,14 @@ export function registerSpawnCommand(
         const sendAt =
           opts.sendAt === undefined ? undefined : parseSendAt(opts.sendAt);
         const providerId = opts.provider?.trim();
+        const executionContextId = resolveExplicitIdFlag({
+          flagName: "--execution-context",
+          value: opts.executionContext,
+        });
+        const modelConnectionId = resolveExplicitIdFlag({
+          flagName: "--model-connection",
+          value: opts.modelConnection,
+        });
 
         let thread: Thread;
         try {
@@ -604,6 +622,8 @@ export function registerSpawnCommand(
               : {}),
             ...(providerId ? { providerId } : {}),
             ...(opts.model ? { model: opts.model } : {}),
+            ...(executionContextId ? { executionContextId } : {}),
+            ...(modelConnectionId ? { modelConnectionId } : {}),
             input,
             ...(reasoningLevel ? { reasoningLevel } : {}),
             ...(opts.title ? { title: opts.title } : {}),

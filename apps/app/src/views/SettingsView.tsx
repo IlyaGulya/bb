@@ -52,6 +52,7 @@ import {
 import { useHostDaemon, useLocalHostDaemonAccess } from "@/hooks/useHostDaemon";
 import { useAppThemePreview } from "@/hooks/useAppThemePreview";
 import { ProvidersSettingsSection } from "@/components/settings/ProvidersSettingsSection";
+import { ExecutionContextsSettingsSection } from "@/components/settings/ExecutionContextsSettingsSection";
 import { CodeRendererSettings } from "@/components/settings/CodeRendererSettings";
 import { SidebarThreadListSetting } from "@/components/settings/SidebarThreadListSetting";
 import { SidebarFooterSettings } from "@/components/settings/SidebarFooterSettings";
@@ -1235,6 +1236,8 @@ export function SettingsView() {
         }
       />
     );
+  } else if (activeSection === "execution-contexts") {
+    content = <ExecutionContextsSettingsSection />;
   } else if (activeSection === "ai-services") {
     content = <AiServicesSettingsSection />;
   } else if (activeSection === "appearance") {

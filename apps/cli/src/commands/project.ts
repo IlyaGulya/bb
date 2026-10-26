@@ -273,6 +273,37 @@ export function registerProjectCommands(
   const attachment = project
     .command("attachment")
     .description("Upload and download server-managed project attachments");
+  const contextDefaults = project
+    .command("context-defaults")
+    .description("Get or set independent logical execution-context and native model-connection defaults");
+  contextDefaults.command("get <project-id>")
+    .description("Show a project's context and connection defaults")
+    .option("--json", "Print machine-readable JSON output")
+    .action(action(async (projectId: string, opts: { json?: boolean }) => {
+      const result = await createCliBbSdk(getUrl()).executionContexts.getProjectDefaults({ projectId });
+      if (!outputJson(opts, result)) console.log(JSON.stringify(result, null, 2));
+    }));
+  contextDefaults.command("set <project-id>")
+    .description("Set both defaults; use none to clear either selection")
+    .requiredOption("--execution-context <id-or-none>", "Logical context ID, or none to clear")
+    .requiredOption("--model-connection <id-or-none>", "Native connection ID, or none to clear")
+    .option("--json", "Print machine-readable JSON output")
+    .action(action(async (
+      projectId: string,
+      opts: { executionContext: string; modelConnection: string; json?: boolean },
+    ) => {
+      const parseDefault = (value: string): string | null => {
+        const trimmed = value.trim();
+        if (!trimmed) throw new Error("Default IDs must not be empty; use none to clear.");
+        return trimmed === "none" ? null : trimmed;
+      };
+      const result = await createCliBbSdk(getUrl()).executionContexts.setProjectDefaults({
+        projectId,
+        executionContextId: parseDefault(opts.executionContext),
+        modelConnectionId: parseDefault(opts.modelConnection),
+      });
+      if (!outputJson(opts, result)) console.log(JSON.stringify(result, null, 2));
+    }));
 
   project
     .command("prepare-machine")

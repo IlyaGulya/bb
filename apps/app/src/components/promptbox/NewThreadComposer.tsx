@@ -138,6 +138,8 @@ import {
   MACHINE_SERVER_ACCESS_TITLE,
   machineServerAccessBlockedReason,
 } from "@/components/machines/machine-server-access";
+import { ExecutionBindingPicker } from "@/components/pickers/ExecutionBindingPicker";
+import { useExecutionBindingSelection } from "@/hooks/useExecutionBindingSelection";
 
 type NewThreadComposerSelectionScope = "new-thread" | "component-local";
 
@@ -1515,6 +1517,15 @@ export function NewThreadComposer({
       : null;
   const projectHostId =
     reuseEnvironmentId !== null ? null : (providerHostId ?? primaryHostId);
+  const bindingEnvironment = useEnvironment(reuseEnvironmentId);
+  const bindingHostId = reuseEnvironmentId === null
+    ? projectHostId
+    : (bindingEnvironment.data?.hostId ?? null);
+  const executionBinding = useExecutionBindingSelection({
+    projectId,
+    providerId: selectedProviderId,
+    hostId: bindingHostId,
+  });
   const panelThreadId = resolvePanelThreadId(
     reuseEnvironmentId,
     reuseThreadOptions,
@@ -1625,7 +1636,7 @@ export function NewThreadComposer({
     : (selectedEnvironment ??
       (selectionScope === "new-thread" ? seed?.environment : undefined) ??
       null);
-  const submissionReadinessReason = resolveNewThreadSubmitDisabledReason({
+  const submissionReadinessReason = executionBinding.unavailableReason ?? resolveNewThreadSubmitDisabledReason({
     environmentProviderInputsBlocker:
       machineProviderInputs.blockedReason ?? environmentProviderInputsBlocker,
     environmentSetupRequiredReason:
@@ -1682,6 +1693,8 @@ export function NewThreadComposer({
         model: selectedThreadModel,
         reasoningLevel,
         permissionMode,
+        ...(executionBinding.executionContextId === undefined ? {} : { executionContextId: executionBinding.executionContextId }),
+        ...(executionBinding.modelConnectionId === undefined ? {} : { modelConnectionId: executionBinding.modelConnectionId }),
         ...(supportsServiceTier && serviceTier ? { serviceTier } : {}),
         ...(Object.keys(sessionOptionSelections).length > 0
           ? { sessionOptions: sessionOptionSelections }
@@ -1730,6 +1743,8 @@ export function NewThreadComposer({
     [
       clearReuseEnvironment,
       executionInputSources,
+      executionBinding.executionContextId,
+      executionBinding.modelConnectionId,
       onSubmit,
       permissionMode,
       projectDefaultsUnavailable,
@@ -2106,7 +2121,7 @@ export function NewThreadComposer({
                   }
                 />
               )),
-            header: options.header,
+            header: <>{options.header}<ExecutionBindingPicker selection={executionBinding} projectId={projectId} providerId={selectedProviderId} hostId={bindingHostId} disabled={isSubmitting} /></>,
           }}
           project={{
             projects: projectOptions,
@@ -2166,6 +2181,8 @@ export function NewThreadComposer({
     },
     [
       activeModel,
+      executionBinding,
+      bindingHostId,
       attachmentError,
       commandSuggestions,
       defaultMentionLinkResolver,
