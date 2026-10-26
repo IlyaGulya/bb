@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import { experimental_resolveClaudePluginRoots } from "@get-bb/plugin-sdk/host";
 import { parse as parseYaml } from "yaml";
@@ -146,6 +147,26 @@ async function resolveOmpConfiguredSkillRoots(
 }
 
 export const resolveOmpNativeRoots: AcpNativeRootsResolver = async (args) => {
+  if (args.executionContext) {
+    return {
+      skills: await Promise.all(
+        args.executionContext.skillRoots.map(async (rootPath) => {
+          if (!path.isAbsolute(rootPath)) {
+            throw new Error(
+              "OMP execution-context skill roots must be absolute host paths.",
+            );
+          }
+          const root = await stat(rootPath).catch(() => null);
+          if (!root?.isDirectory()) {
+            throw new Error(
+              `OMP execution-context skill root is unavailable or not a directory: ${rootPath}`,
+            );
+          }
+          return skillsRoot({ origin: "project", path: rootPath, recursive: false });
+        }),
+      ),
+    };
+  }
   const agentDir = resolveOmpAgentDir(args.homeDir, args.env);
   const userRoot = (rootPath: string): AcpResolvedSkillRoot =>
     skillsRoot({ origin: "user", path: rootPath, recursive: false });

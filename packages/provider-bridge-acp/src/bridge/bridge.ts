@@ -6,6 +6,10 @@ import {
 import type { AvailableModel, PromptInput, ReasoningLevel } from "@bb/domain";
 import { acpLaunchSpecSchema, type AcpLaunchSpec } from "../launch-spec.js";
 import {
+  assertAcpConnectionUnchanged,
+  resolveAcpScopedOptions,
+} from "../scoped-context.js";
+import {
   BRIDGE_INBOUND_REQUEST_METHODS,
   BRIDGE_JSON_RPC_ERRORS,
   BRIDGE_NOTIFICATION_METHODS,
@@ -2275,13 +2279,21 @@ function reconcileExecutionSettings(
     throw new Error('ACP does not support permission mode "auto".');
   }
   const launchSpec = decodeLaunchSpec(options.providerOptions);
+  const scoped = resolveScopedOptions(options.providerOptions, launchSpec);
+  assertAcpConnectionUnchanged(
+    session.construction.modelConnection ?? null,
+    scoped.modelConnection,
+  );
   const envVars =
     Object.keys(options.envVars ?? {}).length > 0
       ? {
           ...(launchSpec?.env ?? {}),
           ...options.envVars,
+          ...scoped.env,
         }
-      : session.construction.envVars;
+      : Object.keys(scoped.env).length > 0
+        ? { ...session.construction.envVars, ...scoped.env }
+        : session.construction.envVars;
   const workspaceWriteRoots =
     options.providerOptions?.additionalWorkspaceWriteRoots !== undefined
       ? [
@@ -2698,6 +2710,20 @@ function decodeLaunchSpec(
   return launchSpec.success ? launchSpec.data : null;
 }
 
+function resolveScopedOptions(
+  providerOptions: Record<string, unknown> | undefined,
+  launchSpec: AcpLaunchSpec | null,
+) {
+  return resolveAcpScopedOptions({
+    providerOptions,
+    dialectId: resolveAcpDialect({
+      dialectId: decodeDialectId(providerOptions),
+      command: launchSpec?.command ?? "",
+    }).id,
+    env: process.env,
+  });
+}
+
 const acpProviderOptionsSchema = z
   .object({
     additionalWorkspaceWriteRoots: z.array(z.string()).optional(),
@@ -2753,6 +2779,7 @@ function maintenanceTarget(
   env: NodeJS.ProcessEnv;
 } {
   const launchSpec = decodeLaunchSpec(providerOptions);
+  const scoped = resolveScopedOptions(providerOptions, launchSpec);
   const dialect = resolveAcpDialect({
     dialectId: decodeDialectId(providerOptions),
     command: launchSpec?.command ?? "",
@@ -2761,7 +2788,7 @@ function maintenanceTarget(
     maintenance: dialect.maintenance,
     command: launchSpec?.command ?? null,
     dialectId: dialect.id,
-    env: { ...process.env, ...launchSpec?.env },
+    env: { ...process.env, ...launchSpec?.env, ...scoped.env },
   };
 }
 
@@ -2789,13 +2816,20 @@ async function handleRequest(
       return;
 
     case "model/list": {
+      const launchSpec = decodeLaunchSpec(request.params.providerOptions);
+      const scoped = resolveScopedOptions(
+        request.params.providerOptions,
+        launchSpec,
+      );
       const modelPicker = decodeAcpModelPickerOptions(
         request.params.providerOptions,
       );
       await handleModelList(
         request.id,
         buildAcpModelListParams(
-          decodeLaunchSpec(request.params.providerOptions),
+          launchSpec === null
+            ? null
+            : { ...launchSpec, env: { ...launchSpec.env, ...scoped.env } },
           modelPicker,
         ),
         decodeDialectId(request.params.providerOptions),
@@ -2864,10 +2898,15 @@ async function handleRequest(
         );
         return;
       }
+      const scoped = resolveScopedOptions(
+        params.options.providerOptions,
+        launchSpec,
+      );
       const modelPicker = decodeAcpModelPickerOptions(
         params.options.providerOptions,
       );
       const sessionParams = buildAcpSessionParams({
+        modelConnection: scoped.modelConnection,
         additionalWorkspaceWriteRoots: decodeAdditionalWorkspaceWriteRoots(
           params.options.providerOptions,
         ),
@@ -2876,6 +2915,7 @@ async function handleRequest(
         dynamicTools: params.dynamicTools,
         options: {
           ...params.options,
+          envVars: { ...params.options.envVars, ...scoped.env },
           skillRoots: configuredSkillRoots ?? undefined,
         },
         parameterizedModelPicker: modelPicker.parameterizedModelPicker,
@@ -2946,6 +2986,14 @@ async function handleRequest(
         });
         return;
       }
+      const scoped = resolveScopedOptions(
+        params.options.providerOptions,
+        decodeLaunchSpec(params.options.providerOptions),
+      );
+      assertAcpConnectionUnchanged(
+        session.construction.modelConnection ?? null,
+        scoped.modelConnection,
+      );
       session.queuedInputs.push({
         clientRequestId: params.clientRequestId,
         input: params.input,

@@ -100,6 +100,56 @@ describe("opencode", () => {
 });
 
 describe("omp", () => {
+  it("keeps concurrent context roots separate from native account and ambient roots", async () => {
+    await writeFileEnsuringDir(
+      home(".omp", "profiles", "shared", "agent", "config.yml"),
+      "skills:\n  customDirectories: [~/sibling-skills]\n",
+    );
+    const base = argsFor({
+      OMP_PROFILE: "shared",
+      PI_CONFIG_FILES: home("sibling-settings.yml"),
+      CODEX_HOME: home("sibling-codex"),
+    });
+    const workRoot = home("work-skills");
+    const personalRoot = home("personal-skills");
+    await Promise.all([mkdir(workRoot), mkdir(personalRoot)]);
+    const [work, personal, empty] = await Promise.all([
+      resolveSkills(resolveOmpNativeRoots, {
+        ...base,
+        executionContext: { skillRoots: [workRoot] },
+      }),
+      resolveSkills(resolveOmpNativeRoots, {
+        ...base,
+        executionContext: { skillRoots: [personalRoot] },
+      }),
+      resolveSkills(resolveOmpNativeRoots, {
+        ...base,
+        executionContext: { skillRoots: [] },
+      }),
+    ]);
+    expect(work.map((root) => root.path)).toEqual([workRoot]);
+    expect(personal.map((root) => root.path)).toEqual([personalRoot]);
+    expect(empty).toEqual([]);
+  });
+
+  it("refuses relative scoped skill roots instead of resolving ambient paths", async () => {
+    await expect(
+      resolveOmpNativeRoots({
+        ...argsFor(),
+        executionContext: { skillRoots: ["../sibling-skills"] },
+      }),
+    ).rejects.toThrow("absolute host paths");
+  });
+
+  it("refuses unavailable declared roots instead of dropping the selection", async () => {
+    await expect(
+      resolveOmpNativeRoots({
+        ...argsFor(),
+        executionContext: { skillRoots: [home("missing-skills")] },
+      }),
+    ).rejects.toThrow("unavailable or not a directory");
+  });
+
   it("reads the agent, pi, codex and opencode skill directories", async () => {
     const roots = await resolveSkills(resolveOmpNativeRoots, argsFor());
     expect(roots.map((root) => root.path)).toEqual([

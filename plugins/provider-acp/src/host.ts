@@ -22,6 +22,7 @@ export default experimental_defineHostEntry({
         cwd: input.cwd,
         homeDir: os.homedir(),
         env: process.env,
+        executionContext: input.executionContext,
       }),
   },
 });

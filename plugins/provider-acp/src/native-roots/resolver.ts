@@ -8,6 +8,7 @@ export interface AcpNativeRootsResolverArgs {
   cwd: string | null;
   homeDir: string;
   env: AcpNativeRootsEnvironment;
+  executionContext?: { skillRoots: readonly string[] } | null;
 }
 
 export type AcpResolvedSkillRoot = NonNullable<

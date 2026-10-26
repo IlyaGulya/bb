@@ -21,6 +21,7 @@ export async function resolveAcpNativeRoots(
     cwd: args.cwd,
     homeDir: args.homeDir,
     env: args.env,
+    executionContext: args.executionContext,
   });
   return experimental_filterResolvedNativeRoots(answer, { warn: console.warn })
     .answer;

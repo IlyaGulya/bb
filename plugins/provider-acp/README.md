@@ -46,3 +46,42 @@ What lives here:
 
 The kit itself, including the ACP wire schema, the delta translation, the
 per-agent dialects and the bridge process, is `packages/provider-bridge-acp`.
+
+## OMP context and account bindings
+
+The shipped `acp-omp` provider still starts native `omp acp`. Its bridge consumes
+the reserved `providerOptions.executionContext` and `providerOptions.modelConnection`
+snapshots on discovery, start, resume, fork and followup; invalid or unsupported
+selections fail before an agent is launched or a prompt is submitted.
+
+An OMP model connection with `nativeAuth.configDir` and `nativeAuth.profile` both
+`null` uses the host's existing native authentication source. Multiple connections
+can reference that same source concurrently without switching a global login or
+copying credentials. An optional `nativeAuth.hostEnv` object names
+`brokerUrlEnv` and `brokerTokenEnv` variables on the selected host. The bridge
+passes their values only to the child as `OMP_AUTH_BROKER_URL` and
+`OMP_AUTH_BROKER_TOKEN`; absent references fail instead of falling back to another
+login. The stored snapshot contains variable names, never their values. Changing
+the selected connection on an active thread is refused.
+
+OMP profile/config-directory references are not authentication-only references:
+native OMP uses them for settings, instructions, skills and session storage too.
+The bridge therefore rejects them as model-connection selectors rather than
+silently replacing the execution context.
+
+The inspected native OMP 18.12.6 CLI has no complete isolated-context launch seam.
+Its `--config` / `PI_CONFIG_FILES` values overlay ambient global and project
+settings; ACP session creation also rediscovers project settings and title
+instructions. Although ACP owns the MCP server list, that alone does not isolate
+instructions, extensions or settings. Scoped execution-context launches are
+therefore refused with an actionable native-capability error. Full Work/Personal
+context execution requires a native explicit-context capability that disables
+ambient discovery before startup and preserves the supplied immutable resources
+on session creation and continuation; this is not provided by a new BB adapter.
+
+The OMP host root resolver accepts the selected execution context and returns
+only its absolute `skillRoots`, including an empty list for an empty selection.
+It does not read ambient OMP/Pi/Codex/OpenCode/Claude-plugin roots in that mode.
+The host layer must pass the snapshot and exclude static/default native roots
+and sibling instruction/MCP injection as well. Unbound legacy launches retain
+their existing behavior and native transcript/continuation handling.
