@@ -36,7 +36,7 @@ function connection(prefix = "personal"): ModelConnectionSnapshot {
 }
 
 function options(prefix = "personal", model = `bb-cpa/${prefix}/gpt-example`) {
-  return { ...FULL_ACCESS_SESSION_OPTIONS, model, modelConnection: connection(prefix) };
+  return { ...FULL_ACCESS_SESSION_OPTIONS, model, providerOptions: { modelConnection: connection(prefix) } };
 }
 
 async function construct(threadId: string, opts: BridgeExecutionOptions = options(), kind: "start" | "resume" | "fork" = "start", providerThreadId?: string) {
@@ -99,7 +99,7 @@ afterEach(async () => {
 it("discovers only the selected connection namespace without routing correlation or invented capabilities", async () => {
   for (const prefix of ["personal", "work"]) {
     const id = nextId++;
-    harness.sendRequest(id, "model/list", { modelConnection: connection(prefix) });
+    harness.sendRequest(id, "model/list", { cwd: root, providerOptions: { modelConnection: connection(prefix) } });
     const result = await harness.waitForResponse(id);
     expect(result.error).toBeUndefined();
     expect(result.result).toEqual({ models: [{
@@ -124,7 +124,7 @@ it.each(["gpt-example", "bb-cpa/work/gpt-example", "bb-cpa/personal/unknown", ""
 
 it("does not fall back to native discovery when CPA denies the worker credential", async () => {
   catalogStatus = 403;
-  harness.sendRequest(10, "model/list", { modelConnection: connection() });
+  harness.sendRequest(10, "model/list", { cwd: root, providerOptions: { modelConnection: connection() } });
   const result = await harness.waitForResponse(10);
   expect(result.error?.message).toContain("403");
   expect(JSON.stringify(result)).not.toContain(key);
@@ -188,7 +188,7 @@ it("refuses reopening a pinned thread with a changed endpoint or with native fal
   const started = await construct("thr_cpa_reopen");
   const { providerThreadId } = providerIdentitySchema.parse(started.result);
   const changed = options();
-  changed.modelConnection.gateway!.baseUrl = `${endpoint}/changed`;
+  changed.providerOptions.modelConnection.gateway!.baseUrl = `${endpoint}/changed`;
   catalogStatus = 200;
   const rejected = await construct("thr_cpa_reopen", changed, "resume", providerThreadId);
   expect(rejected.error).toBeDefined();
@@ -232,7 +232,7 @@ it("surfaces payer failure without native quota recovery or leaking the child cr
 }, 30_000);
 
 it("requires an explicit selection and a nonempty catalog in the bound namespace", async () => {
-  const missing = await construct("thr_cpa_missing_model", { ...FULL_ACCESS_SESSION_OPTIONS, modelConnection: connection() });
+  const missing = await construct("thr_cpa_missing_model", { ...FULL_ACCESS_SESSION_OPTIONS, providerOptions: { modelConnection: connection() } });
   expect(missing.error?.message).toContain("fallback");
   expect(discoveries).toEqual([]);
   catalog = ["work/gpt-example"];
@@ -252,12 +252,12 @@ it.each([false, true])("refuses unsupported explicit context sources before sess
   };
   const expected = nativeMcp ? "Native Claude MCP" : "Explicit execution contexts";
   for (const kind of ["start", "resume", "fork"] as const) {
-    const response = await construct(`thr_context_${kind}`, { ...options(), executionContext }, kind, "native-existing-thread");
+    const response = await construct(`thr_context_${kind}`, { ...options(), providerOptions: { ...options().providerOptions, executionContext } }, kind, "native-existing-thread");
     expect(response.error?.message).toContain(expected);
     expect(response.result).toBeUndefined();
   }
   const id = nextId++;
-  harness.sendRequest(id, "model/list", { modelConnection: connection(), executionContext });
+  harness.sendRequest(id, "model/list", { cwd: root, providerOptions: { modelConnection: connection(), executionContext } });
   expect((await harness.waitForResponse(id)).error?.message).toContain(expected);
   expect(discoveries).toEqual([]);
 });
@@ -276,7 +276,7 @@ it.each(["resume", "fork"] as const)(
     });
     await harness.waitForResponse(releaseId);
     const changedEndpoint = options();
-    changedEndpoint.modelConnection.gateway!.baseUrl = `${endpoint}/another-account`;
+    changedEndpoint.providerOptions.modelConnection.gateway!.baseUrl = `${endpoint}/another-account`;
     const attempts: { name: string; options: BridgeExecutionOptions }[] = [
       { name: "valid-alternate-model", options: options("personal", "bb-cpa/personal/gpt-other") },
       { name: "gateway-removal", options: { ...FULL_ACCESS_SESSION_OPTIONS, model: "gpt-example" } },

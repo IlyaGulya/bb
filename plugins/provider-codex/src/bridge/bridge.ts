@@ -559,7 +559,7 @@ interface DecodedCodexOptions {
 }
 
 function assertCodexExecutionContext(
-  context: BridgeExecutionOptions["executionContext"],
+  context: NonNullable<BridgeExecutionOptions["providerOptions"]>["executionContext"],
 ): void {
   if (context?.claudeNativeMcp)
     throw new Error("Native Claude MCP profiles cannot be used by Codex; select a supported execution context.");
@@ -570,7 +570,7 @@ function assertCodexExecutionContext(
 function decodeCodexOptions(
   options: BridgeExecutionOptions,
 ): DecodedCodexOptions {
-  assertCodexExecutionContext(options.executionContext);
+  assertCodexExecutionContext(options.providerOptions?.executionContext);
   const decoded = codexProviderOptionsSchema.parse(
     options.providerOptions ?? {},
   );
@@ -1217,11 +1217,11 @@ async function constructThreadSession(
 ): Promise<ConstructedCodexSession> {
   const existing = sessionsByBbThreadId.get(args.threadId);
   const decoded = decodeCodexOptions(args.options);
-  existing?.gateway?.verify(args.options.modelConnection, args.options.model);
-  if (existing && !existing.gateway && args.options.modelConnection?.gateway)
+  existing?.gateway?.verify(args.options.providerOptions?.modelConnection, args.options.model);
+  if (existing && !existing.gateway && args.options.providerOptions?.modelConnection?.gateway)
     throw new Error("Create a new thread to change a native Codex session to CPA.");
   const gateway = await prepareCodexGateway({
-    connection: args.options.modelConnection,
+    connection: args.options.providerOptions?.modelConnection,
     model: args.options.model,
     threadId: args.threadId,
     dataDir: providerDataDir,
@@ -1672,8 +1672,8 @@ async function handleModelList(
 ): Promise<void> {
   let connection: CodexAppServerConnection | null = null;
   try {
-    assertCodexExecutionContext(params.executionContext);
-    const gatewayModels = await listCodexGatewayModels(params.modelConnection);
+    assertCodexExecutionContext(params.providerOptions?.executionContext);
+    const gatewayModels = await listCodexGatewayModels(params.providerOptions?.modelConnection);
     if (gatewayModels !== null) {
       sendResult(id, { models: gatewayModels, selectedOnlyModels: [] });
       return;
@@ -1776,9 +1776,9 @@ async function requireLiveSessionForTurn(
   }
 
   if (session.gateway) {
-    session.gateway.verify(params.options.modelConnection, params.options.model);
+    session.gateway.verify(params.options.providerOptions?.modelConnection, params.options.model);
     session.gateway.verifyCredential();
-  } else if (params.options.modelConnection?.gateway) {
+  } else if (params.options.providerOptions?.modelConnection?.gateway) {
     throw new Error("Create a new thread to change a native Codex session to CPA.");
   }
   const decoded = decodeCodexOptions(params.options);
@@ -2169,9 +2169,9 @@ async function handleTurnSteer(
   }
   try {
     if (session.gateway) {
-      session.gateway.verify(params.options.modelConnection, params.options.model);
+      session.gateway.verify(params.options.providerOptions?.modelConnection, params.options.model);
       session.gateway.verifyCredential();
-    } else if (params.options.modelConnection?.gateway) {
+    } else if (params.options.providerOptions?.modelConnection?.gateway) {
       throw new Error("Create a new thread to change a native Codex session to CPA.");
     }
     const decoded = decodeCodexOptions(params.options);
