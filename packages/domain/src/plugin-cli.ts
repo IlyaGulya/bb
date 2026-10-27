@@ -4,6 +4,7 @@ export const RESERVED_BB_CLI_COMMANDS: readonly string[] = [
   "environment",
   "execution-context",
   "file",
+  "gateway-logs",
   "guide",
   "help",
   "machine",

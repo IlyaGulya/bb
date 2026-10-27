@@ -17,7 +17,6 @@ import {
 import { z } from "zod";
 import { OmpContextStore, type OmpContextFiles } from "./omp-context-files.js";
 import type { AcpSessionParams } from "./session-params.js";
-import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
 import { discoverGatewayModels, gatewayChildEnv, gatewayModelSchema, pinGatewayReceipt, requireGatewayModel, resolveGatewayCredential, type GatewayModel, type OmpGateway } from "./omp-gateway.js";
 
@@ -666,11 +665,15 @@ export async function runOmpScopedAcp(): Promise<void> {
 }
 
 async function bundledGatewayModels(packageRoot: string, gateway: OmpGateway): Promise<GatewayModel[]> {
-  const require = createRequire(join(packageRoot, "package.json"));
-  const catalog = moduleFunctions(await import(pathToFileURL(require.resolve("@oh-my-pi/pi-catalog/models")).href), ["getBundledModels"], "bundled catalog") as unknown as {
+  const catalog = moduleFunctions(await import(import.meta.resolve("@oh-my-pi/pi-catalog/models", join(packageRoot, "src/index.ts"))), ["getBundledModels"], "bundled catalog") as unknown as {
     getBundledModels(provider: string): unknown[];
   };
-  return catalog.getBundledModels(gateway.modelProvider).map((model) => gatewayModelSchema.parse(model));
+  const models: GatewayModel[] = [];
+  for (const metadata of catalog.getBundledModels(gateway.modelProvider)) {
+    const parsed = gatewayModelSchema.safeParse(metadata);
+    if (parsed.success) models.push(parsed.data);
+  }
+  return models;
 }
 
 async function configureGatewayRegistry(launch: NativeLaunch, registry: InstanceType<NativeSdk["ModelRegistry"]>, key: string | undefined): Promise<unknown> {

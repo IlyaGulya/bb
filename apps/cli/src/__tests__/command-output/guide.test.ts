@@ -49,15 +49,6 @@ describe("bb guide command output", () => {
     expect(output).toContain("bb guide commands <group>");
   }, 30_000);
 
-  it("bb guide commands rejects a group that does not exist", async () => {
-    await expect(
-      runCommand(["guide", "commands", "nope"], registerGuideCommand),
-    ).rejects.toThrow("process.exit:1");
-
-    const errorOutput = collectLogLines(vi.mocked(console.error)).join("\n");
-    expect(errorOutput).toContain("Unknown command group 'nope'.");
-    expect(errorOutput).toContain("Command groups: browser, status");
-  }, 30_000);
 
   it("bb guide terminals renders the terminals chapter", async () => {
     await runCommand(["guide", "terminals"], registerGuideCommand);

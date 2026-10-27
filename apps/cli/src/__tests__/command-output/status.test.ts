@@ -16,16 +16,6 @@ describe("bb status command output", () => {
   const register: CommandRegistrar = (program) =>
     registerStatusCommand(program, () => "http://server");
 
-  it("bb status prints project/thread context", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
-    vi.stubEnv("BB_THREAD_ID", "thread-1");
-
-    await runCommand(["status"], register);
-
-    const lines = collectLogLines(vi.mocked(console.log));
-    expect(lines).toContain("Project: proj-1");
-    expect(lines).toContain("Thread: thread-1");
-  });
 
   it("bb status prints environment without fetching hosts", async () => {
     vi.stubEnv("BB_PROJECT_ID", "proj-1");

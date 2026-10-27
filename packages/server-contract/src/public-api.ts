@@ -453,6 +453,7 @@ type PathThreadMessage = { param: { id: string; seq: string } };
 type PathThreadInteractionId = {
   param: { id: string; interactionId: string };
 };
+type PathGatewayLogId = { param: { logId: string } };
 
 export const publicApiRoutes = {
   gatewayLogs: {
@@ -465,13 +466,13 @@ export const publicApiRoutes = {
     read: defineRoute({
       path: "/gateway-logs/:logId",
       method: "get",
-      request: queryRequest<{ logId: string }, GatewayLogReadQuery>(gatewayLogReadQuerySchema),
+      request: queryRequest<PathGatewayLogId, GatewayLogReadQuery>(gatewayLogReadQuerySchema),
       response: jsonResponse<GatewayLogPreview>(),
     }),
     download: defineRoute({
       path: "/gateway-logs/:logId/download",
       method: "get",
-      request: queryRequest<{ logId: string }, GatewayLogListQuery>(gatewayLogDownloadQuerySchema),
+      request: queryRequest<PathGatewayLogId, GatewayLogListQuery>(gatewayLogDownloadQuerySchema),
       response: binaryResponse<Uint8Array>(),
     }),
   },

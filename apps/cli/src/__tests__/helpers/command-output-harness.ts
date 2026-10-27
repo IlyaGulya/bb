@@ -30,7 +30,10 @@ vi.mock("../../client.js", async () => {
     return createBbSdk({
       transport: {
         ...realTransport,
-        api: serverClientState.createClient(baseUrl)?.api ?? {},
+        api: {
+          v1: realTransport.api.v1,
+          ...(serverClientState.createClient(baseUrl)?.api ?? {}),
+        },
         readJson: (responsePromise: MockTransportPromise) =>
           realTransport.readJson(responsePromise.then(toResponse)),
         readVoid: (responsePromise: MockTransportPromise) =>
