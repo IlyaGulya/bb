@@ -8,6 +8,7 @@ import {
 import { SecondaryPanelLayout } from "@/components/secondary-panel/SecondaryPanelLayout";
 import { LazyThreadSecondaryPanel } from "@/components/secondary-panel/lazySecondaryPanelComponents";
 import { ThreadExecutionBindingCard } from "@/components/secondary-panel/ThreadExecutionBindingCard";
+import { GatewayLogsAction } from "@/components/secondary-panel/GatewayLogsDrawer";
 import {
   ThreadMetadataCard,
   ThreadMetadataContent,
@@ -160,6 +161,10 @@ function ThreadDetailSecondaryContentBody({
             metadataContent={
               <div className="flex min-h-0 flex-1 flex-col">
                 <ThreadExecutionBindingCard threadId={metadata.thread.id} />
+                <GatewayLogsAction
+                  key={metadata.thread.id}
+                  threadId={metadata.thread.id}
+                />
                 {metadataContent}
               </div>
             }

@@ -1,3 +1,12 @@
+import {
+  gatewayLogListQuerySchema,
+  gatewayLogReadQuerySchema,
+  gatewayLogDownloadQuerySchema,
+  type GatewayLogListQuery,
+  type GatewayLogReadQuery,
+  type GatewayLogList,
+  type GatewayLogPreview,
+} from "./api/gateway-logs.js";
 import { executionContextRoutes } from "./execution-context-routes.js";
 import {
   machineEnvironmentSetSchema,
@@ -446,6 +455,26 @@ type PathThreadInteractionId = {
 };
 
 export const publicApiRoutes = {
+  gatewayLogs: {
+    list: defineRoute({
+      path: "/gateway-logs",
+      method: "get",
+      request: queryRequest<EmptyInput, GatewayLogListQuery>(gatewayLogListQuerySchema),
+      response: jsonResponse<GatewayLogList>(),
+    }),
+    read: defineRoute({
+      path: "/gateway-logs/:logId",
+      method: "get",
+      request: queryRequest<{ logId: string }, GatewayLogReadQuery>(gatewayLogReadQuerySchema),
+      response: jsonResponse<GatewayLogPreview>(),
+    }),
+    download: defineRoute({
+      path: "/gateway-logs/:logId/download",
+      method: "get",
+      request: queryRequest<{ logId: string }, GatewayLogListQuery>(gatewayLogDownloadQuerySchema),
+      response: binaryResponse<Uint8Array>(),
+    }),
+  },
   ...executionContextRoutes,
   promptHistory: {
     list: defineRoute({

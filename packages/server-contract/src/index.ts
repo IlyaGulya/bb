@@ -1,4 +1,5 @@
 export * from "./api/execution-contexts.js";
+export * from "./api/gateway-logs.js";
 export * from "./api-client.js";
 export * from "./api-types.js";
 export * from "./api/thread-tabs.js";

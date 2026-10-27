@@ -1,4 +1,8 @@
 import {
+  createGatewayLogsArea,
+  type ExperimentalGatewayLogsArea,
+} from "./areas/gateway-logs.js";
+import {
   createExecutionContextsArea,
   createModelConnectionsArea,
   type ExecutionContextsArea,
@@ -53,6 +57,7 @@ export interface CreateBbSdkWithGuideArgs extends CreateBbSdkArgs {
 }
 
 export interface BbSdkAreas extends BbRealtime {
+  experimental_gatewayLogs: ExperimentalGatewayLogsArea;
   experimental_executionContexts: ExecutionContextsArea;
   experimental_modelConnections: ModelConnectionsArea;
   experimental_desktopBrowsers: ExperimentalDesktopBrowsersArea;
@@ -87,6 +92,7 @@ export function createBbSdk(
     transport: args.transport,
   });
   const areas: BbSdkAreas = {
+    experimental_gatewayLogs: createGatewayLogsArea(sdkContext),
     experimental_executionContexts: createExecutionContextsArea(sdkContext),
     experimental_modelConnections: createModelConnectionsArea(sdkContext),
     experimental_desktopBrowsers: createDesktopBrowsersArea(sdkContext),
