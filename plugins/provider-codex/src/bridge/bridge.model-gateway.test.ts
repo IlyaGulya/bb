@@ -240,3 +240,24 @@ it("requires an explicit selection and a nonempty catalog in the bound namespace
   expect(wrongNamespace.error).toBeDefined();
   expect(wrongNamespace.result).toBeUndefined();
 });
+
+it.each([false, true])("refuses unsupported explicit context sources before session or catalog discovery (Claude MCP: %s)", async (nativeMcp) => {
+  const executionContext = {
+    id: "context-explicit", name: "Explicit context", enabled: true, projectIds: [],
+    instructions: "Use only this explicit context", skillRoots: [], commandRoots: [],
+    pluginRoots: [], settingsPaths: [], mcpServers: [], hooksPath: null,
+    autoMemory: false, gitIdentity: null, defaultModelConnectionId: null,
+    createdAt: 1, updatedAt: 1,
+    ...(nativeMcp ? { claudeNativeMcp: { configDir: null } } : {}),
+  };
+  const expected = nativeMcp ? "Native Claude MCP" : "Explicit execution contexts";
+  for (const kind of ["start", "resume", "fork"] as const) {
+    const response = await construct(`thr_context_${kind}`, { ...options(), executionContext }, kind, "native-existing-thread");
+    expect(response.error?.message).toContain(expected);
+    expect(response.result).toBeUndefined();
+  }
+  const id = nextId++;
+  harness.sendRequest(id, "model/list", { modelConnection: connection(), executionContext });
+  expect((await harness.waitForResponse(id)).error?.message).toContain(expected);
+  expect(discoveries).toEqual([]);
+});

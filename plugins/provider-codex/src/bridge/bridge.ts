@@ -558,9 +558,19 @@ interface DecodedCodexOptions {
   daybreak: boolean | null;
 }
 
+function assertCodexExecutionContext(
+  context: BridgeExecutionOptions["executionContext"],
+): void {
+  if (context?.claudeNativeMcp)
+    throw new Error("Native Claude MCP profiles cannot be used by Codex; select a supported execution context.");
+  if (context)
+    throw new Error("Explicit execution contexts are not supported by native Codex; refusing ambient context fallback.");
+}
+
 function decodeCodexOptions(
   options: BridgeExecutionOptions,
 ): DecodedCodexOptions {
+  assertCodexExecutionContext(options.executionContext);
   const decoded = codexProviderOptionsSchema.parse(
     options.providerOptions ?? {},
   );
@@ -1657,6 +1667,7 @@ async function handleModelList(
 ): Promise<void> {
   let connection: CodexAppServerConnection | null = null;
   try {
+    assertCodexExecutionContext(params.executionContext);
     const gatewayModels = await listCodexGatewayModels(params.modelConnection);
     if (gatewayModels !== null) {
       sendResult(id, { models: gatewayModels, selectedOnlyModels: [] });
