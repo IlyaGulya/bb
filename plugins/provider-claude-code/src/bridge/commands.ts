@@ -1,6 +1,7 @@
 import {
   dynamicToolSchema,
   initializeParamsSchema,
+  modelListParamsSchema,
   instructionModeValues,
   permissionEscalationValues,
   reasoningLevelSchema,
@@ -114,7 +115,7 @@ const claudeCodeCommandSchema = z.discriminatedUnion("method", [
   }),
   z.object({
     method: z.literal("model/list"),
-    params: z.object({ modelConnection: modelConnectionSnapshotSchema.optional() }),
+    params: modelListParamsSchema,
   }),
   z.object({
     method: z.literal("provider/health"),

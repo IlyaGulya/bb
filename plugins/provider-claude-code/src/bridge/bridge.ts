@@ -2179,8 +2179,8 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
       try {
         sendResult(
           request.id,
-          request.params.modelConnection?.gateway
-            ? await listClaudeGatewayModels(request.params.modelConnection)
+          request.params.providerOptions?.modelConnection?.gateway
+            ? await listClaudeGatewayModels(request.params.providerOptions.modelConnection)
             : await listModelsMemoized(),
         );
       } catch (error) {
