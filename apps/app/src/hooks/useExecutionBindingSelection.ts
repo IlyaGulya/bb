@@ -25,6 +25,7 @@ export interface ExecutionBindingSelection {
   effectiveContextId: string | null | undefined;
   effectiveConnectionId: string | null | undefined;
   effectiveContext: ExecutionContext | undefined;
+  effectiveConnection: ModelConnection | undefined;
   mcpInspection: McpInspectionQuery;
   mcpIssue: string | null;
   unavailableReason: string | null;
@@ -32,15 +33,16 @@ export interface ExecutionBindingSelection {
   selectConnection: (id: string) => void;
 }
 
-export function useExecutionBindingSelection({
+export type ExecutionBindingDefinitions = Omit<
+  ExecutionBindingSelection,
+  "mcpInspection" | "mcpIssue" | "unavailableReason"
+>;
+
+export function useExecutionBindingDefinitions({
   projectId,
-  providerId,
-  hostId,
 }: {
   projectId: string;
-  providerId: string;
-  hostId: string | null;
-}): ExecutionBindingSelection {
+}): ExecutionBindingDefinitions {
   const contexts = useQuery({
     queryKey: ["execution-contexts"],
     queryFn: () => sdk.experimental_executionContexts.list(),
@@ -77,6 +79,51 @@ export function useExecutionBindingSelection({
   const connection = connections.data?.find(
     (entry) => entry.id === effectiveConnectionId,
   );
+  return {
+    contexts,
+    connections,
+    defaults,
+    executionContextId,
+    modelConnectionId,
+    effectiveContextId,
+    effectiveConnectionId,
+    effectiveContext: context,
+    effectiveConnection: connection,
+    selectContext: (id: string) =>
+      setSelection((current) => ({
+        ...(current.projectId === projectId ? current : {}),
+        projectId,
+        executionContextId: id || undefined,
+      })),
+    selectConnection: (id: string) =>
+      setSelection((current) => ({
+        ...(current.projectId === projectId ? current : {}),
+        projectId,
+        modelConnectionId: id || undefined,
+      })),
+  };
+}
+
+export function useExecutionBindingValidation({
+  selection,
+  projectId,
+  providerId,
+  hostId,
+}: {
+  selection: ExecutionBindingDefinitions;
+  projectId: string;
+  providerId: string;
+  hostId: string | null;
+}): ExecutionBindingSelection {
+  const {
+    contexts,
+    connections,
+    defaults,
+    effectiveContextId,
+    effectiveConnectionId,
+    effectiveContext: context,
+    effectiveConnection: connection,
+  } = selection;
   const mcpServers = context?.mcpServers ?? [];
   const mcpInspection = useMcpInspection({
     hostId,
@@ -103,28 +150,27 @@ export function useExecutionBindingSelection({
             ? "Checking selected MCP configuration…"
             : null));
   return {
-    contexts,
-    connections,
-    defaults,
-    executionContextId,
-    modelConnectionId,
-    effectiveContextId,
-    effectiveConnectionId,
-    effectiveContext: context,
+    ...selection,
     mcpInspection,
     mcpIssue,
     unavailableReason,
-    selectContext: (id: string) =>
-      setSelection((current) => ({
-        ...(current.projectId === projectId ? current : {}),
-        projectId,
-        executionContextId: id || undefined,
-      })),
-    selectConnection: (id: string) =>
-      setSelection((current) => ({
-        ...(current.projectId === projectId ? current : {}),
-        projectId,
-        modelConnectionId: id || undefined,
-      })),
   };
+}
+
+export function useExecutionBindingSelection({
+  projectId,
+  providerId,
+  hostId,
+}: {
+  projectId: string;
+  providerId: string;
+  hostId: string | null;
+}): ExecutionBindingSelection {
+  const selection = useExecutionBindingDefinitions({ projectId });
+  return useExecutionBindingValidation({
+    selection,
+    projectId,
+    providerId,
+    hostId,
+  });
 }

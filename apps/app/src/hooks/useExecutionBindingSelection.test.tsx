@@ -116,6 +116,56 @@ describe("execution binding MCP selection", () => {
     expect(result.current.effectiveConnectionId).toBe("personal-account");
   });
 
+  it("selects a gateway independently of context and rejects an unapproved execution machine", async () => {
+    const gateway = modelConnectionSchema.parse({
+      id: "personal-cpa",
+      name: "Personal CPA",
+      provider: "acp-omp",
+      hostId: null,
+      gateway: {
+        baseUrl: "http://cpa:8317/v1",
+        protocol: "openai-responses",
+        accountPrefix: "personal",
+        modelProvider: "openai-codex",
+        credential: { kind: "file", path: "/private/cpa-client-key" },
+        allowedHostIds: ["worker"],
+      },
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    vi.mocked(sdk.experimental_modelConnections.list).mockResolvedValue([
+      ...connections,
+      gateway,
+    ]);
+    vi.mocked(sdk.experimental_executionContexts.getProjectDefaults).mockResolvedValue({
+      projectId: "project",
+      executionContextId: null,
+      modelConnectionId: null,
+    });
+    const { wrapper } = createQueryClientTestHarness();
+    const { result, rerender } = renderHook(
+      ({ hostId }: { hostId: string }) =>
+        useExecutionBindingSelection({
+          projectId: "project",
+          providerId: "acp-omp",
+          hostId,
+        }),
+      { wrapper, initialProps: { hostId: "worker" } },
+    );
+    await waitFor(() => expect(result.current.connections.isSuccess).toBe(true));
+    act(() => result.current.selectConnection(gateway.id));
+    await waitFor(() => expect(result.current.unavailableReason).toBeNull());
+    expect(result.current.effectiveContext).toBeUndefined();
+    expect(result.current.effectiveConnection).toEqual(gateway);
+
+    rerender({ hostId: "other-worker" });
+    expect(result.current.unavailableReason).toBe(
+      "This machine is not allowed to use the CPA gateway connection.",
+    );
+    expect(result.current.effectiveConnectionId).toBe(gateway.id);
+    expect(result.current.effectiveContext).toBeUndefined();
+  });
+
   it("does not reuse another machine's valid inspection and blocks known invalid configuration", async () => {
     const nextInspection = createDeferredPromise<McpConfigurationInspection>();
     const { wrapper } = createQueryClientTestHarness();

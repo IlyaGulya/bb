@@ -11,7 +11,6 @@ import { useHosts } from "@/hooks/queries/host-queries";
 export function ExecutionBindingPicker({
   selection,
   projectId,
-  providerId,
   hostId,
   disabled,
 }: {
@@ -61,13 +60,15 @@ export function ExecutionBindingPicker({
     ...connections.map((entry) => {
       const reason = modelConnectionUnavailableReason(
         entry,
-        providerId,
+        entry.provider,
         hostId,
       );
       return {
         value: entry.id,
         label: entry.name,
-        description: `${entry.provider} · ${entry.hostId}`,
+        description: entry.gateway
+          ? `CPA gateway · ${entry.gateway.accountPrefix} · native OMP (acp-omp)`
+          : `${entry.provider} · ${entry.hostId}`,
         disabled: reason !== null,
         disabledReason: reason ?? undefined,
       };
@@ -108,6 +109,13 @@ export function ExecutionBindingPicker({
             ? mcpServers.map((ref) => ref.name).join(", ")
             : "None selected (native defaults unchanged)"}
         </p>
+        {selection.effectiveConnection?.gateway ? (
+          <p className="break-all">
+            CPA gateway: {selection.effectiveConnection.gateway.accountPrefix} ·{" "}
+            {selection.effectiveConnection.gateway.baseUrl}. Native OMP (acp-omp)
+            only. Context, MCP, Git identity and session storage are unchanged.
+          </p>
+        ) : null}
         {mcpServers.length > 0 ? (
           <>
             <p role="status">

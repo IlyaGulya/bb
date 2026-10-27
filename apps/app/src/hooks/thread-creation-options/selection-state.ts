@@ -49,6 +49,9 @@ export interface UsePromptModelReasoningOptions {
   sessionOptionSelections?: SessionOptionSelections;
   preferenceProjectId?: string | null;
   catalogProjectId?: string;
+  modelConnectionId?: string;
+  modelConnectionProviderId?: string;
+  executionThreadId?: string;
   resolveProviderRouting?: (
     environmentSelectionValue: string,
   ) => SystemProvidersQuery;

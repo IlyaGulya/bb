@@ -756,6 +756,7 @@ export function ThreadDetailPromptArea({
     enabled: thread.archivedAt === null,
     environmentId: thread.environmentId ?? undefined,
     environmentHostId,
+    executionThreadId: thread.id,
     scope: "component-local",
     resetKey: thread.id,
     sessionOptionSelections: liveSessionOptionSelections,
@@ -1641,10 +1642,7 @@ export function ThreadDetailPromptArea({
   ]);
   const bottomExecutionConfig = useMemo(
     () => ({
-      providerRouting:
-        thread.environmentId === null
-          ? executionOptionsRouting
-          : { environmentId: thread.environmentId },
+      providerRouting: executionOptionsRouting,
       provider: {
         options: providerOptions,
         selectedId: selectedProviderId,

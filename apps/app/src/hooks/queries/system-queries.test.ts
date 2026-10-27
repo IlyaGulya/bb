@@ -316,6 +316,45 @@ describe("useSystemExecutionOptions", () => {
     });
   });
 
+  it("withholds native and another account's model roster while a selected connection loads", async () => {
+    const personalModel = { ...CODEX_MODEL, model: "bb-cpa/personal/gpt-5.5" };
+    vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) => {
+      if (args?.modelConnectionId === "work-cpa") {
+        return new Promise<SystemExecutionOptionsResponse>(() => undefined);
+      }
+      return {
+        ...EXECUTION_OPTIONS_RESPONSE,
+        models: args?.modelConnectionId === "personal-cpa" ? [personalModel] : [CODEX_MODEL],
+      };
+    });
+    const { queryClient } = createQueryClientTestHarness();
+    const observer = observe(
+      queryClient,
+      liveSystemExecutionOptionsQueryOptions({ hostId: "worker", providerId: "acp-omp" }),
+    );
+    await vi.waitFor(() => expect(observer.getCurrentResult().data?.models).toEqual([CODEX_MODEL]));
+
+    observer.setOptions(
+      liveSystemExecutionOptionsQueryOptions({
+        hostId: "worker",
+        providerId: "acp-omp",
+        modelConnectionId: "personal-cpa",
+      }),
+    );
+    expect(observer.getCurrentResult().data?.models).toBeUndefined();
+    await vi.waitFor(() => expect(observer.getCurrentResult().data?.models).toEqual([personalModel]));
+
+    observer.setOptions(
+      liveSystemExecutionOptionsQueryOptions({
+        hostId: "worker",
+        providerId: "acp-omp",
+        modelConnectionId: "work-cpa",
+      }),
+    );
+    expect(observer.getCurrentResult().data?.models).toBeUndefined();
+    expect(observer.getCurrentResult().isPlaceholderData).toBe(false);
+  });
+
   it("separates requests and cache entries for different hosts", async () => {
     vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) =>
       args?.hostId === "host-a"

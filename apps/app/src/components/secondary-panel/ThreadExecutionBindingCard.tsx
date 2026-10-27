@@ -44,10 +44,45 @@ export function ThreadExecutionBindingCard({ threadId }: { threadId: string }) {
               {binding.data?.modelConnection?.name ?? "Native default (legacy)"}
             </DetailRow>
             {binding.data?.modelConnection ? (
-              <DetailRow label="Provider · machine">
+              <DetailRow label="Provider · connection mode">
                 {binding.data.modelConnection.provider} ·{" "}
-                {binding.data.modelConnection.hostId}
+                {binding.data.modelConnection.gateway
+                  ? "CPA gateway"
+                  : binding.data.modelConnection.hostId}
               </DetailRow>
+            ) : null}
+            {binding.data?.modelConnection?.gateway ? (
+              <>
+                <DetailRow label="Gateway model API">
+                  <span className="break-all">{binding.data.modelConnection.gateway.baseUrl}</span>
+                </DetailRow>
+                <DetailRow label="Account namespace · catalog provider">
+                  {binding.data.modelConnection.gateway.accountPrefix} ·{" "}
+                  {binding.data.modelConnection.gateway.modelProvider}
+                </DetailRow>
+                <DetailRow label="Gateway protocol">
+                  {binding.data.modelConnection.gateway.protocol}
+                </DetailRow>
+                <DetailRow label="Client credential reference">
+                  <span className="break-all">
+                    {binding.data.modelConnection.gateway.credential.kind === "env"
+                      ? `Environment: ${binding.data.modelConnection.gateway.credential.name}`
+                      : `File: ${binding.data.modelConnection.gateway.credential.path}`}
+                  </span>
+                </DetailRow>
+                <DetailRow label="Allowed execution machines">
+                  {binding.data.modelConnection.gateway.allowedHostIds.map((id) => (
+                    <div key={id} className="break-all">
+                      {hosts.data?.find((host) => host.id === id)?.name ?? id}
+                    </div>
+                  ))}
+                </DetailRow>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Frozen gateway receipt. Credential references may rotate;
+                  endpoint and account changes require a new thread. Trusted
+                  pilot client keys are flat, not per-run access grants.
+                </p>
+              </>
             ) : null}
             <DetailRow label="Execution machine">
               {executionHost?.name ??

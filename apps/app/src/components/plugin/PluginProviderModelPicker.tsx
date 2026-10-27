@@ -27,6 +27,8 @@ export function PluginProviderModelPicker({
   value,
   onChange,
   routing,
+  modelConnectionId,
+  threadId,
   allowProviderChange = true,
   align = "start",
   disabled,
@@ -36,10 +38,13 @@ export function PluginProviderModelPicker({
     () => resolvePluginExecutionRouting(routing),
     [routing],
   );
-  const controlledKey = `${resolvedRouting.key}\0${selectionKey(value)}`;
+  const controlledKey = `${resolvedRouting.key}\0${modelConnectionId ?? ""}\0${threadId ?? ""}\0${selectionKey(value)}`;
   const controller = useThreadCreationOptions({
     scope: "component-local",
     initialProviderId: value.providerId,
+    modelConnectionId,
+    modelConnectionProviderId: modelConnectionId ? value.providerId : undefined,
+    executionThreadId: threadId,
     initialModel: value.model,
     initialReasoningLevel: value.reasoningLevel,
     initialServiceTier: value.serviceTier,

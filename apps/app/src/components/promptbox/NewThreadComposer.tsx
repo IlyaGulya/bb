@@ -139,7 +139,10 @@ import {
   machineServerAccessBlockedReason,
 } from "@/components/machines/machine-server-access";
 import { ExecutionBindingPicker } from "@/components/pickers/ExecutionBindingPicker";
-import { useExecutionBindingSelection } from "@/hooks/useExecutionBindingSelection";
+import {
+  useExecutionBindingDefinitions,
+  useExecutionBindingValidation,
+} from "@/hooks/useExecutionBindingSelection";
 
 type NewThreadComposerSelectionScope = "new-thread" | "component-local";
 
@@ -867,10 +870,17 @@ export function NewThreadComposer({
       seed?.model === undefined ||
       seed?.reasoningLevel === undefined ||
       seed?.permissionMode === undefined);
+  const bindingDefinitions = useExecutionBindingDefinitions({ projectId });
   const creationOptions = useThreadCreationOptions({
     scope: selectionScope,
     preferenceProjectId: projectId,
     catalogProjectId: isProjectless ? undefined : projectId,
+    enabled:
+      bindingDefinitions.defaults.isSuccess &&
+      bindingDefinitions.connections.isSuccess &&
+      bindingDefinitions.contexts.isSuccess,
+    modelConnectionId: bindingDefinitions.effectiveConnectionId ?? undefined,
+    modelConnectionProviderId: bindingDefinitions.effectiveConnection?.provider,
     resetKey: `${projectId}\0${seedSignature}`,
     resolveProviderRouting,
     initialProviderId: seed?.providerId ?? projectDefaults?.providerId,
@@ -1522,7 +1532,8 @@ export function NewThreadComposer({
     reuseEnvironmentId === null
       ? projectHostId
       : (bindingEnvironment.data?.hostId ?? null);
-  const executionBinding = useExecutionBindingSelection({
+  const executionBinding = useExecutionBindingValidation({
+    selection: bindingDefinitions,
     projectId,
     providerId: selectedProviderId,
     hostId: bindingHostId,

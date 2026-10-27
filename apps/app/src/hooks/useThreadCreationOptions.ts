@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+import { sdk } from "@/lib/sdk";
 import {
   useCallback,
   useEffect,
@@ -115,7 +117,7 @@ type ProviderModelReasoningSelectionSetter = (
 ) => void;
 
 interface UseThreadCreationOptionsResult<TExecutionInputSources> {
-  executionOptionsRouting: SystemProvidersQuery;
+  executionOptionsRouting: SystemProvidersQuery & { modelConnectionId?: string; threadId?: string };
   selectedProviderId: string;
   setSelectedProviderId: StringSelectionSetter;
   setProviderModelReasoning: ProviderModelReasoningSelectionSetter;
@@ -242,11 +244,24 @@ export function useThreadCreationOptions(
     preferReadyProviderWhenUnset = false,
     preferenceProjectId,
     catalogProjectId,
+    modelConnectionId: requestedModelConnectionId,
+    modelConnectionProviderId: requestedModelConnectionProviderId,
+    executionThreadId,
     resolveProviderRouting,
     resetKey,
     scope = "new-thread",
     sessionOptionSelections: sessionOptionSelectionsOverride,
   } = options ?? {};
+  const binding = useQuery({
+    queryKey: ["thread-execution-binding", executionThreadId],
+    queryFn: () => sdk.experimental_executionContexts.getThreadBinding({ threadId: executionThreadId! }),
+    enabled: enabled && executionThreadId !== undefined,
+    staleTime: Infinity,
+  });
+  const modelConnectionId =
+    requestedModelConnectionId ?? binding.data?.modelConnection?.id;
+  const modelConnectionProviderId =
+    requestedModelConnectionProviderId ?? binding.data?.modelConnection?.provider;
   const { setValue: setStoredProviderId, value: storedProviderId } =
     usePromptBoxProviderPreference();
   const setStoredProviderModelReasoning =
@@ -324,9 +339,11 @@ export function useThreadCreationOptions(
     usesLocalThreadSelections,
   ]);
 
-  const selectedProviderIdBeforeReadyFallback = usesStoredCreateSelections
-    ? storedProviderId || renderedThreadSelections.selectedProviderId
-    : renderedThreadSelections.selectedProviderId;
+  const selectedProviderIdBeforeReadyFallback =
+    modelConnectionProviderId ??
+    (usesStoredCreateSelections
+      ? storedProviderId || renderedThreadSelections.selectedProviderId
+      : renderedThreadSelections.selectedProviderId);
   const rawPermissionMode = usesStoredCreateSelections
     ? storedPermissionMode || renderedThreadSelections.permissionMode
     : renderedThreadSelections.permissionMode;
@@ -339,7 +356,8 @@ export function useThreadCreationOptions(
   const knownModelCatalogScope = useKnownProviderModelCatalogScope(
     selectedProviderIdBeforeReadyFallback,
   );
-  const executionOptionsQueryEnabled = enabled;
+  const executionOptionsQueryEnabled =
+    enabled && (executionThreadId === undefined || binding.isSuccess);
   const routingSelectionKey = JSON.stringify([
     scope,
     resetKey,
@@ -371,9 +389,25 @@ export function useThreadCreationOptions(
       routing: defaultCatalogRouting,
     });
   }
-  const executionOptionsRouting = resolveProviderRouting
-    ? resolveProviderRouting(rawEnvironmentSelectionValue)
-    : defaultCatalogRouting;
+  const executionOptionsRouting = useMemo(
+    () => ({
+      ...(resolveProviderRouting
+        ? resolveProviderRouting(rawEnvironmentSelectionValue)
+        : defaultCatalogRouting),
+      ...(modelConnectionId ? { modelConnectionId } : {}),
+      ...(executionThreadId && binding.data?.modelConnection?.gateway
+        ? { threadId: executionThreadId }
+        : {}),
+    }),
+    [
+      resolveProviderRouting,
+      rawEnvironmentSelectionValue,
+      defaultCatalogRouting,
+      modelConnectionId,
+      executionThreadId,
+      binding.data?.modelConnection?.gateway,
+    ],
+  );
   const canResolveReadyProvider =
     executionOptionsQueryEnabled &&
     scope === "new-thread" &&
@@ -434,15 +468,23 @@ export function useThreadCreationOptions(
   });
   const hostsQuery = useHosts();
   const systemConfig = useSystemConfig();
-  const providers = executionOptionsQuery.data?.providers ?? EMPTY_PROVIDERS;
+  const offeredProviders = executionOptionsQuery.data?.providers ?? EMPTY_PROVIDERS;
+  const providers = useMemo(
+    () => modelConnectionProviderId
+      ? offeredProviders.filter((provider) => provider.id === modelConnectionProviderId)
+      : offeredProviders,
+    [offeredProviders, modelConnectionProviderId],
+  );
   const isLoadingModels =
-    executionOptionsQueryEnabled &&
-    (executionOptionsQuery.isLoading ||
-      (executionOptionsQuery.isPlaceholderData &&
-        (executionOptionsQuery.data?.models.length ?? 0) === 0));
+    (enabled && executionThreadId !== undefined && binding.isPending) ||
+    (executionOptionsQueryEnabled &&
+      (executionOptionsQuery.isLoading ||
+        (executionOptionsQuery.isPlaceholderData &&
+          (executionOptionsQuery.data?.models.length ?? 0) === 0)));
   const modelLoadError =
     executionOptionsQuery.data?.modelLoadError ?? NO_MODEL_LOAD_ERROR;
   const modelLoadFailed =
+    (executionThreadId !== undefined && binding.isError) ||
     executionOptionsQuery.isError || modelLoadError !== null;
   const modelCatalogIsVerified =
     executionOptionsQuery.data !== undefined &&
@@ -450,10 +492,12 @@ export function useThreadCreationOptions(
     !executionOptionsQuery.isError &&
     modelLoadError === null;
   const modelCatalogIsSettled =
-    !executionOptionsQueryEnabled ||
-    executionOptionsQuery.isError ||
-    (executionOptionsQuery.data !== undefined &&
-      !executionOptionsQuery.isPlaceholderData);
+    !enabled ||
+    (executionThreadId !== undefined && binding.isError) ||
+    (executionOptionsQueryEnabled &&
+      (executionOptionsQuery.isError ||
+        (executionOptionsQuery.data !== undefined &&
+          !executionOptionsQuery.isPlaceholderData)));
   const permissionModeIsVerified =
     executionOptionsQuery.data !== undefined &&
     !executionOptionsQuery.isPlaceholderData &&
@@ -461,6 +505,7 @@ export function useThreadCreationOptions(
   const hasMultipleProviders = providers.length >= 2;
 
   const effectiveProviderId = useMemo(() => {
+    if (modelConnectionProviderId) return modelConnectionProviderId;
     if (
       rawSelectedProviderId &&
       providers.some((provider) => provider.id === rawSelectedProviderId)
@@ -468,7 +513,7 @@ export function useThreadCreationOptions(
       return rawSelectedProviderId;
     }
     return providers[0]?.id ?? "";
-  }, [providers, rawSelectedProviderId]);
+  }, [providers, rawSelectedProviderId, modelConnectionProviderId]);
 
   const { setValue: setStoredSelectedModel, value: storedSelectedModel } =
     usePromptBoxModelPreference(effectiveProviderId);
@@ -707,11 +752,13 @@ export function useThreadCreationOptions(
   const touchedFieldsPendingReset =
     usesLocalThreadSelections && threadResetKeyRef.current !== resetKey;
   const effectiveInitialProviderSource: ExecutionInputFieldSource | undefined =
-    canResolveReadyProvider &&
-    readyProviderId !== undefined &&
-    effectiveProviderId === readyProviderId
-      ? "client-preference"
-      : undefined;
+    modelConnectionId !== undefined
+      ? "explicit"
+      : canResolveReadyProvider &&
+          readyProviderId !== undefined &&
+          effectiveProviderId === readyProviderId
+        ? "client-preference"
+        : undefined;
   const executionInputSources = useMemo(
     () =>
       buildExecutionInputSources({
@@ -723,7 +770,7 @@ export function useThreadCreationOptions(
           permissionMode,
         },
         forceExplicitModel:
-          isUnavailableModelRecovery || isSessionOptionModelSwitch,
+          modelConnectionId !== undefined || isUnavailableModelRecovery || isSessionOptionModelSwitch,
         initialProviderSource: effectiveInitialProviderSource,
         scope,
         storedValues: {
@@ -742,6 +789,7 @@ export function useThreadCreationOptions(
       effectiveInitialProviderSource,
       isSessionOptionModelSwitch,
       isUnavailableModelRecovery,
+      modelConnectionId,
       permissionMode,
       reasoningLevel,
       scope,

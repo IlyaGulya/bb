@@ -60,6 +60,8 @@ interface UseSystemExecutionOptionsArgs {
   hostId?: string;
   providerId?: string;
   projectId?: string;
+  modelConnectionId?: string;
+  threadId?: string;
 }
 
 interface SystemExecutionOptionsQueryArgs {
@@ -67,6 +69,8 @@ interface SystemExecutionOptionsQueryArgs {
   hostId: string | null;
   providerId: string | null;
   projectId: string | null;
+  modelConnectionId: string | null;
+  threadId: string | null;
   writeLastKnown: boolean;
 }
 
@@ -305,6 +309,8 @@ async function requestOfferedProviderExecutionOptions({
   hostId,
   providerId,
   projectId,
+  modelConnectionId,
+  threadId,
   signal,
 }: Omit<SystemExecutionOptionsQueryArgs, "writeLastKnown"> & {
   signal: AbortSignal;
@@ -318,11 +324,14 @@ async function requestOfferedProviderExecutionOptions({
       hostId: hostId ?? undefined,
       providerId: requestedProviderId ?? undefined,
       projectId: projectId ?? undefined,
+      modelConnectionId: modelConnectionId ?? undefined,
+      threadId: threadId ?? undefined,
       signal,
     });
   const response = await request(providerId);
   const fallbackProviderId = response.providers[0]?.id;
   if (
+    modelConnectionId !== null ||
     providerId === null ||
     fallbackProviderId === undefined ||
     response.providers.some((provider) => provider.id === providerId)
@@ -340,6 +349,8 @@ function systemExecutionOptionsQueryOptions({
   hostId,
   providerId,
   projectId,
+  modelConnectionId,
+  threadId,
   writeLastKnown,
 }: SystemExecutionOptionsQueryArgs) {
   return queryOptions<SystemExecutionOptionsResponse>({
@@ -348,6 +359,8 @@ function systemExecutionOptionsQueryOptions({
       hostId,
       providerId,
       projectId,
+      modelConnectionId,
+      threadId,
     }),
     queryFn: async ({ signal }) => {
       const { response, loadedProviderId } =
@@ -356,11 +369,13 @@ function systemExecutionOptionsQueryOptions({
           hostId,
           providerId,
           projectId,
+          modelConnectionId,
+          threadId,
           signal,
         });
       const modelsProviderId =
         loadedProviderId ?? response.providers[0]?.id ?? null;
-      if (writeLastKnown) {
+      if (writeLastKnown && modelConnectionId === null && threadId === null) {
         writeCachedProviderList(
           providerListCacheKey({ environmentId, hostId }),
           response.providers,
@@ -394,6 +409,8 @@ function systemExecutionOptionsQueryOptions({
       }
       if (
         writeLastKnown &&
+        modelConnectionId === null &&
+        threadId === null &&
         response.modelLoadError?.providerId === modelsProviderId &&
         response.models.length === 0 &&
         response.selectedOnlyModels.length === 0 &&
@@ -425,8 +442,9 @@ function systemExecutionOptionsQueryOptions({
 
 export function prefetchSystemExecutionOptions(
   queryClient: QueryClient,
-  args: { routing: SystemProvidersQuery; providerIds: readonly string[] },
+  args: { routing: SystemProvidersQuery & { modelConnectionId?: string; threadId?: string }; providerIds: readonly string[] },
 ): void {
+  if (args.routing.modelConnectionId !== undefined || args.routing.threadId !== undefined) return;
   for (const providerId of args.providerIds) {
     void queryClient.prefetchQuery(
       systemExecutionOptionsQueryOptions({
@@ -434,6 +452,8 @@ export function prefetchSystemExecutionOptions(
         hostId: args.routing.hostId ?? null,
         providerId,
         projectId: null,
+        modelConnectionId: null,
+        threadId: null,
         writeLastKnown: false,
       }),
     );
@@ -447,6 +467,8 @@ export function liveSystemExecutionOptionsQueryOptions(
   const hostId = args.hostId ?? null;
   const providerId = args.providerId ?? null;
   const projectId = args.projectId ?? null;
+  const modelConnectionId = args.modelConnectionId ?? null;
+  const threadId = args.threadId ?? null;
   const providersCacheKey = providerListCacheKey({ environmentId, hostId });
   const machineCatalogCacheKey = modelCatalogCacheKey({
     environmentId,
@@ -465,20 +487,24 @@ export function liveSystemExecutionOptionsQueryOptions(
       hostId,
       providerId,
       projectId,
+      modelConnectionId,
+      threadId,
       writeLastKnown: true,
     }),
     enabled: args.enabled ?? true,
     placeholderData: (previousData, previousQuery) =>
-      resolveExecutionOptionsPlaceholder({
-        previousData,
-        previousQueryKey: previousQuery?.queryKey,
-        environmentId,
-        hostId,
-        providerId,
-        catalogCacheKey,
-        machineCatalogCacheKey,
-        providersCacheKey,
-      }),
+      modelConnectionId !== null || threadId !== null
+        ? undefined
+        : resolveExecutionOptionsPlaceholder({
+            previousData,
+            previousQueryKey: previousQuery?.queryKey,
+            environmentId,
+            hostId,
+            providerId,
+            catalogCacheKey,
+            machineCatalogCacheKey,
+            providersCacheKey,
+          }),
   });
 }
 

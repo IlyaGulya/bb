@@ -172,7 +172,7 @@ export function buildModelNavRows({
 }
 
 interface ModelReasoningPickerProps {
-  providerRouting?: SystemProvidersQuery;
+  providerRouting?: SystemProvidersQuery & { modelConnectionId?: string; threadId?: string };
   providerOptions: readonly ProviderPickerOption[];
   selectedProviderId: string;
   onSelectedProviderChange?: (value: string) => void;

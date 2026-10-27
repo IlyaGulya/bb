@@ -250,6 +250,7 @@ function EmbeddedThreadChatWithComposer({
     scope: "component-local",
     environmentId: composer.executionEnvironmentId,
     environmentHostId: composer.executionEnvironmentHostId,
+    executionThreadId: composer.executionDefaultsThreadId ?? undefined,
     resetKey: composer.executionResetKey,
     initialProviderId: providerId,
     initialModel: defaultExecutionOptions?.model,

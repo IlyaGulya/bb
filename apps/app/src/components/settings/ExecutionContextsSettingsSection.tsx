@@ -9,6 +9,7 @@ import { SettingsSection } from "@/components/ui/settings-section";
 import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
 import { useHosts } from "@/hooks/queries/host-queries";
 import { sdk } from "@/lib/sdk";
+import { allSystemExecutionOptionsQueryKeyPrefix } from "@/hooks/queries/query-keys";
 import { getMutationErrorMessage } from "@/lib/mutation-errors";
 import { McpServerManager } from "./McpServerManager";
 
@@ -52,6 +53,7 @@ export function ExecutionContextsSettingsSection() {
       queryClient.invalidateQueries({ queryKey: ["execution-contexts"] }),
       queryClient.invalidateQueries({ queryKey: ["model-connections"] }),
       queryClient.invalidateQueries({ queryKey: ["project-context-defaults"] }),
+      queryClient.removeQueries({ queryKey: allSystemExecutionOptionsQueryKeyPrefix() }),
     ]);
   };
   const remove = async (kind: "context" | "connection", id: string) => {
@@ -74,10 +76,10 @@ export function ExecutionContextsSettingsSection() {
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">
         Execution contexts select project instructions and tools, not a physical
-        worktree. Model connections select a native provider account on a
-        machine independently. Names such as Work and Personal are ordinary
-        labels, not security domains. Configuration separation is not a
-        filesystem sandbox.
+        worktree. Model connections select a native provider account or a CPA
+        gateway independently of context, tools and session storage. Work and
+        Personal are ordinary labels, not security domains. Configuration
+        separation is not a filesystem sandbox.
       </p>
       {error ? (
         <p role="alert" className="text-sm text-destructive-text">
@@ -149,7 +151,7 @@ export function ExecutionContextsSettingsSection() {
       </SettingsSection>
       <SettingsSection
         title="Model connections"
-        description="Native configuration references only. Configure sign-in using the native provider; do not enter tokens here."
+        description="Configuration references only. Never enter provider tokens, CPA client keys or administrator secrets here."
       >
         {connections.isError ? (
           <p role="alert">
@@ -185,7 +187,9 @@ export function ExecutionContextsSettingsSection() {
                     : ""}
               </p>
               <p className="break-all text-xs text-muted-foreground">
-                {connection.provider} · {connection.hostId}
+                {connection.gateway
+                  ? `${connection.provider} · CPA gateway · ${connection.gateway.accountPrefix}`
+                  : `${connection.provider} · ${connection.hostId}`}
               </p>
             </div>
             <div className="flex gap-1">
@@ -557,11 +561,17 @@ function ConnectionEditor({
       profile: null,
       hostEnv: null,
     },
+    gateway: value?.gateway ?? null,
   }));
   const set = <K extends keyof ConnectionFields>(
     key: K,
     next: ConnectionFields[K],
   ) => setDraft((current) => ({ ...current, [key]: next }));
+  const setGateway = (next: Partial<NonNullable<ModelConnection["gateway"]>>) =>
+    setDraft((current) => ({
+      ...current,
+      gateway: current.gateway ? { ...current.gateway, ...next } : null,
+    }));
   return (
     <EditorForm
       title={value ? "Edit model connection" : "New model connection"}
@@ -575,9 +585,39 @@ function ConnectionEditor({
           onChange={(event) => set("name", event.target.value)}
         />
       </Field>
+      <Field label="Connection mode">
+        <select
+          className={selectClass}
+          value={draft.gateway ? "gateway" : "native"}
+          onChange={(event) =>
+            setDraft((current) =>
+              event.target.value === "gateway"
+                ? {
+                    ...current,
+                    provider: "acp-omp",
+                    hostId: null,
+                    nativeAuth: { configDir: null, profile: null, hostEnv: null },
+                    gateway: {
+                      baseUrl: "",
+                      protocol: "openai-responses",
+                      accountPrefix: "",
+                      modelProvider: "openai-codex",
+                      credential: { kind: "env", name: "BB_CPA_API_KEY" },
+                      allowedHostIds: [],
+                    },
+                  }
+                : { ...current, provider: "", hostId: "", gateway: null },
+            )
+          }
+        >
+          <option value="native">Native provider login</option>
+          <option value="gateway">CPA gateway · native OMP (acp-omp)</option>
+        </select>
+      </Field>
       <Field label="Native provider">
         <select
           required
+          disabled={draft.gateway !== null}
           className={selectClass}
           value={draft.provider}
           onChange={(event) => set("provider", event.target.value)}
@@ -599,11 +639,165 @@ function ConnectionEditor({
           ) : null}
         </select>
       </Field>
+      {draft.gateway ? (
+        <>
+          <p className="text-xs text-muted-foreground">
+            CPA gateway supports native OMP (acp-omp) only. The selected worker
+            resolves the client credential reference and discovers only this
+            account namespace. This does not change context, MCP, Git identity
+            or native session storage. Client keys are flat, trusted-pilot
+            credentials, not per-run access grants.
+          </p>
+          <Field label="Gateway model API base URL">
+            <Input
+              required
+              type="url"
+              autoComplete="off"
+              value={draft.gateway.baseUrl}
+              placeholder="http://cpa:8317/v1"
+              onChange={(event) => setGateway({ baseUrl: event.target.value })}
+            />
+          </Field>
+          <Field label="Account namespace (accountPrefix)">
+            <Input
+              required
+              pattern="[A-Za-z0-9][A-Za-z0-9._-]*"
+              value={draft.gateway.accountPrefix}
+              placeholder="personal"
+              onChange={(event) => setGateway({ accountPrefix: event.target.value })}
+            />
+          </Field>
+          <Field label="Native model catalog provider (modelProvider)">
+            <Input
+              required
+              value={draft.gateway.modelProvider}
+              placeholder="openai-codex"
+              onChange={(event) => setGateway({ modelProvider: event.target.value })}
+            />
+          </Field>
+          <p className="text-xs text-muted-foreground">
+            Use the exact native OMP catalog provider ID, such as openai-codex or
+            anthropic. Unknown models or capabilities are unsupported.
+          </p>
+          <Field label="Gateway protocol">
+            <select
+              className={selectClass}
+              value={draft.gateway.protocol}
+              onChange={(event) => {
+                const protocol = event.target.value;
+                if (
+                  protocol === "openai-responses" ||
+                  protocol === "openai-completions" ||
+                  protocol === "anthropic-messages"
+                ) setGateway({ protocol });
+              }}
+            >
+              <option value="openai-responses">OpenAI Responses</option>
+              <option value="openai-completions">OpenAI Completions</option>
+              <option value="anthropic-messages">Anthropic Messages</option>
+            </select>
+          </Field>
+          <Field label="Client credential reference type">
+            <select
+              className={selectClass}
+              value={draft.gateway.credential.kind}
+              onChange={(event) =>
+                setGateway({
+                  credential: event.target.value === "file"
+                    ? { kind: "file", path: "" }
+                    : { kind: "env", name: "" },
+                })
+              }
+            >
+              <option value="env">Worker environment variable name</option>
+              <option value="file">Absolute worker file path</option>
+            </select>
+          </Field>
+          {draft.gateway.credential.kind === "env" ? (
+            <Field label="Client credential environment variable name">
+              <Input
+                required
+                autoComplete="off"
+                pattern="[A-Za-z_][A-Za-z0-9_]*"
+                value={draft.gateway.credential.name}
+                placeholder="BB_CPA_API_KEY"
+                onChange={(event) =>
+                  setGateway({ credential: { kind: "env", name: event.target.value } })
+                }
+              />
+            </Field>
+          ) : (
+            <Field label="Client credential absolute file path on worker">
+              <Input
+                required
+                autoComplete="off"
+                pattern="/.*"
+                value={draft.gateway.credential.path}
+                placeholder="/absolute/private/cpa-client-key"
+                onChange={(event) =>
+                  setGateway({ credential: { kind: "file", path: event.target.value } })
+                }
+              />
+            </Field>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Enter only a reference, never the key itself. Provision the CPA
+            client key on every explicitly allowed worker outside this form.
+            Never use the CPA administrator key.
+          </p>
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">Allowed execution machines</legend>
+            <p className="text-xs text-muted-foreground">
+              Select at least one enrolled worker. This connection cannot run on
+              any other machine; selecting it does not select a machine.
+            </p>
+            {hosts.data?.map((host) => (
+              <label key={host.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={draft.gateway?.allowedHostIds.includes(host.id) ?? false}
+                  onChange={(event) =>
+                    setGateway({
+                      allowedHostIds: event.target.checked
+                        ? [...(draft.gateway?.allowedHostIds ?? []), host.id]
+                        : (draft.gateway?.allowedHostIds ?? []).filter((id) => id !== host.id),
+                    })
+                  }
+                />
+                {host.name} · {host.status}
+              </label>
+            ))}
+            {hosts.isPending ? <p role="status">Loading machines…</p> : null}
+            {hosts.isError ? (
+              <button type="button" className="underline" onClick={() => void hosts.refetch()}>
+                Retry loading machines
+              </button>
+            ) : null}
+            {draft.gateway.allowedHostIds
+              .filter((id) => !hosts.data?.some((host) => host.id === id))
+              .map((id) => (
+                <label key={id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked
+                    onChange={() =>
+                      setGateway({
+                        allowedHostIds: (draft.gateway?.allowedHostIds ?? []).filter((entry) => entry !== id),
+                      })
+                    }
+                  />
+                  {id} · unavailable
+                </label>
+              ))}
+          </fieldset>
+        </>
+      ) : (
+        <>
       <Field label="Machine">
         <select
           required
           className={selectClass}
-          value={draft.hostId}
+          value={draft.hostId ?? ""}
           onChange={(event) => set("hostId", event.target.value)}
         >
           <option value="">Choose machine</option>
@@ -695,6 +889,8 @@ function ConnectionEditor({
           />
         </Field>
       </details>
+        </>
+      )}
       <label className="flex items-center gap-2 text-sm">
         <input
           type="checkbox"

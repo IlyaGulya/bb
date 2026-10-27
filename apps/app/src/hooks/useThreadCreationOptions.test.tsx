@@ -327,6 +327,26 @@ afterEach(() => {
 });
 
 describe("useThreadCreationOptions", () => {
+  it("lets the selected connection override a remembered provider without replacing the execution environment", async () => {
+    window.localStorage.setItem("bb.promptbox.provider", GLOBAL_PROVIDER_ID);
+    vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) =>
+      providerExecutionOptionsResponse(args?.providerId),
+    );
+    const { result } = renderHook(
+      () => useThreadCreationOptions({
+        scope: "new-thread",
+        initialEnvironmentSelectionValue: "selected-environment",
+        modelConnectionId: "personal-cpa",
+        modelConnectionProviderId: PROJECT_PROVIDER_ID,
+      }),
+      { wrapper: createQueryClientTestHarness().wrapper },
+    );
+    await waitFor(() => expect(result.current.modelCatalogIsVerified).toBe(true));
+    expect(result.current.selectedProviderId).toBe(PROJECT_PROVIDER_ID);
+    expect(result.current.environmentSelectionValue).toBe("selected-environment");
+    expect(result.current.hasMultipleProviders).toBe(false);
+  });
+
   it("keeps the selected remembered provider branded while models load", () => {
     window.localStorage.setItem("bb.promptbox.provider", "codex");
     writeCachedProviderList(
