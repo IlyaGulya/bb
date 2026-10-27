@@ -1717,7 +1717,6 @@ export function ThreadDetailPromptArea({
       setServiceTier,
       supportsServiceTier,
       serviceTierOptions,
-      thread.environmentId,
       thread.providerId,
     ],
   );

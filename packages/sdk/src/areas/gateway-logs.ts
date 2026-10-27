@@ -16,12 +16,6 @@ export interface GatewayLogReadArgs extends GatewayLogDownloadArgs {
 
 export type { GatewayLogList, GatewayLogPreview } from "@bb/server-contract";
 
-/**
- * Native CPA request logs linked by a persisted gateway binding and exact inbound
- * X-BB-Thread-Id header. This is trusted-pilot correlation, not cryptographic
- * ownership, per-run authorization, per-turn attribution, or lossless capture.
- * Requests use the same protected BB application API as other SDK areas.
- */
 export interface ExperimentalGatewayLogsArea {
   list(args: GatewayLogListArgs): Promise<GatewayLogList>;
   read(args: GatewayLogReadArgs): Promise<GatewayLogPreview>;

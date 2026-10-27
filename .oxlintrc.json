@@ -152,11 +152,31 @@
               },
               {
                 "name": "node:fs",
-                "message": "Server must not use node:fs. Use daemon commands for workspace access. (attachments.ts is the only exception — it manages server-local storage.)"
+                "message": "Server must use daemon commands for workspace access. Filesystem imports are reserved for explicitly scoped server-local storage services."
               },
               {
                 "name": "node:fs/promises",
-                "message": "Server must not use node:fs/promises. Use daemon commands for workspace access. (attachments.ts is the only exception — it manages server-local storage.)"
+                "message": "Server must use daemon commands for workspace access. Filesystem imports are reserved for explicitly scoped server-local storage services."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/server/src/services/gateway-logs.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "@bb/host-workspace",
+                "message": "Server must not access workspaces directly. Use daemon commands instead."
+              },
+              {
+                "name": "@bb/host-watcher",
+                "message": "Server must not access host watchers directly. Use daemon commands instead."
               }
             ]
           }
