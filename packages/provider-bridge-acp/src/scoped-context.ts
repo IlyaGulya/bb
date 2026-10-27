@@ -71,6 +71,9 @@ export function resolveAcpScopedOptions(args: {
       "This model connection requires the shipped acp-omp native provider. Other ACP agents do not support its native account references.",
     );
   }
+  if (snapshot.gateway) {
+    return { executionContext, modelConnection: snapshot, env };
+  }
   if (
     snapshot.nativeAuth.profile !== null ||
     (snapshot.nativeAuth.configDir !== null && executionContext === null)

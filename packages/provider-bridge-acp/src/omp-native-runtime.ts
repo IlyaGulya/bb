@@ -16,6 +16,9 @@ import {
 import { z } from "zod";
 import { OmpContextStore, type OmpContextFiles } from "./omp-context-files.js";
 import type { AcpSessionParams } from "./session-params.js";
+import { createRequire } from "node:module";
+import { spawn } from "node:child_process";
+import { discoverGatewayModels, gatewayChildEnv, gatewayModelSchema, pinGatewayReceipt, requireGatewayModel, resolveGatewayCredential, type GatewayModel, type OmpGateway } from "./omp-gateway.js";
 
 const launchEnvironment = "BB_OMP_SCOPED_LAUNCH";
 const nativePackageName = "@oh-my-pi/pi-coding-agent";
@@ -27,7 +30,7 @@ const launchSchema = z
     cwd: z.string().min(1),
     instructions: z.string(),
     workspaceRoots: z.array(z.string()),
-    executionContext: executionContextSnapshotSchema,
+    executionContext: executionContextSnapshotSchema.nullable(),
     modelConnection: modelConnectionSnapshotSchema.nullable(),
     model: z.string().optional(),
     permissionMode: z.enum(["accept-edits", "full"]),
@@ -63,8 +66,16 @@ interface NativeSdk {
   ModelRegistry: new (
     authStorage: unknown,
     modelsPath: string,
-    options: { settings: NativeSettings },
-  ) => unknown;
+    options: { settings: NativeSettings; ignoreLocalModelConfig?: boolean },
+  ) => {
+    authStorage: { keys: { setRuntime(provider: string, key: string): void } };
+    getAll(kind?: string): unknown[];
+    getAvailable(kind?: string): unknown[];
+    getProviderModels(provider: string): unknown[];
+    getAvailableForProviders(providers: ReadonlySet<string>, kind?: string): unknown[];
+    registerProvider(name: string, config: Record<string, unknown>): void;
+    find(provider: string, id: string): unknown;
+  };
   SessionManager: {
     create(cwd: string, sessionDir: string): unknown;
     getDefaultSessionDir(cwd: string, agentDir: string): string;
@@ -206,7 +217,8 @@ export interface OmpScopedLaunch {
   command: string;
   args: string[];
   env: NodeJS.ProcessEnv;
-  files: OmpContextFiles;
+  files?: OmpContextFiles;
+  gatewayReceipt?: { verify(): void };
 }
 
 export function prepareOmpScopedLaunch(args: {
@@ -217,10 +229,9 @@ export function prepareOmpScopedLaunch(args: {
   env: NodeJS.ProcessEnv;
 }): OmpScopedLaunch {
   const context = args.params.executionContext;
-  if (!context)
-    throw new Error(
-      "Scoped OMP launch requires a validated execution context.",
-    );
+  const gateway = args.params.modelConnection?.gateway;
+  if (!context && !gateway)
+    throw new Error("Native SDK launch requires an execution context or CPA gateway.");
   if (
     args.params.agent.args.length !== 1 ||
     args.params.agent.args[0] !== "acp"
@@ -235,24 +246,30 @@ export function prepareOmpScopedLaunch(args: {
     throw new Error(
       "Scoped native OMP requires Bun on the execution host PATH. No ambient CLI fallback was started.",
     );
-  const files = new OmpContextStore(args.dataDir).resolve({
+  const files = context ? new OmpContextStore(args.dataDir).resolve({
     threadId: args.params.threadId,
     cwd: args.params.cwd,
     executionContext: context,
     resume: args.resume,
-  });
+  }) : undefined;
   const selection = args.params.modelSelection;
   const model = selection
     ? "model" in selection
       ? selection.model
       : selection.modelId
     : undefined;
+  let gatewayReceipt: { verify(): void } | undefined;
+  if (gateway) {
+    if (!model?.startsWith(`bb-cpa/${gateway.accountPrefix}/`))
+      throw new Error("CPA requires an explicit model in the selected account namespace.");
+    gatewayReceipt = pinGatewayReceipt(args.dataDir, args.params.threadId, gateway, model, args.resume);
+  }
   const launch: NativeLaunch = {
     packageRoot,
     dataDir: args.dataDir,
     threadId: args.params.threadId,
     cwd: args.params.cwd,
-    instructions: [context.instructions, args.params.instructions]
+    instructions: [context?.instructions, args.params.instructions]
       .filter(Boolean)
       .join("\n\n"),
     workspaceRoots: args.params.workspaceWriteRoots ?? [],
@@ -264,8 +281,9 @@ export function prepareOmpScopedLaunch(args: {
   return {
     command: bun,
     args: [args.artifactPath, "--omp-scoped-acp"],
-    env: { ...args.env, [launchEnvironment]: JSON.stringify(launch) },
+    env: { ...(gateway ? gatewayChildEnv(gateway, process.env, args.env) : args.env), [launchEnvironment]: JSON.stringify(launch) },
     files,
+    gatewayReceipt,
   };
 }
 
@@ -289,8 +307,16 @@ export async function runOmpScopedAcp(): Promise<void> {
     JSON.parse(process.env[launchEnvironment] ?? "null"),
   );
   delete process.env[launchEnvironment];
+  const gateway = launch.modelConnection?.gateway;
+  const gatewayKey = gateway ? resolveGatewayCredential(gateway, process.env) : undefined;
+  if (gateway?.credential.kind === "env") delete process.env[gateway.credential.name];
   if (![launch.packageRoot, launch.dataDir, launch.cwd].every(isAbsolute))
     throw new Error("Native OMP scoped paths must be absolute.");
+  if (!launch.executionContext) {
+    await runGatewayOnlyAcp(launch, gatewayKey);
+    return;
+  }
+  const executionContext = launch.executionContext;
   const files = new OmpContextStore(launch.dataDir).resolve({
     threadId: launch.threadId,
     cwd: launch.cwd,
@@ -442,9 +468,12 @@ export async function runOmpScopedAcp(): Promise<void> {
         );
       const modelRegistry = new sdk.ModelRegistry(
         authStorage,
-        join(authDir, "models.yml"),
-        { settings: authSettings },
+        launch.modelConnection?.gateway ? join(launch.dataDir, "omp-gateway", "models.yml") : join(authDir, "models.yml"),
+        { settings: authSettings, ignoreLocalModelConfig: !!launch.modelConnection?.gateway },
       );
+      const gatewayModel = launch.modelConnection?.gateway
+        ? await configureGatewayRegistry(launch, modelRegistry, gatewayKey)
+        : undefined;
       const selectedTools = await capabilities.loadCapability("tools", {
         cwd: launch.cwd,
         agentDir,
@@ -508,7 +537,7 @@ export async function runOmpScopedAcp(): Promise<void> {
               directory,
               discoveryOptions,
             );
-            for (const server of launch.executionContext.mcpServers) {
+            for (const server of executionContext.mcpServers) {
               result.configs[server.name] = files.mcpServers[server.name];
               result.sources[server.name] = {
                 provider: "bb-execution-context",
@@ -562,6 +591,7 @@ export async function runOmpScopedAcp(): Promise<void> {
             cwd,
             authStorage,
             modelRegistry,
+            ...(gatewayModel ? { model: gatewayModel, scopedModels: [{ model: gatewayModel }], modelPatternDefaultFallbackChain: [], allowSessionModelFallback: false } : {}),
             sessionManager: sdk.SessionManager.create(
               cwd,
               sdk.SessionManager.getDefaultSessionDir(cwd, agentDir),
@@ -632,4 +662,98 @@ export async function runOmpScopedAcp(): Promise<void> {
       });
     },
   );
+}
+
+async function bundledGatewayModels(packageRoot: string, gateway: OmpGateway): Promise<GatewayModel[]> {
+  const require = createRequire(join(packageRoot, "package.json"));
+  const catalog = moduleFunctions(await import(pathToFileURL(require.resolve("@oh-my-pi/pi-catalog/models")).href), ["getBundledModels"], "bundled catalog") as unknown as {
+    getBundledModels(provider: string): unknown[];
+  };
+  return catalog.getBundledModels(gateway.modelProvider).map((model) => gatewayModelSchema.parse(model));
+}
+
+async function configureGatewayRegistry(launch: NativeLaunch, registry: InstanceType<NativeSdk["ModelRegistry"]>, key: string | undefined): Promise<unknown> {
+  const gateway = launch.modelConnection?.gateway;
+  if (!gateway) throw new Error("CPA gateway binding is missing.");
+  if (!key) throw new Error("CPA client credential is unavailable; native fallback is disabled.");
+  pinGatewayReceipt(launch.dataDir, launch.threadId, gateway, launch.model ?? "", true).verify();
+  const models = await discoverGatewayModels(gateway, key, await bundledGatewayModels(launch.packageRoot, gateway));
+  const id = requireGatewayModel(launch.model, gateway, models);
+  registry.authStorage.keys.setRuntime("bb-cpa", key);
+  registry.registerProvider("bb-cpa", {
+    baseUrl: gateway.baseUrl, api: gateway.protocol, apiKey: key, authHeader: true,
+    headers: { "X-BB-Thread-Id": launch.threadId },
+    models: models.map((model) => ({ ...model, api: gateway.protocol, baseUrl: gateway.baseUrl })),
+  });
+  const selected = registry.find("bb-cpa", id);
+  if (!selected) throw new Error("Native OMP refused the bound CPA model.");
+  registry.find = (provider, modelId) => provider === "bb-cpa" && modelId === id ? selected : undefined;
+  registry.getAll = () => [selected];
+  registry.getAvailable = () => [selected];
+  registry.getProviderModels = (provider) => provider === "bb-cpa" ? [selected] : [];
+  registry.getAvailableForProviders = (providers) => providers.has("bb-cpa") ? [selected] : [];
+  return selected;
+}
+
+async function runGatewayOnlyAcp(launch: NativeLaunch, key: string | undefined): Promise<void> {
+  const sdk = moduleFunctions(await import(pathToFileURL(join(launch.packageRoot, "src/index.ts")).href), ["createAgentSession", "discoverAuthStorage", "getAgentDir"], "session") as unknown as NativeSdk;
+  const agentDir = sdk.getAgentDir();
+  const settings = await sdk.Settings.loadReadOnly({ cwd: launch.cwd, agentDir });
+  const authStorage = await sdk.discoverAuthStorage(agentDir, { cwd: launch.cwd, settings });
+  const registry = new sdk.ModelRegistry(authStorage, join(launch.dataDir, "omp-gateway", "models.yml"), { settings, ignoreLocalModelConfig: true });
+  const model = await configureGatewayRegistry(launch, registry, key);
+  const acp = moduleFunctions(await import(pathToFileURL(join(launch.packageRoot, "src/modes/acp/acp-mode.ts")).href), ["runAcpMode"], "ACP") as unknown as {
+    runAcpMode(factory: (cwd: string, options?: { interactivePrompts?: boolean }) => Promise<unknown>): Promise<void>;
+  };
+  await acp.runAcpMode(async (cwd, options) => {
+    if (resolve(cwd) !== resolve(launch.cwd)) throw new Error("CPA ACP cannot change the bound workspace.");
+    pinGatewayReceipt(launch.dataDir, launch.threadId, launch.modelConnection!.gateway!, launch.model!, true).verify();
+    return sdk.createAgentSession({
+      cwd, settings, authStorage, modelRegistry: registry, model,
+      scopedModels: [{ model }], modelPatternDefaultFallbackChain: [], allowSessionModelFallback: false,
+      sessionManager: sdk.SessionManager.create(cwd, sdk.SessionManager.getDefaultSessionDir(cwd, agentDir)),
+      appendSystemPrompt: launch.instructions,
+      additionalDirectories: launch.workspaceRoots.filter((directory) => resolve(directory) !== resolve(cwd)),
+      interactivePrompts: options?.interactivePrompts ?? false,
+      autoApprove: launch.permissionMode === "full", cacheWarming: false, autoTitle: false,
+    });
+  });
+}
+
+export async function listOmpGatewayModels(args: { connection: NonNullable<AcpSessionParams["modelConnection"]>; command: string; env: NodeJS.ProcessEnv; artifactPath: string }): Promise<GatewayModel[]> {
+  const packageRoot = nativePackageRoot(args.command, args.env);
+  const bun = executable("bun", args.env);
+  if (!bun) throw new Error("CPA model metadata requires native OMP and Bun on this worker.");
+  if (!args.connection.gateway) throw new Error("CPA gateway binding is missing.");
+  const env = gatewayChildEnv(args.connection.gateway, process.env, args.env);
+  const { promise, resolve: resolveModels, reject } = Promise.withResolvers<GatewayModel[]>();
+    const child = spawn(bun, [args.artifactPath, "--omp-gateway-models"], {
+      env: { ...env, [launchEnvironment]: JSON.stringify({ packageRoot, connection: args.connection }) },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error("CPA model metadata timed out.")); }, 20000);
+    child.stdout.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+      if (output.length > 4 * 1024 * 1024) child.kill("SIGKILL");
+    });
+    child.stderr.resume();
+    child.on("error", (error) => { clearTimeout(timer); reject(error); });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) { reject(new Error("CPA model discovery failed; native fallback is disabled.")); return; }
+      try { resolveModels(z.array(gatewayModelSchema).parse(JSON.parse(output))); } catch (error) { reject(error); }
+    });
+  return promise;
+}
+
+export async function runOmpGatewayModelList(): Promise<void> {
+  const input = z.object({ packageRoot: z.string(), connection: modelConnectionSnapshotSchema }).parse(JSON.parse(process.env[launchEnvironment] ?? "null"));
+  delete process.env[launchEnvironment];
+  const gateway = input.connection.gateway;
+  if (!gateway) throw new Error("CPA gateway binding is missing.");
+  const key = resolveGatewayCredential(gateway, process.env);
+  if (gateway.credential.kind === "env") delete process.env[gateway.credential.name];
+  const models = await discoverGatewayModels(gateway, key, await bundledGatewayModels(input.packageRoot, gateway));
+  process.stdout.write(JSON.stringify(models));
 }

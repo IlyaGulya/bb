@@ -13,6 +13,8 @@ import {
 import {
   prepareOmpScopedLaunch,
   runOmpScopedAcp,
+  listOmpGatewayModels,
+  runOmpGatewayModelList,
   type OmpScopedLaunch,
 } from "../omp-native-runtime.js";
 import type { OmpContextFiles } from "../omp-context-files.js";
@@ -184,6 +186,7 @@ interface AcpThreadSession {
   construction: AcpSessionParams;
   nativeConfig: AcpNativeConfigState;
   nativeContextFiles?: OmpContextFiles;
+  nativeGatewayReceipt?: { verify(): void };
   providerThreadId: string;
   cwd: string;
   dialect: AcpDialect;
@@ -1137,6 +1140,7 @@ function withAcpAuthRequiredRecovery(error: unknown): unknown {
 async function resolveAgentLaunchArgs(
   params: AcpSessionParams,
 ): Promise<{ args: string[]; warning: string | undefined }> {
+  if (params.modelConnection?.gateway) return { args: params.agent.args, warning: undefined };
   const selection = params.modelSelection;
   const agentArgs = applyPermissionCliArgs(
     params.agent.args,
@@ -1818,7 +1822,7 @@ async function startAgentSession(
       : {}),
   };
   let scopedLaunch: OmpScopedLaunch | null = null;
-  if (params.executionContext) {
+  if (params.executionContext || params.modelConnection?.gateway) {
     if (dialect.id !== "omp")
       throw new Error(
         "This ACP provider does not support native execution contexts.",
@@ -1867,6 +1871,7 @@ async function startAgentSession(
     construction: params,
     nativeConfig: { configOptions: undefined, models: undefined },
     nativeContextFiles: scopedLaunch?.files,
+    nativeGatewayReceipt: scopedLaunch?.gatewayReceipt,
     providerThreadId: "",
     cwd: params.cwd,
     dialect,
@@ -1878,7 +1883,7 @@ async function startAgentSession(
       permissionMode: params.permissionMode,
       workspaceWriteRoots: params.workspaceWriteRoots,
     },
-    pendingInstructions: params.executionContext
+    pendingInstructions: scopedLaunch
       ? undefined
       : params.instructions,
     activePromptKind: null,
@@ -2330,6 +2335,7 @@ function assertScopedSessionBinding(
     );
   }
   session.nativeContextFiles?.verify();
+  session.nativeGatewayReceipt?.verify();
 }
 
 function reconcileExecutionSettings(
@@ -2898,6 +2904,25 @@ async function handleRequest(
         request.params.providerOptions,
         launchSpec,
       );
+      if (scoped.modelConnection?.gateway) {
+        const gateway = scoped.modelConnection.gateway;
+        if (!launchSpec) throw new Error("CPA discovery requires the worker's native OMP launch.");
+        const models = await listOmpGatewayModels({
+          connection: scoped.modelConnection,
+          command: launchSpec.command,
+          env: { ...withoutBridgeRuntimeEnv(process.env), ...launchSpec.env },
+          artifactPath: fileURLToPath(import.meta.url),
+        });
+        sendResult(request.id, {
+          models: models.map((model) => ({
+            id: `bb-cpa/${model.id}`, model: `bb-cpa/${model.id}`, displayName: model.name,
+            description: `CPA ${gateway.accountPrefix}; native ${gateway.modelProvider} metadata`,
+            supportedReasoningEfforts: [], defaultReasoningEffort: "medium", isDefault: false,
+          })),
+          selectedOnlyModels: [],
+        });
+        return;
+      }
       const modelPicker = decodeAcpModelPickerOptions(
         request.params.providerOptions,
       );
@@ -3201,6 +3226,12 @@ if (process.argv.includes("--omp-scoped-acp")) {
     process.stderr.write(
       `Native OMP scoped ACP: ${error instanceof Error ? error.message : String(error)}\n`,
     );
+    process.exit(1);
+  });
+}
+if (process.argv.includes("--omp-gateway-models")) {
+  void runOmpGatewayModelList().catch(() => {
+    process.stderr.write("CPA model discovery failed.\n");
     process.exit(1);
   });
 }
