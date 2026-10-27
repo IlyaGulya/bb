@@ -553,7 +553,7 @@ function ConnectionEditor({
   const [draft, setDraft] = useState<ConnectionFields>(() => ({
     name: value?.name ?? "",
     provider: value?.provider ?? "",
-    hostId: value?.hostId ?? "",
+    hostId: value?.gateway ? null : (value?.hostId ?? ""),
     enabled: value?.enabled ?? true,
     revoked: value?.revoked ?? false,
     nativeAuth: value?.nativeAuth ?? {

@@ -1,3 +1,4 @@
+/// <reference lib="es2024.promise" />
 import {
   constants,
   existsSync,
@@ -273,7 +274,7 @@ export function prepareOmpScopedLaunch(args: {
       .filter(Boolean)
       .join("\n\n"),
     workspaceRoots: args.params.workspaceWriteRoots ?? [],
-    executionContext: context,
+    executionContext: context ?? null,
     modelConnection: args.params.modelConnection ?? null,
     ...(model && model !== "default" ? { model } : {}),
     permissionMode: args.params.permissionMode,

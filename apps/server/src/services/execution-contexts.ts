@@ -413,7 +413,7 @@ export function updateModelConnectionDefinition(
     ...input,
     updatedAt: Date.now(),
   });
-  validateConnectionDefinition(db, value);
+  if (value.enabled && !value.revoked) validateConnectionDefinition(db, value);
   return saveModelConnection(db, value);
 }
 

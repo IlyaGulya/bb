@@ -714,6 +714,18 @@ describe("gateway execution host admission", () => {
     ]);
   });
 
+  it("can disable and revoke a gateway after an allowed host is retired", () => {
+    const disabled = gatewayConnection("disable", [hostId, "other-host"]);
+    const revoked = gatewayConnection("revoke", [hostId, "other-host"]);
+    updateHost(db, noopNotifier, "other-host", { phase: "destroyed" });
+    expect(
+      updateModelConnectionDefinition(db, { id: disabled.id, enabled: false }),
+    ).toMatchObject({ id: disabled.id, enabled: false });
+    expect(
+      updateModelConnectionDefinition(db, { id: revoked.id, revoked: true }),
+    ).toMatchObject({ id: revoked.id, revoked: true });
+  });
+
   it("keeps the old gateway config and checks both immutable and current host grants on continuation", () => {
     const connection = gatewayConnection("personal");
     const binding = resolve(undefined, connection.id)!;
