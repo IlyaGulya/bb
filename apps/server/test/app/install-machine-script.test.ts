@@ -343,10 +343,23 @@ exec '${process.execPath}' "$@"
       );
       writeExecutable(join(fixture.binDir, "id"), `#!/bin/sh\necho ${uid}\n`);
       writeCurlArtifactMock(fixture, 404);
+      const npmInvocationPath = join(fixture.dataDir, "npm-invocation");
+      writeExecutable(
+        join(fixture.binDir, "npm"),
+        `#!/bin/sh
+printf '%s\\n' "$*" >'${npmInvocationPath}'
+exit 1
+`,
+      );
       const result = runScript(BOOTSTRAP_ARGS, fixture, {
         HOME: unset ? undefined : fixture.homeDir,
+        BB_INSTALL_SKIP_SERVICE: "1",
       });
-      expect(result.status).not.toBe(0);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Could not install bb-app for this machine");
+      expect(readFileSync(npmInvocationPath, "utf8")).toContain(
+        `--prefix ${join(fixture.dataDir, "npm")} bb-app`,
+      );
       expect(result.stderr).not.toContain("HOME");
       expect(existsSync(join(fixture.dataDir, "resolved-home"))).toBe(unset);
       expect(existsSync(join(fixture.homeDir, ".local/bin/bb"))).toBe(true);

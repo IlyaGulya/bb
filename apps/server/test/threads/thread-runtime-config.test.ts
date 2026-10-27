@@ -163,15 +163,7 @@ function registerRemoteRuntimeFileResponder(
 describe("thread runtime config", () => {
   it("uses immutable gateway receipts on start and continuation while enforcing live host grants and revocation", async () => {
     await withTestHarness(
-      {
-        extraProviders: [
-          await configuredAcpProvider({
-            id: "omp",
-            displayName: "OMP",
-            command: "omp",
-          }),
-        ],
-      },
+      {},
       async (harness) => {
         const { host } = seedHostSession(harness.deps, {
           id: "host-gateway-runtime",

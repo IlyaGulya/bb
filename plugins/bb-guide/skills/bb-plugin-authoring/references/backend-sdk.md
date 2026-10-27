@@ -17,6 +17,10 @@ that need the singleton personal project use
 methods, not their arguments — read the bundled `bb-plugin-sdk.d.ts` for exact
 signatures (see "Looking up the exact API" in distribution.md).
 
+- `experimental_executionContexts`: `list` `get` `create` `update` `delete`
+  `inspectMcp` `getProjectDefaults` `setProjectDefaults` `getThreadBinding`
+- `experimental_modelConnections`: `list` `get` `create` `update` `delete`
+- `experimental_gatewayLogs`: `list` `read` `download`
 - `threads`: `list` `listRunning` `count` `get` `search` `spawn` `fork`
   `send` `retry` `message` `editMessage` `resolveMentions` `update` `delete`
   `stop` `compact` `clearContext` `wait` `open` `output` `timeline` `context`
@@ -100,6 +104,31 @@ const thread = await bb.sdk.threads.spawn({
   pluginMetadata: { issueKey: "ENG-42", requestedBy: "automation" },
 });
 ```
+
+### Execution contexts, model connections, and gateway logs
+
+`bb.sdk.experimental_executionContexts` manages agent context independently of
+the model account, Git/workspace, and MCP configuration. `inspectMcp` inspects
+the selected host's MCP configuration; it does not execute MCP tools.
+`getProjectDefaults` and `setProjectDefaults` manage project selections, while
+`getThreadBinding({ threadId })` returns the persisted execution receipt or
+`null`. Editing a definition does not rewrite a thread's immutable snapshot.
+
+`bb.sdk.experimental_modelConnections` manages model-account definitions.
+A CPA gateway connection uses provider `acp-omp`, `hostId: null`, explicit
+`gateway.allowedHostIds`, and a credential reference rather than a raw key.
+Selecting an account does not select a machine or environment. Live host
+grants, disabled/revoked definitions, and deletion are enforced on the next
+turn even when the thread already has a snapshot; there is no account fallback.
+
+`bb.sdk.experimental_gatewayLogs.list({ threadId })` lists native CPA logs for
+a thread with a persisted gateway binding. Pass `threadId` and `logId` to
+`read` for a bounded preview (`previewBytes` defaults to 65536), or `download`
+for a `Blob`. All three accept an abort `signal`. These calls use the
+protected BB application API. Correlation uses the exact inbound
+`X-BB-Thread-Id`: it is trusted-pilot correlation, not cryptographic
+ownership, per-run authorization, per-turn attribution, or lossless capture.
+Treat log payloads as sensitive.
 
 ### Calling another plugin's RPC
 
