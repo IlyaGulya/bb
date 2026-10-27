@@ -1,5 +1,15 @@
 import type { DbConnection } from "../../src/index.js";
 
+function dropExecutionContextSchema(db: DbConnection): void {
+  db.$client.exec(`
+    DROP TABLE IF EXISTS thread_execution_bindings;
+    DROP TABLE IF EXISTS project_context_defaults;
+    DROP TABLE IF EXISTS execution_context_projects;
+    DROP TABLE IF EXISTS execution_contexts;
+    DROP TABLE IF EXISTS model_connections;
+  `);
+}
+
 export function dropPluginEnabledFollowsDefaultColumn(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], { name: string }>("PRAGMA table_info(plugins)")
@@ -10,6 +20,7 @@ export function dropPluginEnabledFollowsDefaultColumn(db: DbConnection): void {
 }
 
 export function rewindThreadPruningWork(db: DbConnection): void {
+  dropExecutionContextSchema(db);
   db.$client.exec(`
     DROP TABLE IF EXISTS thread_pruning_work;
     DELETE FROM __drizzle_migrations WHERE created_at >= 1791399370294;
@@ -67,6 +78,7 @@ interface QueuedTableColumn {
 }
 
 export function rewindQueuedMessageStateMigration(db: DbConnection): void {
+  dropExecutionContextSchema(db);
   const columns = db.$client
     .prepare<[], QueuedTableColumn>("PRAGMA table_info(queued_thread_messages)")
     .all();
