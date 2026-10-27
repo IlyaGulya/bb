@@ -761,6 +761,9 @@ async function configureGatewayRegistry(
     apiKey: key,
     authHeader: true,
     headers: { "X-BB-Thread-Id": launch.threadId },
+    ...(gateway.protocol === "openai-responses"
+      ? { compat: { statefulResponses: false } }
+      : {}),
     models: models.map((model) => ({
       ...model,
       api: gateway.protocol,

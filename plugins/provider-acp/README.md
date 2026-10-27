@@ -170,6 +170,13 @@ explicit `bb-cpa/personal-codex/<upstream-model-id>` model. Native/default model
 fallback is disabled. Catalog requests need the selected `modelConnectionId`;
 bound-thread requests use `threadId` to retain the frozen selection.
 
+Responses gateway registrations explicitly set native
+`compat.statefulResponses: false`. Each request sends the complete native
+transcript with `store: false` and no `previous_response_id`, including each
+function call before its result. Gateway routes must not inherit the official
+provider's server-side continuation assumption. Native session history,
+follow-up and reopen remain local to the same native SDK.
+
 Both context-free and explicitly scoped launches use the native SDK/ACP loop.
 Follow-up and reopen preserve native IDs; forks retain the binding with a new
 native ID. Endpoint/protocol/namespace/model mapping and credential references

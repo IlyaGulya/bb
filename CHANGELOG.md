@@ -6,6 +6,10 @@
   credential references, permitted execution hosts and account-scoped model
   discovery. Preserve context, MCP, Git identity and native session storage;
   missing credentials or unsupported models never borrow a native account.
+- Disable server-side Responses continuation for CPA gateway registrations.
+  Replay complete native tool-call history instead of sending orphaned tool
+  results with an unsupported previous-response reference; native session
+  identity and reopen remain intact.
 - Link native CPA request logs to bound BB threads. Thread Info, the SDK and
   `bb gateway-logs` expose bounded previews and protected full downloads with
   exact-thread filtering and explicit incomplete/truncated results. This is
