@@ -23,6 +23,14 @@ export const executionContextFieldsSchema = z
         z.object({ name: idSchema, configPath: referencePathSchema }).strict(),
       )
       .default([]),
+    nativeMcpProfile: z
+      .object({
+        configDir: referencePathSchema
+          .refine(isAbsoluteHostPath, "Native MCP configDir must be absolute")
+          .nullable(),
+      })
+      .strict()
+      .optional(),
     hooksPath: referencePathSchema.nullable().default(null),
     autoMemory: z.boolean().default(false),
     gitIdentity: z
@@ -95,6 +103,17 @@ export const modelGatewaySchema = z
   .strict();
 export type ModelGateway = z.infer<typeof modelGatewaySchema>;
 
+export function isModelGatewayProviderCompatible(
+  provider: string,
+  protocol: ModelGateway["protocol"],
+): boolean {
+  return (
+    provider === "acp-omp" ||
+    (provider === "claude-code" && protocol === "anthropic-messages") ||
+    (provider === "codex" && protocol === "openai-responses")
+  );
+}
+
 export const modelConnectionFieldsSchema = z
   .object({
     name: z.string().trim().min(1),
@@ -136,11 +155,16 @@ export const modelConnectionFieldsSchema = z
         path: ["hostId"],
         message: "Gateway connections require a null hostId",
       });
-    if (connection.provider !== "acp-omp")
+    if (
+      !isModelGatewayProviderCompatible(
+        connection.provider,
+        connection.gateway.protocol,
+      )
+    )
       ctx.addIssue({
         code: "custom",
         path: ["provider"],
-        message: "Gateway connections require acp-omp",
+        message: "Gateway protocol is incompatible with the native provider",
       });
     if (
       connection.nativeAuth.configDir !== null ||

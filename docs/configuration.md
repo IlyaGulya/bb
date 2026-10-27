@@ -48,6 +48,45 @@ session or model account. Disabling/revoking a referenced definition blocks
 continuation without silently substituting an account. Forks preserve the source
 binding; a different context/account requires a new thread.
 
+### CPA gateway model connections
+
+Choose the native engine and gateway account independently of Work/Personal
+context and MCP. Native OMP (`acp-omp`) supports `openai-completions`,
+`openai-responses` and `anthropic-messages`; native Claude Code supports only
+`anthropic-messages`, native Codex only `openai-responses`. Native CLI/session
+history remains native. Codex currently rejects any explicit execution context,
+but supports a gateway model connection without one.
+
+Gateway definitions use `hostId: null`, default-null `nativeAuth`, explicit
+`gateway.allowedHostIds` and `accountPrefix`, and a private model-client key
+FILE or ENV reference resolved on the actual worker. Never put key contents,
+CPA management credentials or provider OAuth in Core/Git. Select an exact
+`bb-cpa/<prefix>/<id>` model. Invalid credentials, hosts, protocols or models
+refuse; there is no implicit native/default/account-pool fallback.
+Secret-free receipts freeze endpoint/protocol/model mapping and credential
+references for continuation. A new binding requires a new thread; existing
+sessions and global defaults are not migrated.
+
+### CPA request-log roots
+
+`BB_CPA_LOG_DIRS` replaces `BB_CPA_LOG_DIR`. Set it on the BB server to a JSON
+object mapping gateway endpoint URLs to absolute read-only log directories:
+
+```json
+{"https://bb.tail3cf09a.ts.net:8443/v1":"/opt/agentos-cpa-logs"}
+```
+
+An intended Work mapping is
+`https://bb.tail3cf09a.ts.net:8444/v1` →
+`/opt/agentos-cpa-work-claude-logs`; that endpoint is not yet live/qualified.
+Mount only logs read-only, never CPA auth/key/config directories. Invalid
+entries and normalized duplicate endpoints are rejected; an unmapped endpoint
+refuses log access. The thread's frozen gateway endpoint selects its root,
+not a caller-supplied path. Exact inbound thread-header matching and bounded,
+confined preview/download guards still apply. Logs may contain full prompts,
+tool results and secrets; correlation headers are not authorization and this
+is neither lossless capture nor visibility into MCP/Git/browser traffic.
+
 ### Selecting named MCP servers
 
 The context editor's **MCP servers** section is separate from advanced native
@@ -103,10 +142,26 @@ Configuration validity is neither authentication readiness nor per-tool policy.
 
 ### Native provider boundaries
 
-Scoped Claude uses explicit sources, selected repository-root instructions and
-direct MCP rather than ambient user/ancestor settings or account-provided cloud
-MCP. Native enterprise-managed policy is preserved. Native auto-memory is
-unsupported for scoped contexts; keep `autoMemory: false`.
+By default, scoped Claude uses explicit sources, selected repository-root
+instructions and direct MCP rather than ambient user/ancestor settings or
+account-provided cloud MCP. Native enterprise-managed policy is preserved.
+Native auto-memory is unsupported for scoped contexts; keep `autoMemory: false`.
+
+Optional `nativeMcpProfile: {configDir: string|null}` is absent by default and
+Claude-only. Explicit owner approval opts into the entire native user/project
+MCP profile plus account Cloud Connectors, not BB's strict named-server
+allowlist. `null` uses the host-native profile. This is broader tool scope, not
+a sandbox or ACL; other contexts retain the strict direct-MCP policy.
+
+With CPA, keep `nativeAuth` default-null: a custom model Authorization header
+uses the CPA client key, while local native Claude OAuth remains only for
+Cloud. No tokens are copied. Before model input is released, native
+initialization must prove first-party subscription/OAuth and at least one
+connected `claudeai`-scoped connector. Missing/empty/unavailable inventory
+refuses: valid-empty cannot be distinguished from missing grant. This needs a
+compatible installed native CLI/SDK, not a vendor hotpatch. Fake-only header
+transport evidence is not real Cloud qualification. OMP and Codex reject this
+field; Codex rejects explicit execution contexts altogether.
 
 Scoped OMP runs the native SDK ACP loop under Bun. Install the patched host SDK
 from `IlyaGulya/oh-my-pi` branch `agentos/explicit-context-20261026` and set

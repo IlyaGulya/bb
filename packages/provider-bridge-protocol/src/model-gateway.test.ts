@@ -15,11 +15,11 @@ import {
   requireGatewayModel,
   resolveGatewayCredential,
   type GatewayModel,
-  type OmpGateway,
-} from "./omp-gateway.js";
+  type ModelGateway,
+} from "./model-gateway.js";
 
 const roots: string[] = [];
-const gateway: OmpGateway = {
+const gateway: ModelGateway = {
   baseUrl: "http://127.0.0.1:8317/v1/",
   protocol: "openai-responses",
   accountPrefix: "personal",
@@ -74,7 +74,7 @@ describe("CPA native gateway boundary", () => {
   });
   it("reads a rotated owner-only file on each launch and refuses unsafe files", () => {
     const path = join(root(), "client-key");
-    const selected: OmpGateway = {
+    const selected: ModelGateway = {
       ...gateway,
       credential: { kind: "file", path },
     };
@@ -127,21 +127,19 @@ describe("CPA native gateway boundary", () => {
     expect(receipt.verify).toThrow("receipt");
   });
   it("joins the model API base, binds exact namespaces and copies real metadata only", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            data: [
-              { id: "personal/gpt-example" },
-              { id: "personal-other/gpt-example" },
-              { id: "other/gpt-example" },
-              { id: "personal/unknown" },
-              { id: "personal/gpt-example" },
-            ],
-          }),
-        ),
-      );
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            { id: "personal/gpt-example" },
+            { id: "personal-other/gpt-example" },
+            { id: "other/gpt-example" },
+            { id: "personal/unknown" },
+            { id: "personal/gpt-example" },
+          ],
+        }),
+      ),
+    );
     const models = await discoverGatewayModels(
       gateway,
       "client-key",
@@ -177,18 +175,16 @@ describe("CPA native gateway boundary", () => {
     await expect(
       discoverGatewayModels(gateway, "bad-key", [metadata], unauthorized),
     ).rejects.toThrow("401");
-    const unknown = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            data: [
-              { id: "personal-other/gpt-example" },
-              { id: "personal/unknown" },
-            ],
-          }),
-        ),
-      );
+    const unknown = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            { id: "personal-other/gpt-example" },
+            { id: "personal/unknown" },
+          ],
+        }),
+      ),
+    );
     await expect(
       discoverGatewayModels(gateway, "client-key", [metadata], unknown),
     ).rejects.toThrow("no supported models");

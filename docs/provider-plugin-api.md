@@ -95,10 +95,10 @@ bb.providers.register({
 ```
 
 Declare `experimental_executionBindings: { contexts, nativeConnections,
-contextUnavailableReason? }` only for launch modes the bridge actually supports.
-An absent declaration is unsupported. Core rejects unsupported explicit or
-defaulted bindings before creating a thread; it never substitutes another
-provider or ambient context.
+gatewayConnections?, contextUnavailableReason? }` only for launch modes the bridge
+actually supports. An absent declaration is unsupported. Core checks native and
+gateway connections independently before creating a thread; supporting a gateway
+does not imply support for native account references or execution contexts.
 
 Core reserves `providerOptions.executionContext` and
 `providerOptions.modelConnection` for frozen, validated thread snapshots. Provider
@@ -107,6 +107,17 @@ bridges validate them with `experimental_executionContextSnapshotSchema` and
 `@get-bb/plugin-sdk/provider-bridge`, not private `@bb/*` imports. Continue and fork
 must preserve the binding and native session identity; current disabled/revoked
 definitions still refuse continuation.
+
+`@get-bb/plugin-sdk/provider-bridge` provides worker-local experimental gateway
+helpers: `experimental_gatewayChildEnv` preserves the worker's credential-env
+reference over task environment input; `experimental_resolveGatewayCredential`
+accepts a valid worker env value or owner-only regular file;
+`experimental_listGatewayModelIds` discovers only the exact account namespace;
+`experimental_requireGatewayModel` rejects implicit/default/unlisted selections;
+`experimental_pinGatewayReceipt` and `experimental_hasGatewayReceipt` preserve
+gateway/model identity across native lifecycle boundaries. Their gateway type is
+`experimental_ModelGateway`. Receipts contain references, never client-key values.
+Native provider host artifacts must import these from the public SDK.
 
 The scoped OMP bridge uses Bun and a host native SDK exporting
 `EXPLICIT_CONTEXT_DISCOVERY_VERSION = 1` (not stock 18.12.6), selected through

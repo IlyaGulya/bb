@@ -85,16 +85,23 @@ function connection(
     }),
   );
 }
-function gatewayConnection(id: string, allowedHostIds = [hostId]) {
+function gatewayConnection(
+  id: string,
+  allowedHostIds = [hostId],
+  provider = "acp-omp",
+) {
   return createModelConnectionDefinition(
     db,
     createModelConnectionRequestSchema.parse({
       name: id,
-      provider: "acp-omp",
+      provider,
       hostId: null,
       gateway: {
         baseUrl: "https://gateway.example/v1",
-        protocol: "openai-responses",
+        protocol:
+          provider === "claude-code"
+            ? "anthropic-messages"
+            : "openai-responses",
         accountPrefix: "personal",
         modelProvider: "openai-codex",
         credential: { kind: "env", name: "CPA_MODEL_KEY" },
@@ -253,7 +260,7 @@ describe("native execution context persistence and selection", () => {
         provider: "omp-native",
         modelConnectionId: "available",
       }),
-    ).toThrow(/not omp-native/);
+    ).toThrow();
     expect(() =>
       resolveThreadExecutionBinding(db, {
         projectId,
@@ -526,7 +533,7 @@ describe("gateway execution host admission", () => {
     };
     for (const patch of [
       { hostId },
-      { provider: "codex" },
+      { provider: "claude-code" },
       { nativeAuth: { configDir: "/fixtures/native-auth" } },
       { nativeAuth: { profile: "work" } },
       {
@@ -631,7 +638,7 @@ describe("gateway execution host admission", () => {
     ).toBe(false);
   });
 
-  it("selects a gateway without a context but still requires an authorized execution host and acp-omp", () => {
+  it("selects a gateway without a context but still requires an authorized execution host", () => {
     const connection = gatewayConnection("personal", [hostId, "other-host"]);
     for (const selectedHostId of [hostId, "other-host"]) {
       expect(
@@ -653,14 +660,6 @@ describe("gateway execution host admission", () => {
         modelConnectionId: connection.id,
       }),
     ).toThrow(/concrete execution host/);
-    expect(() =>
-      resolveThreadExecutionBinding(db, {
-        projectId,
-        hostId,
-        provider: "codex",
-        modelConnectionId: connection.id,
-      }),
-    ).toThrow(/not codex/);
     const restricted = gatewayConnection("restricted");
     expect(() =>
       resolveThreadExecutionBinding(db, {
@@ -670,6 +669,52 @@ describe("gateway execution host admission", () => {
       }),
     ).toThrow(/does not authorize/);
   });
+
+  it.each(["claude-code", "codex"])(
+    "admits %s only with its explicit compatible gateway and host",
+    (provider) => {
+      const selected = gatewayConnection(provider, [hostId], provider);
+      expect(
+        resolveThreadExecutionBinding(db, {
+          projectId,
+          hostId,
+          provider,
+          modelConnectionId: selected.id,
+        })?.modelConnection?.provider,
+      ).toBe(provider);
+      for (const wrongProvider of [
+        "acp-omp",
+        provider === "codex" ? "claude-code" : "codex",
+      ]) {
+        let error: unknown;
+        try {
+          resolveThreadExecutionBinding(db, {
+            projectId,
+            hostId,
+            provider: wrongProvider,
+            modelConnectionId: selected.id,
+          });
+        } catch (cause) {
+          error = cause;
+        }
+        expect(error).toMatchObject({
+          body: { code: "model_connection_provider_mismatch" },
+        });
+      }
+      expect(
+        createModelConnectionRequestSchema.safeParse({
+          name: "incompatible",
+          provider,
+          hostId: null,
+          gateway: {
+            ...selected.gateway!,
+            protocol:
+              provider === "codex" ? "anthropic-messages" : "openai-responses",
+          },
+        }).success,
+      ).toBe(false);
+    },
+  );
 
   it("rejects unknown, removing, destroyed and deleted allowed hosts on create and update", () => {
     const connection = gatewayConnection("personal");

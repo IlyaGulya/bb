@@ -19,7 +19,7 @@ Start a thread, pick Claude Code, and let it work in your repository from bb. Th
 ## Requirements
 
 - Install the Claude Code CLI (`claude`) on the host machine. The plugin can run the installer for you.
-- Sign in with `claude` on that machine. bb reads the sign-in state to show account and plan.
+- For native model authentication, sign in with `claude` on that machine. A CPA model connection instead uses its provisioned worker-local client key.
 - `Claude in Chrome` needs the Chrome extension and a claude.ai login on the host.
 
 ## Scoped contexts and native accounts
@@ -28,7 +28,7 @@ Explicit `executionContext` and `modelConnection` snapshots select instructions/
 tools and native authentication independently. Unassigned legacy threads retain
 their existing behavior.
 
-Scoped launches use explicit settings/hooks and selected skill/command/plugin
+By default, scoped launches use explicit settings/hooks and selected skill/command/plugin
 roots. Named MCP descriptors come from the selected native JSON files; strict
 MCP retains `bb-bridge`. Plugin MCP auto-discovery is off. Account-cloud MCP
 import is separately disabled with `ENABLE_CLAUDEAI_MCP_SERVERS=false`
@@ -41,7 +41,22 @@ copy OAuth or switch the global login. A non-default auth directory requires a
 scoped context. Auth `profile`/OMP broker references, Chrome and shared native
 auto-memory are unsupported for scoped Claude.
 
-Hash-only host receipts protect selected settings/MCP/hooks/root content across
+A CPA connection routes native Claude model HTTP over `anthropic-messages`;
+CLI/session history stays native. Select an exact `bb-cpa/<prefix>/<id>` model
+and worker-local key reference. Missing/incompatible selections refuse without
+native/pool fallback. Context and model payer remain independent.
+
+Optional `nativeMcpProfile: {configDir: string|null}` opts into the entire native
+user/project MCP plus account Cloud profile, not BB's per-server allowlist.
+`null` uses the host-native profile. With CPA, model `nativeAuth` stays null:
+custom model Authorization carries the CPA key; native OAuth stays only for
+Cloud, without copying tokens. A compatible CLI/SDK must prove first-party OAuth
+and at least one connected `claudeai` connector before input. Missing/empty
+inventory refuses; it cannot prove a valid-empty grant. Other contexts stay
+strict. This is broader tool scope, not a sandbox/ACL.
+
+Hash-only host receipts protect selected settings/MCP/hooks/root content and
+secret-free gateway references across
 continuation and resume. Modified sources or missing resume receipts require a
 new thread or restored original files. Native session/transcript linkage and
 managed enterprise policy remain native. This is configuration selection, not

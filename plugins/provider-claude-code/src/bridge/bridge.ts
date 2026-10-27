@@ -758,7 +758,9 @@ async function applyLiveSessionSettings(
   next: ClaudeLiveSessionSettings,
 ): Promise<void> {
   const current = threadSession.attachment.liveSettings;
-  const connection = threadSession.attachment.sessionConstructionConfig.sessionOptions.modelConnection;
+  const connection =
+    threadSession.attachment.sessionConstructionConfig.sessionOptions
+      .modelConnection;
   if (connection?.gateway && current.model !== next.model) {
     throw new Error(
       "Claude gateway model binding is immutable; create a new thread to change the selected model.",
@@ -2180,7 +2182,9 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
         sendResult(
           request.id,
           request.params.providerOptions?.modelConnection?.gateway
-            ? await listClaudeGatewayModels(request.params.providerOptions.modelConnection)
+            ? await listClaudeGatewayModels(
+                request.params.providerOptions.modelConnection,
+              )
             : await listModelsMemoized(),
         );
       } catch (error) {
@@ -2273,22 +2277,28 @@ function attachThreadSession(
 ): void {
   if (params.modelConnection?.gateway) {
     if (!contextStore) {
-      throw new Error("Claude gateway context lineage requires the provider host data directory.");
+      throw new Error(
+        "Claude gateway context lineage requires the provider host data directory.",
+      );
     }
     if ("sourceProviderThreadId" in params) {
-      contextStore.resolve({
-        threadId: `claude-gateway-session:${params.sourceProviderThreadId}`,
+      contextStore
+        .resolve({
+          threadId: `claude-gateway-session:${params.sourceProviderThreadId}`,
+          executionContext: params.executionContext,
+          modelConnection: params.modelConnection,
+          resume: true,
+        })
+        ?.verify();
+    }
+    contextStore
+      .resolve({
+        threadId: `claude-gateway-session:${providerThreadId}`,
         executionContext: params.executionContext,
         modelConnection: params.modelConnection,
-        resume: true,
-      })?.verify();
-    }
-    contextStore.resolve({
-      threadId: `claude-gateway-session:${providerThreadId}`,
-      executionContext: params.executionContext,
-      modelConnection: params.modelConnection,
-      resume,
-    })?.verify();
+        resume,
+      })
+      ?.verify();
   }
   const threadIdRef = { current: params.threadId };
   const env = buildSessionEnv(readConfigEnvOverrides(params.config));
@@ -2350,7 +2360,12 @@ async function handleThreadStart(
   params: ThreadStartParams,
 ): Promise<void> {
   const providerThreadId = randomUUID();
-  const verifyGateway = await prepareGatewayBinding(gatewayDataDir, params, providerThreadId, false);
+  const verifyGateway = await prepareGatewayBinding(
+    gatewayDataDir,
+    params,
+    providerThreadId,
+    false,
+  );
   const existing = threadAttachments.get(params.threadId);
   if (existing) {
     await closeThreadSession({
@@ -2377,7 +2392,12 @@ async function handleThreadResume(
     );
     return;
   }
-  const verifyGateway = await prepareGatewayBinding(gatewayDataDir, params, requestedProviderThreadId, true);
+  const verifyGateway = await prepareGatewayBinding(
+    gatewayDataDir,
+    params,
+    requestedProviderThreadId,
+    true,
+  );
   const sessionConstructionConfig = toSessionConstructionConfig(params);
 
   const existing = threadAttachments.get(threadId);
@@ -2426,7 +2446,13 @@ async function handleThreadResume(
     });
   }
 
-  attachThreadSession(id, params, requestedProviderThreadId, true, verifyGateway);
+  attachThreadSession(
+    id,
+    params,
+    requestedProviderThreadId,
+    true,
+    verifyGateway,
+  );
 }
 
 async function handleThreadFork(
@@ -2435,7 +2461,12 @@ async function handleThreadFork(
 ): Promise<void> {
   const threadId = params.threadId;
   const providerThreadId = randomUUID();
-  const verifyGateway = await prepareGatewayBinding(gatewayDataDir, params, providerThreadId, false);
+  const verifyGateway = await prepareGatewayBinding(
+    gatewayDataDir,
+    params,
+    providerThreadId,
+    false,
+  );
 
   const existing = threadAttachments.get(threadId);
   if (existing) {

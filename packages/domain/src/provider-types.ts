@@ -141,6 +141,7 @@ export const providerExecutionBindingSupportSchema = z
   .object({
     contexts: z.boolean(),
     nativeConnections: z.boolean(),
+    gatewayConnections: z.boolean().optional(),
     contextUnavailableReason: z.string().trim().min(1).optional(),
   })
   .strict();

@@ -17,11 +17,22 @@ a "Docs:" line has no owning doc, so it keeps the essential contract itself.
 ## Scoped execution context roots and launch bindings
 
 `PluginProviderDeclaration.experimental_executionBindings` declares independent
-`contexts` / `nativeConnections` support and an optional context refusal reason.
-Core admission uses this declaration instead of branching on provider IDs.
+`contexts` / `nativeConnections` / `gatewayConnections` support and an optional
+context refusal reason. Core admission checks the selected connection mode.
 `sdk.experimental_executionContexts` and `sdk.experimental_modelConnections`
 expose CRUD/defaults/binding APIs; first-party UI, CLI and Tasks use the same
 backend resolver. No unprefixed compatibility aliases are exported.
+
+`@get-bb/plugin-sdk/provider-bridge` exports `experimental_gatewayChildEnv`,
+`experimental_resolveGatewayCredential`, `experimental_listGatewayModelIds`,
+`experimental_requireGatewayModel`, `experimental_pinGatewayReceipt`,
+`experimental_hasGatewayReceipt` and `experimental_ModelGateway`. Native bridges
+use these worker-local helpers for reference-only credentials, exact account
+namespaces and binding/model receipts, not private workspace imports. Client-key
+resolution never reads native OAuth. Receipts contain references, never values.
+Docs: [provider-plugin-api.md](provider-plugin-api.md).
+Before stabilization: qualify additional native engines and credential rotation,
+and audit receipt persistence and lifecycle guarantees across worker upgrades.
 
 `experimental_executionContexts.inspectMcp({hostId, providerId, configPaths})`
 uses the same online-worker inspection as the context editor, new-thread

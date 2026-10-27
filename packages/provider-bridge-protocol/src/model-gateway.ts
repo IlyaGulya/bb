@@ -1,5 +1,6 @@
 import {
   constants,
+  existsSync,
   openSync,
   closeSync,
   fstatSync,
@@ -14,7 +15,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { ModelConnectionSnapshot } from "@bb/domain";
 import { z } from "zod";
 
-export type OmpGateway = NonNullable<ModelConnectionSnapshot["gateway"]>;
+export type ModelGateway = NonNullable<ModelConnectionSnapshot["gateway"]>;
 export const gatewayModelSchema = z
   .object({
     id: z.string().min(1),
@@ -35,7 +36,7 @@ export const gatewayModelSchema = z
 export type GatewayModel = z.infer<typeof gatewayModelSchema>;
 
 export function gatewayChildEnv(
-  gateway: OmpGateway,
+  gateway: ModelGateway,
   workerEnv: NodeJS.ProcessEnv,
   launchEnv: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
@@ -49,7 +50,7 @@ export function gatewayChildEnv(
 }
 
 export function resolveGatewayCredential(
-  gateway: OmpGateway,
+  gateway: ModelGateway,
   env: NodeJS.ProcessEnv,
 ): string {
   let value: string | undefined;
@@ -90,12 +91,11 @@ export function resolveGatewayCredential(
   return key;
 }
 
-export async function discoverGatewayModels(
-  gateway: OmpGateway,
+export async function listGatewayModelIds(
+  gateway: ModelGateway,
   key: string,
-  catalog: readonly GatewayModel[],
   fetchModels: typeof fetch = fetch,
-): Promise<GatewayModel[]> {
+): Promise<string[]> {
   let response: Response;
   try {
     response = await fetchModels(
@@ -119,15 +119,28 @@ export async function discoverGatewayModels(
     .object({ data: z.array(z.object({ id: z.string() })) })
     .parse(await response.json());
   const prefix = `${gateway.accountPrefix}/`;
+  const ids = [...new Set(body.data.map((model) => model.id))].filter(
+    (id) => id.startsWith(prefix) && id.length > prefix.length,
+  );
+  if (!ids.length)
+    throw new Error("CPA returned no models in the bound account namespace.");
+  return ids;
+}
+
+export async function discoverGatewayModels(
+  gateway: ModelGateway,
+  key: string,
+  catalog: readonly GatewayModel[],
+  fetchModels: typeof fetch = fetch,
+): Promise<GatewayModel[]> {
+  const ids = await listGatewayModelIds(gateway, key, fetchModels);
+  const prefix = `${gateway.accountPrefix}/`;
   const models: GatewayModel[] = [];
-  const seen = new Set<string>();
-  for (const { id } of body.data) {
-    if (!id.startsWith(prefix) || seen.has(id)) continue;
+  for (const id of ids) {
     const metadata = catalog.find(
       (model) => model.id === id.slice(prefix.length),
     );
     if (!metadata) continue;
-    seen.add(id);
     const {
       headers: _headers,
       baseUrl: _baseUrl,
@@ -149,19 +162,37 @@ export async function discoverGatewayModels(
   return models;
 }
 
+function gatewayReceiptPath(
+  dataDir: string,
+  id: string,
+  directory: string,
+): string {
+  return join(
+    dataDir,
+    directory,
+    `${createHash("sha256").update(id).digest("hex")}.json`,
+  );
+}
+
+export function hasGatewayReceipt(
+  dataDir: string,
+  id: string,
+  receiptDirectory = "omp-gateway",
+): boolean {
+  return existsSync(gatewayReceiptPath(dataDir, id, receiptDirectory));
+}
+
 export function pinGatewayReceipt(
   dataDir: string,
   threadId: string,
-  gateway: OmpGateway,
+  gateway: ModelGateway,
   model: string,
   resume: boolean,
+  receiptDirectory = "omp-gateway",
 ): { path: string; verify(): void } {
-  const root = join(dataDir, "omp-gateway");
+  const root = join(dataDir, receiptDirectory);
   mkdirSync(root, { recursive: true, mode: 0o700 });
-  const path = join(
-    root,
-    `${createHash("sha256").update(threadId).digest("hex")}.json`,
-  );
+  const path = gatewayReceiptPath(dataDir, threadId, receiptDirectory);
   const receipt = { version: 1, gateway, model };
   const verify = () => {
     try {
@@ -186,8 +217,8 @@ export function pinGatewayReceipt(
 
 export function requireGatewayModel(
   model: string | undefined,
-  gateway: OmpGateway,
-  models: readonly GatewayModel[],
+  gateway: ModelGateway,
+  models: readonly Pick<GatewayModel, "id">[],
 ): string {
   const prefix = `bb-cpa/${gateway.accountPrefix}/`;
   if (

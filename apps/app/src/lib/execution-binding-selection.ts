@@ -1,3 +1,4 @@
+import { isModelGatewayProviderCompatible } from "@bb/domain";
 import type { ExecutionContext, ModelConnection } from "@bb/domain";
 
 export function executionContextUnavailableReason(
@@ -25,8 +26,10 @@ export function modelConnectionUnavailableReason(
   }
   if (hostId === null) return "Select a machine to use this model connection.";
   if (connection.gateway) {
-    if (providerId !== "acp-omp")
-      return "CPA gateway requires native OMP (acp-omp).";
+    if (
+      !isModelGatewayProviderCompatible(providerId, connection.gateway.protocol)
+    )
+      return "CPA protocol is incompatible with the selected native engine.";
     if (!connection.gateway.allowedHostIds.includes(hostId)) {
       return "This machine is not allowed to use the CPA gateway connection.";
     }

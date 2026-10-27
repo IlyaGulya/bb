@@ -14,6 +14,7 @@ import {
   type DbConnection,
 } from "@bb/db";
 import {
+  isModelGatewayProviderCompatible,
   executionContextSchema,
   modelConnectionSchema,
   inspectMcpRequestSchema,
@@ -203,13 +204,17 @@ export function assertModelConnectionHostAuthorized(
   providerId?: string,
 ): void {
   if (
-    (connection.gateway !== null && connection.provider !== "acp-omp") ||
+    (connection.gateway !== null &&
+      !isModelGatewayProviderCompatible(
+        connection.provider,
+        connection.gateway.protocol,
+      )) ||
     (providerId !== undefined && connection.provider !== providerId)
   )
     throw new ApiError(
       400,
       "model_connection_provider_mismatch",
-      `Connection ${connection.name} uses provider ${connection.provider}, not ${providerId ?? "acp-omp"}; select its provider or another connection`,
+      `Connection ${connection.name} is incompatible with provider ${providerId ?? connection.provider}; select its provider or another connection`,
     );
   if (connection.gateway !== null) {
     if (!connection.gateway.allowedHostIds.includes(hostId))

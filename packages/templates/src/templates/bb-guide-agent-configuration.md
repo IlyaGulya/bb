@@ -24,6 +24,12 @@ Explicit contexts and model connections:
   auth remains on the execution host; connection selection does not sign in or
   change the global login. Native providers may refuse unsupported references.
 
+  Alternatively choose a CPA gateway connection for native OMP (acp-omp),
+  Claude Code or Codex. OMP supports openai-completions, openai-responses and
+  anthropic-messages; Claude Code requires anthropic-messages and Codex requires
+  openai-responses. The native engine/session stays native; the gateway selects
+  the model payer, not Work/Personal context or MCP authorization.
+
     bb execution-context list --json
     bb execution-context create --file context.json --json
     bb execution-context show <id> --json
@@ -44,10 +50,15 @@ Explicit contexts and model connections:
   native configuration paths belong to the selected execution host. Context
   input includes name, projectIds, instructions, skillRoots, commandRoots,
   pluginRoots, settingsPaths, mcpServers [{name,configPath}], hooksPath,
-  autoMemory, gitIdentity {name,email} and defaultModelConnectionId. Model
-  connection input includes name, provider, hostId and nativeAuth
-  {configDir,profile,hostEnv}; hostEnv contains brokerUrlEnv/brokerTokenEnv
-  variable NAMES, not their values. Omitted create fields get native defaults;
+  autoMemory, gitIdentity {name,email}, defaultModelConnectionId and optional
+  Claude-only nativeMcpProfile {configDir:string|null}. Model connection input
+  includes name, provider, hostId and nativeAuth {configDir,profile,hostEnv};
+  hostEnv contains brokerUrlEnv/brokerTokenEnv variable NAMES, not their values.
+  Gateway connections instead require hostId:null, default-null nativeAuth,
+  gateway.allowedHostIds, accountPrefix and a worker-local credential FILE or
+  ENV reference. Select an exact bb-cpa/<prefix>/<id> model; missing credentials,
+  incompatible protocols/models or hosts refuse without native/pool fallback.
+  Omitted create fields get native defaults;
   update JSON is a patch. Both definition kinds support enabled; connections
   also support revoked. Inspect `--help` for mutation/delete commands.
 
@@ -65,6 +76,10 @@ Explicit contexts and model connections:
   threads.spawn({executionContextId,modelConnectionId,...}). HTTP resources:
   /api/v1/execution-contexts and /api/v1/model-connections; static MCP inspection
   is POST /api/v1/execution-contexts/mcp/inspect with {hostId,providerId,configPaths}.
+  Provider requests carry frozen executionContext/modelConnection snapshots
+  under providerOptions, including model/list requests. Capability
+  experimental_executionBindings advertises optional gatewayConnections
+  independently of explicit-context support; gateways alone do not enable it.
 
   The context editor's MCP servers section inspects a preview machine's native
   file and selects individual names; the preview does not bind a host/account.
@@ -94,6 +109,20 @@ Explicit contexts and model connections:
   .bb/AGENTS.md are read within that root; ancestor/home instructions are not
   substituted. Selected native-source changes are rejected for an existing
   binding rather than silently changing its context.
+
+  nativeMcpProfile is absent by default. Explicit owner-approved Claude use
+  opts into the entire native user/project MCP profile plus account Cloud
+  Connectors, not BB's per-server allowlist. configDir:null uses the host-native
+  profile. This broader tool scope is not a sandbox/ACL. With CPA, nativeAuth
+  stays default-null: the CPA key supplies model Authorization while local
+  native OAuth is retained only for Cloud; no tokens are copied. Before model
+  input, native initialization must prove first-party subscription/OAuth and
+  at least one connected claudeai-scoped connector. Missing, unavailable or
+  empty inventory refuses; valid-empty cannot be distinguished from missing
+  grant. A compatible installed native CLI/SDK is required, without vendor
+  hotpatches. This prerequisite is not proof of real Cloud runtime success.
+  OMP/Codex refuse nativeMcpProfile; native Codex currently refuses any explicit
+  execution context, even when its gateway model connection is supported.
 
   Scoped OMP requires the native host SDK under Bun with
   EXPLICIT_CONTEXT_DISCOVERY_VERSION = 1. Install the AgentOS explicit-context

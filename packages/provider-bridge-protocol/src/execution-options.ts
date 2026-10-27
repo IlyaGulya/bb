@@ -1,4 +1,6 @@
 import {
+  executionContextSnapshotSchema,
+  modelConnectionSnapshotSchema,
   promptModeSchema,
   reasoningLevelSchema,
   runtimePermissionPolicySchema,
@@ -6,6 +8,13 @@ import {
   serviceTierSchema,
 } from "@bb/domain";
 import { z } from "zod";
+
+export const bridgeProviderOptionsSchema = z
+  .object({
+    executionContext: executionContextSnapshotSchema.nullable().optional(),
+    modelConnection: modelConnectionSnapshotSchema.nullable().optional(),
+  })
+  .catchall(z.unknown());
 
 export const bridgeExecutionOptionsSchema = z
   .object({
@@ -16,7 +25,7 @@ export const bridgeExecutionOptionsSchema = z
     sessionOptions: sessionOptionSelectionsSchema.optional(),
     instructions: z.string().optional(),
     envVars: z.record(z.string(), z.string()).optional(),
-    providerOptions: z.record(z.string(), z.unknown()).optional(),
+    providerOptions: bridgeProviderOptionsSchema.optional(),
   })
   .and(runtimePermissionPolicySchema);
 

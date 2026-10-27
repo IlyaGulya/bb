@@ -2,6 +2,7 @@ import { mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { gatewayLogDirectory } from "../../src/routes/gateway-logs.js";
 import {
   downloadGatewayLog,
   listGatewayLogs,
@@ -36,6 +37,59 @@ describe.skipIf(process.platform !== "linux")("native CPA gateway logs", () => {
     const past = new Date(Date.now() - 10000);
     await utimes(path, past, past);
   }
+
+  it("selects the frozen endpoint's log root even when another account has the same thread header and filename", async () => {
+    const personal = nativeLog("thread-a", "personal-only");
+    const work = nativeLog("thread-a", "work-only");
+    await finalized("same.log", personal);
+    const other = join(foreignRoot, "same.log");
+    await writeFile(other, work);
+    const past = new Date(Date.now() - 10000);
+    await utimes(other, past, past);
+    const mapping = JSON.stringify({
+      "https://personal.example/v1/": root,
+      "https://work.example/v1": foreignRoot,
+    });
+    const personalDownload = await downloadGatewayLog(
+      gatewayLogDirectory("https://personal.example/v1", mapping),
+      "thread-a",
+      logId("same.log"),
+    );
+    const workDownload = await downloadGatewayLog(
+      gatewayLogDirectory("https://work.example/v1/", mapping),
+      "thread-a",
+      logId("same.log"),
+    );
+    expect(await personalDownload.text()).toBe(personal);
+    expect(await workDownload.text()).toBe(work);
+    await expect(
+      listGatewayLogs(
+        gatewayLogDirectory("https://unbound.example/v1", mapping),
+        "thread-a",
+      ),
+    ).rejects.toMatchObject({ body: { code: "gateway_logs_unavailable" } });
+  });
+
+  it("refuses invalid or ambiguous endpoint mappings rather than borrowing another account root", () => {
+    for (const mapping of [
+      "{",
+      JSON.stringify({ "https://personal.example/v1": "relative" }),
+      JSON.stringify({
+        "https://personal.example/v1": root,
+        "https://personal.example/v1/": foreignRoot,
+      }),
+    ]) {
+      let error: unknown;
+      try {
+        gatewayLogDirectory("https://personal.example/v1", mapping);
+      } catch (cause) {
+        error = cause;
+      }
+      expect(error).toMatchObject({
+        body: { code: "gateway_logs_unavailable" },
+      });
+    }
+  });
 
   it("matches the exact case-insensitive inbound header name, never another thread or body text", async () => {
     await finalized("ours.log", nativeLog("thread-a"));

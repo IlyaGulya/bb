@@ -37,6 +37,13 @@ export default function plugin(bb: BbPluginApi) {
       installUrl: "https://developers.openai.com/codex/cli",
       brandPrefix: "GPT-",
     },
+    experimental_executionBindings: {
+      contexts: false,
+      nativeConnections: false,
+      gatewayConnections: true,
+      contextUnavailableReason:
+        "Native Codex gateway sessions retain project-native instructions but do not support BB execution contexts.",
+    },
     models: { scope: "host" },
     ...CODEX_NATIVE_ROOTS_DECLARATION,
     maintenance: { health: true, usage: true, installation: true },

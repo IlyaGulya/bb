@@ -98,6 +98,16 @@ export function ThreadExecutionBindingCard({ threadId }: { threadId: string }) {
                     ? "Loading…"
                     : "No execution environment")}
             </DetailRow>
+            {binding.data?.executionContext?.nativeMcpProfile ? (
+              <DetailRow label="Native Claude MCP profile">
+                {binding.data.executionContext.nativeMcpProfile.configDir ??
+                  "Host-native account"}
+                <span className="block text-muted-foreground">
+                  Includes native user/project MCP and Cloud Connectors; not the
+                  BB server allowlist.
+                </span>
+              </DetailRow>
+            ) : null}
             <DetailRow label="Context MCP servers">
               {binding.data?.executionContext?.mcpServers.length
                 ? binding.data.executionContext.mcpServers.map((ref) => (

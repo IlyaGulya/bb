@@ -57,6 +57,7 @@ export function acpProviderDeclaration(
           experimental_executionBindings: {
             contexts: true,
             nativeConnections: true,
+            gatewayConnections: true,
           },
         }
       : {}),

@@ -483,7 +483,7 @@ export function buildClaudeSessionEnvironment(args: {
 }): NodeJS.ProcessEnv {
   let env = { ...args.env };
   const connection = args.modelConnection;
-  const nativeMcp = args.executionContext?.claudeNativeMcp;
+  const nativeMcp = args.executionContext?.nativeMcpProfile;
   if (connection) {
     if (
       connection.provider !== "claude-code" ||
@@ -524,8 +524,11 @@ export function buildClaudeSessionEnvironment(args: {
   }
   if (nativeMcp) {
     for (const key of nativeAuthEnvironment) delete env[key];
-    if (connection && !connection.gateway &&
-        connection.nativeAuth.configDir !== nativeMcp.configDir) {
+    if (
+      connection &&
+      !connection.gateway &&
+      connection.nativeAuth.configDir !== nativeMcp.configDir
+    ) {
       throw new Error(
         "The selected native Claude MCP profile and native model connection must use the same configDir; select matching sources or create a new thread.",
       );
@@ -533,7 +536,9 @@ export function buildClaudeSessionEnvironment(args: {
     if (nativeMcp.configDir !== null) {
       requireAbsolutePath(nativeMcp.configDir);
       if (!statSync(nativeMcp.configDir).isDirectory()) {
-        throw new Error("The selected native Claude MCP profile directory is unavailable.");
+        throw new Error(
+          "The selected native Claude MCP profile directory is unavailable.",
+        );
       }
       env.CLAUDE_CONFIG_DIR = nativeMcp.configDir;
     } else {

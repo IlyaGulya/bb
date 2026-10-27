@@ -335,6 +335,9 @@ function ContextEditor({
     pluginRoots: value?.pluginRoots ?? [],
     settingsPaths: value?.settingsPaths ?? [],
     mcpServers: value?.mcpServers ?? [],
+    ...(value?.nativeMcpProfile
+      ? { nativeMcpProfile: value.nativeMcpProfile }
+      : {}),
     hooksPath: value?.hooksPath ?? null,
     autoMemory: value?.autoMemory ?? false,
     gitIdentity: value?.gitIdentity ?? null,
@@ -442,6 +445,39 @@ function ContextEditor({
         value={draft.mcpServers}
         onChange={(refs) => set("mcpServers", refs)}
       />
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={draft.nativeMcpProfile !== undefined}
+          onChange={(event) =>
+            set(
+              "nativeMcpProfile",
+              event.target.checked ? { configDir: null } : undefined,
+            )
+          }
+        />
+        Use native Claude MCP profile, including Cloud Connectors
+      </label>
+      {draft.nativeMcpProfile ? (
+        <Field label="Native Claude MCP account config directory">
+          <Input
+            value={draft.nativeMcpProfile.configDir ?? ""}
+            placeholder="Empty: native account on the selected host"
+            onChange={(event) =>
+              set("nativeMcpProfile", {
+                configDir: event.target.value.trim() || null,
+              })
+            }
+          />
+          <p className="text-xs text-muted-foreground">
+            Claude Code only. Explicitly loads native user/project MCP and
+            account Cloud Connectors, not just the BB server allowlist. Requires
+            native sign-in and at least one connected Cloud connector on this
+            host; model-account selection stays independent. Other contexts and
+            existing sessions do not change.
+          </p>
+        </Field>
+      ) : null}
       <details className="space-y-3">
         <summary className="cursor-pointer text-sm font-medium">
           Native context configuration
@@ -587,7 +623,11 @@ function ConnectionEditor({
               event.target.value === "gateway"
                 ? {
                     ...current,
-                    provider: "acp-omp",
+                    provider: ["acp-omp", "claude-code", "codex"].includes(
+                      current.provider,
+                    )
+                      ? current.provider
+                      : "acp-omp",
                     hostId: null,
                     nativeAuth: {
                       configDir: null,
@@ -596,9 +636,15 @@ function ConnectionEditor({
                     },
                     gateway: {
                       baseUrl: "",
-                      protocol: "openai-responses",
+                      protocol:
+                        current.provider === "claude-code"
+                          ? "anthropic-messages"
+                          : "openai-responses",
                       accountPrefix: "",
-                      modelProvider: "openai-codex",
+                      modelProvider:
+                        current.provider === "claude-code"
+                          ? "anthropic"
+                          : "openai-codex",
                       credential: { kind: "env", name: "BB_CPA_API_KEY" },
                       allowedHostIds: [],
                     },
@@ -608,24 +654,46 @@ function ConnectionEditor({
           }
         >
           <option value="native">Native provider login</option>
-          <option value="gateway">CPA gateway · native OMP (acp-omp)</option>
+          <option value="gateway">CPA gateway · native engine</option>
         </select>
       </Field>
       <Field label="Native provider">
         <select
           required
-          disabled={draft.gateway !== null}
           className={selectClass}
           value={draft.provider}
-          onChange={(event) => set("provider", event.target.value)}
+          onChange={(event) => {
+            const provider = event.target.value;
+            setDraft((current) => ({
+              ...current,
+              provider,
+              gateway: current.gateway
+                ? {
+                    ...current.gateway,
+                    protocol:
+                      provider === "claude-code"
+                        ? "anthropic-messages"
+                        : provider === "codex"
+                          ? "openai-responses"
+                          : current.gateway.protocol,
+                  }
+                : null,
+            }));
+          }}
         >
           <option value="">Choose provider</option>
-          {providers.data?.map((provider) => (
-            <option key={provider.id} value={provider.id}>
-              {provider.displayName}
-              {provider.available ? "" : " · unavailable"}
-            </option>
-          ))}
+          {providers.data
+            ?.filter(
+              (provider) =>
+                !draft.gateway ||
+                ["acp-omp", "claude-code", "codex"].includes(provider.id),
+            )
+            .map((provider) => (
+              <option key={provider.id} value={provider.id}>
+                {provider.displayName}
+                {provider.available ? "" : " · unavailable"}
+              </option>
+            ))}
           {draft.provider &&
           !providers.data?.some(
             (provider) => provider.id === draft.provider,
@@ -639,10 +707,11 @@ function ConnectionEditor({
       {draft.gateway ? (
         <>
           <p className="text-xs text-muted-foreground">
-            CPA gateway supports native OMP (acp-omp) only. The selected worker
-            resolves the client credential reference and discovers only this
-            account namespace. This does not change context, MCP, Git identity
-            or native session storage. Client keys are flat, trusted-pilot
+            CPA supports native OMP, Claude Code and Codex with compatible
+            protocols. The selected worker resolves its client credential and
+            account namespace. Execution context, MCP identity, Git and native
+            session storage remain independent. Native Claude MCP-profile mode
+            must be explicitly selected. Client keys are account-service
             credentials, not per-run access grants.
           </p>
           <Field label="Gateway model API base URL">
@@ -677,8 +746,9 @@ function ConnectionEditor({
             />
           </Field>
           <p className="text-xs text-muted-foreground">
-            Use the exact native OMP catalog provider ID, such as openai-codex
-            or anthropic. Unknown models or capabilities are unsupported.
+            OMP requires exact native catalog metadata, such as openai-codex or
+            anthropic. Other engines list the selected CPA inventory without
+            invented token budgets.
           </p>
           <Field label="Gateway protocol">
             <select
@@ -694,9 +764,24 @@ function ConnectionEditor({
                   setGateway({ protocol });
               }}
             >
-              <option value="openai-responses">OpenAI Responses</option>
-              <option value="openai-completions">OpenAI Completions</option>
-              <option value="anthropic-messages">Anthropic Messages</option>
+              <option
+                value="openai-responses"
+                disabled={draft.provider === "claude-code"}
+              >
+                OpenAI Responses
+              </option>
+              <option
+                value="openai-completions"
+                disabled={draft.provider !== "acp-omp"}
+              >
+                OpenAI Completions
+              </option>
+              <option
+                value="anthropic-messages"
+                disabled={draft.provider === "codex"}
+              >
+                Anthropic Messages
+              </option>
             </select>
           </Field>
           <Field label="Client credential reference type">

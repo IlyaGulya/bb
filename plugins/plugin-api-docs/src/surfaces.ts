@@ -1267,7 +1267,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Do what the [bb CLI](cli) and the app can do",
           "Have the threads it creates attributed to the plugin",
           "Start plugin updates in the background and follow their progress or rollback",
-          "Select independent execution context and native model-account references when creating a thread, and inspect its persisted binding",
+          "Select independent execution contexts and native or gateway model-account references when creating a thread, and inspect its frozen binding",
           "Inspect named MCP configuration on the execution worker without returning native descriptors or credentials; validity is not authentication readiness",
         ],
         apiSymbols: [
@@ -1293,6 +1293,13 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "experimental_modelConnectionSnapshotSchema",
           "experimental_claudeMcpConfigSchema",
           "experimental_claudeSelectedMcpSchema",
+          "experimental_gatewayChildEnv",
+          "experimental_resolveGatewayCredential",
+          "experimental_listGatewayModelIds",
+          "experimental_requireGatewayModel",
+          "experimental_pinGatewayReceipt",
+          "experimental_hasGatewayReceipt",
+          "experimental_ModelGateway",
         ],
         firstParty: [
           "Account Pooler [Experimental]",

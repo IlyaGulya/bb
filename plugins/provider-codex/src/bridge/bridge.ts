@@ -559,12 +559,18 @@ interface DecodedCodexOptions {
 }
 
 function assertCodexExecutionContext(
-  context: NonNullable<BridgeExecutionOptions["providerOptions"]>["executionContext"],
+  context: NonNullable<
+    BridgeExecutionOptions["providerOptions"]
+  >["executionContext"],
 ): void {
-  if (context?.claudeNativeMcp)
-    throw new Error("Native Claude MCP profiles cannot be used by Codex; select a supported execution context.");
+  if (context?.nativeMcpProfile)
+    throw new Error(
+      "Native Claude MCP profiles cannot be used by Codex; select a supported execution context.",
+    );
   if (context)
-    throw new Error("Explicit execution contexts are not supported by native Codex; refusing ambient context fallback.");
+    throw new Error(
+      "Explicit execution contexts are not supported by native Codex; refusing ambient context fallback.",
+    );
 }
 
 function decodeCodexOptions(
@@ -1009,8 +1015,11 @@ function spawnChildConnection(callbacks: {
   const launchEnv = appServerLaunchEnv(callbacks.envVars);
   if (callbacks.gateway) {
     for (const name of [
-      CODEX_POOL_BASE_URL_ENV, CODEX_POOL_AUTH_TOKEN_ENV,
-      "OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL",
+      CODEX_POOL_BASE_URL_ENV,
+      CODEX_POOL_AUTH_TOKEN_ENV,
+      "OPENAI_API_KEY",
+      "CODEX_API_KEY",
+      "OPENAI_BASE_URL",
     ]) {
       delete env[name];
       delete launchEnv[name];
@@ -1217,9 +1226,18 @@ async function constructThreadSession(
 ): Promise<ConstructedCodexSession> {
   const existing = sessionsByBbThreadId.get(args.threadId);
   const decoded = decodeCodexOptions(args.options);
-  existing?.gateway?.verify(args.options.providerOptions?.modelConnection, args.options.model);
-  if (existing && !existing.gateway && args.options.providerOptions?.modelConnection?.gateway)
-    throw new Error("Create a new thread to change a native Codex session to CPA.");
+  existing?.gateway?.verify(
+    args.options.providerOptions?.modelConnection,
+    args.options.model,
+  );
+  if (
+    existing &&
+    !existing.gateway &&
+    args.options.providerOptions?.modelConnection?.gateway
+  )
+    throw new Error(
+      "Create a new thread to change a native Codex session to CPA.",
+    );
   const gateway = await prepareCodexGateway({
     connection: args.options.providerOptions?.modelConnection,
     model: args.options.model,
@@ -1277,9 +1295,12 @@ async function constructThreadSession(
     pendingPreIdentityDeltas: [],
     turnRateLimits: null,
     quotaRecoveryAttempted: false,
-    quotaRecoveryAllowed: gateway === null && !(
-      launchEnv[CODEX_POOL_BASE_URL_ENV] && launchEnv[CODEX_POOL_AUTH_TOKEN_ENV]
-    ),
+    quotaRecoveryAllowed:
+      gateway === null &&
+      !(
+        launchEnv[CODEX_POOL_BASE_URL_ENV] &&
+        launchEnv[CODEX_POOL_AUTH_TOKEN_ENV]
+      ),
     rebuildBeforeNextTurnReason: null,
     daybreakEnabled: null,
     modelCatalog: null,
@@ -1339,10 +1360,16 @@ async function constructThreadSession(
   try {
     await initializeChild(connection);
 
-    const childOnlyEnvNames = gateway ? new Set([
-      ...Object.keys(gateway.env), CODEX_POOL_AUTH_TOKEN_ENV,
-      CODEX_POOL_BASE_URL_ENV, "OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL",
-    ]) : null;
+    const childOnlyEnvNames = gateway
+      ? new Set([
+          ...Object.keys(gateway.env),
+          CODEX_POOL_AUTH_TOKEN_ENV,
+          CODEX_POOL_BASE_URL_ENV,
+          "OPENAI_API_KEY",
+          "CODEX_API_KEY",
+          "OPENAI_BASE_URL",
+        ])
+      : null;
     const preparedGitRoots = translator.prepareWorkspaceWriteGitRoots({
       command: {
         threadId: args.threadId,
@@ -1350,8 +1377,11 @@ async function constructThreadSession(
         options: childOnlyEnvNames
           ? {
               ...decoded.sessionOptions,
-              envVars: Object.fromEntries(Object.entries(decoded.sessionOptions.envVars ?? {})
-                .filter(([name]) => !childOnlyEnvNames.has(name))),
+              envVars: Object.fromEntries(
+                Object.entries(decoded.sessionOptions.envVars ?? {}).filter(
+                  ([name]) => !childOnlyEnvNames.has(name),
+                ),
+              ),
             }
           : decoded.sessionOptions,
       },
@@ -1372,7 +1402,7 @@ async function constructThreadSession(
       serviceTier: toCodexServiceTier(decoded.sessionOptions.serviceTier),
       config: gateway
         ? { ...preparedGitRoots.config, ...gateway.config }
-        : preparedGitRoots.config ?? undefined,
+        : (preparedGitRoots.config ?? undefined),
       ...(dynamicTools && dynamicTools.length > 0 ? { dynamicTools } : {}),
     };
 
@@ -1452,7 +1482,9 @@ async function constructThreadSession(
         decoded.daybreak,
       );
     }
-    const modelCatalog = gateway ? Promise.resolve(null) : loadSessionModelCatalog(connection);
+    const modelCatalog = gateway
+      ? Promise.resolve(null)
+      : loadSessionModelCatalog(connection);
     session.modelCatalog = modelCatalog;
     void modelCatalog.then((catalog) => publishDaybreakState(session, catalog));
     return { session, codexThreadId };
@@ -1487,6 +1519,7 @@ function registerResumableSession(session: CodexBridgeSession): void {
     codexThreadId: session.codexThreadId,
     serial: sessionSerialCounter,
     connection: null,
+    gateway: session.gateway,
     translator: session.translator,
     construction: session.construction,
     constructionSignature: session.constructionSignature,
@@ -1673,7 +1706,9 @@ async function handleModelList(
   let connection: CodexAppServerConnection | null = null;
   try {
     assertCodexExecutionContext(params.providerOptions?.executionContext);
-    const gatewayModels = await listCodexGatewayModels(params.providerOptions?.modelConnection);
+    const gatewayModels = await listCodexGatewayModels(
+      params.providerOptions?.modelConnection,
+    );
     if (gatewayModels !== null) {
       sendResult(id, { models: gatewayModels, selectedOnlyModels: [] });
       return;
@@ -1776,10 +1811,15 @@ async function requireLiveSessionForTurn(
   }
 
   if (session.gateway) {
-    session.gateway.verify(params.options.providerOptions?.modelConnection, params.options.model);
+    session.gateway.verify(
+      params.options.providerOptions?.modelConnection,
+      params.options.model,
+    );
     session.gateway.verifyCredential();
   } else if (params.options.providerOptions?.modelConnection?.gateway) {
-    throw new Error("Create a new thread to change a native Codex session to CPA.");
+    throw new Error(
+      "Create a new thread to change a native Codex session to CPA.",
+    );
   }
   const decoded = decodeCodexOptions(params.options);
   const signature = constructionSignature(
@@ -2112,7 +2152,10 @@ async function handleTurnStart(
             approvalPolicy: permissionSettings.approvalPolicy,
             approvalsReviewer: permissionSettings.approvalsReviewer,
             sandboxPolicy: permissionSettings.sandboxPolicy,
-            model: session.gateway?.model ?? decoded.sessionOptions.model ?? undefined,
+            model:
+              session.gateway?.model ??
+              decoded.sessionOptions.model ??
+              undefined,
             serviceTier: toCodexServiceTier(decoded.sessionOptions.serviceTier),
             ...(cyberAccessProgram === null ? {} : { cyberAccessProgram }),
           },
@@ -2169,10 +2212,15 @@ async function handleTurnSteer(
   }
   try {
     if (session.gateway) {
-      session.gateway.verify(params.options.providerOptions?.modelConnection, params.options.model);
+      session.gateway.verify(
+        params.options.providerOptions?.modelConnection,
+        params.options.model,
+      );
       session.gateway.verifyCredential();
     } else if (params.options.providerOptions?.modelConnection?.gateway) {
-      throw new Error("Create a new thread to change a native Codex session to CPA.");
+      throw new Error(
+        "Create a new thread to change a native Codex session to CPA.",
+      );
     }
     const decoded = decodeCodexOptions(params.options);
     const permissionSettings = toCodexPermissionSettings({

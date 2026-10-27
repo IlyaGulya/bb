@@ -177,7 +177,13 @@ export class SdkSession {
   private readonly completion: Promise<void>;
   private complete: (() => void) | null = null;
   private stderrTail = "";
-  private cloudReadiness: PromiseWithResolvers<void> | undefined;
+  private cloudReadiness:
+    | {
+        promise: Promise<void>;
+        resolve: () => void;
+        reject: (reason: unknown) => void;
+      }
+    | undefined;
 
   constructor(
     private readonly options: SdkSessionOptions,
@@ -185,7 +191,13 @@ export class SdkSession {
     private readonly onDone: SdkSessionDoneHandler,
   ) {
     if (options.requireNativeCloudMcp) {
-      this.cloudReadiness = Promise.withResolvers<void>();
+      let resolve!: () => void;
+      let reject!: (reason: unknown) => void;
+      const promise = new Promise<void>((onResolve, onReject) => {
+        resolve = onResolve;
+        reject = onReject;
+      });
+      this.cloudReadiness = { promise, resolve, reject };
     }
     this.completion = new Promise((resolve) => {
       this.complete = resolve;
@@ -338,7 +350,10 @@ export class SdkSession {
     }
     if (this.cloudReadiness) {
       const readiness = this.cloudReadiness;
-      void this.requireNativeCloudMcp().then(readiness.resolve, readiness.reject);
+      void this.requireNativeCloudMcp().then(
+        readiness.resolve,
+        readiness.reject,
+      );
     }
 
     void this.consumeStream();
@@ -499,10 +514,12 @@ export class SdkSession {
       if (this.cloudReadiness) q.close();
       this.onDone(
         new Error(
-          this.redactGatewayText(buildSdkDoneErrorMessage({
-            error,
-            stderrTail: this.stderrTail,
-          })),
+          this.redactGatewayText(
+            buildSdkDoneErrorMessage({
+              error,
+              stderrTail: this.stderrTail,
+            }),
+          ),
         ),
       );
     } finally {
@@ -530,7 +547,8 @@ export class SdkSession {
     if (value !== null && typeof value === "object") {
       return Object.fromEntries(
         Object.entries(value).map(([key, item]) => [
-          this.redactGatewayText(key), this.redactGatewayValue(item),
+          this.redactGatewayText(key),
+          this.redactGatewayValue(item),
         ]),
       ) as T;
     }
@@ -539,17 +557,26 @@ export class SdkSession {
 
   private async requireNativeCloudMcp(): Promise<void> {
     const q = this.query;
-    if (!q) throw new Error("Native Claude MCP profile startup did not create a session.");
+    if (!q)
+      throw new Error(
+        "Native Claude MCP profile startup did not create a session.",
+      );
     const { account } = await q.initializationResult();
-    const nativeOAuth = account.tokenSource === "claude.ai" ||
+    const nativeOAuth =
+      account.tokenSource === "claude.ai" ||
       (account.tokenSource === undefined &&
         typeof account.subscriptionType === "string" &&
         account.subscriptionType.length > 0);
-    const competingApiKey = account.apiKeySource !== undefined &&
+    const competingApiKey =
+      account.apiKeySource !== undefined &&
       account.apiKeySource !== "none" &&
       account.apiKeySource !== "/login managed key";
-    if (!nativeOAuth || competingApiKey ||
-        (account.apiProvider !== undefined && account.apiProvider !== "firstParty")) {
+    if (
+      !nativeOAuth ||
+      competingApiKey ||
+      (account.apiProvider !== undefined &&
+        account.apiProvider !== "firstParty")
+    ) {
       throw new Error(
         "The explicit native Claude MCP profile requires local Claude.ai OAuth authentication with user:mcp_servers scope. Client-key routing was not substituted. This profile authorizes native user/project MCP as well as Cloud connectors.",
       );

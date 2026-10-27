@@ -136,12 +136,17 @@ deployment.
 ## CPA gateway model connections
 
 A gateway connection selects model HTTP independently of execution context, MCP,
-Git identity and native session storage. It uses provider `acp-omp`, `hostId: null`
-and an explicit nonempty `gateway.allowedHostIds` list. Native auth overrides and
-gateway routing are mutually exclusive. The selected worker needs Bun and the
-native SDK described above, plus its own provisioned CPA model-client key.
+Git identity and native session storage. Native OMP (`acp-omp`) supports
+`openai-completions`, `openai-responses` and `anthropic-messages`; native Claude
+Code supports only `anthropic-messages`, native Codex only `openai-responses`.
+All use `hostId: null`, default-null `nativeAuth` and an explicit nonempty
+`gateway.allowedHostIds` list. Native auth overrides and gateway routing are
+mutually exclusive. OMP workers need Bun and the native SDK described above;
+other engines need their compatible installed native CLI/SDK, not vendor
+hotpatches. Each worker needs its own provisioned CPA model-client key.
 
 In Settings → Contexts & connections → Model connections, choose
+the CPA gateway option for the selected native engine. For OMP choose
 **CPA gateway · native OMP (acp-omp)**. Enter the model API base URL, protocol,
 account namespace and native catalog provider. Credential fields accept only an
 environment variable name or an absolute worker file path, never its contents.
@@ -170,14 +175,14 @@ explicit `bb-cpa/personal-codex/<upstream-model-id>` model. Native/default model
 fallback is disabled. Catalog requests need the selected `modelConnectionId`;
 bound-thread requests use `threadId` to retain the frozen selection.
 
-Responses gateway registrations explicitly set native
+OMP Responses gateway registrations explicitly set native
 `compat.statefulResponses: false`. Each request sends the complete native
 transcript with `store: false` and no `previous_response_id`, including each
 function call before its result. Gateway routes must not inherit the official
 provider's server-side continuation assumption. Native session history,
 follow-up and reopen remain local to the same native SDK.
 
-Both context-free and explicitly scoped launches use the native SDK/ACP loop.
+Both context-free and explicitly scoped OMP launches use the native SDK/ACP loop.
 Follow-up and reopen preserve native IDs; forks retain the binding with a new
 native ID. Endpoint/protocol/namespace/model mapping and credential references
 are pinned in secret-free receipts. Change the binding through a new thread,
@@ -187,15 +192,25 @@ BB disable/revoke blocks new admitted turns, not already admitted HTTP.
 
 CPA client keys are flat credentials, not task/account leases. Account prefixes
 restrict routing, not worker authorization. This pilot is private and trusted;
-it does not provide per-user RBAC or strict per-run revocation. Native Claude
-Cloud Connectors remain on their separate native path.
+it does not provide per-user RBAC or strict per-run revocation. Claude's optional
+owner-approved `nativeMcpProfile` enables broader native user/project MCP plus
+Cloud, not a per-server allowlist. It requires first-party subscription/OAuth
+and a connected `claudeai` connector before model input; real Cloud success is
+not yet qualified. Native Codex refuses any explicit execution context.
+See [provider boundaries](../../docs/configuration.md#native-provider-boundaries);
+other contexts retain strict direct-MCP selection. No existing sessions or
+global defaults are migrated by gateway support.
 
 ## Inspecting CPA request logs
 
-Enable stock CPA request logging and give the Linux BB server only a read-only
-log mount via `BB_CPA_LOG_DIR`. Do not mount CPA auth, configuration or key
-directories into BB. Model requests carry `X-BB-Thread-Id`; discovery requests
-do not. This header is correlation, not authorization or per-turn attribution.
+Enable stock CPA request logging and give the Linux BB server only read-only
+log mounts. Configure endpoint-to-directory mapping with `BB_CPA_LOG_DIRS`
+(the singular variable is removed); see the owning
+[configuration section](../../docs/configuration.md#cpa-request-log-roots).
+The frozen gateway endpoint selects the root; unmapped endpoints refuse.
+Do not mount CPA auth, configuration or key directories into BB. Model requests
+carry `X-BB-Thread-Id`; discovery requests do not. This header is correlation,
+not authorization or per-turn attribution.
 
 Open a gateway-bound thread's Info panel → **Native CPA request logs**, or use:
 

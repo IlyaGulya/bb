@@ -39,7 +39,10 @@ function addConnectionOptions(command: Command): Command {
   return command
     .option("--file <path>", "Local JSON definition containing references only")
     .option("--name <name>", "Connection display name")
-    .option("--provider <id>", "Provider ID (gateway requires acp-omp)")
+    .option(
+      "--provider <id>",
+      "Provider ID (gateway: acp-omp, claude-code or codex)",
+    )
     .option("--host <id>", "Native connection host ID; clears gateway")
     .option("--native", "Clear gateway and use native host authentication")
     .option("--gateway-base-url <url>", "Gateway model API base URL")
@@ -110,8 +113,15 @@ async function connectionDefinition(
       "Choose only one gateway credential reference: env or file.",
     );
   if (gatewayOptions) {
-    if (options.provider !== undefined && options.provider !== "acp-omp")
-      throw new Error("Gateway connections require --provider acp-omp.");
+    const provider =
+      options.provider ?? input.provider ?? current?.provider ?? "acp-omp";
+    if (
+      typeof provider !== "string" ||
+      !["acp-omp", "claude-code", "codex"].includes(provider)
+    )
+      throw new Error(
+        "Gateway connections require acp-omp, claude-code or codex.",
+      );
     const gateway =
       input.gateway === undefined ? current?.gateway : input.gateway;
     if (
@@ -146,7 +156,7 @@ async function connectionDefinition(
         : {}),
     };
     input.hostId = null;
-    input.provider = "acp-omp";
+    input.provider = provider;
     input.nativeAuth = { configDir: null, profile: null, hostEnv: null };
   } else if (options.native || options.host !== undefined) {
     input.gateway = null;
@@ -189,7 +199,8 @@ nativeAuth:{configDir:string|null,profile:string|null,
 hostEnv:{brokerUrlEnv:string,brokerTokenEnv:string}|null}.
 Gateway fields: baseUrl, protocol, accountPrefix, modelProvider,
 credential:{kind:"env",name} or {kind:"file",path}, allowedHostIds.
-Gateway requires provider acp-omp, hostId:null and default nativeAuth.
+Gateway requires a compatible acp-omp/claude-code/codex protocol, hostId:null
+and default nativeAuth.
 Native requires hostId and gateway:null. Paths and environment names refer to
 workers, never this CLI machine. Credentials are references only, never values.
 Use --native --host <id> to clear a gateway. Gateway edit flags preserve omitted

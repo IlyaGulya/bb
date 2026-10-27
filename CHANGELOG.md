@@ -2,10 +2,18 @@
 
 ## AgentOS fork — unreleased
 
-- Add explicit CPA gateway model connections for native OMP, with worker-local
-  credential references, permitted execution hosts and account-scoped model
-  discovery. Preserve context, MCP, Git identity and native session storage;
-  missing credentials or unsupported models never borrow a native account.
+- Extend explicit CPA gateway model connections to native OMP, Claude Code and
+  Codex with per-engine protocols, worker-local credential references, allowed
+  hosts and exact account-prefixed models. Native sessions remain native;
+  invalid selections never borrow native auth or another account. Codex still
+  refuses explicit execution contexts.
+- Add opt-in Claude `nativeMcpProfile` for owner-approved whole native
+  user/project MCP plus account Cloud scope, retaining strict direct MCP by
+  default. Require first-party OAuth/subscription and a connected Cloud
+  connector before model input; this does not claim real Cloud qualification.
+- Replace `BB_CPA_LOG_DIR` with endpoint-mapped `BB_CPA_LOG_DIRS`, choosing
+  read-only log roots from frozen thread bindings without weakening exact
+  thread-header download guards.
 - Disable server-side Responses continuation for CPA gateway registrations.
   Replay complete native tool-call history instead of sending orphaned tool
   results with an unsupported previous-response reference; native session

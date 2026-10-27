@@ -202,7 +202,8 @@ export function createCodexAppServerConnection(
       "code" in error && typeof error.code === "string"
         ? ` (${error.code})`
         : "";
-    const detail = options.redact?.(`stdin failed${code}: ${error.message}`) ??
+    const detail =
+      options.redact?.(`stdin failed${code}: ${error.message}`) ??
       `stdin failed${code}: ${error.message}`;
     stdinFailure = new CodexAppServerExitedError(`codex app-server ${detail}`);
     pushStderrChunk(detail);
@@ -262,10 +263,14 @@ export function createCodexAppServerConnection(
         return;
       }
       const parsed = parseChildLine(line);
-      const message: ParsedChildMessage | null = parsed && options.redact
-        ? JSON.parse(JSON.stringify(parsed, (_key, value: unknown) =>
-            typeof value === "string" ? options.redact!(value) : value))
-        : parsed;
+      const message: ParsedChildMessage | null =
+        parsed && options.redact
+          ? JSON.parse(
+              JSON.stringify(parsed, (_key, value: unknown) =>
+                typeof value === "string" ? options.redact!(value) : value,
+              ),
+            )
+          : parsed;
       if (!message) {
         return;
       }

@@ -3,14 +3,14 @@ import type {
   ModelConnectionSnapshot,
 } from "@get-bb/plugin-sdk/provider-bridge";
 import {
-  gatewayChildEnv,
-  hasGatewayReceipt,
-  pinGatewayReceipt,
-  listGatewayModelIds,
-  requireGatewayModel,
-  resolveGatewayCredential,
-  type ModelGateway,
-} from "@bb/provider-bridge-protocol/model-gateway";
+  experimental_gatewayChildEnv as gatewayChildEnv,
+  experimental_hasGatewayReceipt as hasGatewayReceipt,
+  experimental_pinGatewayReceipt as pinGatewayReceipt,
+  experimental_listGatewayModelIds as listGatewayModelIds,
+  experimental_requireGatewayModel as requireGatewayModel,
+  experimental_resolveGatewayCredential as resolveGatewayCredential,
+  type experimental_ModelGateway as ModelGateway,
+} from "@get-bb/plugin-sdk/provider-bridge";
 
 export const CLAUDE_GATEWAY_CLOUD_LIMITATION =
   "Claude Code CPA routing uses explicit client-key authentication. Native Claude.ai Cloud MCP connectors are unavailable in this mode; selected direct MCP servers and bb-bridge remain available. An explicit native MCP profile instead authorizes native account Cloud and native user/project MCP sources, subject to native OAuth and connected-connector admission. Model capabilities and token budgets are unknown until reported by the gateway/native runtime.";
@@ -85,7 +85,10 @@ export function buildClaudeGatewayEnvironment(args: {
   nativeMcp?: boolean;
 }): NodeJS.ProcessEnv {
   const gateway = requireClaudeGateway(args.connection);
-  if (!args.nativeMcp && /^(true|1|yes|on)$/i.test(args.env.ENABLE_CLAUDEAI_MCP_SERVERS ?? "")) {
+  if (
+    !args.nativeMcp &&
+    /^(true|1|yes|on)$/i.test(args.env.ENABLE_CLAUDEAI_MCP_SERVERS ?? "")
+  ) {
     throw new Error(CLAUDE_GATEWAY_CLOUD_LIMITATION);
   }
   const env = gatewayChildEnv(gateway, process.env, args.env);
@@ -101,9 +104,12 @@ export function buildClaudeGatewayEnvironment(args: {
       name === "CLAUDE_CODE_API_KEY_HELPER_FD" ||
       name === "CCR_OAUTH_TOKEN_FILE" ||
       name === "_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL"
-    ) delete env[name];
+    )
+      delete env[name];
   }
-  env.ANTHROPIC_BASE_URL = gateway.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
+  env.ANTHROPIC_BASE_URL = gateway.baseUrl
+    .replace(/\/+$/, "")
+    .replace(/\/v1$/, "");
   const clientKey = resolveGatewayCredential(gateway, process.env);
   if (args.nativeMcp) {
     env.ANTHROPIC_CUSTOM_HEADERS = `Authorization: Bearer ${clientKey}`;
@@ -114,12 +120,16 @@ export function buildClaudeGatewayEnvironment(args: {
   env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
   if (args.threadId) {
     if (/[\r\n]/.test(args.threadId)) {
-      throw new Error("Claude gateway thread identity cannot contain header delimiters.");
+      throw new Error(
+        "Claude gateway thread identity cannot contain header delimiters.",
+      );
     }
     env.ANTHROPIC_CUSTOM_HEADERS = [
       env.ANTHROPIC_CUSTOM_HEADERS,
       `X-BB-Thread-Id: ${args.threadId}`,
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
   const model = claudeGatewayModel(args.model, args.connection);
   env.ANTHROPIC_MODEL = model;
@@ -147,9 +157,18 @@ export async function prepareGatewayBinding(
     if (
       gatewayDataDir &&
       (hasGatewayReceipt(gatewayDataDir, params.threadId, "claude-gateway") ||
-        (resume && hasGatewayReceipt(gatewayDataDir, providerThreadId, "claude-gateway-sessions")) ||
+        (resume &&
+          hasGatewayReceipt(
+            gatewayDataDir,
+            providerThreadId,
+            "claude-gateway-sessions",
+          )) ||
         (params.sourceProviderThreadId !== undefined &&
-          hasGatewayReceipt(gatewayDataDir, params.sourceProviderThreadId, "claude-gateway-sessions")))
+          hasGatewayReceipt(
+            gatewayDataDir,
+            params.sourceProviderThreadId,
+            "claude-gateway-sessions",
+          )))
     ) {
       throw new Error(
         "This Claude native session is bound to its original gateway. Restore that connection and model; gateway removal or a native account fallback requires a new unrelated thread.",
@@ -161,23 +180,42 @@ export async function prepareGatewayBinding(
   const model = params.model;
   claudeGatewayModel(model, connection);
   const catalog = await listClaudeGatewayModels(connection);
-  requireGatewayModel(model!, gateway, catalog.models.map(({ id }) => ({
-    id: id.slice("bb-cpa/".length),
-  })));
+  requireGatewayModel(
+    model!,
+    gateway,
+    catalog.models.map(({ id }) => ({
+      id: id.slice("bb-cpa/".length),
+    })),
+  );
   if (!gatewayDataDir) {
-    throw new Error("Claude gateway routing requires the provider host data directory.");
+    throw new Error(
+      "Claude gateway routing requires the provider host data directory.",
+    );
   }
   if (params.sourceProviderThreadId !== undefined) {
     pinGatewayReceipt(
-      gatewayDataDir, params.sourceProviderThreadId, gateway, model!, true,
+      gatewayDataDir,
+      params.sourceProviderThreadId,
+      gateway,
+      model!,
+      true,
       "claude-gateway-sessions",
     ).verify();
   }
   const threadReceipt = pinGatewayReceipt(
-    gatewayDataDir, params.threadId, gateway, model!, resume, "claude-gateway",
+    gatewayDataDir,
+    params.threadId,
+    gateway,
+    model!,
+    resume,
+    "claude-gateway",
   );
   const sessionReceipt = pinGatewayReceipt(
-    gatewayDataDir, providerThreadId, gateway, model!, resume,
+    gatewayDataDir,
+    providerThreadId,
+    gateway,
+    model!,
+    resume,
     "claude-gateway-sessions",
   );
   return () => {

@@ -854,6 +854,15 @@ export async function createThreadFromRequest(
   });
   const bindingSupport =
     deps.providerRegistry.get(providerId)?.info.experimental_executionBindings;
+  if (
+    executionBinding?.executionContext?.nativeMcpProfile &&
+    providerId !== "claude-code"
+  )
+    throw new ApiError(
+      409,
+      "execution_context_provider_unsupported",
+      "The selected native Claude MCP profile requires Claude Code.",
+    );
   if (executionBinding?.executionContext && !bindingSupport?.contexts) {
     throw new ApiError(
       409,
@@ -862,11 +871,16 @@ export async function createThreadFromRequest(
         `Provider ${providerId} does not declare scoped execution context support. Choose a compatible provider; no ambient context was substituted.`,
     );
   }
-  if (executionBinding?.modelConnection && !bindingSupport?.nativeConnections) {
+  if (
+    executionBinding?.modelConnection &&
+    !(executionBinding.modelConnection.gateway
+      ? bindingSupport?.gatewayConnections
+      : bindingSupport?.nativeConnections)
+  ) {
     throw new ApiError(
       409,
       "model_connection_provider_unsupported",
-      `Provider ${providerId} does not declare native account-reference support. Choose a compatible provider.`,
+      `Provider ${providerId} does not declare support for this connection mode. Choose a compatible provider.`,
     );
   }
   const {

@@ -67,7 +67,7 @@ export function ExecutionBindingPicker({
         value: entry.id,
         label: entry.name,
         description: entry.gateway
-          ? `CPA gateway · ${entry.gateway.accountPrefix} · native OMP (acp-omp)`
+          ? `CPA gateway · ${entry.gateway.accountPrefix} · ${entry.provider}`
           : `${entry.provider} · ${entry.hostId}`,
         disabled: reason !== null,
         disabledReason: reason ?? undefined,
@@ -109,12 +109,21 @@ export function ExecutionBindingPicker({
             ? mcpServers.map((ref) => ref.name).join(", ")
             : "None selected (native defaults unchanged)"}
         </p>
+        {selection.effectiveContext?.nativeMcpProfile ? (
+          <p className="break-all">
+            Native Claude MCP profile:{" "}
+            {selection.effectiveContext.nativeMcpProfile.configDir ??
+              "Host-native account"}
+            . Includes native user/project MCP and Cloud; not the BB server
+            allowlist.
+          </p>
+        ) : null}
         {selection.effectiveConnection?.gateway ? (
           <p className="break-all">
             CPA gateway: {selection.effectiveConnection.gateway.accountPrefix} ·{" "}
-            {selection.effectiveConnection.gateway.baseUrl}. Native OMP
-            (acp-omp) only. Context, MCP, Git identity and session storage are
-            unchanged.
+            {selection.effectiveConnection.gateway.baseUrl}. Native engine:{" "}
+            {selection.effectiveConnection.provider}. Account selection is
+            independent of the context and MCP profile.
           </p>
         ) : null}
         {mcpServers.length > 0 ? (

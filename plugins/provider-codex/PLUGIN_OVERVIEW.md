@@ -20,5 +20,27 @@ Start a thread, pick Codex, and let it write and review code in your repository 
 ## Requirements
 
 - Install the Codex CLI (`codex`) on the host machine, version 0.136.0 or newer. The plugin can run the npm install for you.
-- Sign in with `codex login` on that machine. A ChatGPT account or an OpenAI API key both work.
+- For native model authentication, sign in with `codex login` on that machine. A ChatGPT account or an OpenAI API key both work. CPA model connections instead use a worker-local model-client key.
 - Usage limits show only for ChatGPT accounts.
+
+## CPA model connections and context boundary
+
+A CPA model connection keeps the native Codex CLI, session IDs and history but
+routes model HTTP through `openai-responses` only. It uses `hostId: null`,
+default-null `nativeAuth`, explicit `gateway.allowedHostIds` and account prefix,
+and a private credential FILE or ENV reference resolved on the actual worker.
+Choose an exact `bb-cpa/<prefix>/<id>` model; invalid credentials, models,
+protocols or workers refuse without borrowing native auth or another account.
+
+Model payer selection is independent of Work/Personal naming and MCP
+authorization. Native Codex currently refuses **any explicit execution context**,
+including `nativeMcpProfile`; gateway support does not add scoped context/MCP
+support. Existing native instructions, discovery and direct-MCP policies remain
+unchanged. Use a compatible installed native CLI/SDK, not vendor hotpatches.
+
+Secret-free receipts pin the gateway endpoint/protocol/model and credential
+reference for continuation/reopen. Changing the account requires a new thread;
+no live session or global/default migration occurs. CPA support is not a claim
+of production rollout or real-account qualification for every native engine.
+See [configuration](../../docs/configuration.md#cpa-gateway-model-connections)
+for the shared UI/CLI/SDK contract.

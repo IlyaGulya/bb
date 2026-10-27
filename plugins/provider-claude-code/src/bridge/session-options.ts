@@ -276,8 +276,13 @@ export function buildSessionOptions(
       "Claude in Chrome is not supported in a scoped execution context; disable it to avoid importing an unselected browser tool identity.",
     );
   }
-  if (params.modelConnection?.gateway && experimental_isProviderBridgeRecording()) {
-    throw new Error("Raw native provider recording is unavailable for credentialed Claude gateway sessions.");
+  if (
+    params.modelConnection?.gateway &&
+    experimental_isProviderBridgeRecording()
+  ) {
+    throw new Error(
+      "Raw native provider recording is unavailable for credentialed Claude gateway sessions.",
+    );
   }
   const baseInstructions = [
     params.baseInstructions,
@@ -319,8 +324,10 @@ export function buildSessionOptions(
       : toSdkEffort(params.reasoningLevel);
   const extraArgs = buildChromeExtraArgs(params.chromeEnabled);
   const gatewayKey = params.modelConnection?.gateway
-    ? sessionEnv.ANTHROPIC_API_KEY ??
-      sessionEnv.ANTHROPIC_CUSTOM_HEADERS?.match(/^Authorization: Bearer (.+)$/m)?.[1]
+    ? (sessionEnv.ANTHROPIC_API_KEY ??
+      sessionEnv.ANTHROPIC_CUSTOM_HEADERS?.match(
+        /^Authorization: Bearer (.+)$/m,
+      )?.[1])
     : undefined;
 
   return {
@@ -345,8 +352,10 @@ export function buildSessionOptions(
     ...(params.executionContext
       ? {
           settingSources: [],
-          strictMcpConfig: params.executionContext.claudeNativeMcp === undefined,
-          requireNativeCloudMcp: params.executionContext.claudeNativeMcp !== undefined,
+          strictMcpConfig:
+            params.executionContext.nativeMcpProfile === undefined,
+          requireNativeCloudMcp:
+            params.executionContext.nativeMcpProfile !== undefined,
           mcpServers: params.contextFiles?.mcpServers ?? {},
         }
       : {}),

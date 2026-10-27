@@ -26,8 +26,8 @@ import {
   requireGatewayModel,
   resolveGatewayCredential,
   type GatewayModel,
-  type OmpGateway,
-} from "./omp-gateway.js";
+  type ModelGateway,
+} from "@bb/provider-bridge-protocol/model-gateway";
 
 const launchEnvironment = "BB_OMP_SCOPED_LAUNCH";
 const nativePackageName = "@oh-my-pi/pi-coding-agent";
@@ -708,7 +708,7 @@ export async function runOmpScopedAcp(): Promise<void> {
 
 async function bundledGatewayModels(
   packageRoot: string,
-  gateway: OmpGateway,
+  gateway: ModelGateway,
 ): Promise<GatewayModel[]> {
   const catalog = moduleFunctions(
     await import(

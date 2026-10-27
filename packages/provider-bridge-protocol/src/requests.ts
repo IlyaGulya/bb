@@ -5,7 +5,10 @@ import {
   promptInputSchema,
 } from "@bb/domain";
 import { z } from "zod";
-import { bridgeExecutionOptionsSchema } from "./execution-options.js";
+import {
+  bridgeExecutionOptionsSchema,
+  bridgeProviderOptionsSchema,
+} from "./execution-options.js";
 
 export const BRIDGE_REQUEST_METHODS = {
   initialize: "initialize",
@@ -38,7 +41,10 @@ const sessionConstructionFields = {
 };
 
 export const modelListParamsSchema = z
-  .object({ cwd: z.string().min(1).optional() })
+  .object({
+    cwd: z.string().min(1).optional(),
+    providerOptions: bridgeProviderOptionsSchema.optional(),
+  })
   .passthrough();
 
 export const threadStartParamsSchema = z

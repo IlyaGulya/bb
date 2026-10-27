@@ -973,30 +973,46 @@ describe("bridge", () => {
     tempDirs.push(directory);
     const credentialPath = join(directory, "cpa-client-key");
     writeFileSync(credentialPath, "private-catalog-fixture", { mode: 0o600 });
-    const ingress: { path: string | undefined; threadId: string | string[] | undefined }[] = [];
+    const ingress: {
+      path: string | undefined;
+      threadId: string | string[] | undefined;
+    }[] = [];
     const server = createServer((request, response) => {
-      ingress.push({ path: request.url, threadId: request.headers["x-bb-thread-id"] });
+      ingress.push({
+        path: request.url,
+        threadId: request.headers["x-bb-thread-id"],
+      });
       response.writeHead(200, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ data: [{ id: "work/claude-selected" }] }));
     });
-    const listening = Promise.withResolvers<void>();
-    server.listen(0, "127.0.0.1", listening.resolve);
-    await listening.promise;
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
     const address = server.address();
-    if (!address || typeof address === "string") throw new Error("Missing catalog listener");
+    if (!address || typeof address === "string")
+      throw new Error("Missing catalog listener");
     const bridge = createBridgeJsonRpcTestHarness(handleLine);
     try {
       bridge.sendRequest(1, "model/list", {
         cwd: directory,
         providerOptions: {
           modelConnection: {
-            id: "claude-cpa-wire", name: "Selected CPA", provider: "claude-code",
-            hostId: null, enabled: true, revoked: false, createdAt: 1, updatedAt: 1,
+            id: "claude-cpa-wire",
+            name: "Selected CPA",
+            provider: "claude-code",
+            hostId: null,
+            enabled: true,
+            revoked: false,
+            createdAt: 1,
+            updatedAt: 1,
             nativeAuth: { configDir: null, profile: null, hostEnv: null },
             gateway: {
               baseUrl: `http://127.0.0.1:${address.port}/v1`,
-              protocol: "anthropic-messages", accountPrefix: "work", modelProvider: "anthropic",
-              credential: { kind: "file", path: credentialPath }, allowedHostIds: ["host"],
+              protocol: "anthropic-messages",
+              accountPrefix: "work",
+              modelProvider: "anthropic",
+              credential: { kind: "file", path: credentialPath },
+              allowedHostIds: ["host"],
             },
           },
         },
@@ -1004,7 +1020,12 @@ describe("bridge", () => {
       const result = await bridge.waitForResponse(1);
       expect(result.error).toBeUndefined();
       expect(result.result).toMatchObject({
-        models: [{ id: "bb-cpa/work/claude-selected", model: "bb-cpa/work/claude-selected" }],
+        models: [
+          {
+            id: "bb-cpa/work/claude-selected",
+            model: "bb-cpa/work/claude-selected",
+          },
+        ],
         selectedOnlyModels: [],
       });
       expect(ingress).toEqual([{ path: "/v1/models", threadId: undefined }]);
@@ -1012,9 +1033,9 @@ describe("bridge", () => {
     } finally {
       bridge.restore();
       server.closeAllConnections();
-      const closed = Promise.withResolvers<void>();
-      server.close((error) => error ? closed.reject(error) : closed.resolve());
-      await closed.promise;
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
     }
   });
 

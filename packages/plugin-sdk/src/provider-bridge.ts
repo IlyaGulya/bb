@@ -58,6 +58,16 @@ export type {
   ProviderBridgeEntry,
 } from "@bb/provider-bridge-protocol/bridge-kit";
 
+export {
+  gatewayChildEnv as experimental_gatewayChildEnv,
+  hasGatewayReceipt as experimental_hasGatewayReceipt,
+  listGatewayModelIds as experimental_listGatewayModelIds,
+  pinGatewayReceipt as experimental_pinGatewayReceipt,
+  requireGatewayModel as experimental_requireGatewayModel,
+  resolveGatewayCredential as experimental_resolveGatewayCredential,
+  type ModelGateway as experimental_ModelGateway,
+} from "@bb/provider-bridge-protocol/model-gateway";
+
 // ---------------------------------------------------------------------------
 // 2. The Provider Bridge Protocol
 // ---------------------------------------------------------------------------

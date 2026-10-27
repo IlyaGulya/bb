@@ -37,6 +37,11 @@
       "source": "./src/bridge-worker-entry.ts",
       "types": "./src/bridge-worker-entry.ts",
       "default": "./src/bridge-worker-entry.ts"
+    },
+    "./model-gateway": {
+      "source": "./src/model-gateway.ts",
+      "types": "./src/model-gateway.ts",
+      "default": "./src/model-gateway.ts"
     }
   },
   "types": "./src/index.ts",

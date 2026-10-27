@@ -1,3 +1,9 @@
+import { isAbsolute } from "node:path";
+import { z } from "zod";
+import {
+  isModelGatewayProviderCompatible,
+  modelGatewaySchema,
+} from "@bb/domain";
 import { getThread, getThreadExecutionBinding } from "@bb/db";
 import {
   publicApiRoutes,
@@ -13,13 +19,38 @@ import {
   readGatewayLog,
 } from "../services/gateway-logs.js";
 
+export function gatewayLogDirectory(
+  baseUrl: string,
+  definition: string | undefined,
+): string | undefined {
+  if (!definition) return undefined;
+  try {
+    const directories = z
+      .record(modelGatewaySchema.shape.baseUrl, z.string().refine(isAbsolute))
+      .parse(JSON.parse(definition));
+    const roots = new Map<string, string>();
+    for (const [endpoint, directory] of Object.entries(directories)) {
+      const normalized = endpoint.replace(/\/+$/, "");
+      if (roots.has(normalized)) throw new Error();
+      roots.set(normalized, directory);
+    }
+    return roots.get(baseUrl.replace(/\/+$/, ""));
+  } catch {
+    throw new ApiError(
+      503,
+      "gateway_logs_unavailable",
+      "CPA log-directory mapping is invalid.",
+    );
+  }
+}
+
 export function registerGatewayLogRoutes(app: Hono, deps: AppDeps): void {
   const { get } = typedRoutes<PublicApiSchema>(app, {
     onValidationError: (message) =>
       new ApiError(400, "invalid_request", message),
   });
   const routes = publicApiRoutes.gatewayLogs;
-  function requireGatewayThread(threadId: string): void {
+  function requireGatewayThread(threadId: string): string | undefined {
     if (!getThread(deps.db, threadId)) {
       throw new ApiError(404, "thread_not_found", "Thread does not exist.");
     }
@@ -27,27 +58,35 @@ export function registerGatewayLogRoutes(app: Hono, deps: AppDeps): void {
       deps.db,
       threadId,
     )?.modelConnection;
-    if (connection?.provider !== "acp-omp" || !connection.gateway) {
+    if (
+      !connection?.gateway ||
+      !isModelGatewayProviderCompatible(
+        connection.provider,
+        connection.gateway.protocol,
+      )
+    ) {
       throw new ApiError(
         409,
         "gateway_logs_unsupported",
         "This thread has no persisted CPA gateway binding.",
       );
     }
+    return gatewayLogDirectory(
+      connection.gateway.baseUrl,
+      process.env.BB_CPA_LOG_DIRS,
+    );
   }
   get(routes.list, async (context, query) => {
-    requireGatewayThread(query.threadId);
+    const directory = requireGatewayThread(query.threadId);
     context.header("cache-control", "private, no-store");
-    return context.json(
-      await listGatewayLogs(process.env.BB_CPA_LOG_DIR, query.threadId),
-    );
+    return context.json(await listGatewayLogs(directory, query.threadId));
   });
   get(routes.read, async (context, query) => {
-    requireGatewayThread(query.threadId);
+    const directory = requireGatewayThread(query.threadId);
     context.header("cache-control", "private, no-store");
     return context.json(
       await readGatewayLog(
-        process.env.BB_CPA_LOG_DIR,
+        directory,
         query.threadId,
         context.req.param("logId"),
         query.previewBytes,
@@ -55,9 +94,9 @@ export function registerGatewayLogRoutes(app: Hono, deps: AppDeps): void {
     );
   });
   get(routes.download, async (context, query) => {
-    requireGatewayThread(query.threadId);
+    const directory = requireGatewayThread(query.threadId);
     return downloadGatewayLog(
-      process.env.BB_CPA_LOG_DIR,
+      directory,
       query.threadId,
       context.req.param("logId"),
     );
