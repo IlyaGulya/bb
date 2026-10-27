@@ -541,7 +541,14 @@ export class SdkSession {
     const q = this.query;
     if (!q) throw new Error("Native Claude MCP profile startup did not create a session.");
     const { account } = await q.initializationResult();
-    if (account.tokenSource !== "claude.ai" ||
+    const nativeOAuth = account.tokenSource === "claude.ai" ||
+      (account.tokenSource === undefined &&
+        typeof account.subscriptionType === "string" &&
+        account.subscriptionType.length > 0);
+    const competingApiKey = account.apiKeySource !== undefined &&
+      account.apiKeySource !== "none" &&
+      account.apiKeySource !== "/login managed key";
+    if (!nativeOAuth || competingApiKey ||
         (account.apiProvider !== undefined && account.apiProvider !== "firstParty")) {
       throw new Error(
         "The explicit native Claude MCP profile requires local Claude.ai OAuth authentication with user:mcp_servers scope. Client-key routing was not substituted. This profile authorizes native user/project MCP as well as Cloud connectors.",

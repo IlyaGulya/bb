@@ -94,7 +94,9 @@ describe("SdkSession", () => {
 
   it("withholds native model input until the explicit MCP profile proves local OAuth and a connected Cloud connector", async () => {
     keepSdkStreamOpen();
-    const initialized = Promise.withResolvers<{ account: { tokenSource: string } }>();
+    const initialized = Promise.withResolvers<{
+      account: { subscriptionType: string; apiProvider: string };
+    }>();
     mockQueryInstance.initializationResult.mockReturnValue(initialized.promise);
     mockQueryInstance.mcpServerStatus.mockResolvedValue([
       { name: "native-cloud", scope: "claudeai", status: "connected" },
@@ -109,7 +111,9 @@ describe("SdkSession", () => {
     void consumed.then(() => { delivered = true; });
     await waitForAsyncWork();
     expect(delivered).toBe(false);
-    initialized.resolve({ account: { tokenSource: "claude.ai" } });
+    initialized.resolve({ account: {
+      subscriptionType: "Claude Team", apiProvider: "firstParty",
+    } });
     await consumed;
     expect((await next).value?.message.content).toBe("private prompt");
     session.stop();
@@ -117,7 +121,13 @@ describe("SdkSession", () => {
 
   it.each([
     { account: { tokenSource: "none" }, servers: [], message: "local Claude.ai OAuth" },
+    { account: {}, servers: [], message: "local Claude.ai OAuth" },
+    { account: { subscriptionType: "" }, servers: [], message: "local Claude.ai OAuth" },
+    { account: { subscriptionType: "Claude Team", apiProvider: "bedrock" }, servers: [], message: "local Claude.ai OAuth" },
+    { account: { subscriptionType: "Claude Team", apiKeySource: "ANTHROPIC_API_KEY" }, servers: [], message: "local Claude.ai OAuth" },
+    { account: { subscriptionType: "Claude Team", apiKeySource: "apiKeyHelper" }, servers: [], message: "local Claude.ai OAuth" },
     { account: { tokenSource: "claude.ai" }, servers: [], message: "connected Claude.ai Cloud connector" },
+    { account: { subscriptionType: "Claude Team", apiProvider: "firstParty" }, servers: [], message: "connected Claude.ai Cloud connector" },
   ])("refuses explicit native MCP startup without its Cloud prerequisite: $message", async ({ account, servers, message }) => {
     mockQueryInstance.initializationResult.mockResolvedValue({ account });
     mockQueryInstance.mcpServerStatus.mockResolvedValue(servers);
