@@ -23,8 +23,16 @@ describe("bb provider command output", () => {
     }));
     stubServerApi({ "v1.system.execution-options.$get": get });
     await runCommand(
-      ["provider", "models", "acp-omp", "--environment", "env-worker",
-       "--model-connection", "conn-gateway", "--json"],
+      [
+        "provider",
+        "models",
+        "acp-omp",
+        "--environment",
+        "env-worker",
+        "--model-connection",
+        "conn-gateway",
+        "--json",
+      ],
       register,
     );
     expect(get).toHaveBeenCalledWith({

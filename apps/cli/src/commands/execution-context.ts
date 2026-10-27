@@ -43,11 +43,23 @@ function addConnectionOptions(command: Command): Command {
     .option("--host <id>", "Native connection host ID; clears gateway")
     .option("--native", "Clear gateway and use native host authentication")
     .option("--gateway-base-url <url>", "Gateway model API base URL")
-    .option("--gateway-protocol <protocol>", "openai-responses, openai-completions, or anthropic-messages")
-    .option("--gateway-account-prefix <prefix>", "Gateway account model namespace")
+    .option(
+      "--gateway-protocol <protocol>",
+      "openai-responses, openai-completions, or anthropic-messages",
+    )
+    .option(
+      "--gateway-account-prefix <prefix>",
+      "Gateway account model namespace",
+    )
     .option("--gateway-model-provider <id>", "Native model catalog provider ID")
-    .option("--gateway-credential-env <name>", "Worker environment variable name, never its value")
-    .option("--gateway-credential-file <path>", "Absolute worker credential file path, never its contents")
+    .option(
+      "--gateway-credential-env <name>",
+      "Worker environment variable name, never its value",
+    )
+    .option(
+      "--gateway-credential-file <path>",
+      "Absolute worker credential file path, never its contents",
+    )
     .option(
       "--gateway-allowed-host <id>",
       "Permitted worker host ID (repeat to replace the complete allowed host list)",
@@ -76,35 +88,62 @@ async function connectionDefinition(
   const definition: unknown = options.file
     ? await readDefinition(options.file)
     : {};
-  if (!definition || typeof definition !== "object" || Array.isArray(definition))
+  if (
+    !definition ||
+    typeof definition !== "object" ||
+    Array.isArray(definition)
+  )
     throw new Error("--file must contain a JSON definition object.");
   const input: Record<string, unknown> = { ...definition };
   if (options.name !== undefined) input.name = options.name;
   if (options.provider !== undefined) input.provider = options.provider;
   const gatewayOptions = hasGatewayOptions(options);
   if (gatewayOptions && (options.native || options.host !== undefined))
-    throw new Error("Gateway flags cannot be combined with --native or --host.");
-  if (options.gatewayCredentialEnv !== undefined && options.gatewayCredentialFile !== undefined)
-    throw new Error("Choose only one gateway credential reference: env or file.");
+    throw new Error(
+      "Gateway flags cannot be combined with --native or --host.",
+    );
+  if (
+    options.gatewayCredentialEnv !== undefined &&
+    options.gatewayCredentialFile !== undefined
+  )
+    throw new Error(
+      "Choose only one gateway credential reference: env or file.",
+    );
   if (gatewayOptions) {
     if (options.provider !== undefined && options.provider !== "acp-omp")
       throw new Error("Gateway connections require --provider acp-omp.");
-    const gateway = input.gateway === undefined ? current?.gateway : input.gateway;
-    if (gateway !== undefined && gateway !== null &&
-        (typeof gateway !== "object" || Array.isArray(gateway)))
+    const gateway =
+      input.gateway === undefined ? current?.gateway : input.gateway;
+    if (
+      gateway !== undefined &&
+      gateway !== null &&
+      (typeof gateway !== "object" || Array.isArray(gateway))
+    )
       throw new Error("gateway must be a definition object or null.");
     input.gateway = {
       ...gateway,
-      ...(options.gatewayBaseUrl !== undefined ? { baseUrl: options.gatewayBaseUrl } : {}),
-      ...(options.gatewayProtocol !== undefined ? { protocol: options.gatewayProtocol } : {}),
-      ...(options.gatewayAccountPrefix !== undefined ? { accountPrefix: options.gatewayAccountPrefix } : {}),
-      ...(options.gatewayModelProvider !== undefined ? { modelProvider: options.gatewayModelProvider } : {}),
+      ...(options.gatewayBaseUrl !== undefined
+        ? { baseUrl: options.gatewayBaseUrl }
+        : {}),
+      ...(options.gatewayProtocol !== undefined
+        ? { protocol: options.gatewayProtocol }
+        : {}),
+      ...(options.gatewayAccountPrefix !== undefined
+        ? { accountPrefix: options.gatewayAccountPrefix }
+        : {}),
+      ...(options.gatewayModelProvider !== undefined
+        ? { modelProvider: options.gatewayModelProvider }
+        : {}),
       ...(options.gatewayCredentialEnv !== undefined
         ? { credential: { kind: "env", name: options.gatewayCredentialEnv } }
         : options.gatewayCredentialFile !== undefined
-          ? { credential: { kind: "file", path: options.gatewayCredentialFile } }
+          ? {
+              credential: { kind: "file", path: options.gatewayCredentialFile },
+            }
           : {}),
-      ...(options.gatewayAllowedHost !== undefined ? { allowedHostIds: options.gatewayAllowedHost } : {}),
+      ...(options.gatewayAllowedHost !== undefined
+        ? { allowedHostIds: options.gatewayAllowedHost }
+        : {}),
     };
     input.hostId = null;
     input.provider = "acp-omp";
@@ -113,7 +152,9 @@ async function connectionDefinition(
     input.gateway = null;
     input.hostId = options.host ?? input.hostId ?? current?.hostId;
     if (!input.hostId)
-      throw new Error("Switching to native authentication requires --host <id>.");
+      throw new Error(
+        "Switching to native authentication requires --host <id>.",
+      );
   }
   return input;
 }
@@ -357,9 +398,10 @@ export function registerModelConnectionCommands(
     .action(
       action(async (id: string, opts: ConnectionOptions) => {
         const sdk = createCliBbSdk(getUrl());
-        const current = hasGatewayOptions(opts) || opts.native
-          ? await sdk.experimental_modelConnections.get({ id })
-          : undefined;
+        const current =
+          hasGatewayOptions(opts) || opts.native
+            ? await sdk.experimental_modelConnections.get({ id })
+            : undefined;
         const input = updateModelConnectionRequestSchema
           .omit({ id: true })
           .parse(await connectionDefinition(opts, current));

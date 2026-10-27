@@ -110,7 +110,12 @@ interface ResolveCatalogExecutionDefaultsArgs {
 
 async function loadCatalogDefaultForProvider(
   deps: ThreadCreateDeps,
-  args: { cwd?: string; hostId: string; providerId: string; modelConnection?: ModelConnection | null },
+  args: {
+    cwd?: string;
+    hostId: string;
+    providerId: string;
+    modelConnection?: ModelConnection | null;
+  },
 ): Promise<ProjectExecutionDefaults | ApiError> {
   const catalog = await resolveSystemProviderModels(deps, {
     ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
@@ -210,7 +215,11 @@ async function resolveCatalogExecutionDefaults(
 ): Promise<ProjectExecutionDefaults | null> {
   if (args.modelConnection?.gateway) {
     if (args.hostId === null)
-      throw new ApiError(400, "execution_context_host_required", "Gateway models require an allowed execution host.");
+      throw new ApiError(
+        400,
+        "execution_context_host_required",
+        "Gateway models require an allowed execution host.",
+      );
     const catalog = await resolveSystemProviderModels(deps, {
       ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
       hostId: args.hostId,
@@ -218,14 +227,28 @@ async function resolveCatalogExecutionDefaults(
       modelConnection: args.modelConnection,
     });
     if (catalog.modelLoadError !== null)
-      throw new ApiError(503, "model_catalog_unavailable", "The selected gateway model catalog is unavailable.");
+      throw new ApiError(
+        503,
+        "model_catalog_unavailable",
+        "The selected gateway model catalog is unavailable.",
+      );
     const requested = args.requestedModel;
-    const chosen = requested === null
-      ? catalog.models.find((entry) => entry.model === args.executionDefaults?.model) ??
-        catalog.models.find((entry) => entry.isDefault) ?? catalog.models[0]
-      : [...catalog.models, ...catalog.selectedOnlyModels].find((entry) => entry.model === requested);
+    const chosen =
+      requested === null
+        ? (catalog.models.find(
+            (entry) => entry.model === args.executionDefaults?.model,
+          ) ??
+          catalog.models.find((entry) => entry.isDefault) ??
+          catalog.models[0])
+        : [...catalog.models, ...catalog.selectedOnlyModels].find(
+            (entry) => entry.model === requested,
+          );
     if (chosen === undefined)
-      throw new ApiError(400, "model_unavailable", "Choose a model offered by the selected gateway connection.");
+      throw new ApiError(
+        400,
+        "model_unavailable",
+        "Choose a model offered by the selected gateway connection.",
+      );
     return {
       ...buildProviderThreadExecutionDefaults(deps.providerRegistry, {
         providerId: args.providerId,
@@ -792,7 +815,12 @@ export async function createThreadFromRequest(
             : { modelConnectionId: requestInput.modelConnectionId }),
         });
   if (sourceBinding !== null) {
-    assertThreadExecutionBindingAvailable(deps.db, sourceBinding, childHostId, requestInput.providerId);
+    assertThreadExecutionBindingAvailable(
+      deps.db,
+      sourceBinding,
+      childHostId,
+      requestInput.providerId,
+    );
     if (
       sourceThread &&
       requestInput.providerId !== undefined &&

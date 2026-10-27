@@ -1345,8 +1345,7 @@ export const projectAttachmentBackfills = sqliteTable(
 
 export const modelConnections = sqliteTable("model_connections", {
   id: text("id").primaryKey(),
-  hostId: text("host_id")
-    .references(() => hosts.id, { onDelete: "restrict" }),
+  hostId: text("host_id").references(() => hosts.id, { onDelete: "restrict" }),
   definition: text("definition", { mode: "json" })
     .$type<ModelConnection>()
     .notNull(),

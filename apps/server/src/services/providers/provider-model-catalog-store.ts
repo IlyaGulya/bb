@@ -535,20 +535,37 @@ export function createProviderModelCatalogStore(options: {
           args.provider.id,
         );
       }
-      const baseLaunch = requireBridgeLaunchForProviderId(deps, args.provider.id);
-      const bridgeLaunch = modelConnection === null
-        ? baseLaunch
-        : {
-            ...baseLaunch,
-            providerOptions: { ...baseLaunch.providerOptions, modelConnection },
-          };
+      const baseLaunch = requireBridgeLaunchForProviderId(
+        deps,
+        args.provider.id,
+      );
+      const bridgeLaunch =
+        modelConnection === null
+          ? baseLaunch
+          : {
+              ...baseLaunch,
+              providerOptions: {
+                ...baseLaunch.providerOptions,
+                modelConnection,
+              },
+            };
       const fingerprint = catalogFingerprint(args.provider.id, bridgeLaunch);
-      const cwd = args.cwd !== null && providerModelCatalogDependsOnWorkspace(
-        args.provider.capabilities.modelCatalogScope,
-      ) ? args.cwd : null;
-      const scopeKey = modelConnection === null
-        ? cwd ?? ""
-        : JSON.stringify(["connection", modelConnection.id, fingerprint, cwd]);
+      const cwd =
+        args.cwd !== null &&
+        providerModelCatalogDependsOnWorkspace(
+          args.provider.capabilities.modelCatalogScope,
+        )
+          ? args.cwd
+          : null;
+      const scopeKey =
+        modelConnection === null
+          ? (cwd ?? "")
+          : JSON.stringify([
+              "connection",
+              modelConnection.id,
+              fingerprint,
+              cwd,
+            ]);
       const entry = loadEntry(deps, {
         hostId: args.hostId,
         providerId: args.provider.id,
@@ -564,7 +581,13 @@ export function createProviderModelCatalogStore(options: {
         );
         if (decision.kind === "serve") {
           if (decision.backgroundRefresh) {
-            void joinOrStartRefresh(deps, entry, fingerprint, bridgeLaunch, cwd);
+            void joinOrStartRefresh(
+              deps,
+              entry,
+              fingerprint,
+              bridgeLaunch,
+              cwd,
+            );
           }
           return decision.result;
         }

@@ -2,6 +2,17 @@
 
 This index lists every command path that the core CLI registers, including aliases: `thread get|view|status` run `thread show`, `thread message|send` run `thread tell`, `thread messages|timeline` run `thread log`, `thread create|new` run `thread spawn`, `terminal read` runs `terminal output`, `plugin uninstall` runs `plugin remove`, and `environment get` runs `environment show`. At the top level `bb host`, `bb hosts`, and `bb machines` run `bb machine`, `bb env` runs `bb environment`, and the plurals `threads`, `projects`, `terminals`, `providers`, `plugins`, and `skills` run their singular command, unless a plugin registers that name. `bb guide commands <group>` prints a group's commands with every option on one page. Check live help for flags and defaults.
 
+## gateway-logs
+
+- `bb gateway-logs`
+- `bb gateway-logs list`
+- `bb gateway-logs read`
+
+Native CPA request logs are available only for gateway-bound threads. Use
+`list --thread <id>`, then `read <log-id> --thread <id>`. Previews are bounded;
+`read --output <path>` downloads the full private log to the invoking machine.
+Raw logs may contain sensitive prompts and tool results; keep them outside Git.
+
 ## status
 
 - `bb status`

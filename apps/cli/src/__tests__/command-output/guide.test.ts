@@ -49,7 +49,6 @@ describe("bb guide command output", () => {
     expect(output).toContain("bb guide commands <group>");
   }, 30_000);
 
-
   it("bb guide terminals renders the terminals chapter", async () => {
     await runCommand(["guide", "terminals"], registerGuideCommand);
 

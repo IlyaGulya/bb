@@ -4,7 +4,11 @@ import {
   saveModelConnection,
   persistThreadExecutionBinding,
 } from "@bb/db";
-import { modelConnectionSchema, type JsonValue, type ProviderFork } from "@bb/domain";
+import {
+  modelConnectionSchema,
+  type JsonValue,
+  type ProviderFork,
+} from "@bb/domain";
 import type { HostDaemonOnlineRpcRequestMessage } from "@bb/host-daemon-contract";
 import { createDeferredPromise } from "@bb/test-helpers";
 import { describe, expect, it, vi } from "vitest";
@@ -161,30 +165,43 @@ describe("provider model catalog store", () => {
   it("isolates native and gateway account catalogs, including persisted rows and changed connection configuration", async () => {
     await withTestHarness(async (harness) => {
       const host = setupCatalogHost(harness, { id: "host-gateway-catalogs" });
-      const seedConnection = (id: string) => saveModelConnection(harness.db,
-        modelConnectionSchema.parse({
-          id, name: id, hostId: null, provider: "acp-omp",
-          createdAt: 1, updatedAt: 1,
-          gateway: {
-            baseUrl: "https://cpa.example/v1",
-            protocol: "openai-responses",
-            accountPrefix: id,
-            modelProvider: "openai-codex",
-            credential: { kind: "env", name: "CPA_KEY" },
-            allowedHostIds: [host.hostId],
-          },
-        }));
+      const seedConnection = (id: string) =>
+        saveModelConnection(
+          harness.db,
+          modelConnectionSchema.parse({
+            id,
+            name: id,
+            hostId: null,
+            provider: "acp-omp",
+            createdAt: 1,
+            updatedAt: 1,
+            gateway: {
+              baseUrl: "https://cpa.example/v1",
+              protocol: "openai-responses",
+              accountPrefix: id,
+              modelProvider: "openai-codex",
+              credential: { kind: "env", name: "CPA_KEY" },
+              allowedHostIds: [host.hostId],
+            },
+          }),
+        );
       const first = seedConnection("personal");
       const second = seedConnection("work");
       host.setAnswer((command) => {
         const value = command.bridgeLaunch.providerOptions.modelConnection;
-        const connection = value === undefined ? null : modelConnectionSchema.parse(value);
+        const connection =
+          value === undefined ? null : modelConnectionSchema.parse(value);
         const id = connection?.gateway?.accountPrefix;
-        return catalogAnswer(modelList(id ? `bb-cpa/${id}/model` : "native-model"));
+        return catalogAnswer(
+          modelList(id ? `bb-cpa/${id}/model` : "native-model"),
+        );
       });
-      const read = (modelConnectionId?: string) => resolveSystemProviderModels(harness.deps, {
-        hostId: host.hostId, providerId: "acp-omp", modelConnectionId,
-      });
+      const read = (modelConnectionId?: string) =>
+        resolveSystemProviderModels(harness.deps, {
+          hostId: host.hostId,
+          providerId: "acp-omp",
+          modelConnectionId,
+        });
       expect(modelIds(await read())).toEqual(["native-model"]);
       expect(modelIds(await read(first.id))).toEqual(["bb-cpa/personal/model"]);
       expect(modelIds(await read(second.id))).toEqual(["bb-cpa/work/model"]);
@@ -194,9 +211,14 @@ describe("provider model catalog store", () => {
       expect(modelIds(await read(second.id))).toEqual(["bb-cpa/work/model"]);
       expect(modelIds(await read(first.id))).toEqual(["bb-cpa/personal/model"]);
       expect(host.listRequests()).toHaveLength(3);
-      saveModelConnection(harness.db, modelConnectionSchema.parse({
-        ...first, updatedAt: 2, gateway: { ...first.gateway, accountPrefix: "new-personal" },
-      }));
+      saveModelConnection(
+        harness.db,
+        modelConnectionSchema.parse({
+          ...first,
+          updatedAt: 2,
+          gateway: { ...first.gateway, accountPrefix: "new-personal" },
+        }),
+      );
       host.setAnswer(() => errorAnswer("command_failed"));
       const failed = await read(first.id);
       expect(failed.modelLoadError?.code).toBe("failed");
@@ -209,42 +231,73 @@ describe("provider model catalog store", () => {
     await withTestHarness(async (harness) => {
       const host = setupCatalogHost(harness, { id: "host-gateway-receipt" });
       const { project } = seedProjectWithSource(harness.deps, {
-        hostId: host.hostId, path: "/gateway/project",
+        hostId: host.hostId,
+        path: "/gateway/project",
       });
       const environment = seedEnvironment(harness.deps, {
-        hostId: host.hostId, projectId: project.id, path: "/gateway/project",
+        hostId: host.hostId,
+        projectId: project.id,
+        path: "/gateway/project",
       });
       const thread = seedThread(harness.deps, {
-        projectId: project.id, environmentId: environment.id, providerId: "acp-omp",
+        projectId: project.id,
+        environmentId: environment.id,
+        providerId: "acp-omp",
       });
-      const connection = saveModelConnection(harness.db, modelConnectionSchema.parse({
-        id: "frozen-catalog", name: "Frozen", hostId: null, provider: "acp-omp",
-        createdAt: 1, updatedAt: 1,
-        gateway: {
-          baseUrl: "https://original.example/v1", protocol: "openai-responses",
-          accountPrefix: "personal", modelProvider: "openai-codex",
-          credential: { kind: "file", path: "/run/keys/cpa" },
-          allowedHostIds: [host.hostId],
-        },
-      }));
+      const connection = saveModelConnection(
+        harness.db,
+        modelConnectionSchema.parse({
+          id: "frozen-catalog",
+          name: "Frozen",
+          hostId: null,
+          provider: "acp-omp",
+          createdAt: 1,
+          updatedAt: 1,
+          gateway: {
+            baseUrl: "https://original.example/v1",
+            protocol: "openai-responses",
+            accountPrefix: "personal",
+            modelProvider: "openai-codex",
+            credential: { kind: "file", path: "/run/keys/cpa" },
+            allowedHostIds: [host.hostId],
+          },
+        }),
+      );
       persistThreadExecutionBinding(harness.db, thread.id, {
-        executionContext: null, modelConnection: connection, createdAt: 1,
+        executionContext: null,
+        modelConnection: connection,
+        createdAt: 1,
       });
-      saveModelConnection(harness.db, modelConnectionSchema.parse({
-        ...connection, updatedAt: 2,
-        gateway: { ...connection.gateway, baseUrl: "https://changed.example/v1" },
-      }));
+      saveModelConnection(
+        harness.db,
+        modelConnectionSchema.parse({
+          ...connection,
+          updatedAt: 2,
+          gateway: {
+            ...connection.gateway,
+            baseUrl: "https://changed.example/v1",
+          },
+        }),
+      );
       host.setAnswer((command) => {
-        const receipt = modelConnectionSchema.parse(command.bridgeLaunch.providerOptions.modelConnection);
+        const receipt = modelConnectionSchema.parse(
+          command.bridgeLaunch.providerOptions.modelConnection,
+        );
         return catalogAnswer(modelList(receipt.gateway?.baseUrl ?? "native"));
       });
       const result = await resolveSystemExecutionOptions(harness.deps, {
-        threadId: thread.id, modelConnectionId: connection.id,
+        threadId: thread.id,
+        modelConnectionId: connection.id,
       });
       expect(modelIds(result)).toEqual(["https://original.example/v1"]);
-      await expect(resolveSystemExecutionOptions(harness.deps, {
-        threadId: thread.id, modelConnectionId: "different-account",
-      })).rejects.toMatchObject({ body: { code: "thread_model_connection_mismatch" } });
+      await expect(
+        resolveSystemExecutionOptions(harness.deps, {
+          threadId: thread.id,
+          modelConnectionId: "different-account",
+        }),
+      ).rejects.toMatchObject({
+        body: { code: "thread_model_connection_mismatch" },
+      });
     });
   });
 

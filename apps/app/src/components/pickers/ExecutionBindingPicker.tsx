@@ -112,8 +112,9 @@ export function ExecutionBindingPicker({
         {selection.effectiveConnection?.gateway ? (
           <p className="break-all">
             CPA gateway: {selection.effectiveConnection.gateway.accountPrefix} ·{" "}
-            {selection.effectiveConnection.gateway.baseUrl}. Native OMP (acp-omp)
-            only. Context, MCP, Git identity and session storage are unchanged.
+            {selection.effectiveConnection.gateway.baseUrl}. Native OMP
+            (acp-omp) only. Context, MCP, Git identity and session storage are
+            unchanged.
           </p>
         ) : null}
         {mcpServers.length > 0 ? (

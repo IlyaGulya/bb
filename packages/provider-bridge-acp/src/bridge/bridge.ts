@@ -1140,7 +1140,8 @@ function withAcpAuthRequiredRecovery(error: unknown): unknown {
 async function resolveAgentLaunchArgs(
   params: AcpSessionParams,
 ): Promise<{ args: string[]; warning: string | undefined }> {
-  if (params.modelConnection?.gateway) return { args: params.agent.args, warning: undefined };
+  if (params.modelConnection?.gateway)
+    return { args: params.agent.args, warning: undefined };
   const selection = params.modelSelection;
   const agentArgs = applyPermissionCliArgs(
     params.agent.args,
@@ -1883,9 +1884,7 @@ async function startAgentSession(
       permissionMode: params.permissionMode,
       workspaceWriteRoots: params.workspaceWriteRoots,
     },
-    pendingInstructions: scopedLaunch
-      ? undefined
-      : params.instructions,
+    pendingInstructions: scopedLaunch ? undefined : params.instructions,
     activePromptKind: null,
     compactionAgentMessage: "",
     queuedInputs: [],
@@ -2906,7 +2905,10 @@ async function handleRequest(
       );
       if (scoped.modelConnection?.gateway) {
         const gateway = scoped.modelConnection.gateway;
-        if (!launchSpec) throw new Error("CPA discovery requires the worker's native OMP launch.");
+        if (!launchSpec)
+          throw new Error(
+            "CPA discovery requires the worker's native OMP launch.",
+          );
         const models = await listOmpGatewayModels({
           connection: scoped.modelConnection,
           command: launchSpec.command,
@@ -2915,9 +2917,13 @@ async function handleRequest(
         });
         sendResult(request.id, {
           models: models.map((model) => ({
-            id: `bb-cpa/${model.id}`, model: `bb-cpa/${model.id}`, displayName: model.name,
+            id: `bb-cpa/${model.id}`,
+            model: `bb-cpa/${model.id}`,
+            displayName: model.name,
             description: `CPA ${gateway.accountPrefix}; native ${gateway.modelProvider} metadata`,
-            supportedReasoningEfforts: [], defaultReasoningEffort: "medium", isDefault: false,
+            supportedReasoningEfforts: [],
+            defaultReasoningEffort: "medium",
+            isDefault: false,
           })),
           selectedOnlyModels: [],
         });

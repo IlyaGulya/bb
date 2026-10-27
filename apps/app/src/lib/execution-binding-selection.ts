@@ -25,7 +25,8 @@ export function modelConnectionUnavailableReason(
   }
   if (hostId === null) return "Select a machine to use this model connection.";
   if (connection.gateway) {
-    if (providerId !== "acp-omp") return "CPA gateway requires native OMP (acp-omp).";
+    if (providerId !== "acp-omp")
+      return "CPA gateway requires native OMP (acp-omp).";
     if (!connection.gateway.allowedHostIds.includes(hostId)) {
       return "This machine is not allowed to use the CPA gateway connection.";
     }

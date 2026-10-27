@@ -117,7 +117,10 @@ type ProviderModelReasoningSelectionSetter = (
 ) => void;
 
 interface UseThreadCreationOptionsResult<TExecutionInputSources> {
-  executionOptionsRouting: SystemProvidersQuery & { modelConnectionId?: string; threadId?: string };
+  executionOptionsRouting: SystemProvidersQuery & {
+    modelConnectionId?: string;
+    threadId?: string;
+  };
   selectedProviderId: string;
   setSelectedProviderId: StringSelectionSetter;
   setProviderModelReasoning: ProviderModelReasoningSelectionSetter;
@@ -254,14 +257,18 @@ export function useThreadCreationOptions(
   } = options ?? {};
   const binding = useQuery({
     queryKey: ["thread-execution-binding", executionThreadId],
-    queryFn: () => sdk.experimental_executionContexts.getThreadBinding({ threadId: executionThreadId! }),
+    queryFn: () =>
+      sdk.experimental_executionContexts.getThreadBinding({
+        threadId: executionThreadId!,
+      }),
     enabled: enabled && executionThreadId !== undefined,
     staleTime: Infinity,
   });
   const modelConnectionId =
     requestedModelConnectionId ?? binding.data?.modelConnection?.id;
   const modelConnectionProviderId =
-    requestedModelConnectionProviderId ?? binding.data?.modelConnection?.provider;
+    requestedModelConnectionProviderId ??
+    binding.data?.modelConnection?.provider;
   const { setValue: setStoredProviderId, value: storedProviderId } =
     usePromptBoxProviderPreference();
   const setStoredProviderModelReasoning =
@@ -480,11 +487,15 @@ export function useThreadCreationOptions(
   });
   const hostsQuery = useHosts();
   const systemConfig = useSystemConfig();
-  const offeredProviders = executionOptionsQuery.data?.providers ?? EMPTY_PROVIDERS;
+  const offeredProviders =
+    executionOptionsQuery.data?.providers ?? EMPTY_PROVIDERS;
   const providers = useMemo(
-    () => modelConnectionProviderId
-      ? offeredProviders.filter((provider) => provider.id === modelConnectionProviderId)
-      : offeredProviders,
+    () =>
+      modelConnectionProviderId
+        ? offeredProviders.filter(
+            (provider) => provider.id === modelConnectionProviderId,
+          )
+        : offeredProviders,
     [offeredProviders, modelConnectionProviderId],
   );
   const isLoadingModels =
@@ -497,7 +508,8 @@ export function useThreadCreationOptions(
     executionOptionsQuery.data?.modelLoadError ?? NO_MODEL_LOAD_ERROR;
   const modelLoadFailed =
     (executionThreadId !== undefined && binding.isError) ||
-    executionOptionsQuery.isError || modelLoadError !== null;
+    executionOptionsQuery.isError ||
+    modelLoadError !== null;
   const modelCatalogIsVerified =
     executionOptionsQuery.data !== undefined &&
     !executionOptionsQuery.isPlaceholderData &&
@@ -782,7 +794,9 @@ export function useThreadCreationOptions(
           permissionMode,
         },
         forceExplicitModel:
-          modelConnectionId !== undefined || isUnavailableModelRecovery || isSessionOptionModelSwitch,
+          modelConnectionId !== undefined ||
+          isUnavailableModelRecovery ||
+          isSessionOptionModelSwitch,
         initialProviderSource: effectiveInitialProviderSource,
         scope,
         storedValues: {
@@ -1083,7 +1097,10 @@ export function useThreadCreationOptions(
     (value: string) => {
       touchedThreadFieldsRef.current.add("environmentSelectionValue");
       if (scope === "new-thread") {
-        setEnvironmentSelectionEdit({ projectId: preferenceProjectId, resetKey });
+        setEnvironmentSelectionEdit({
+          projectId: preferenceProjectId,
+          resetKey,
+        });
         const parsed = parseEnvironmentValue(value);
         if (parsed?.type === "reuse") {
           setRootComposeReuseValue(value);

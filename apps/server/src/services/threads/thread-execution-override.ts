@@ -183,7 +183,8 @@ async function loadThreadProviderModels(
   thread: Thread,
   requiredModel: string | null,
 ): Promise<readonly AvailableModel[]> {
-  const modelConnection = getThreadExecutionBinding(deps.db, thread.id)?.modelConnection ?? null;
+  const modelConnection =
+    getThreadExecutionBinding(deps.db, thread.id)?.modelConnection ?? null;
   const result = await resolveSystemExecutionOptionsForValidation(
     deps,
     {

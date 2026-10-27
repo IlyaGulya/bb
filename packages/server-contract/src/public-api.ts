@@ -460,19 +460,25 @@ export const publicApiRoutes = {
     list: defineRoute({
       path: "/gateway-logs",
       method: "get",
-      request: queryRequest<EmptyInput, GatewayLogListQuery>(gatewayLogListQuerySchema),
+      request: queryRequest<EmptyInput, GatewayLogListQuery>(
+        gatewayLogListQuerySchema,
+      ),
       response: jsonResponse<GatewayLogList>(),
     }),
     read: defineRoute({
       path: "/gateway-logs/:logId",
       method: "get",
-      request: queryRequest<PathGatewayLogId, GatewayLogReadQuery>(gatewayLogReadQuerySchema),
+      request: queryRequest<PathGatewayLogId, GatewayLogReadQuery>(
+        gatewayLogReadQuerySchema,
+      ),
       response: jsonResponse<GatewayLogPreview>(),
     }),
     download: defineRoute({
       path: "/gateway-logs/:logId/download",
       method: "get",
-      request: queryRequest<PathGatewayLogId, GatewayLogListQuery>(gatewayLogDownloadQuerySchema),
+      request: queryRequest<PathGatewayLogId, GatewayLogListQuery>(
+        gatewayLogDownloadQuerySchema,
+      ),
       response: binaryResponse<Uint8Array>(),
     }),
   },

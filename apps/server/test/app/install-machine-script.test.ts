@@ -356,7 +356,9 @@ exit 1
         BB_INSTALL_SKIP_SERVICE: "1",
       });
       expect(result.status).toBe(1);
-      expect(result.stderr).toContain("Could not install bb-app for this machine");
+      expect(result.stderr).toContain(
+        "Could not install bb-app for this machine",
+      );
       expect(readFileSync(npmInvocationPath, "utf8")).toContain(
         `--prefix ${join(fixture.dataDir, "npm")} bb-app`,
       );

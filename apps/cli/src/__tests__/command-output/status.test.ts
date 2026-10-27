@@ -16,7 +16,6 @@ describe("bb status command output", () => {
   const register: CommandRegistrar = (program) =>
     registerStatusCommand(program, () => "http://server");
 
-
   it("bb status prints environment without fetching hosts", async () => {
     vi.stubEnv("BB_PROJECT_ID", "proj-1");
     vi.stubEnv("BB_THREAD_ID", "thread-1");

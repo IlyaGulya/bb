@@ -26,11 +26,16 @@ export function registerGatewayLogsCommands(
   logs
     .command("list")
     .description("List available logs without printing their contents")
-    .requiredOption("--thread <id>", "Persisted CPA-bound thread to correlate by its inbound request header")
+    .requiredOption(
+      "--thread <id>",
+      "Persisted CPA-bound thread to correlate by its inbound request header",
+    )
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: GatewayLogListOptions) => {
-        const result = await createCliBbSdk(getUrl()).experimental_gatewayLogs.list({
+        const result = await createCliBbSdk(
+          getUrl(),
+        ).experimental_gatewayLogs.list({
           threadId: opts.thread,
         });
         if (outputJson(opts, result)) return;
@@ -51,19 +56,33 @@ export function registerGatewayLogsCommands(
             rows,
           );
         }
-        if (result.scanTruncated) console.error("Log scan truncated; this list may be incomplete.");
+        if (result.scanTruncated)
+          console.error("Log scan truncated; this list may be incomplete.");
         if (result.unavailableFiles > 0) {
-          console.error(`${result.unavailableFiles} log file(s) unavailable during the scan.`);
+          console.error(
+            `${result.unavailableFiles} log file(s) unavailable during the scan.`,
+          );
         }
       }),
     );
 
   logs
     .command("read <logId>")
-    .description("Print a bounded raw preview, or download the full private log to --output")
-    .requiredOption("--thread <id>", "Persisted CPA-bound thread to correlate by its inbound request header")
-    .option("--preview-bytes <bytes>", "Preview byte limit (1–262144; default 65536)")
-    .option("--output <path>", "Download the full log to a new private file instead of stdout")
+    .description(
+      "Print a bounded raw preview, or download the full private log to --output",
+    )
+    .requiredOption(
+      "--thread <id>",
+      "Persisted CPA-bound thread to correlate by its inbound request header",
+    )
+    .option(
+      "--preview-bytes <bytes>",
+      "Preview byte limit (1–262144; default 65536)",
+    )
+    .option(
+      "--output <path>",
+      "Download the full log to a new private file instead of stdout",
+    )
     .option("--json", "Print preview and explicit truncation metadata as JSON")
     .action(
       action(async (logId: string, opts: GatewayLogReadOptions) => {
@@ -80,17 +99,32 @@ export function registerGatewayLogsCommands(
             threadId: opts.thread,
             logId,
           });
-          await writeFile(opts.output, new Uint8Array(await blob.arrayBuffer()), {
-            flag: "wx",
-            mode: 0o600,
-          });
-          if (!outputJson(opts, { logId, output: opts.output, sizeBytes: blob.size })) {
+          await writeFile(
+            opts.output,
+            new Uint8Array(await blob.arrayBuffer()),
+            {
+              flag: "wx",
+              mode: 0o600,
+            },
+          );
+          if (
+            !outputJson(opts, {
+              logId,
+              output: opts.output,
+              sizeBytes: blob.size,
+            })
+          ) {
             console.log(`Saved ${blob.size} bytes to ${opts.output}`);
           }
           return;
         }
-        const previewBytes = opts.previewBytes === undefined ? 65536 : Number(opts.previewBytes);
-        if (!Number.isInteger(previewBytes) || previewBytes < 1 || previewBytes > 262144) {
+        const previewBytes =
+          opts.previewBytes === undefined ? 65536 : Number(opts.previewBytes);
+        if (
+          !Number.isInteger(previewBytes) ||
+          previewBytes < 1 ||
+          previewBytes > 262144
+        ) {
           throw new CliUsageError({
             code: "invalid_preview_bytes",
             hint: null,

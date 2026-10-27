@@ -589,7 +589,11 @@ function ConnectionEditor({
                     ...current,
                     provider: "acp-omp",
                     hostId: null,
-                    nativeAuth: { configDir: null, profile: null, hostEnv: null },
+                    nativeAuth: {
+                      configDir: null,
+                      profile: null,
+                      hostEnv: null,
+                    },
                     gateway: {
                       baseUrl: "",
                       protocol: "openai-responses",
@@ -657,7 +661,9 @@ function ConnectionEditor({
               pattern="[A-Za-z0-9][A-Za-z0-9._-]*"
               value={draft.gateway.accountPrefix}
               placeholder="personal"
-              onChange={(event) => setGateway({ accountPrefix: event.target.value })}
+              onChange={(event) =>
+                setGateway({ accountPrefix: event.target.value })
+              }
             />
           </Field>
           <Field label="Native model catalog provider (modelProvider)">
@@ -665,12 +671,14 @@ function ConnectionEditor({
               required
               value={draft.gateway.modelProvider}
               placeholder="openai-codex"
-              onChange={(event) => setGateway({ modelProvider: event.target.value })}
+              onChange={(event) =>
+                setGateway({ modelProvider: event.target.value })
+              }
             />
           </Field>
           <p className="text-xs text-muted-foreground">
-            Use the exact native OMP catalog provider ID, such as openai-codex or
-            anthropic. Unknown models or capabilities are unsupported.
+            Use the exact native OMP catalog provider ID, such as openai-codex
+            or anthropic. Unknown models or capabilities are unsupported.
           </p>
           <Field label="Gateway protocol">
             <select
@@ -682,7 +690,8 @@ function ConnectionEditor({
                   protocol === "openai-responses" ||
                   protocol === "openai-completions" ||
                   protocol === "anthropic-messages"
-                ) setGateway({ protocol });
+                )
+                  setGateway({ protocol });
               }}
             >
               <option value="openai-responses">OpenAI Responses</option>
@@ -696,9 +705,10 @@ function ConnectionEditor({
               value={draft.gateway.credential.kind}
               onChange={(event) =>
                 setGateway({
-                  credential: event.target.value === "file"
-                    ? { kind: "file", path: "" }
-                    : { kind: "env", name: "" },
+                  credential:
+                    event.target.value === "file"
+                      ? { kind: "file", path: "" }
+                      : { kind: "env", name: "" },
                 })
               }
             >
@@ -715,7 +725,9 @@ function ConnectionEditor({
                 value={draft.gateway.credential.name}
                 placeholder="BB_CPA_API_KEY"
                 onChange={(event) =>
-                  setGateway({ credential: { kind: "env", name: event.target.value } })
+                  setGateway({
+                    credential: { kind: "env", name: event.target.value },
+                  })
                 }
               />
             </Field>
@@ -728,7 +740,9 @@ function ConnectionEditor({
                 value={draft.gateway.credential.path}
                 placeholder="/absolute/private/cpa-client-key"
                 onChange={(event) =>
-                  setGateway({ credential: { kind: "file", path: event.target.value } })
+                  setGateway({
+                    credential: { kind: "file", path: event.target.value },
+                  })
                 }
               />
             </Field>
@@ -739,7 +753,9 @@ function ConnectionEditor({
             Never use the CPA administrator key.
           </p>
           <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">Allowed execution machines</legend>
+            <legend className="text-sm font-medium">
+              Allowed execution machines
+            </legend>
             <p className="text-xs text-muted-foreground">
               Select at least one enrolled worker. This connection cannot run on
               any other machine; selecting it does not select a machine.
@@ -748,12 +764,16 @@ function ConnectionEditor({
               <label key={host.id} className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
-                  checked={draft.gateway?.allowedHostIds.includes(host.id) ?? false}
+                  checked={
+                    draft.gateway?.allowedHostIds.includes(host.id) ?? false
+                  }
                   onChange={(event) =>
                     setGateway({
                       allowedHostIds: event.target.checked
                         ? [...(draft.gateway?.allowedHostIds ?? []), host.id]
-                        : (draft.gateway?.allowedHostIds ?? []).filter((id) => id !== host.id),
+                        : (draft.gateway?.allowedHostIds ?? []).filter(
+                            (id) => id !== host.id,
+                          ),
                     })
                   }
                 />
@@ -762,7 +782,11 @@ function ConnectionEditor({
             ))}
             {hosts.isPending ? <p role="status">Loading machines…</p> : null}
             {hosts.isError ? (
-              <button type="button" className="underline" onClick={() => void hosts.refetch()}>
+              <button
+                type="button"
+                className="underline"
+                onClick={() => void hosts.refetch()}
+              >
                 Retry loading machines
               </button>
             ) : null}
@@ -775,7 +799,9 @@ function ConnectionEditor({
                     checked
                     onChange={() =>
                       setGateway({
-                        allowedHostIds: (draft.gateway?.allowedHostIds ?? []).filter((entry) => entry !== id),
+                        allowedHostIds: (
+                          draft.gateway?.allowedHostIds ?? []
+                        ).filter((entry) => entry !== id),
                       })
                     }
                   />
@@ -786,102 +812,106 @@ function ConnectionEditor({
         </>
       ) : (
         <>
-      <Field label="Machine">
-        <select
-          required
-          className={selectClass}
-          value={draft.hostId ?? ""}
-          onChange={(event) => set("hostId", event.target.value)}
-        >
-          <option value="">Choose machine</option>
-          {hosts.data?.map((host) => (
-            <option key={host.id} value={host.id}>
-              {host.name} · {host.status}
-            </option>
-          ))}
-          {draft.hostId &&
-          !hosts.data?.some((host) => host.id === draft.hostId) ? (
-            <option value={draft.hostId}>{draft.hostId} · unavailable</option>
-          ) : null}
-        </select>
-      </Field>
-      <p className="text-xs text-muted-foreground">
-        Reference an existing native login/configuration on this machine. This
-        does not sign in, copy credentials, or switch accounts in an existing
-        session.
-      </p>
-      <Field label="Native configuration directory (optional)">
-        <Input
-          autoComplete="off"
-          value={draft.nativeAuth.configDir ?? ""}
-          placeholder="/absolute/native/config/directory"
-          onChange={(event) =>
-            set("nativeAuth", {
-              ...draft.nativeAuth,
-              configDir: event.target.value || null,
-            })
-          }
-        />
-      </Field>
-      <Field label="Native profile name (optional)">
-        <Input
-          autoComplete="off"
-          value={draft.nativeAuth.profile ?? ""}
-          onChange={(event) =>
-            set("nativeAuth", {
-              ...draft.nativeAuth,
-              profile: event.target.value || null,
-            })
-          }
-        />
-      </Field>
-      <details className="space-y-3">
-        <summary className="cursor-pointer text-sm font-medium">
-          Native host environment references
-        </summary>
-        <p className="text-xs text-muted-foreground">
-          Environment variable names on the execution host only. Never paste
-          broker URLs, tokens, or credentials.
-        </p>
-        <Field label="Broker URL environment variable name">
-          <Input
-            autoComplete="off"
-            value={draft.nativeAuth.hostEnv?.brokerUrlEnv ?? ""}
-            onChange={(event) =>
-              set("nativeAuth", {
-                ...draft.nativeAuth,
-                hostEnv:
-                  event.target.value || draft.nativeAuth.hostEnv?.brokerTokenEnv
-                    ? {
-                        brokerUrlEnv: event.target.value,
-                        brokerTokenEnv:
-                          draft.nativeAuth.hostEnv?.brokerTokenEnv ?? "",
-                      }
-                    : null,
-              })
-            }
-          />
-        </Field>
-        <Field label="Broker token environment variable name">
-          <Input
-            autoComplete="off"
-            value={draft.nativeAuth.hostEnv?.brokerTokenEnv ?? ""}
-            onChange={(event) =>
-              set("nativeAuth", {
-                ...draft.nativeAuth,
-                hostEnv:
-                  event.target.value || draft.nativeAuth.hostEnv?.brokerUrlEnv
-                    ? {
-                        brokerUrlEnv:
-                          draft.nativeAuth.hostEnv?.brokerUrlEnv ?? "",
-                        brokerTokenEnv: event.target.value,
-                      }
-                    : null,
-              })
-            }
-          />
-        </Field>
-      </details>
+          <Field label="Machine">
+            <select
+              required
+              className={selectClass}
+              value={draft.hostId ?? ""}
+              onChange={(event) => set("hostId", event.target.value)}
+            >
+              <option value="">Choose machine</option>
+              {hosts.data?.map((host) => (
+                <option key={host.id} value={host.id}>
+                  {host.name} · {host.status}
+                </option>
+              ))}
+              {draft.hostId &&
+              !hosts.data?.some((host) => host.id === draft.hostId) ? (
+                <option value={draft.hostId}>
+                  {draft.hostId} · unavailable
+                </option>
+              ) : null}
+            </select>
+          </Field>
+          <p className="text-xs text-muted-foreground">
+            Reference an existing native login/configuration on this machine.
+            This does not sign in, copy credentials, or switch accounts in an
+            existing session.
+          </p>
+          <Field label="Native configuration directory (optional)">
+            <Input
+              autoComplete="off"
+              value={draft.nativeAuth.configDir ?? ""}
+              placeholder="/absolute/native/config/directory"
+              onChange={(event) =>
+                set("nativeAuth", {
+                  ...draft.nativeAuth,
+                  configDir: event.target.value || null,
+                })
+              }
+            />
+          </Field>
+          <Field label="Native profile name (optional)">
+            <Input
+              autoComplete="off"
+              value={draft.nativeAuth.profile ?? ""}
+              onChange={(event) =>
+                set("nativeAuth", {
+                  ...draft.nativeAuth,
+                  profile: event.target.value || null,
+                })
+              }
+            />
+          </Field>
+          <details className="space-y-3">
+            <summary className="cursor-pointer text-sm font-medium">
+              Native host environment references
+            </summary>
+            <p className="text-xs text-muted-foreground">
+              Environment variable names on the execution host only. Never paste
+              broker URLs, tokens, or credentials.
+            </p>
+            <Field label="Broker URL environment variable name">
+              <Input
+                autoComplete="off"
+                value={draft.nativeAuth.hostEnv?.brokerUrlEnv ?? ""}
+                onChange={(event) =>
+                  set("nativeAuth", {
+                    ...draft.nativeAuth,
+                    hostEnv:
+                      event.target.value ||
+                      draft.nativeAuth.hostEnv?.brokerTokenEnv
+                        ? {
+                            brokerUrlEnv: event.target.value,
+                            brokerTokenEnv:
+                              draft.nativeAuth.hostEnv?.brokerTokenEnv ?? "",
+                          }
+                        : null,
+                  })
+                }
+              />
+            </Field>
+            <Field label="Broker token environment variable name">
+              <Input
+                autoComplete="off"
+                value={draft.nativeAuth.hostEnv?.brokerTokenEnv ?? ""}
+                onChange={(event) =>
+                  set("nativeAuth", {
+                    ...draft.nativeAuth,
+                    hostEnv:
+                      event.target.value ||
+                      draft.nativeAuth.hostEnv?.brokerUrlEnv
+                        ? {
+                            brokerUrlEnv:
+                              draft.nativeAuth.hostEnv?.brokerUrlEnv ?? "",
+                            brokerTokenEnv: event.target.value,
+                          }
+                        : null,
+                  })
+                }
+              />
+            </Field>
+          </details>
         </>
       )}
       <label className="flex items-center gap-2 text-sm">

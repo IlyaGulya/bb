@@ -66,7 +66,8 @@ export function createGatewayLogsArea({
         ),
       );
       return new Blob([await response.arrayBuffer()], {
-        type: response.headers.get("content-type") ?? "application/octet-stream",
+        type:
+          response.headers.get("content-type") ?? "application/octet-stream",
       });
     },
   };

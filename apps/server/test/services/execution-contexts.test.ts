@@ -709,9 +709,9 @@ describe("gateway execution host admission", () => {
         }),
       ).toThrow(/unavailable/);
     }
-    expect(getModelConnection(db, connection.id)?.gateway?.allowedHostIds).toEqual([
-      hostId,
-    ]);
+    expect(
+      getModelConnection(db, connection.id)?.gateway?.allowedHostIds,
+    ).toEqual([hostId]);
   });
 
   it("can disable and revoke a gateway after an allowed host is retired", () => {
@@ -752,7 +752,12 @@ describe("gateway execution host admission", () => {
       assertThreadExecutionBindingAvailable(db, snapshot, hostId, "acp-omp"),
     ).not.toThrow();
     expect(() =>
-      assertThreadExecutionBindingAvailable(db, snapshot, "other-host", "acp-omp"),
+      assertThreadExecutionBindingAvailable(
+        db,
+        snapshot,
+        "other-host",
+        "acp-omp",
+      ),
     ).toThrow(/does not authorize/);
     updateModelConnectionDefinition(db, {
       id: connection.id,
@@ -813,7 +818,12 @@ describe("gateway execution host admission", () => {
     const snapshot = getThreadExecutionBinding(db, thread.id)!;
     expect(snapshot.modelConnection?.gateway).toBeNull();
     expect(() =>
-      assertThreadExecutionBindingAvailable(db, snapshot, hostId, native.provider),
+      assertThreadExecutionBindingAvailable(
+        db,
+        snapshot,
+        hostId,
+        native.provider,
+      ),
     ).not.toThrow();
     expect(() =>
       assertThreadExecutionBindingAvailable(
@@ -828,7 +838,12 @@ describe("gateway execution host admission", () => {
       hostId: "other-host",
     });
     expect(() =>
-      assertThreadExecutionBindingAvailable(db, snapshot, hostId, native.provider),
+      assertThreadExecutionBindingAvailable(
+        db,
+        snapshot,
+        hostId,
+        native.provider,
+      ),
     ).toThrow(/not execution host/);
     expect(snapshot.modelConnection?.nativeAuth).toEqual(native.nativeAuth);
   });

@@ -292,7 +292,11 @@ export function assertThreadExecutionBindingAvailable(
       hostId ?? (snapshot.gateway === null ? snapshot.hostId : null);
     if (executionHostId !== null) {
       requireAvailableExecutionHost(db, executionHostId);
-      assertModelConnectionHostAuthorized(snapshot, executionHostId, providerId);
+      assertModelConnectionHostAuthorized(
+        snapshot,
+        executionHostId,
+        providerId,
+      );
       assertModelConnectionHostAuthorized(
         current,
         executionHostId,

@@ -2,6 +2,15 @@
 
 ## AgentOS fork — unreleased
 
+- Add explicit CPA gateway model connections for native OMP, with worker-local
+  credential references, permitted execution hosts and account-scoped model
+  discovery. Preserve context, MCP, Git identity and native session storage;
+  missing credentials or unsupported models never borrow a native account.
+- Link native CPA request logs to bound BB threads. Thread Info, the SDK and
+  `bb gateway-logs` expose bounded previews and protected full downloads with
+  exact-thread filtering and explicit incomplete/truncated results. This is
+  model-HTTP visibility for a private trusted pilot, not per-run authorization
+  or lossless capture of all agent/tool traffic.
 - Add persisted execution contexts, native model-connection references and
   independent project defaults in Settings, the SDK and `bb`. New threads and
   task launches retain immutable effective bindings; definition edits do not
@@ -31,9 +40,8 @@
   so BB records a failed turn instead of success. Preserve diagnostics, explicit
   retry, native resume, typed refusals and cancellation; native retry policy is
   unchanged. See the provider README for the prepared SDK revision.
-- Advance host-daemon protocol to 241 for bounded MCP inspection and scoped
-  root/instruction semantics. These are unreleased source changes, not a
-  production deployment.
+- Advance host-daemon protocol to 242 for bounded MCP inspection, scoped
+  root/instruction semantics and explicit gateway catalog/runtime bindings.
 - **Tasks 0.4.0:** prepare an explicit multi-repository workspace asynchronously,
   retain per-root checkpoints and failures, then start one coherent writer on
   the selected machine only after every required root verifies.

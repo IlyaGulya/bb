@@ -132,3 +132,81 @@ references. Discovery alone does not prove runtime acceptance. Real work
 subscriptions, cloud MCP identities and macOS acceptance remain separate from
 synthetic loopback evidence; these unreleased changes do not change the live
 deployment.
+
+## CPA gateway model connections
+
+A gateway connection selects model HTTP independently of execution context, MCP,
+Git identity and native session storage. It uses provider `acp-omp`, `hostId: null`
+and an explicit nonempty `gateway.allowedHostIds` list. Native auth overrides and
+gateway routing are mutually exclusive. The selected worker needs Bun and the
+native SDK described above, plus its own provisioned CPA model-client key.
+
+In Settings → Contexts & connections → Model connections, choose
+**CPA gateway · native OMP (acp-omp)**. Enter the model API base URL, protocol,
+account namespace and native catalog provider. Credential fields accept only an
+environment variable name or an absolute worker file path, never its contents.
+File credentials must be small owner-only regular files owned by the worker;
+symlinks and missing/invalid values refuse launch. Never provision the CPA
+management key or provider OAuth stores to a worker.
+
+The same definition is available through `bb model-connection create/update`
+and `sdk.experimental_modelConnections`. For example, after provisioning:
+
+```sh
+bb model-connection create \
+  --name "CPA personal" --provider acp-omp \
+  --gateway-base-url https://gateway.example/v1 \
+  --gateway-protocol openai-responses \
+  --gateway-account-prefix personal-codex \
+  --gateway-model-provider openai-codex \
+  --gateway-credential-file /run/credentials/cpa-client \
+  --gateway-allowed-host host_authorized --json
+```
+
+The worker fetches this connection's `/models` with its client key. Only exact
+namespace matches with supported native metadata are offered; unknown models
+and unsupported image metadata do not acquire invented token limits. Select an
+explicit `bb-cpa/personal-codex/<upstream-model-id>` model. Native/default model
+fallback is disabled. Catalog requests need the selected `modelConnectionId`;
+bound-thread requests use `threadId` to retain the frozen selection.
+
+Both context-free and explicitly scoped launches use the native SDK/ACP loop.
+Follow-up and reopen preserve native IDs; forks retain the binding with a new
+native ID. Endpoint/protocol/namespace/model mapping and credential references
+are pinned in secret-free receipts. Change the binding through a new thread,
+not by editing an old receipt. File-key contents can rotate behind their
+reference; an already running child retains its key until a new child opens.
+BB disable/revoke blocks new admitted turns, not already admitted HTTP.
+
+CPA client keys are flat credentials, not task/account leases. Account prefixes
+restrict routing, not worker authorization. This pilot is private and trusted;
+it does not provide per-user RBAC or strict per-run revocation. Native Claude
+Cloud Connectors remain on their separate native path.
+
+## Inspecting CPA request logs
+
+Enable stock CPA request logging and give the Linux BB server only a read-only
+log mount via `BB_CPA_LOG_DIR`. Do not mount CPA auth, configuration or key
+directories into BB. Model requests carry `X-BB-Thread-Id`; discovery requests
+do not. This header is correlation, not authorization or per-turn attribution.
+
+Open a gateway-bound thread's Info panel → **Native CPA request logs**, or use:
+
+```sh
+bb gateway-logs list --thread <thread-id> --json
+bb gateway-logs read <log-id> --thread <thread-id> --preview-bytes 1024 --json
+bb gateway-logs read <log-id> --thread <thread-id> --output ./request.log
+```
+
+The SDK area is `experimental_gatewayLogs.list/read/download`. Reads require a
+persisted gateway binding and an exact inbound thread header, not a body
+substring. Paths, symlinks and hardlinks are confined/rejected server-side.
+Previews default to 64 KiB, at most 256 KiB; truncation is explicit, and full
+downloads retain all bytes. Directory scans are bounded to 2,048 entries and
+report incomplete scans. Files still changing or settling are unavailable.
+
+Raw logs may contain complete prompts, tool schemas/results and sensitive data.
+Keep them private and outside Git; sample key masking is not universal
+redaction. Native CPA capture can lose data under overload, and early admission
+errors need not produce a full request trace. This covers routed model HTTP,
+not direct providers, MCP/Git/browser transport or all machine traffic.

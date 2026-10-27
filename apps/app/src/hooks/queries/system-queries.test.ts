@@ -324,15 +324,23 @@ describe("useSystemExecutionOptions", () => {
       }
       return {
         ...EXECUTION_OPTIONS_RESPONSE,
-        models: args?.modelConnectionId === "personal-cpa" ? [personalModel] : [CODEX_MODEL],
+        models:
+          args?.modelConnectionId === "personal-cpa"
+            ? [personalModel]
+            : [CODEX_MODEL],
       };
     });
     const { queryClient } = createQueryClientTestHarness();
     const observer = observe(
       queryClient,
-      liveSystemExecutionOptionsQueryOptions({ hostId: "worker", providerId: "acp-omp" }),
+      liveSystemExecutionOptionsQueryOptions({
+        hostId: "worker",
+        providerId: "acp-omp",
+      }),
     );
-    await vi.waitFor(() => expect(observer.getCurrentResult().data?.models).toEqual([CODEX_MODEL]));
+    await vi.waitFor(() =>
+      expect(observer.getCurrentResult().data?.models).toEqual([CODEX_MODEL]),
+    );
 
     observer.setOptions(
       liveSystemExecutionOptionsQueryOptions({
@@ -342,7 +350,9 @@ describe("useSystemExecutionOptions", () => {
       }),
     );
     expect(observer.getCurrentResult().data?.models).toBeUndefined();
-    await vi.waitFor(() => expect(observer.getCurrentResult().data?.models).toEqual([personalModel]));
+    await vi.waitFor(() =>
+      expect(observer.getCurrentResult().data?.models).toEqual([personalModel]),
+    );
 
     observer.setOptions(
       liveSystemExecutionOptionsQueryOptions({

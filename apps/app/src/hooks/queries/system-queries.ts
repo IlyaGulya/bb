@@ -442,9 +442,19 @@ function systemExecutionOptionsQueryOptions({
 
 export function prefetchSystemExecutionOptions(
   queryClient: QueryClient,
-  args: { routing: SystemProvidersQuery & { modelConnectionId?: string; threadId?: string }; providerIds: readonly string[] },
+  args: {
+    routing: SystemProvidersQuery & {
+      modelConnectionId?: string;
+      threadId?: string;
+    };
+    providerIds: readonly string[];
+  },
 ): void {
-  if (args.routing.modelConnectionId !== undefined || args.routing.threadId !== undefined) return;
+  if (
+    args.routing.modelConnectionId !== undefined ||
+    args.routing.threadId !== undefined
+  )
+    return;
   for (const providerId of args.providerIds) {
     void queryClient.prefetchQuery(
       systemExecutionOptionsQueryOptions({

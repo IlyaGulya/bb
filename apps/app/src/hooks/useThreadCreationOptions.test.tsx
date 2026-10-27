@@ -333,21 +333,28 @@ describe("useThreadCreationOptions", () => {
       providerExecutionOptionsResponse(args?.providerId),
     );
     const { result } = renderHook(
-      () => useThreadCreationOptions({
-        scope: "new-thread",
-        initialEnvironmentSelectionValue: "selected-environment",
-        modelConnectionId: "personal-cpa",
-        modelConnectionProviderId: PROJECT_PROVIDER_ID,
-      }),
+      () =>
+        useThreadCreationOptions({
+          scope: "new-thread",
+          initialEnvironmentSelectionValue: "selected-environment",
+          modelConnectionId: "personal-cpa",
+          modelConnectionProviderId: PROJECT_PROVIDER_ID,
+        }),
       { wrapper: createQueryClientTestHarness().wrapper },
     );
-    await waitFor(() => expect(result.current.modelCatalogIsVerified).toBe(true));
+    await waitFor(() =>
+      expect(result.current.modelCatalogIsVerified).toBe(true),
+    );
     expect(result.current.selectedProviderId).toBe(PROJECT_PROVIDER_ID);
-    expect(result.current.environmentSelectionValue).toBe("selected-environment");
+    expect(result.current.environmentSelectionValue).toBe(
+      "selected-environment",
+    );
     expect(result.current.hasMultipleProviders).toBe(false);
     act(() => result.current.setSelectedModel("project-remembered"));
     expect(result.current.selectedModel).toBe("project-remembered");
-    expect(result.current.environmentSelectionValue).toBe("selected-environment");
+    expect(result.current.environmentSelectionValue).toBe(
+      "selected-environment",
+    );
     act(() => result.current.setEnvironmentSelectionValue(""));
     expect(result.current.environmentSelectionValue).toBe("");
     expect(result.current.selectedModel).toBe("project-remembered");

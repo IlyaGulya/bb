@@ -137,7 +137,9 @@ describe("execution binding MCP selection", () => {
       ...connections,
       gateway,
     ]);
-    vi.mocked(sdk.experimental_executionContexts.getProjectDefaults).mockResolvedValue({
+    vi.mocked(
+      sdk.experimental_executionContexts.getProjectDefaults,
+    ).mockResolvedValue({
       projectId: "project",
       executionContextId: null,
       modelConnectionId: null,
@@ -152,7 +154,9 @@ describe("execution binding MCP selection", () => {
         }),
       { wrapper, initialProps: { hostId: "worker" } },
     );
-    await waitFor(() => expect(result.current.connections.isSuccess).toBe(true));
+    await waitFor(() =>
+      expect(result.current.connections.isSuccess).toBe(true),
+    );
     act(() => result.current.selectConnection(gateway.id));
     await waitFor(() => expect(result.current.unavailableReason).toBeNull());
     expect(result.current.effectiveContext).toBeUndefined();

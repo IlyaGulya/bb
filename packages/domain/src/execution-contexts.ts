@@ -55,9 +55,9 @@ export const modelGatewaySchema = z
         !url.username &&
         !url.password &&
         !url.search &&
-        !url.hash
-        && !/[?#\u0000-\u0020\u007f]/.test(value)
-        && !/^https?:\/\/[^/]*@/i.test(value)
+        !url.hash &&
+        !/[?#\u0000-\u0020\u007f]/.test(value) &&
+        !/^https?:\/\/[^/]*@/i.test(value)
       );
     }, "Gateway URL must be HTTP(S) without credentials, query, or fragment"),
     protocol: z.enum([
@@ -68,19 +68,29 @@ export const modelGatewaySchema = z
     accountPrefix: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$(?![\s\S])/),
     modelProvider: idSchema,
     credential: z.discriminatedUnion("kind", [
-      z.object({
-        kind: z.literal("env"),
-        name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$(?![\s\S])/),
-      }).strict(),
-      z.object({
-        kind: z.literal("file"),
-        path: referencePathSchema.refine(isAbsoluteHostPath, "Credential file path must be absolute"),
-      }).strict(),
+      z
+        .object({
+          kind: z.literal("env"),
+          name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$(?![\s\S])/),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("file"),
+          path: referencePathSchema.refine(
+            isAbsoluteHostPath,
+            "Credential file path must be absolute",
+          ),
+        })
+        .strict(),
     ]),
-    allowedHostIds: z.array(idSchema).min(1).refine(
-      (ids) => new Set(ids).size === ids.length,
-      "Gateway allowed host IDs must be unique",
-    ),
+    allowedHostIds: z
+      .array(idSchema)
+      .min(1)
+      .refine(
+        (ids) => new Set(ids).size === ids.length,
+        "Gateway allowed host IDs must be unique",
+      ),
   })
   .strict();
 export type ModelGateway = z.infer<typeof modelGatewaySchema>;
@@ -113,15 +123,35 @@ export const modelConnectionFieldsSchema = z
   .superRefine((connection, ctx) => {
     if (connection.gateway === null) {
       if (connection.hostId === null)
-        ctx.addIssue({ code: "custom", path: ["hostId"], message: "Native connections require a host" });
+        ctx.addIssue({
+          code: "custom",
+          path: ["hostId"],
+          message: "Native connections require a host",
+        });
       return;
     }
     if (connection.hostId !== null)
-      ctx.addIssue({ code: "custom", path: ["hostId"], message: "Gateway connections require a null hostId" });
+      ctx.addIssue({
+        code: "custom",
+        path: ["hostId"],
+        message: "Gateway connections require a null hostId",
+      });
     if (connection.provider !== "acp-omp")
-      ctx.addIssue({ code: "custom", path: ["provider"], message: "Gateway connections require acp-omp" });
-    if (connection.nativeAuth.configDir !== null || connection.nativeAuth.profile !== null || connection.nativeAuth.hostEnv !== null)
-      ctx.addIssue({ code: "custom", path: ["nativeAuth"], message: "Gateway and native authentication cannot be combined" });
+      ctx.addIssue({
+        code: "custom",
+        path: ["provider"],
+        message: "Gateway connections require acp-omp",
+      });
+    if (
+      connection.nativeAuth.configDir !== null ||
+      connection.nativeAuth.profile !== null ||
+      connection.nativeAuth.hostEnv !== null
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["nativeAuth"],
+        message: "Gateway and native authentication cannot be combined",
+      });
   });
 export const modelConnectionSchema = modelConnectionFieldsSchema
   .safeExtend({
