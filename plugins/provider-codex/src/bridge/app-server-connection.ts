@@ -35,6 +35,7 @@ interface CreateCodexAppServerConnectionOptions {
   cwd: string;
   env: Record<string, string | undefined>;
   recordThreadId: string | null;
+  redact?: (text: string) => string;
   onNotification(method: string, params: unknown): void;
   onRequest(
     method: string,
@@ -126,9 +127,11 @@ export function createCodexAppServerConnection(
     env: options.env,
     stdio: ["pipe", "pipe", "pipe"],
   });
-  experimental_recordProviderChildIo(child, {
-    threadId: options.recordThreadId,
-  });
+  if (!options.redact) {
+    experimental_recordProviderChildIo(child, {
+      threadId: options.recordThreadId,
+    });
+  }
 
   const pending = new Map<number, PendingChildRequest>();
   const stderrChunks: string[] = [];
@@ -149,7 +152,7 @@ export function createCodexAppServerConnection(
   });
 
   function pushStderrChunk(chunk: string): void {
-    stderrChunks.push(chunk);
+    stderrChunks.push(options.redact?.(chunk) ?? chunk);
     if (stderrChunks.length > STDERR_TAIL_MAX_CHUNKS) {
       stderrChunks.shift();
     }
@@ -199,7 +202,8 @@ export function createCodexAppServerConnection(
       "code" in error && typeof error.code === "string"
         ? ` (${error.code})`
         : "";
-    const detail = `stdin failed${code}: ${error.message}`;
+    const detail = options.redact?.(`stdin failed${code}: ${error.message}`) ??
+      `stdin failed${code}: ${error.message}`;
     stdinFailure = new CodexAppServerExitedError(`codex app-server ${detail}`);
     pushStderrChunk(detail);
     killStarted = true;
@@ -257,7 +261,11 @@ export function createCodexAppServerConnection(
       if (finalized) {
         return;
       }
-      const message = parseChildLine(line);
+      const parsed = parseChildLine(line);
+      const message: ParsedChildMessage | null = parsed && options.redact
+        ? JSON.parse(JSON.stringify(parsed, (_key, value: unknown) =>
+            typeof value === "string" ? options.redact!(value) : value))
+        : parsed;
       if (!message) {
         return;
       }

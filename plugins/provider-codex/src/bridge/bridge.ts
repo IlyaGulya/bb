@@ -3,6 +3,11 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
+  listCodexGatewayModels,
+  prepareCodexGateway,
+  type CodexGatewaySession,
+} from "./model-gateway.js";
+import {
   isStandaloneBuiltinCompactCommand,
   approvalInteractionOutcomeSchema,
   userQuestionInteractionOutcomeSchema,
@@ -470,6 +475,7 @@ interface CodexBridgeSession {
   translator: CodexEventTranslator;
   construction: CodexSessionConstruction;
   constructionSignature: string;
+  gateway: CodexGatewaySession | null;
   turnPermissionSettings: ReturnType<typeof toCodexPermissionSettings>;
   openCodexTurnIds: Set<string>;
   responseOpenedTurns: Map<string, ResponseOpenedTurn>;
@@ -496,6 +502,7 @@ let modelListConnection: CodexAppServerConnection | null = null;
 let modelListConnectionPromise: Promise<CodexAppServerConnection> | null = null;
 let sessionSerialCounter = 0;
 let configuredSkillExtraRoots: string[] | null = null;
+let providerDataDir: string | null = null;
 
 const LEGACY_BRIDGE_MINTED_ID_PATTERN = /^bt[0-9a-f]{8}-\d+-/;
 
@@ -580,6 +587,7 @@ function requestedDaybreak(options: BridgeExecutionOptions): boolean | null {
 function constructionSignature(
   cwd: string,
   sessionOptions: CodexSessionOptions,
+  gateway = false,
 ): string {
   const poolBaseUrl = sessionOptions.envVars?.[CODEX_POOL_BASE_URL_ENV];
   const poolToken = sessionOptions.envVars?.[CODEX_POOL_AUTH_TOKEN_ENV];
@@ -589,7 +597,7 @@ function constructionSignature(
     memoryEnabled: sessionOptions.memoryEnabled ?? null,
     providerSubagentsEnabled: sessionOptions.providerSubagentsEnabled ?? null,
     poolRoute:
-      poolBaseUrl === undefined || poolToken === undefined
+      gateway || poolBaseUrl === undefined || poolToken === undefined
         ? null
         : {
             baseUrl: poolBaseUrl,
@@ -977,6 +985,7 @@ function handleChildExit(
 
 function spawnChildConnection(callbacks: {
   envVars?: Readonly<Record<string, string>>;
+  gateway?: CodexGatewaySession | null;
   recordThreadId: string | null;
   onNotification: (method: string, params: unknown) => void;
   onRequest: (
@@ -987,14 +996,26 @@ function spawnChildConnection(callbacks: {
   onExit: (info: CodexAppServerExitInfo) => void;
 }): CodexAppServerConnection {
   const env = buildAppServerEnv(callbacks.envVars);
-  const launch = resolveAppServerLaunch(appServerLaunchEnv(callbacks.envVars));
-  const { envVars: _envVars, ...connectionCallbacks } = callbacks;
+  const launchEnv = appServerLaunchEnv(callbacks.envVars);
+  if (callbacks.gateway) {
+    for (const name of [
+      CODEX_POOL_BASE_URL_ENV, CODEX_POOL_AUTH_TOKEN_ENV,
+      "OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL",
+    ]) {
+      delete env[name];
+      delete launchEnv[name];
+    }
+    Object.assign(env, callbacks.gateway.env);
+  }
+  const launch = resolveAppServerLaunch(launchEnv);
+  const { envVars: _envVars, gateway, ...connectionCallbacks } = callbacks;
   return createCodexAppServerConnection({
     command: launch.command,
     args: launch.args,
     cwd: process.cwd(),
     env,
     ...connectionCallbacks,
+    ...(gateway ? { redact: gateway.redact } : {}),
   });
 }
 
@@ -1186,6 +1207,16 @@ async function constructThreadSession(
 ): Promise<ConstructedCodexSession> {
   const existing = sessionsByBbThreadId.get(args.threadId);
   const decoded = decodeCodexOptions(args.options);
+  existing?.gateway?.verify(args.options.modelConnection, args.options.model);
+  if (existing && !existing.gateway && args.options.modelConnection?.gateway)
+    throw new Error("Create a new thread to change a native Codex session to CPA.");
+  const gateway = await prepareCodexGateway({
+    connection: args.options.modelConnection,
+    model: args.options.model,
+    threadId: args.threadId,
+    dataDir: providerDataDir,
+    resume: args.request.kind === "resume",
+  });
   sessionSerialCounter += 1;
   const serial = sessionSerialCounter;
   const translator = createCodexEventTranslator({
@@ -1215,7 +1246,9 @@ async function constructThreadSession(
     constructionSignature: constructionSignature(
       args.cwd,
       decoded.sessionOptions,
+      gateway !== null,
     ),
+    gateway,
     turnPermissionSettings: toCodexPermissionSettings({
       additionalWorkspaceWriteRoots: decoded.additionalWorkspaceWriteRoots,
       gitWritableRoots: [],
@@ -1230,7 +1263,7 @@ async function constructThreadSession(
     pendingPreIdentityDeltas: [],
     turnRateLimits: null,
     quotaRecoveryAttempted: false,
-    quotaRecoveryAllowed: !(
+    quotaRecoveryAllowed: gateway === null && !(
       launchEnv[CODEX_POOL_BASE_URL_ENV] && launchEnv[CODEX_POOL_AUTH_TOKEN_ENV]
     ),
     rebuildBeforeNextTurnReason: null,
@@ -1265,6 +1298,7 @@ async function constructThreadSession(
   let notifications = Promise.resolve();
   const connection = spawnChildConnection({
     envVars: decoded.sessionOptions.envVars,
+    gateway,
     recordThreadId: args.threadId,
     onNotification: (method, params) => {
       notifications = notifications
@@ -1291,11 +1325,21 @@ async function constructThreadSession(
   try {
     await initializeChild(connection);
 
+    const childOnlyEnvNames = gateway ? new Set([
+      ...Object.keys(gateway.env), CODEX_POOL_AUTH_TOKEN_ENV,
+      CODEX_POOL_BASE_URL_ENV, "OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL",
+    ]) : null;
     const preparedGitRoots = translator.prepareWorkspaceWriteGitRoots({
       command: {
         threadId: args.threadId,
         cwd: args.cwd,
-        options: decoded.sessionOptions,
+        options: childOnlyEnvNames
+          ? {
+              ...decoded.sessionOptions,
+              envVars: Object.fromEntries(Object.entries(decoded.sessionOptions.envVars ?? {})
+                .filter(([name]) => !childOnlyEnvNames.has(name))),
+            }
+          : decoded.sessionOptions,
       },
     });
     const dynamicTools = toCodexDynamicTools(args.dynamicTools);
@@ -1309,9 +1353,12 @@ async function constructThreadSession(
       sandbox: preparedGitRoots.permissionSettings.sandbox,
       cwd: args.cwd,
       ...instructionOverrides,
-      model: decoded.sessionOptions.model ?? undefined,
+      model: gateway?.model ?? decoded.sessionOptions.model ?? undefined,
+      ...(gateway ? { modelProvider: gateway.providerId } : {}),
       serviceTier: toCodexServiceTier(decoded.sessionOptions.serviceTier),
-      config: preparedGitRoots.config ?? undefined,
+      config: gateway
+        ? { ...preparedGitRoots.config, ...gateway.config }
+        : preparedGitRoots.config ?? undefined,
       ...(dynamicTools && dynamicTools.length > 0 ? { dynamicTools } : {}),
     };
 
@@ -1390,7 +1437,7 @@ async function constructThreadSession(
         decoded.daybreak,
       );
     }
-    const modelCatalog = loadSessionModelCatalog(connection);
+    const modelCatalog = gateway ? Promise.resolve(null) : loadSessionModelCatalog(connection);
     session.modelCatalog = modelCatalog;
     void modelCatalog.then((catalog) => publishDaybreakState(session, catalog));
     return { session, codexThreadId };
@@ -1604,9 +1651,17 @@ function handleInitialize(id: string | number): void {
   sendResult(id, result);
 }
 
-async function handleModelList(id: string | number): Promise<void> {
+async function handleModelList(
+  id: string | number,
+  params: z.infer<typeof modelListParamsSchema>,
+): Promise<void> {
   let connection: CodexAppServerConnection | null = null;
   try {
+    const gatewayModels = await listCodexGatewayModels(params.modelConnection);
+    if (gatewayModels !== null) {
+      sendResult(id, { models: gatewayModels, selectedOnlyModels: [] });
+      return;
+    }
     connection = await getModelListConnection();
     const result = await connection.request({
       method: "model/list",
@@ -1704,10 +1759,17 @@ async function requireLiveSessionForTurn(
     throw new Error(`No active codex session for thread "${params.threadId}"`);
   }
 
+  if (session.gateway) {
+    session.gateway.verify(params.options.modelConnection, params.options.model);
+    session.gateway.verifyCredential();
+  } else if (params.options.modelConnection?.gateway) {
+    throw new Error("Create a new thread to change a native Codex session to CPA.");
+  }
   const decoded = decodeCodexOptions(params.options);
   const signature = constructionSignature(
     session.construction.cwd,
     decoded.sessionOptions,
+    session.gateway !== null,
   );
   if (session.connection === null || session.connection.exited) {
     session = await rebuildThreadSession(
@@ -2034,7 +2096,7 @@ async function handleTurnStart(
             approvalPolicy: permissionSettings.approvalPolicy,
             approvalsReviewer: permissionSettings.approvalsReviewer,
             sandboxPolicy: permissionSettings.sandboxPolicy,
-            model: decoded.sessionOptions.model ?? undefined,
+            model: session.gateway?.model ?? decoded.sessionOptions.model ?? undefined,
             serviceTier: toCodexServiceTier(decoded.sessionOptions.serviceTier),
             ...(cyberAccessProgram === null ? {} : { cyberAccessProgram }),
           },
@@ -2090,6 +2152,12 @@ async function handleTurnSteer(
     return;
   }
   try {
+    if (session.gateway) {
+      session.gateway.verify(params.options.modelConnection, params.options.model);
+      session.gateway.verifyCredential();
+    } else if (params.options.modelConnection?.gateway) {
+      throw new Error("Create a new thread to change a native Codex session to CPA.");
+    }
     const decoded = decodeCodexOptions(params.options);
     const permissionSettings = toCodexPermissionSettings({
       additionalWorkspaceWriteRoots: decoded.additionalWorkspaceWriteRoots,
@@ -2424,7 +2492,7 @@ async function handleRequest(
       handleInitialize(request.id);
       break;
     case "model/list":
-      await handleModelList(request.id);
+      await handleModelList(request.id, request.params);
       break;
     case "provider/health":
       sendResult(request.id, await getCodexProviderHealth());
@@ -2592,6 +2660,9 @@ export const experimental_killAllChildrenForTests = killAllChildren;
 
 export const experimental_providerBridge = experimental_defineProviderBridge({
   handleLine,
+  start: ({ dataDir }) => {
+    providerDataDir = dataDir;
+  },
   onClose: () => {
     killAllChildren();
     process.exit(0);
