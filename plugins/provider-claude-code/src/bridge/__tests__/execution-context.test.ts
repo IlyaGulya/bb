@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   mkdirSync,
   mkdtempSync,
@@ -63,6 +64,50 @@ afterEach(() => {
 });
 
 describe("scoped Claude context files", () => {
+  it("resumes pre-gateway native receipts without rewriting them or changing auth sources", () => {
+    const snapshot = connection(null);
+    const { gateway: _gateway, ...legacyConnection } = snapshot;
+    const threadId = "legacy-native";
+    const state = join(directory, "state");
+    const receipts = join(state, "execution-contexts");
+    mkdirSync(receipts, { recursive: true });
+    const receiptPath = join(
+      receipts,
+      `${createHash("sha256").update(threadId).digest("hex")}.json`,
+    );
+    const original = JSON.stringify({
+      version: 1,
+      digest: createHash("sha256")
+        .update(
+          JSON.stringify({
+            executionContext: null,
+            modelConnection: legacyConnection,
+          }),
+        )
+        .digest("hex"),
+    });
+    writeFileSync(receiptPath, original, { mode: 0o600 });
+    const files = new ClaudeContextStore(state).resolve({
+      threadId,
+      modelConnection: snapshot,
+      resume: true,
+    })!;
+    files.verify();
+    expect(readFileSync(receiptPath, "utf8")).toBe(original);
+    const changedSource = join(directory, "changed-native-source");
+    mkdirSync(changedSource);
+    expect(() =>
+      new ClaudeContextStore(state).resolve({
+        threadId,
+        modelConnection: {
+          ...snapshot,
+          nativeAuth: { ...snapshot.nativeAuth, configDir: changedSource },
+        },
+        resume: true,
+      }),
+    ).toThrow();
+  });
+
   it("keeps simultaneous contexts and direct MCP inventories independent on the same native account", async () => {
     const account = join(directory, "native-account");
     mkdirSync(account);

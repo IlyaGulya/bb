@@ -303,11 +303,17 @@ function hashPath(
   hash.update("\0");
 }
 
+function modelConnectionSourceBinding(connection?: ModelConnectionSnapshot) {
+  if (!connection || connection.gateway !== null) return connection ?? null;
+  const { gateway: _gateway, ...nativeConnection } = connection;
+  return nativeConnection;
+}
+
 function sourceDigest(args: ResolveContextArgs): string {
   const hash = createHash("sha256").update(
     JSON.stringify({
       executionContext: args.executionContext ?? null,
-      modelConnection: args.modelConnection ?? null,
+      modelConnection: modelConnectionSourceBinding(args.modelConnection),
     }),
   );
   const context = args.executionContext;

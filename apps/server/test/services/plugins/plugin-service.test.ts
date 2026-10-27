@@ -590,8 +590,14 @@ describe("plugin service", () => {
   });
 
   it("expects a plugin to run until its load pass ends without reaching it", async () => {
-    const { promise: gate, resolve: release } = Promise.withResolvers<void>();
-    const { promise: loading, resolve: entered } = Promise.withResolvers<void>();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const loading = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
     vi.stubGlobal("__slowPluginGate", gate);
     vi.stubGlobal("__slowPluginEntered", entered);
     const slowRoot = await writePlugin(workDir, {

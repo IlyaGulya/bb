@@ -11,6 +11,9 @@
   exact-thread filtering and explicit incomplete/truncated results. This is
   model-HTTP visibility for a private trusted pilot, not per-run authorization
   or lossless capture of all agent/tool traffic.
+- Preserve pre-gateway native Claude receipt digests when parsing newly nullable
+  gateway metadata. Existing sessions keep their original receipts; changing
+  native authentication sources still requires a new thread.
 - Add persisted execution contexts, native model-connection references and
   independent project defaults in Settings, the SDK and `bb`. New threads and
   task launches retain immutable effective bindings; definition edits do not
