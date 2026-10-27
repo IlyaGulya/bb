@@ -107,6 +107,42 @@ describe("scoped Claude context files", () => {
       }),
     ).toThrow();
   });
+  it("opts into a host-native MCP profile without importing its settings or changing legacy context defaults", () => {
+    const profileRoot = join(directory, "native-mcp-profile");
+    mkdirSync(profileRoot);
+    const snapshot = context("selected-native-mcp", {
+      claudeNativeMcp: { configDir: profileRoot },
+    });
+    const native = connection(profileRoot);
+    const store = new ClaudeContextStore(join(directory, "state"));
+    const files = store.resolve({
+      threadId: "native-profile", executionContext: snapshot,
+      modelConnection: native, resume: false,
+    })!;
+    expect(files.settings).toEqual({});
+    expect(files.mcpServers).toEqual({});
+    const launchEnv = {
+      HOME: "/unchanged-home", CLAUDE_CONFIG_DIR: "/unselected-profile",
+      ANTHROPIC_API_KEY: "ambient-key", ANTHROPIC_AUTH_TOKEN: "ambient-token",
+    };
+    const env = buildClaudeSessionEnvironment({
+      env: launchEnv, executionContext: snapshot, modelConnection: native,
+    });
+    expect(env.HOME).toBe(launchEnv.HOME);
+    expect(env.CLAUDE_CONFIG_DIR).toBe(profileRoot);
+    expect(env.ENABLE_CLAUDEAI_MCP_SERVERS).toBe("true");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    expect(launchEnv.CLAUDE_CONFIG_DIR).toBe("/unselected-profile");
+    expect(() => buildClaudeSessionEnvironment({
+      env: {}, executionContext: snapshot, modelConnection: connection(null),
+    })).toThrow("same configDir");
+    expect(() => new ClaudeContextStore(join(directory, "state")).resolve({
+      threadId: "native-profile",
+      executionContext: context("selected-native-mcp"),
+      modelConnection: native, resume: true,
+    })).toThrow("changed");
+  });
 
   it("keeps simultaneous contexts and direct MCP inventories independent on the same native account", async () => {
     const account = join(directory, "native-account");

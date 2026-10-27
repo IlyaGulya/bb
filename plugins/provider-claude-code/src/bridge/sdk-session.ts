@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   query,
   type CanUseTool,
@@ -46,6 +47,8 @@ export interface SdkSessionOptions {
   strictMcpConfig?: boolean;
   verifyContextSources?: () => void;
   recordThreadId?: () => string;
+  redactGatewayText?: (text: string) => string;
+  requireNativeCloudMcp?: boolean;
 }
 
 export type ClaudeSdkReasoningEffort =
@@ -174,12 +177,16 @@ export class SdkSession {
   private readonly completion: Promise<void>;
   private complete: (() => void) | null = null;
   private stderrTail = "";
+  private cloudReadiness: PromiseWithResolvers<void> | undefined;
 
   constructor(
     private readonly options: SdkSessionOptions,
     private readonly onMessage: SdkSessionMessageHandler,
     private readonly onDone: SdkSessionDoneHandler,
   ) {
+    if (options.requireNativeCloudMcp) {
+      this.cloudReadiness = Promise.withResolvers<void>();
+    }
     this.completion = new Promise((resolve) => {
       this.complete = resolve;
     });
@@ -324,7 +331,14 @@ export class SdkSession {
         options: sdkOptions,
       });
     } catch (error) {
-      throw translateMissingClaudeCliError(error);
+      const translated = translateMissingClaudeCliError(error);
+      throw this.options.redactGatewayText
+        ? new Error(this.options.redactGatewayText(getErrorMessage(translated)))
+        : translated;
+    }
+    if (this.cloudReadiness) {
+      const readiness = this.cloudReadiness;
+      void this.requireNativeCloudMcp().then(readiness.resolve, readiness.reject);
     }
 
     void this.consumeStream();
@@ -423,6 +437,7 @@ export class SdkSession {
       [Symbol.asyncIterator]() {
         return {
           async next(): Promise<IteratorResult<SDKUserMessage>> {
+            if (self.cloudReadiness) await self.cloudReadiness.promise;
             if (self.inputQueue.length > 0) {
               const queued = self.inputQueue.shift();
               if (!queued) {
@@ -474,18 +489,20 @@ export class SdkSession {
     if (!q) return;
 
     try {
+      if (this.cloudReadiness) await this.cloudReadiness.promise;
       for await (const message of q) {
         this.captureSessionId(message);
-        this.onMessage(message);
+        this.onMessage(this.redactGatewayValue(message));
       }
       this.onDone();
     } catch (error) {
+      if (this.cloudReadiness) q.close();
       this.onDone(
         new Error(
-          buildSdkDoneErrorMessage({
+          this.redactGatewayText(buildSdkDoneErrorMessage({
             error,
             stderrTail: this.stderrTail,
-          }),
+          })),
         ),
       );
     } finally {
@@ -498,6 +515,49 @@ export class SdkSession {
         this.complete = null;
       }
     }
+  }
+
+  private redactGatewayText(text: string): string {
+    return this.options.redactGatewayText?.(text) ?? text;
+  }
+
+  private redactGatewayValue<T>(value: T): T {
+    if (!this.options.redactGatewayText) return value;
+    if (typeof value === "string") return this.redactGatewayText(value) as T;
+    if (Array.isArray(value)) {
+      return value.map((item) => this.redactGatewayValue(item)) as T;
+    }
+    if (value !== null && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [
+          this.redactGatewayText(key), this.redactGatewayValue(item),
+        ]),
+      ) as T;
+    }
+    return value;
+  }
+
+  private async requireNativeCloudMcp(): Promise<void> {
+    const q = this.query;
+    if (!q) throw new Error("Native Claude MCP profile startup did not create a session.");
+    const { account } = await q.initializationResult();
+    if (account.tokenSource !== "claude.ai" ||
+        (account.apiProvider !== undefined && account.apiProvider !== "firstParty")) {
+      throw new Error(
+        "The explicit native Claude MCP profile requires local Claude.ai OAuth authentication with user:mcp_servers scope. Client-key routing was not substituted. This profile authorizes native user/project MCP as well as Cloud connectors.",
+      );
+    }
+    const deadline = Date.now() + 30_000;
+    do {
+      const servers = await q.mcpServerStatus();
+      const cloud = servers.filter((server) => server.scope === "claudeai");
+      if (cloud.some((server) => server.status === "connected")) return;
+      if (!cloud.some((server) => server.status === "pending")) break;
+      await delay(200, undefined, { signal: this.abortController.signal });
+    } while (Date.now() < deadline);
+    throw new Error(
+      "The explicit native Claude MCP profile did not report a connected Claude.ai Cloud connector. Confirm native OAuth user:mcp_servers scope and connector access in that profile; BB did not export native tokens or fall back to API-key mode. Native user/project MCP sources are authorized by this profile, not isolated by a strict per-server allowlist.",
+    );
   }
 
   private captureSessionId(message: SDKMessage): void {

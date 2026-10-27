@@ -32,6 +32,10 @@ import { randomUUID } from "node:crypto";
 import { join as joinPath, resolve as resolvePath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
+  prepareGatewayBinding,
+  listClaudeGatewayModels,
+} from "./model-gateway.js";
+import {
   forkSession,
   type CanUseTool,
   type HookCallback,
@@ -370,6 +374,7 @@ let configuredSkillRoots: ClaudeCodeSkillRoot[] | null = null;
 let skillPluginsRoot: string | null = null;
 let bridgeTempDir: string | null = null;
 let contextStore: ClaudeContextStore | null = null;
+let gatewayDataDir: string | null = null;
 
 function assembleSkillPlugins(
   roots: readonly { id: string; path: string }[],
@@ -753,6 +758,12 @@ async function applyLiveSessionSettings(
   next: ClaudeLiveSessionSettings,
 ): Promise<void> {
   const current = threadSession.attachment.liveSettings;
+  const connection = threadSession.attachment.sessionConstructionConfig.sessionOptions.modelConnection;
+  if (connection?.gateway && current.model !== next.model) {
+    throw new Error(
+      "Claude gateway model binding is immutable; create a new thread to change the selected model.",
+    );
+  }
   if (current.model !== next.model) {
     threadSession.contextUsageCollector.invalidateCapacity();
     await threadSession.session.setModel(next.model);
@@ -980,6 +991,7 @@ function toSessionConstructionConfig(
     config: params.config,
     dynamicTools: params.dynamicTools,
     sessionOptions: {
+      threadId: params.threadId,
       additionalWorkspaceWriteRoots: params.additionalWorkspaceWriteRoots,
       baseInstructions: params.baseInstructions,
       chromeEnabled: params.chromeEnabled,
@@ -1697,6 +1709,8 @@ function applyTurnEnvironment(
         attachment.sessionConstructionConfig.sessionOptions.executionContext,
       modelConnection:
         attachment.sessionConstructionConfig.sessionOptions.modelConnection,
+      threadId: attachment.threadIdRef.current,
+      model: attachment.liveSettings.model,
     }),
     CLAUDE_CODE_DISABLE_1M_CONTEXT: attachment.sessionConstructionConfig
       .sessionOptions.disable1MContext
@@ -2163,7 +2177,12 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
       break;
     case "model/list":
       try {
-        sendResult(request.id, await listModelsMemoized());
+        sendResult(
+          request.id,
+          request.params.modelConnection?.gateway
+            ? await listClaudeGatewayModels(request.params.modelConnection)
+            : await listModelsMemoized(),
+        );
       } catch (error) {
         if (error instanceof MissingClaudeCliError) {
           sendError(
@@ -2250,10 +2269,37 @@ function attachThreadSession(
   params: SessionConstructionParams,
   providerThreadId: string,
   resume: boolean,
+  verifyGatewayBinding?: () => void,
 ): void {
+  if (params.modelConnection?.gateway) {
+    if (!contextStore) {
+      throw new Error("Claude gateway context lineage requires the provider host data directory.");
+    }
+    if ("sourceProviderThreadId" in params) {
+      contextStore.resolve({
+        threadId: `claude-gateway-session:${params.sourceProviderThreadId}`,
+        executionContext: params.executionContext,
+        modelConnection: params.modelConnection,
+        resume: true,
+      })?.verify();
+    }
+    contextStore.resolve({
+      threadId: `claude-gateway-session:${providerThreadId}`,
+      executionContext: params.executionContext,
+      modelConnection: params.modelConnection,
+      resume,
+    })?.verify();
+  }
   const threadIdRef = { current: params.threadId };
   const env = buildSessionEnv(readConfigEnvOverrides(params.config));
   const sessionOptions = buildTrackedSessionOptions(params, env, threadIdRef);
+  if (verifyGatewayBinding) {
+    const verifyContext = sessionOptions.verifyContextSources;
+    sessionOptions.verifyContextSources = () => {
+      verifyContext?.();
+      verifyGatewayBinding();
+    };
+  }
   if (!resume) {
     sessionOptions.sessionId = providerThreadId;
   }
@@ -2303,6 +2349,8 @@ async function handleThreadStart(
   id: string | number,
   params: ThreadStartParams,
 ): Promise<void> {
+  const providerThreadId = randomUUID();
+  const verifyGateway = await prepareGatewayBinding(gatewayDataDir, params, providerThreadId, false);
   const existing = threadAttachments.get(params.threadId);
   if (existing) {
     await closeThreadSession({
@@ -2312,7 +2360,7 @@ async function handleThreadStart(
     });
   }
 
-  attachThreadSession(id, params, randomUUID(), false);
+  attachThreadSession(id, params, providerThreadId, false, verifyGateway);
 }
 
 async function handleThreadResume(
@@ -2329,6 +2377,7 @@ async function handleThreadResume(
     );
     return;
   }
+  const verifyGateway = await prepareGatewayBinding(gatewayDataDir, params, requestedProviderThreadId, true);
   const sessionConstructionConfig = toSessionConstructionConfig(params);
 
   const existing = threadAttachments.get(threadId);
@@ -2377,7 +2426,7 @@ async function handleThreadResume(
     });
   }
 
-  attachThreadSession(id, params, requestedProviderThreadId, true);
+  attachThreadSession(id, params, requestedProviderThreadId, true, verifyGateway);
 }
 
 async function handleThreadFork(
@@ -2385,6 +2434,8 @@ async function handleThreadFork(
   params: ThreadForkParams,
 ): Promise<void> {
   const threadId = params.threadId;
+  const providerThreadId = randomUUID();
+  const verifyGateway = await prepareGatewayBinding(gatewayDataDir, params, providerThreadId, false);
 
   const existing = threadAttachments.get(threadId);
   if (existing) {
@@ -2395,7 +2446,7 @@ async function handleThreadFork(
     });
   }
   if (params.executionContext || params.modelConnection) {
-    attachThreadSession(id, params, randomUUID(), false);
+    attachThreadSession(id, params, providerThreadId, false, verifyGateway);
     return;
   }
 
@@ -2475,6 +2526,13 @@ async function runTurnInput(
       );
     }
     attachment.sessionOptions.verifyContextSources?.();
+    if (bound.modelConnection?.gateway && params.model !== undefined) {
+      if (params.model !== attachment.liveSettings.model) {
+        throw new Error(
+          "Claude gateway model binding is immutable; create a new thread to change the selected model.",
+        );
+      }
+    }
     if (bound.executionContext) {
       if (params.memoryEnabled === true || params.chromeEnabled === true) {
         throw new Error(
@@ -2813,6 +2871,7 @@ export const experimental_providerBridge = experimental_defineProviderBridge({
   start: (context) => {
     bridgeTempDir = context.tempDir;
     contextStore = new ClaudeContextStore(context.dataDir);
+    gatewayDataDir = context.dataDir;
   },
   onSigterm: () => {
     shutdownGracefully(

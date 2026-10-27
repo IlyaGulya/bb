@@ -12,6 +12,8 @@ const mockQueryInstance = {
   setModel: vi.fn(),
   setPermissionMode: vi.fn(),
   [Symbol.asyncIterator]: vi.fn(),
+  initializationResult: vi.fn(),
+  mcpServerStatus: vi.fn(),
 };
 const { queryMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
@@ -88,6 +90,64 @@ describe("SdkSession", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("withholds native model input until the explicit MCP profile proves local OAuth and a connected Cloud connector", async () => {
+    keepSdkStreamOpen();
+    const initialized = Promise.withResolvers<{ account: { tokenSource: string } }>();
+    mockQueryInstance.initializationResult.mockReturnValue(initialized.promise);
+    mockQueryInstance.mcpServerStatus.mockResolvedValue([
+      { name: "native-cloud", scope: "claudeai", status: "connected" },
+    ]);
+    const session = new SdkSession(
+      { ...defaultOptions, requireNativeCloudMcp: true }, vi.fn(), vi.fn(),
+    );
+    session.start();
+    const consumed = session.pushInput("private prompt");
+    const next = getLatestPrompt()[Symbol.asyncIterator]().next();
+    let delivered = false;
+    void consumed.then(() => { delivered = true; });
+    await waitForAsyncWork();
+    expect(delivered).toBe(false);
+    initialized.resolve({ account: { tokenSource: "claude.ai" } });
+    await consumed;
+    expect((await next).value?.message.content).toBe("private prompt");
+    session.stop();
+  });
+
+  it.each([
+    { account: { tokenSource: "none" }, servers: [], message: "local Claude.ai OAuth" },
+    { account: { tokenSource: "claude.ai" }, servers: [], message: "connected Claude.ai Cloud connector" },
+  ])("refuses explicit native MCP startup without its Cloud prerequisite: $message", async ({ account, servers, message }) => {
+    mockQueryInstance.initializationResult.mockResolvedValue({ account });
+    mockQueryInstance.mcpServerStatus.mockResolvedValue(servers);
+    const onDone = vi.fn();
+    const session = new SdkSession(
+      { ...defaultOptions, requireNativeCloudMcp: true }, vi.fn(), onDone,
+    );
+    session.start();
+    await waitForAsyncWork();
+    expect(onDone).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining(message),
+    }));
+    expect(mockQueryInstance.close).toHaveBeenCalledOnce();
+    expect(session.canPushInput()).toBe(false);
+  });
+
+  it("redacts a gateway credential echoed by the native error boundary", async () => {
+    mockQueryInstance[Symbol.asyncIterator].mockReturnValue({
+      next: vi.fn().mockRejectedValue(new Error("request rejected: private-cpa-key")),
+    });
+    const onDone = vi.fn();
+    const session = new SdkSession({
+      ...defaultOptions,
+      redactGatewayText: (text) => text.split("private-cpa-key").join("[REDACTED]"),
+    }, vi.fn(), onDone);
+    session.start();
+    await waitForAsyncWork();
+    expect(onDone).toHaveBeenCalledWith(expect.objectContaining({
+      message: "request rejected: [REDACTED]",
+    }));
   });
 
   it("rejects queued input when the SDK input stream closes before consumption", async () => {

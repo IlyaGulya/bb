@@ -28,6 +28,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { BB_BRIDGE_MCP_SERVER_NAME } from "../tool-classification.js";
+import { buildClaudeGatewayEnvironment } from "./model-gateway.js";
 
 const stringMap = z.record(z.string(), z.string());
 const objectSchema = z.record(z.string(), z.json());
@@ -477,9 +478,12 @@ export function buildClaudeSessionEnvironment(args: {
   env: NodeJS.ProcessEnv;
   executionContext?: ExecutionContextSnapshot;
   modelConnection?: ModelConnectionSnapshot;
+  threadId?: string;
+  model?: string;
 }): NodeJS.ProcessEnv {
-  const env = { ...args.env };
+  let env = { ...args.env };
   const connection = args.modelConnection;
+  const nativeMcp = args.executionContext?.claudeNativeMcp;
   if (connection) {
     if (
       connection.provider !== "claude-code" ||
@@ -518,9 +522,36 @@ export function buildClaudeSessionEnvironment(args: {
       delete env.CLAUDE_CONFIG_DIR;
     }
   }
+  if (nativeMcp) {
+    for (const key of nativeAuthEnvironment) delete env[key];
+    if (connection && !connection.gateway &&
+        connection.nativeAuth.configDir !== nativeMcp.configDir) {
+      throw new Error(
+        "The selected native Claude MCP profile and native model connection must use the same configDir; select matching sources or create a new thread.",
+      );
+    }
+    if (nativeMcp.configDir !== null) {
+      requireAbsolutePath(nativeMcp.configDir);
+      if (!statSync(nativeMcp.configDir).isDirectory()) {
+        throw new Error("The selected native Claude MCP profile directory is unavailable.");
+      }
+      env.CLAUDE_CONFIG_DIR = nativeMcp.configDir;
+    } else {
+      delete env.CLAUDE_CONFIG_DIR;
+    }
+  }
+  if (connection?.gateway) {
+    env = buildClaudeGatewayEnvironment({
+      connection,
+      env,
+      threadId: args.threadId,
+      model: args.model,
+      nativeMcp: nativeMcp !== undefined,
+    });
+  }
   const context = args.executionContext;
   if (context) {
-    env.ENABLE_CLAUDEAI_MCP_SERVERS = "false";
+    env.ENABLE_CLAUDEAI_MCP_SERVERS = nativeMcp ? "true" : "false";
     env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
     delete env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD;
     if (context.gitIdentity) {

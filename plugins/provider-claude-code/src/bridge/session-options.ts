@@ -5,6 +5,7 @@ import {
   type RuntimePermissionScope,
   type ExecutionContextSnapshot,
   type ModelConnectionSnapshot,
+  experimental_isProviderBridgeRecording,
 } from "@get-bb/plugin-sdk/provider-bridge";
 import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
@@ -21,6 +22,7 @@ import type {
   ClaudeSdkReasoningEffort,
   SdkSessionOptions,
 } from "./sdk-session.js";
+import { claudeGatewayModel } from "./model-gateway.js";
 
 export interface BuildSessionOptionsArgs {
   additionalWorkspaceWriteRoots?: readonly string[];
@@ -41,6 +43,7 @@ export interface BuildSessionOptionsArgs {
   executionContext?: ExecutionContextSnapshot;
   modelConnection?: ModelConnectionSnapshot;
   contextFiles?: ClaudeContextFiles;
+  threadId?: string;
 }
 
 type WorkspaceWriteSandboxArgs = Pick<
@@ -265,11 +268,16 @@ export function buildSessionOptions(
     env,
     executionContext: params.executionContext,
     modelConnection: params.modelConnection,
+    threadId: params.threadId,
+    model: params.model,
   });
   if (params.executionContext && params.chromeEnabled) {
     throw new Error(
       "Claude in Chrome is not supported in a scoped execution context; disable it to avoid importing an unselected browser tool identity.",
     );
+  }
+  if (params.modelConnection?.gateway && experimental_isProviderBridgeRecording()) {
+    throw new Error("Raw native provider recording is unavailable for credentialed Claude gateway sessions.");
   }
   const baseInstructions = [
     params.baseInstructions,
@@ -287,7 +295,9 @@ export function buildSessionOptions(
           preset: "claude_code",
           ...(baseInstructions.length > 0 ? { append: baseInstructions } : {}),
         };
-  const model = params.model;
+  const model = params.modelConnection?.gateway
+    ? claudeGatewayModel(params.model, params.modelConnection)
+    : params.model;
   const sandbox = mergeClaudeSettings(
     { sandbox: params.contextFiles?.settings.sandbox },
     { sandbox: buildWorkspaceWriteSandbox(params) },
@@ -303,15 +313,26 @@ export function buildSessionOptions(
   }
   const flagSettings = buildFlagSettings(params);
   const effort =
-    params.reasoningLevel === undefined
+    params.reasoningLevel === undefined ||
+    (params.modelConnection?.gateway && params.reasoningLevel === "none")
       ? undefined
       : toSdkEffort(params.reasoningLevel);
   const extraArgs = buildChromeExtraArgs(params.chromeEnabled);
+  const gatewayKey = params.modelConnection?.gateway
+    ? sessionEnv.ANTHROPIC_API_KEY ??
+      sessionEnv.ANTHROPIC_CUSTOM_HEADERS?.match(/^Authorization: Bearer (.+)$/m)?.[1]
+    : undefined;
 
   return {
     cwd: params.cwd,
     systemPrompt,
     model,
+    ...(gatewayKey
+      ? {
+          redactGatewayText: (text: string) =>
+            text.split(gatewayKey).join("[REDACTED]"),
+        }
+      : {}),
     env: {
       ...sessionEnv,
       CLAUDE_CODE_DISABLE_1M_CONTEXT: params.disable1MContext ? "1" : "0",
@@ -324,7 +345,8 @@ export function buildSessionOptions(
     ...(params.executionContext
       ? {
           settingSources: [],
-          strictMcpConfig: true,
+          strictMcpConfig: params.executionContext.claudeNativeMcp === undefined,
+          requireNativeCloudMcp: params.executionContext.claudeNativeMcp !== undefined,
           mcpServers: params.contextFiles?.mcpServers ?? {},
         }
       : {}),
