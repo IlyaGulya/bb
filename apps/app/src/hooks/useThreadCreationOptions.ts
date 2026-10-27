@@ -1097,10 +1097,13 @@ export function useThreadCreationOptions(
     (value: string) => {
       touchedThreadFieldsRef.current.add("environmentSelectionValue");
       if (scope === "new-thread") {
-        setEnvironmentSelectionEdit({
-          projectId: preferenceProjectId,
-          resetKey,
-        });
+        setEnvironmentSelectionEdit((current) =>
+          current !== null &&
+          current.projectId === preferenceProjectId &&
+          current.resetKey === resetKey
+            ? current
+            : { projectId: preferenceProjectId, resetKey },
+        );
         const parsed = parseEnvironmentValue(value);
         if (parsed?.type === "reuse") {
           setRootComposeReuseValue(value);
