@@ -26,7 +26,7 @@ export function registerGatewayLogsCommands(
   logs
     .command("list")
     .description("List available logs without printing their contents")
-    .requiredOption("--thread <id>", "Thread whose persisted gateway binding owns the logs")
+    .requiredOption("--thread <id>", "Persisted CPA-bound thread to correlate by its inbound request header")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: GatewayLogListOptions) => {
@@ -61,7 +61,7 @@ export function registerGatewayLogsCommands(
   logs
     .command("read <logId>")
     .description("Print a bounded raw preview, or download the full private log to --output")
-    .requiredOption("--thread <id>", "Thread whose persisted gateway binding owns the log")
+    .requiredOption("--thread <id>", "Persisted CPA-bound thread to correlate by its inbound request header")
     .option("--preview-bytes <bytes>", "Preview byte limit (1–262144; default 65536)")
     .option("--output <path>", "Download the full log to a new private file instead of stdout")
     .option("--json", "Print preview and explicit truncation metadata as JSON")

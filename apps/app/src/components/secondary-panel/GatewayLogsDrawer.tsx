@@ -182,8 +182,9 @@ function GatewayLogsContent({
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          Private native CPA request logs linked to this thread. Raw headers and bodies
-          may contain sensitive content. These are request records, not per-turn traces;
+          Private native CPA request logs linked by this thread's inbound header.
+          Header correlation is not per-run authorization. Raw headers and bodies may
+          contain sensitive content. These are request records, not per-turn traces;
           retention and streaming queue limits can leave gaps.
         </p>
       </header>
