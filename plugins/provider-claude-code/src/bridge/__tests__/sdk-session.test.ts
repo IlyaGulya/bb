@@ -211,10 +211,18 @@ describe("SdkSession", () => {
       vi.fn(),
       onDone,
     );
+    const queuedFailure = session
+      .pushInput("pending prompt")
+      .catch((error: unknown) => error);
     session.start();
     await waitForAsyncWork();
     expect(onDone).toHaveBeenCalledWith(expect.any(Error));
     expect(onDone.mock.calls[0]?.[0]?.message).not.toContain("private-cpa-key");
+    const rejectedInput = await queuedFailure;
+    expect(rejectedInput).toBeInstanceOf(Error);
+    expect(rejectedInput).toMatchObject({
+      message: expect.not.stringContaining("private-cpa-key"),
+    });
   });
 
   it("rejects queued input when the SDK input stream closes before consumption", async () => {

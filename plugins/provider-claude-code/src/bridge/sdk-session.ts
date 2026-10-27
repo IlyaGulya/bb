@@ -488,8 +488,9 @@ export class SdkSession {
     resolve({ value: undefined, done: true });
   }
 
-  private rejectQueuedInputs(message: string): void {
-    const error = new Error(message);
+  private rejectQueuedInputs(reason: string | Error): void {
+    if (this.inputQueue.length === 0) return;
+    const error = typeof reason === "string" ? new Error(reason) : reason;
     while (this.inputQueue.length > 0) {
       const queued = this.inputQueue.shift();
       if (!queued) {
@@ -511,17 +512,17 @@ export class SdkSession {
       }
       this.onDone();
     } catch (error) {
-      if (this.cloudReadiness) q.close();
-      this.onDone(
-        new Error(
-          this.redactGatewayText(
-            buildSdkDoneErrorMessage({
-              error,
-              stderrTail: this.stderrTail,
-            }),
-          ),
+      const failure = new Error(
+        this.redactGatewayText(
+          buildSdkDoneErrorMessage({
+            error,
+            stderrTail: this.stderrTail,
+          }),
         ),
       );
+      this.rejectQueuedInputs(failure);
+      if (this.cloudReadiness) q.close();
+      this.onDone(failure);
     } finally {
       this.inputDone = true;
       this.rejectQueuedInputs("Claude SDK stream ended before input consumed");

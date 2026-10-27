@@ -10,7 +10,9 @@
 - Add opt-in Claude `nativeMcpProfile` for owner-approved whole native
   user/project MCP plus account Cloud scope, retaining strict direct MCP by
   default. Require first-party OAuth/subscription and a connected Cloud
-  connector before model input; this does not claim real Cloud qualification.
+  connector before model input; report the redacted prerequisite failure to queued
+  callers rather than a generic stream-end error. Real Cloud qualification remains
+  separate.
 - Replace `BB_CPA_LOG_DIR` with endpoint-mapped `BB_CPA_LOG_DIRS`, choosing
   read-only log roots from frozen thread bindings without weakening exact
   thread-header download guards.
