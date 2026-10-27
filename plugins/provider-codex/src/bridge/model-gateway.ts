@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { AvailableModel, ModelConnectionSnapshot } from "@get-bb/plugin-sdk/provider-bridge";
 import {
   gatewayChildEnv,
+  hasGatewayReceipt,
   listGatewayModelIds,
   pinGatewayReceipt,
   requireGatewayModel,
@@ -56,6 +55,7 @@ export interface CodexGatewaySession {
   config: Record<string, JsonValue>;
   redact(text: string): string;
   verify(connection: ModelConnectionSnapshot | null | undefined, model: string | undefined): void;
+  pinNativeSession(providerThreadId: string): void;
   verifyCredential(): void;
 }
 
@@ -64,11 +64,15 @@ export async function prepareCodexGateway(args: {
   model?: string;
   threadId: string;
   dataDir: string | null;
-  resume: boolean;
+  sourceProviderThreadId?: string;
 }): Promise<CodexGatewaySession | null> {
   const gateway = gatewayFor(args.connection);
   if (!gateway) {
-    if (args.dataDir && existsSync(join(args.dataDir, "codex-gateway", `${createHash("sha256").update(args.threadId).digest("hex")}.json`)))
+    if (args.dataDir && (
+      hasGatewayReceipt(args.dataDir, args.threadId, "codex-gateway") ||
+      (args.sourceProviderThreadId !== undefined &&
+        hasGatewayReceipt(args.dataDir, args.sourceProviderThreadId, "codex-gateway-sessions"))
+    ))
       throw new Error("This thread is pinned to CPA; create a new thread to change its connection.");
     return null;
   }
@@ -77,14 +81,15 @@ export async function prepareCodexGateway(args: {
   if (!args.model?.startsWith(`bb-cpa/${gateway.accountPrefix}/`))
     throw new Error("Select an exact supported model from this CPA connection; native/default fallback is disabled.");
   const selection = args.model;
-  const resumedReceipt = args.resume
-    ? pinGatewayReceipt(args.dataDir, args.threadId, gateway, selection, true, "codex-gateway")
-    : null;
+  if (args.sourceProviderThreadId !== undefined) {
+    pinGatewayReceipt(args.dataDir, args.sourceProviderThreadId, gateway, selection, true, "codex-gateway-sessions");
+  }
   const key = credential(gateway);
   const models = await listGatewayModelIds(gateway, key);
   const model = requireGatewayModel(args.model, gateway, models.map((id) => ({ id })));
   const connection = structuredClone(args.connection!);
-  const receipt = resumedReceipt ?? pinGatewayReceipt(args.dataDir, args.threadId, gateway, selection, false, "codex-gateway");
+  const receipt = pinGatewayReceipt(args.dataDir, args.threadId, gateway, selection, false, "codex-gateway");
+  let nativeSessionReceipt: { verify(): void } | null = null;
   const providerId = `bb-cpa-${createHash("sha256").update(JSON.stringify({ gateway, threadId: args.threadId })).digest("hex")}`;
   const config: Record<string, JsonValue> = {
     model_provider: providerId,
@@ -122,9 +127,14 @@ export async function prepareCodexGateway(args: {
       receipt.verify();
       if (!isDeepStrictEqual(connection, nextConnection) || nextModel !== selection)
         throw new Error("CPA connection and model are pinned; create a new thread to change its binding.");
+      nativeSessionReceipt?.verify();
+    },
+    pinNativeSession(providerThreadId) {
+      nativeSessionReceipt = pinGatewayReceipt(args.dataDir!, providerThreadId, gateway, selection, false, "codex-gateway-sessions");
     },
     verifyCredential() {
       receipt.verify();
+      nativeSessionReceipt?.verify();
       if (credential(gateway) !== key)
         throw new Error("CPA worker credential changed; reopen this thread to use the provisioned credential.");
     },

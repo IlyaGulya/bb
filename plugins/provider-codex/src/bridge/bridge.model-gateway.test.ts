@@ -261,3 +261,52 @@ it.each([false, true])("refuses unsupported explicit context sources before sess
   expect((await harness.waitForResponse(id)).error?.message).toContain(expected);
   expect(discoveries).toEqual([]);
 });
+
+it.each(["resume", "fork"] as const)(
+  "checks the native source binding before %s under a different BB thread identity",
+  async (kind) => {
+    catalog = ["personal/gpt-example", "personal/gpt-other", "work/gpt-example"];
+    const originalThreadId = `thr_source_${kind}`;
+    const original = await construct(originalThreadId);
+    expect(original.error).toBeUndefined();
+    const { providerThreadId } = providerIdentitySchema.parse(original.result);
+    const releaseId = nextId++;
+    harness.sendRequest(releaseId, "thread/stop", {
+      threadId: originalThreadId, providerThreadId, intent: "release", activeTurnId: null,
+    });
+    await harness.waitForResponse(releaseId);
+    const changedEndpoint = options();
+    changedEndpoint.modelConnection.gateway!.baseUrl = `${endpoint}/another-account`;
+    const attempts: { name: string; options: BridgeExecutionOptions }[] = [
+      { name: "valid-alternate-model", options: options("personal", "bb-cpa/personal/gpt-other") },
+      { name: "gateway-removal", options: { ...FULL_ACCESS_SESSION_OPTIONS, model: "gpt-example" } },
+      { name: "changed-endpoint", options: changedEndpoint },
+      { name: "changed-account", options: options("work") },
+    ];
+    for (const attempt of attempts) {
+      const denied = await construct(`thr_${kind}_${attempt.name}`, attempt.options, kind, providerThreadId);
+      expect(denied.error?.message).toMatch(/receipt|pinned/);
+      expect(denied.result).toBeUndefined();
+    }
+    expect(discoveries).toHaveLength(1);
+    expect(requests().filter(({ method }) => ["thread/start", "thread/resume", "thread/fork"].includes(method))).toHaveLength(1);
+    const accepted = await construct(`thr_${kind}_same_binding`, options(), kind, providerThreadId);
+    expect(accepted.error).toBeUndefined();
+    const restoredIdentity = providerIdentitySchema.parse(accepted.result);
+    if (kind === "resume") {
+      expect(restoredIdentity.providerThreadId).toBe(providerThreadId);
+    } else {
+      expect(restoredIdentity.providerThreadId).not.toBe(providerThreadId);
+      const deniedDescendant = await construct(
+        "thr_fork_changed_descendant",
+        options("personal", "bb-cpa/personal/gpt-other"),
+        "fork",
+        restoredIdentity.providerThreadId,
+      );
+      expect(deniedDescendant.error?.message).toContain("receipt");
+      expect(deniedDescendant.result).toBeUndefined();
+    }
+    expect(discoveries).toHaveLength(2);
+  },
+  30_000,
+);

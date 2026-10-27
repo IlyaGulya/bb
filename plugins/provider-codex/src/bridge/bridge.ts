@@ -1225,7 +1225,11 @@ async function constructThreadSession(
     model: args.options.model,
     threadId: args.threadId,
     dataDir: providerDataDir,
-    resume: args.request.kind === "resume",
+    ...(args.request.kind === "resume"
+      ? { sourceProviderThreadId: args.request.providerThreadId }
+      : args.request.kind === "fork"
+        ? { sourceProviderThreadId: args.request.sourceProviderThreadId }
+        : {}),
   });
   sessionSerialCounter += 1;
   const serial = sessionSerialCounter;
@@ -1422,6 +1426,7 @@ async function constructThreadSession(
       params,
     );
     const codexThreadId = result.thread.id;
+    gateway?.pinNativeSession(codexThreadId);
     session.codexThreadId = codexThreadId;
     translator.activateThreadGitWritableRoots({
       providerThreadId: codexThreadId,
