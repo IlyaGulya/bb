@@ -322,6 +322,8 @@ function createSettingsStoryQueryClient(hosts: Host[] = SETTINGS_STORY_HOSTS) {
   queryClient.setQueryData(systemProvidersQueryKey(), systemProviders);
   queryClient.setQueryData(systemVersionQueryKey(), systemVersion);
   queryClient.setQueryData(sidebarNavigationQueryKey(), sidebarNavigation);
+  queryClient.setQueryData(["execution-contexts"], []);
+  queryClient.setQueryData(["model-connections"], []);
   queryClient.setQueryData(pluginMarketplacesQueryKey(), []);
   queryClient.setQueryData(systemAiServicesQueryKey(), STORY_AI_SERVICES);
   queryClient.setQueryData(machineEnvironmentQueryKey(null), {

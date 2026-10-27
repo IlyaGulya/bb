@@ -52,6 +52,7 @@ import {
 import { MachineSettingsView } from "./MachineSettingsView";
 import { ProjectDetailSettingsView } from "./ProjectDetailSettingsView";
 import { ProvidersSettingsSection } from "@/components/settings/ProvidersSettingsSection";
+import { ExecutionContextsSettingsSection } from "@/components/settings/ExecutionContextsSettingsSection";
 
 export default {
   title: "settings/Settings",
@@ -363,6 +364,8 @@ function SettingsStoryContent({ route }: { route: SettingsStoryRoute }) {
   switch (route.id) {
     case "providers":
       return <ProvidersSettingsStory />;
+    case "execution-contexts":
+      return <ExecutionContextsSettingsSection />;
     case "ai-services":
       return <AiServicesSettingsSection />;
     case "appearance":

@@ -107,6 +107,10 @@ vi.mock(
   },
 );
 
+vi.mock("@/components/secondary-panel/ThreadExecutionBindingCard", () => ({
+  ThreadExecutionBindingCard: () => null,
+}));
+
 vi.mock(
   "@/components/secondary-panel/ThreadSecondaryPanel",
   async (importOriginal) => {

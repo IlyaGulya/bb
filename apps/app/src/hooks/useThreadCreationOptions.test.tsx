@@ -345,6 +345,12 @@ describe("useThreadCreationOptions", () => {
     expect(result.current.selectedProviderId).toBe(PROJECT_PROVIDER_ID);
     expect(result.current.environmentSelectionValue).toBe("selected-environment");
     expect(result.current.hasMultipleProviders).toBe(false);
+    act(() => result.current.setSelectedModel("project-remembered"));
+    expect(result.current.selectedModel).toBe("project-remembered");
+    expect(result.current.environmentSelectionValue).toBe("selected-environment");
+    act(() => result.current.setEnvironmentSelectionValue(""));
+    expect(result.current.environmentSelectionValue).toBe("");
+    expect(result.current.selectedModel).toBe("project-remembered");
   });
 
   it("keeps the selected remembered provider branded while models load", () => {

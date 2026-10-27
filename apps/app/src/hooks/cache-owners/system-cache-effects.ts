@@ -234,6 +234,19 @@ export function invalidateSystemExecutionOptions({
   });
 }
 
+export async function invalidateExecutionBindingDefinitions({
+  queryClient,
+}: QueryClientArg): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["execution-contexts"] }),
+    queryClient.invalidateQueries({ queryKey: ["model-connections"] }),
+    queryClient.invalidateQueries({ queryKey: ["project-context-defaults"] }),
+    queryClient.invalidateQueries({
+      queryKey: allSystemExecutionOptionsQueryKeyPrefix(),
+    }),
+  ]);
+}
+
 export function invalidateGeneralSettingsDependencies({
   includeSystemConfig,
   queryClient,

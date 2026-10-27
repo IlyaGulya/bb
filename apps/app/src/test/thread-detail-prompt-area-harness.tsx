@@ -595,6 +595,7 @@ vi.mock("@/hooks/useThreadCreationOptions", async () => {
   return {
     useThreadCreationOptions: (options: {
       initialProviderId: string;
+      environmentId?: string;
       initialPermissionMode?: PermissionMode;
     }) => {
       promptAreaMocks.useThreadCreationOptions(options);
@@ -606,7 +607,9 @@ vi.mock("@/hooks/useThreadCreationOptions", async () => {
       return {
         activeModel: null,
         executionInputSources: promptAreaMocks.executionInputSources,
-        executionOptionsRouting: { hostId: "host_1" },
+        executionOptionsRouting: options.environmentId
+          ? { environmentId: options.environmentId }
+          : { hostId: "host_1" },
         providers: [],
         hasMultipleProviders: true,
         isLoadingModels: false,

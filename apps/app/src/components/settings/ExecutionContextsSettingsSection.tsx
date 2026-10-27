@@ -9,7 +9,7 @@ import { SettingsSection } from "@/components/ui/settings-section";
 import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
 import { useHosts } from "@/hooks/queries/host-queries";
 import { sdk } from "@/lib/sdk";
-import { allSystemExecutionOptionsQueryKeyPrefix } from "@/hooks/queries/query-keys";
+import { invalidateExecutionBindingDefinitions } from "@/hooks/cache-owners/system-cache-effects";
 import { getMutationErrorMessage } from "@/lib/mutation-errors";
 import { McpServerManager } from "./McpServerManager";
 
@@ -48,14 +48,7 @@ export function ExecutionContextsSettingsSection() {
     | null
   >(null);
   const [error, setError] = useState<string | null>(null);
-  const refresh = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["execution-contexts"] }),
-      queryClient.invalidateQueries({ queryKey: ["model-connections"] }),
-      queryClient.invalidateQueries({ queryKey: ["project-context-defaults"] }),
-      queryClient.removeQueries({ queryKey: allSystemExecutionOptionsQueryKeyPrefix() }),
-    ]);
-  };
+  const refresh = () => invalidateExecutionBindingDefinitions({ queryClient });
   const remove = async (kind: "context" | "connection", id: string) => {
     setError(null);
     try {

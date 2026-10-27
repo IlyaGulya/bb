@@ -272,6 +272,10 @@ export function useThreadCreationOptions(
     setValue: setStoredEnvironmentSelectionValue,
     value: storedEnvironmentSelectionValue,
   } = usePromptBoxEnvironmentPreference(preferenceProjectId);
+  const [environmentSelectionEdit, setEnvironmentSelectionEdit] = useState<{
+    projectId: string | null | undefined;
+    resetKey: string | number | null | undefined;
+  } | null>(null);
   const [rootComposeReuseValue, setRootComposeReuseValue] =
     useRootComposeReuseEnvironment();
   const [threadSelections, setThreadSelections] =
@@ -347,10 +351,18 @@ export function useThreadCreationOptions(
   const rawPermissionMode = usesStoredCreateSelections
     ? storedPermissionMode || renderedThreadSelections.permissionMode
     : renderedThreadSelections.permissionMode;
+  const storedEnvironmentValue = sanitizeStoredEnvironmentValue(
+    storedEnvironmentSelectionValue,
+  );
   const rawEnvironmentSelectionValue =
     scope === "new-thread"
       ? (rootComposeReuseValue ??
-        sanitizeStoredEnvironmentValue(storedEnvironmentSelectionValue))
+        (storedEnvironmentValue ||
+        (environmentSelectionEdit !== null &&
+          environmentSelectionEdit.projectId === preferenceProjectId &&
+          environmentSelectionEdit.resetKey === resetKey)
+          ? storedEnvironmentValue
+          : renderedThreadSelections.environmentSelectionValue))
       : renderedThreadSelections.environmentSelectionValue;
 
   const knownModelCatalogScope = useKnownProviderModelCatalogScope(
@@ -1069,7 +1081,9 @@ export function useThreadCreationOptions(
   );
   const setEnvironmentSelectionValue = useCallback(
     (value: string) => {
+      touchedThreadFieldsRef.current.add("environmentSelectionValue");
       if (scope === "new-thread") {
+        setEnvironmentSelectionEdit({ projectId: preferenceProjectId, resetKey });
         const parsed = parseEnvironmentValue(value);
         if (parsed?.type === "reuse") {
           setRootComposeReuseValue(value);
@@ -1079,7 +1093,6 @@ export function useThreadCreationOptions(
         setStoredEnvironmentSelectionValue(value);
         return;
       }
-      touchedThreadFieldsRef.current.add("environmentSelectionValue");
       setThreadSelections((currentSelections) =>
         updateThreadPromptSelections({
           currentSelections,
@@ -1088,7 +1101,13 @@ export function useThreadCreationOptions(
         }),
       );
     },
-    [scope, setRootComposeReuseValue, setStoredEnvironmentSelectionValue],
+    [
+      scope,
+      preferenceProjectId,
+      resetKey,
+      setRootComposeReuseValue,
+      setStoredEnvironmentSelectionValue,
+    ],
   );
   const clearReuseEnvironment = useCallback(() => {
     if (scope !== "new-thread") return;
