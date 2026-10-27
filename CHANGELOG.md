@@ -14,6 +14,9 @@
 - Replace `BB_CPA_LOG_DIR` with endpoint-mapped `BB_CPA_LOG_DIRS`, choosing
   read-only log roots from frozen thread bindings without weakening exact
   thread-header download guards.
+- Keep initializing and in-flight provider bridges alive during parallel
+  catalog or artifact refresh. Retire superseded processes only after their
+  startup, requests and thread ownership are idle.
 - Disable server-side Responses continuation for CPA gateway registrations.
   Replay complete native tool-call history instead of sending orphaned tool
   results with an unsupported previous-response reference; native session

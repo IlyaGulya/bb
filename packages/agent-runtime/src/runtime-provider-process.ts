@@ -245,28 +245,31 @@ export class RuntimeProviderProcessManager {
     this.providerStarting.set(args.processKey, startPromise);
     try {
       await startPromise;
+      await this.retireStaleBridgeProcesses(args);
     } finally {
       if (this.providerStarting.get(args.processKey) === startPromise) {
         this.providerStarting.delete(args.processKey);
       }
     }
-    await this.retireStaleBridgeProcesses(args);
   }
 
   private async retireStaleBridgeProcesses(
     args: EnsureRuntimeProviderArgs,
   ): Promise<void> {
     this.currentProcessKeyByProviderId.set(args.providerId, args.processKey);
-    const staleKeys = [...this.processes.entries()]
-      .filter(
-        ([processKey, providerProcess]) =>
-          processKey !== args.processKey &&
-          providerProcess.providerId === args.providerId &&
-          providerProcess.identity.threadIds.size === 0,
-      )
-      .map(([processKey]) => processKey);
+    const staleKeys = [...this.processes.keys()];
 
     for (const processKey of staleKeys) {
+      const process = this.processes.get(processKey);
+      if (
+        processKey === args.processKey ||
+        !process ||
+        process.providerId !== args.providerId ||
+        process.identity.threadIds.size > 0 ||
+        process.pending.size > 0 ||
+        this.providerStarting.has(processKey)
+      )
+        continue;
       await this.shutdownProvider({ processKey, providerId: args.providerId });
     }
   }

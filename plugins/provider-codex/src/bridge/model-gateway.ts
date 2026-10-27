@@ -146,7 +146,6 @@ export async function prepareCodexGateway(args: {
     model_provider: providerId,
     model,
     review_model: model,
-    disable_response_storage: true,
     "shell_environment_policy.exclude": [
       CREDENTIAL_ENV,
       ...(gateway.credential.kind === "env" ? [gateway.credential.name] : []),

@@ -288,7 +288,6 @@ it("pins the model across continuation, reopen and fork while preserving native 
       model: "personal/gpt-example",
       dynamicTools: [expect.objectContaining({ name: "local_probe" })],
     });
-    expect(params.config).toMatchObject({ disable_response_storage: true });
     expect(JSON.stringify(params)).not.toContain(key);
   }
   expect(

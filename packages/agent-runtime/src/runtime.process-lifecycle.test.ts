@@ -16,6 +16,8 @@ import { RuntimeThreadIdentityRegistry } from "./runtime-thread-identity.js";
 import type { BridgeProtocolAdapter } from "./bridge-protocol-adapter.js";
 import {
   parseJsonRpcLine,
+  ignoredJsonRpcResultSchema,
+  sendJsonRpcRequest,
   settleJsonRpcResponse,
 } from "@bb/provider-bridge-protocol/bridge-kit";
 import {
@@ -274,6 +276,88 @@ describe("createAgentRuntime process lifecycle", () => {
 
     await manager.shutdown();
   });
+
+  it.each(["initialization", "metadata"] as const)(
+    "keeps %s requests alive when a parallel bridge launch supersedes their process",
+    async (phase) => {
+      const started = join(tmpDir, "request-started");
+      const release = join(tmpDir, "release-request");
+      const script = join(tmpDir, "held-provider.cjs");
+      writeFileSync(
+        script,
+        `const fs = require("node:fs");
+const reply = message => process.stdout.write(JSON.stringify({
+  jsonrpc: "2.0", id: message.id,
+  result: message.method === "initialize"
+    ? {protocolVersion: 2, capabilities: {grammarVersions: [3, 3]}}
+    : {models: []}
+}) + "\\n");
+require("node:readline").createInterface({input: process.stdin}).on("line", line => {
+  const message = JSON.parse(line);
+  if (message.method === ${JSON.stringify(phase === "initialization" ? "initialize" : "model/list")}) {
+    const watcher = fs.watch(${JSON.stringify(tmpDir)}, () => {
+      if (!fs.existsSync(${JSON.stringify(release)})) return;
+      watcher.close();
+      reply(message);
+    });
+    fs.writeFileSync(${JSON.stringify(started)}, "");
+  } else if (message.id !== undefined) reply(message);
+});`,
+      );
+      let launches = 0;
+      const manager = createProviderProcessManager({
+        createAdapter: () =>
+          createManagerAdapter(
+            launches++ === 0 ? { rawScriptPath: script } : {},
+          ),
+        onProcessExit: vi.fn(),
+        workspacePath: tmpDir,
+      });
+      const heldProvider = {
+        ...MANAGER_PROVIDER,
+        processKey: "fake#bridge:aaaaaaaaaaaaaaaa",
+      };
+      const pendingStart = manager.ensureProvider(heldProvider);
+      let pending: Promise<unknown> = pendingStart;
+      if (phase === "metadata") {
+        await pendingStart;
+        const process = manager.requireProviderProcess(heldProvider);
+        pending = sendJsonRpcRequest({
+          child: process.child,
+          pending: process.pending,
+          getNextId: () => 900,
+          message: { jsonrpc: "2.0", method: "model/list" },
+          resultSchema: ignoredJsonRpcResultSchema,
+        });
+      }
+      const completed = pending.then(
+        () => true,
+        () => false,
+      );
+      try {
+        await waitForRuntimeState({
+          label: "the provider request to wait for release",
+          predicate: () => existsSync(started),
+          timeoutMs: 5_000,
+        });
+        const heldProcess = manager.requireProviderProcess(heldProvider);
+        await manager.ensureProvider({
+          ...MANAGER_PROVIDER,
+          processKey: "fake#bridge:bbbbbbbbbbbbbbbb",
+        });
+        expect(processIsAlive(heldProcess.child.pid ?? 0)).toBe(true);
+        writeFileSync(release, "");
+        expect(await completed).toBe(true);
+        await manager.ensureProvider({
+          ...MANAGER_PROVIDER,
+          processKey: "fake#bridge:cccccccccccccccc",
+        });
+        expect(processIsAlive(heldProcess.child.pid ?? 0)).toBe(false);
+      } finally {
+        await manager.shutdown();
+      }
+    },
+  );
 
   it("keeps an old-hash bridge process that still owns a thread", async () => {
     const manager = createProviderProcessManager({
