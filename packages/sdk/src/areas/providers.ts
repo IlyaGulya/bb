@@ -26,6 +26,8 @@ export type ProviderModelsArgs = (
   | { environmentId?: never; hostId?: never; projectId?: string }
 ) & {
   providerId?: string;
+  modelConnectionId?: string;
+  threadId?: string;
   signal?: AbortSignal;
 };
 

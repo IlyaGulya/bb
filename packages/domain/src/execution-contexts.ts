@@ -46,11 +46,50 @@ export type ExecutionContextSnapshot = z.infer<
   typeof executionContextSnapshotSchema
 >;
 
+export const modelGatewaySchema = z
+  .object({
+    baseUrl: z.url().refine((value) => {
+      const url = new URL(value);
+      return (
+        (url.protocol === "http:" || url.protocol === "https:") &&
+        !url.username &&
+        !url.password &&
+        !url.search &&
+        !url.hash
+        && !/[?#\u0000-\u0020\u007f]/.test(value)
+        && !/^https?:\/\/[^/]*@/i.test(value)
+      );
+    }, "Gateway URL must be HTTP(S) without credentials, query, or fragment"),
+    protocol: z.enum([
+      "openai-responses",
+      "openai-completions",
+      "anthropic-messages",
+    ]),
+    accountPrefix: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$(?![\s\S])/),
+    modelProvider: idSchema,
+    credential: z.discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("env"),
+        name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$(?![\s\S])/),
+      }).strict(),
+      z.object({
+        kind: z.literal("file"),
+        path: referencePathSchema.refine(isAbsoluteHostPath, "Credential file path must be absolute"),
+      }).strict(),
+    ]),
+    allowedHostIds: z.array(idSchema).min(1).refine(
+      (ids) => new Set(ids).size === ids.length,
+      "Gateway allowed host IDs must be unique",
+    ),
+  })
+  .strict();
+export type ModelGateway = z.infer<typeof modelGatewaySchema>;
+
 export const modelConnectionFieldsSchema = z
   .object({
     name: z.string().trim().min(1),
     provider: idSchema,
-    hostId: idSchema,
+    hostId: idSchema.nullable(),
     enabled: z.boolean().default(true),
     revoked: z.boolean().default(false),
     nativeAuth: z
@@ -68,10 +107,24 @@ export const modelConnectionFieldsSchema = z
       })
       .strict()
       .default({ configDir: null, profile: null, hostEnv: null }),
+    gateway: modelGatewaySchema.nullable().default(null),
   })
-  .strict();
+  .strict()
+  .superRefine((connection, ctx) => {
+    if (connection.gateway === null) {
+      if (connection.hostId === null)
+        ctx.addIssue({ code: "custom", path: ["hostId"], message: "Native connections require a host" });
+      return;
+    }
+    if (connection.hostId !== null)
+      ctx.addIssue({ code: "custom", path: ["hostId"], message: "Gateway connections require a null hostId" });
+    if (connection.provider !== "acp-omp")
+      ctx.addIssue({ code: "custom", path: ["provider"], message: "Gateway connections require acp-omp" });
+    if (connection.nativeAuth.configDir !== null || connection.nativeAuth.profile !== null || connection.nativeAuth.hostEnv !== null)
+      ctx.addIssue({ code: "custom", path: ["nativeAuth"], message: "Gateway and native authentication cannot be combined" });
+  });
 export const modelConnectionSchema = modelConnectionFieldsSchema
-  .extend({
+  .safeExtend({
     id: idSchema,
     createdAt: z.number().int().nonnegative(),
     updatedAt: z.number().int().nonnegative(),

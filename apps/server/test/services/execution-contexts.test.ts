@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq, sql } from "drizzle-orm";
 import {
   createConnection,
   createProject,
@@ -22,18 +23,21 @@ import {
   threadExecutionBindings,
   threads,
   upsertHost,
+  updateHost,
   type DbConnection,
 } from "@bb/db";
 import { createMigratedConnection } from "@bb/db/testing";
 import { executionContextSchema, modelConnectionSchema } from "@bb/domain";
 import {
   createExecutionContextRequestSchema,
+  createModelConnectionRequestSchema,
   updateExecutionContextRequestSchema,
   updateModelConnectionRequestSchema,
 } from "@bb/server-contract";
 import {
   assertThreadExecutionBindingAvailable,
   createExecutionContextDefinition,
+  createModelConnectionDefinition,
   deleteConnectionDefinition,
   deleteContextDefinition,
   resolveThreadExecutionBinding,
@@ -78,6 +82,24 @@ function connection(
       nativeAuth: { configDir: `/fixtures/auth/${id}` },
       createdAt: 1,
       updatedAt: 1,
+    }),
+  );
+}
+function gatewayConnection(id: string, allowedHostIds = [hostId]) {
+  return createModelConnectionDefinition(
+    db,
+    createModelConnectionRequestSchema.parse({
+      name: id,
+      provider: "acp-omp",
+      hostId: null,
+      gateway: {
+        baseUrl: "https://gateway.example/v1",
+        protocol: "openai-responses",
+        accountPrefix: "personal",
+        modelProvider: "openai-codex",
+        credential: { kind: "env", name: "CPA_MODEL_KEY" },
+        allowedHostIds,
+      },
     }),
   );
 }
@@ -483,5 +505,319 @@ describe("native execution context persistence and selection", () => {
         executionContextId: "personal",
       }),
     ).toThrow(/disabled/);
+  });
+});
+
+describe("gateway execution host admission", () => {
+  it("rejects contradictory gateway host, provider and native authentication at the create boundary", () => {
+    const gateway = {
+      baseUrl: "https://gateway.example/v1",
+      protocol: "openai-responses",
+      accountPrefix: "personal",
+      modelProvider: "openai-codex",
+      credential: { kind: "env", name: "CPA_MODEL_KEY" },
+      allowedHostIds: [hostId],
+    };
+    const request = {
+      name: "Personal gateway",
+      provider: "acp-omp",
+      hostId: null,
+      gateway,
+    };
+    for (const patch of [
+      { hostId },
+      { provider: "codex" },
+      { nativeAuth: { configDir: "/fixtures/native-auth" } },
+      { nativeAuth: { profile: "work" } },
+      {
+        nativeAuth: {
+          hostEnv: {
+            brokerUrlEnv: "NATIVE_BROKER_URL",
+            brokerTokenEnv: "NATIVE_BROKER_TOKEN",
+          },
+        },
+      },
+    ])
+      expect(() =>
+        createModelConnectionDefinition(
+          db,
+          createModelConnectionRequestSchema.parse({ ...request, ...patch }),
+        ),
+      ).toThrow();
+    expect(db.select().from(modelConnections).all()).toEqual([]);
+    expect(createModelConnectionRequestSchema.parse(request)).toMatchObject({
+      hostId: null,
+      nativeAuth: { configDir: null, profile: null, hostEnv: null },
+      gateway,
+    });
+  });
+
+  it("accepts credential references only and rejects malformed references, raw keys and invalid host lists", () => {
+    const gateway = {
+      baseUrl: "https://gateway.example/v1",
+      protocol: "openai-responses",
+      accountPrefix: "personal",
+      modelProvider: "openai-codex",
+      credential: { kind: "env", name: "CPA_MODEL_KEY" },
+      allowedHostIds: [hostId],
+    };
+    const request = {
+      name: "Personal gateway",
+      provider: "acp-omp",
+      hostId: null,
+      gateway,
+    };
+    for (const credential of [
+      { kind: "env", name: "" },
+      { kind: "env", name: "1CPA_KEY" },
+      { kind: "env", name: "CPA-KEY" },
+      { kind: "env", name: "CPA_KEY\n" },
+      { kind: "env", name: "CPA_KEY", value: "fake-raw-key" },
+      { kind: "file", path: "" },
+      { kind: "file", path: "relative/key" },
+      { kind: "file", path: "/run/key\0" },
+      { kind: "file", path: "/run/key", value: "fake-raw-key" },
+      { kind: "literal", value: "fake-raw-key" },
+      { kind: "env", name: "CPA_KEY", apiKey: "fake-raw-key" },
+    ])
+      expect(
+        createModelConnectionRequestSchema.safeParse({
+          ...request,
+          gateway: { ...gateway, credential },
+        }).success,
+      ).toBe(false);
+    for (const allowedHostIds of [[], [hostId, hostId], [""]])
+      expect(
+        createModelConnectionRequestSchema.safeParse({
+          ...request,
+          gateway: { ...gateway, allowedHostIds },
+        }).success,
+      ).toBe(false);
+    for (const invalidRequest of [
+      { ...request, apiKey: "fake-raw-key" },
+      { ...request, gateway: { ...gateway, token: "fake-raw-key" } },
+    ])
+      expect(
+        createModelConnectionRequestSchema.safeParse(invalidRequest).success,
+      ).toBe(false);
+    expect(
+      createModelConnectionRequestSchema.parse({
+        ...request,
+        gateway: {
+          ...gateway,
+          credential: { kind: "file", path: "/run/secrets/cpa-key" },
+        },
+      }).gateway?.credential,
+    ).toEqual({ kind: "file", path: "/run/secrets/cpa-key" });
+  });
+
+  it("defaults omitted gateway to null for legacy native create input and definitions", () => {
+    const input = createModelConnectionRequestSchema.parse({
+      name: "Legacy native",
+      provider: "acp-omp",
+      hostId,
+      nativeAuth: { configDir: "/fixtures/native-auth" },
+    });
+    expect(input.gateway).toBeNull();
+    const native = createModelConnectionDefinition(db, input);
+    expect(native.gateway).toBeNull();
+    expect(getModelConnection(db, native.id)?.gateway).toBeNull();
+    expect(
+      createModelConnectionRequestSchema.safeParse({
+        name: "Missing native host",
+        provider: "acp-omp",
+        hostId: null,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("selects a gateway without a context but still requires an authorized execution host and acp-omp", () => {
+    const connection = gatewayConnection("personal", [hostId, "other-host"]);
+    for (const selectedHostId of [hostId, "other-host"]) {
+      expect(
+        resolveThreadExecutionBinding(db, {
+          projectId,
+          hostId: selectedHostId,
+          provider: "acp-omp",
+          modelConnectionId: connection.id,
+        }),
+      ).toMatchObject({
+        executionContext: null,
+        modelConnection: { id: connection.id, hostId: null },
+      });
+    }
+    expect(() =>
+      resolveThreadExecutionBinding(db, {
+        projectId,
+        hostId: null,
+        modelConnectionId: connection.id,
+      }),
+    ).toThrow(/concrete execution host/);
+    expect(() =>
+      resolveThreadExecutionBinding(db, {
+        projectId,
+        hostId,
+        provider: "codex",
+        modelConnectionId: connection.id,
+      }),
+    ).toThrow(/not codex/);
+    const restricted = gatewayConnection("restricted");
+    expect(() =>
+      resolveThreadExecutionBinding(db, {
+        projectId,
+        hostId: "other-host",
+        modelConnectionId: restricted.id,
+      }),
+    ).toThrow(/does not authorize/);
+  });
+
+  it("rejects unknown, removing, destroyed and deleted allowed hosts on create and update", () => {
+    const connection = gatewayConnection("personal");
+    for (const unavailableId of ["missing-host", "other-host"]) {
+      if (unavailableId === "other-host")
+        updateHost(db, noopNotifier, unavailableId, { phase: "removing" });
+      expect(() => gatewayConnection("invalid", [unavailableId])).toThrow(
+        unavailableId === "missing-host" ? /does not exist/ : /unavailable/,
+      );
+      expect(() =>
+        updateModelConnectionDefinition(db, {
+          id: connection.id,
+          gateway: {
+            ...connection.gateway!,
+            allowedHostIds: [hostId, unavailableId],
+          },
+        }),
+      ).toThrow(
+        unavailableId === "missing-host" ? /does not exist/ : /unavailable/,
+      );
+    }
+    for (const hostUpdate of [
+      { phase: "destroyed" as const },
+      { phase: "active" as const, destroyedAt: 1 },
+    ]) {
+      updateHost(db, noopNotifier, "other-host", hostUpdate);
+      expect(() => gatewayConnection("destroyed", ["other-host"])).toThrow(
+        /unavailable/,
+      );
+      expect(() =>
+        updateModelConnectionDefinition(db, {
+          id: connection.id,
+          gateway: {
+            ...connection.gateway!,
+            allowedHostIds: ["other-host"],
+          },
+        }),
+      ).toThrow(/unavailable/);
+    }
+    expect(getModelConnection(db, connection.id)?.gateway?.allowedHostIds).toEqual([
+      hostId,
+    ]);
+  });
+
+  it("keeps the old gateway config and checks both immutable and current host grants on continuation", () => {
+    const connection = gatewayConnection("personal");
+    const binding = resolve(undefined, connection.id)!;
+    const thread = createThread(db, noopNotifier, {
+      projectId,
+      providerId: "acp-omp",
+      executionBinding: binding,
+    });
+    updateModelConnectionDefinition(db, {
+      id: connection.id,
+      gateway: {
+        ...connection.gateway!,
+        baseUrl: "https://replacement.example/v1",
+        protocol: "anthropic-messages",
+        accountPrefix: "replacement",
+        modelProvider: "anthropic",
+        credential: { kind: "file", path: "/run/secrets/replacement-key" },
+        allowedHostIds: [hostId, "other-host"],
+      },
+    });
+    const snapshot = getThreadExecutionBinding(db, thread.id)!;
+    expect(snapshot.modelConnection).toEqual(connection);
+    expect(() =>
+      assertThreadExecutionBindingAvailable(db, snapshot, hostId, "acp-omp"),
+    ).not.toThrow();
+    expect(() =>
+      assertThreadExecutionBindingAvailable(db, snapshot, "other-host", "acp-omp"),
+    ).toThrow(/does not authorize/);
+    updateModelConnectionDefinition(db, {
+      id: connection.id,
+      gateway: { ...connection.gateway!, allowedHostIds: ["other-host"] },
+    });
+    expect(() =>
+      assertThreadExecutionBindingAvailable(db, snapshot, hostId, "acp-omp"),
+    ).toThrow(/does not authorize/);
+    expect(getThreadExecutionBinding(db, thread.id)).toEqual(snapshot);
+  });
+
+  it("refuses disabled, revoked, missing and unavailable gateway continuation without substituting defaults", () => {
+    const connection = gatewayConnection("personal");
+    const binding = resolve(undefined, connection.id)!;
+    updateModelConnectionDefinition(db, { id: connection.id, enabled: false });
+    expect(() =>
+      assertThreadExecutionBindingAvailable(db, binding, hostId, "acp-omp"),
+    ).toThrow(/disabled/);
+    updateModelConnectionDefinition(db, {
+      id: connection.id,
+      enabled: true,
+      revoked: true,
+    });
+    expect(() => assertThreadExecutionBindingAvailable(db, binding)).toThrow(
+      /revoked/,
+    );
+    updateModelConnectionDefinition(db, { id: connection.id, revoked: false });
+    updateHost(db, noopNotifier, hostId, { phase: "removing" });
+    expect(() =>
+      assertThreadExecutionBindingAvailable(db, binding, hostId, "acp-omp"),
+    ).toThrow(/unavailable/);
+    deleteConnectionDefinition(db, connection.id);
+    expect(() =>
+      assertThreadExecutionBindingAvailable(db, binding, hostId, "acp-omp"),
+    ).toThrow(/does not exist/);
+  });
+
+  it("reads legacy native snapshots without gateway and preserves native host authorization", () => {
+    const native = connection("legacy-native");
+    const binding = resolve(undefined, native.id)!;
+    const thread = createThread(db, noopNotifier, {
+      projectId,
+      providerId: native.provider,
+      executionBinding: binding,
+    });
+    db.update(threadExecutionBindings)
+      .set({
+        snapshot: sql`json_remove(${threadExecutionBindings.snapshot}, '$.modelConnection.gateway')`,
+      })
+      .where(eq(threadExecutionBindings.threadId, thread.id))
+      .run();
+    db.update(modelConnections)
+      .set({
+        definition: sql`json_remove(${modelConnections.definition}, '$.gateway')`,
+      })
+      .where(eq(modelConnections.id, native.id))
+      .run();
+    const snapshot = getThreadExecutionBinding(db, thread.id)!;
+    expect(snapshot.modelConnection?.gateway).toBeNull();
+    expect(() =>
+      assertThreadExecutionBindingAvailable(db, snapshot, hostId, native.provider),
+    ).not.toThrow();
+    expect(() =>
+      assertThreadExecutionBindingAvailable(
+        db,
+        snapshot,
+        "other-host",
+        native.provider,
+      ),
+    ).toThrow(/not execution host/);
+    updateModelConnectionDefinition(db, {
+      id: native.id,
+      hostId: "other-host",
+    });
+    expect(() =>
+      assertThreadExecutionBindingAvailable(db, snapshot, hostId, native.provider),
+    ).toThrow(/not execution host/);
+    expect(snapshot.modelConnection?.nativeAuth).toEqual(native.nativeAuth);
   });
 });

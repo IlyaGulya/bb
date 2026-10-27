@@ -16,6 +16,7 @@ import {
   type Thread,
   type ThreadOriginKind,
   type ThreadVisibility,
+  type ModelConnection,
 } from "@bb/domain";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
@@ -104,16 +105,18 @@ interface ResolveCatalogExecutionDefaultsArgs {
   providerId: string;
   providerFallbackCandidates: readonly string[];
   requestedModel: string | null;
+  modelConnection?: ModelConnection | null;
 }
 
 async function loadCatalogDefaultForProvider(
   deps: ThreadCreateDeps,
-  args: { cwd?: string; hostId: string; providerId: string },
+  args: { cwd?: string; hostId: string; providerId: string; modelConnection?: ModelConnection | null },
 ): Promise<ProjectExecutionDefaults | ApiError> {
   const catalog = await resolveSystemProviderModels(deps, {
     ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
     hostId: args.hostId,
     providerId: args.providerId,
+    modelConnection: args.modelConnection,
   });
   if (catalog.modelLoadError !== null) {
     return new ApiError(
@@ -149,6 +152,7 @@ interface ResolveSessionOptionExecutionDefaultsArgs {
   providerId: string;
   requestedModel: string | null;
   selections: SessionOptionSelections;
+  modelConnection?: ModelConnection | null;
 }
 
 async function resolveSessionOptionExecutionDefaults(
@@ -167,6 +171,7 @@ async function resolveSessionOptionExecutionDefaults(
     ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
     hostId: args.hostId,
     providerId: args.providerId,
+    modelConnection: args.modelConnection,
   });
   if (catalog.modelLoadError !== null) {
     return args.executionDefaults;
@@ -203,6 +208,34 @@ async function resolveCatalogExecutionDefaults(
   deps: ThreadCreateDeps,
   args: ResolveCatalogExecutionDefaultsArgs,
 ): Promise<ProjectExecutionDefaults | null> {
+  if (args.modelConnection?.gateway) {
+    if (args.hostId === null)
+      throw new ApiError(400, "execution_context_host_required", "Gateway models require an allowed execution host.");
+    const catalog = await resolveSystemProviderModels(deps, {
+      ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
+      hostId: args.hostId,
+      providerId: args.providerId,
+      modelConnection: args.modelConnection,
+    });
+    if (catalog.modelLoadError !== null)
+      throw new ApiError(503, "model_catalog_unavailable", "The selected gateway model catalog is unavailable.");
+    const requested = args.requestedModel;
+    const chosen = requested === null
+      ? catalog.models.find((entry) => entry.model === args.executionDefaults?.model) ??
+        catalog.models.find((entry) => entry.isDefault) ?? catalog.models[0]
+      : [...catalog.models, ...catalog.selectedOnlyModels].find((entry) => entry.model === requested);
+    if (chosen === undefined)
+      throw new ApiError(400, "model_unavailable", "Choose a model offered by the selected gateway connection.");
+    return {
+      ...buildProviderThreadExecutionDefaults(deps.providerRegistry, {
+        providerId: args.providerId,
+        model: chosen.model,
+      }),
+      ...args.executionDefaults,
+      providerId: args.providerId,
+      model: chosen.model,
+    };
+  }
   if (args.executionDefaults !== null || args.requestedModel !== null) {
     return args.executionDefaults;
   }
@@ -222,6 +255,7 @@ async function resolveCatalogExecutionDefaults(
       ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
       hostId: args.hostId,
       providerId,
+      modelConnection: args.modelConnection,
     });
     if (!(result instanceof ApiError)) {
       return result;
@@ -758,7 +792,7 @@ export async function createThreadFromRequest(
             : { modelConnectionId: requestInput.modelConnectionId }),
         });
   if (sourceBinding !== null) {
-    assertThreadExecutionBindingAvailable(deps.db, sourceBinding);
+    assertThreadExecutionBindingAvailable(deps.db, sourceBinding, childHostId, requestInput.providerId);
     if (
       sourceThread &&
       requestInput.providerId !== undefined &&
@@ -870,6 +904,7 @@ export async function createThreadFromRequest(
     providerFallbackCandidates:
       executionBinding === null ? providerFallbackCandidates : [],
     requestedModel,
+    modelConnection: executionBinding?.modelConnection ?? null,
   });
   if (
     catalogExecutionDefaults !== null &&
@@ -886,6 +921,7 @@ export async function createThreadFromRequest(
       providerId: request.providerId,
       requestedModel,
       selections: request.sessionOptions ?? {},
+      modelConnection: executionBinding?.modelConnection ?? null,
     },
   );
   await assertSelectedExecutionContextMcp(deps, {

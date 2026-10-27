@@ -1,6 +1,7 @@
 import {
   getProjectExecutionDefaults,
   getThreadExecutionOverride,
+  getThreadExecutionBinding,
   setThreadExecutionOverride,
   type ThreadExecutionOverride,
 } from "@bb/db";
@@ -182,6 +183,7 @@ async function loadThreadProviderModels(
   thread: Thread,
   requiredModel: string | null,
 ): Promise<readonly AvailableModel[]> {
+  const modelConnection = getThreadExecutionBinding(deps.db, thread.id)?.modelConnection ?? null;
   const result = await resolveSystemExecutionOptionsForValidation(
     deps,
     {
@@ -191,6 +193,7 @@ async function loadThreadProviderModels(
         : {}),
     },
     requiredModel,
+    modelConnection,
   );
   if (result.modelLoadError !== null) {
     throw new ApiError(

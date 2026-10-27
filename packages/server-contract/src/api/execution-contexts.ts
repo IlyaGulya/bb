@@ -89,6 +89,9 @@ export const updateModelConnectionRequestSchema = z
     nativeAuth: modelConnectionFieldsSchema.shape.nativeAuth
       .removeDefault()
       .optional(),
+    gateway: modelConnectionFieldsSchema.shape.gateway
+      .removeDefault()
+      .optional(),
   })
   .strict();
 export type UpdateModelConnectionRequest = z.infer<

@@ -781,7 +781,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       ? getThreadExecutionBinding(deps.db, thread.id)
       : null;
     if (thread) {
-      assertThreadExecutionBindingAvailable(deps.db, binding);
+      assertThreadExecutionBindingAvailable(deps.db, binding, undefined, query.provider);
       if (
         query.executionContextId !== undefined &&
         query.executionContextId !== binding?.executionContext?.id
@@ -810,6 +810,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       environmentId: query.environmentId,
       hostId: query.hostId,
     });
+    if (thread) assertThreadExecutionBindingAvailable(deps.db, binding, workspace.hostId, query.provider);
     const listProviderCommands = async () => {
       if (!providerHasNativeRootSurface(registration)) {
         return { commands: [] };

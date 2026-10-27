@@ -39,6 +39,8 @@ export async function readExecutionOptions(
           hostId: input.hostId,
           projectId: input.projectId,
           providerId: input.providerId,
+          modelConnectionId: input.modelConnectionId,
+          threadId: input.threadId,
         },
       },
       ...signalRequestArgs(input.signal),

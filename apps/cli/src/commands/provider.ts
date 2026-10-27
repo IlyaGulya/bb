@@ -25,6 +25,7 @@ interface ProviderModelsCommandOptions {
   machine?: string;
   project?: string;
   selectedModel?: string;
+  modelConnection?: string;
 }
 
 interface IncludeSelectedOnlyModelArgs {
@@ -171,6 +172,10 @@ export function registerProviderCommands(
       "--project <id>",
       "Project whose checkout on the machine the provider reads its models and options from",
     )
+    .option(
+      "--model-connection <id>",
+      "Model account connection, independent of machine and project routing",
+    )
     .option("--json", "Print machine-readable JSON output")
     .option(
       "--selected-model <model>",
@@ -199,6 +204,9 @@ export function registerProviderCommands(
               ? routing
               : { ...routing, projectId: opts.project }),
             ...(providerId ? { providerId } : {}),
+            ...(opts.modelConnection !== undefined
+              ? { modelConnectionId: opts.modelConnection }
+              : {}),
           });
           const models = includeSelectedOnlyModel({
             models: executionOptions.models,

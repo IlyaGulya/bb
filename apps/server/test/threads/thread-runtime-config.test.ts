@@ -3,6 +3,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   markThreadDeleted,
+  getThreadExecutionBinding,
+  persistThreadExecutionBinding,
+  saveModelConnection,
   setExperiments,
   setThreadExecutionOverride,
 } from "@bb/db";
@@ -10,6 +13,7 @@ import {
   defaultExperiments,
   encodeClientTurnRequestIdNumber,
   normalizeProviderNativeRoots,
+  modelConnectionSchema,
 } from "@bb/domain";
 import { validatePluginProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
 import type { PluginAgentConfigurationContext } from "@get-bb/plugin-sdk";
@@ -24,6 +28,11 @@ import {
   buildThreadStartCommand,
   prepareTurnSubmitCommandPayload,
 } from "../../src/services/threads/thread-commands.js";
+import {
+  deleteConnectionDefinition,
+  resolveThreadExecutionBinding,
+  updateModelConnectionDefinition,
+} from "../../src/services/execution-contexts.js";
 import {
   seedEnvironment,
   seedHostSession,
@@ -152,6 +161,147 @@ function registerRemoteRuntimeFileResponder(
 }
 
 describe("thread runtime config", () => {
+  it("uses immutable gateway receipts on start and continuation while enforcing live host grants and revocation", async () => {
+    await withTestHarness(
+      {
+        extraProviders: [
+          await configuredAcpProvider({
+            id: "omp",
+            displayName: "OMP",
+            command: "omp",
+          }),
+        ],
+      },
+      async (harness) => {
+        const { host } = seedHostSession(harness.deps, {
+          id: "host-gateway-runtime",
+        });
+        const { host: otherHost } = seedHostSession(harness.deps, {
+          id: "host-gateway-other",
+        });
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+        });
+        const environment = seedEnvironment(harness.deps, {
+          hostId: host.id,
+          projectId: project.id,
+        });
+        const thread = seedThread(harness.deps, {
+          projectId: project.id,
+          environmentId: environment.id,
+          providerId: "acp-omp",
+        });
+        seedThreadRuntimeState(harness.deps, {
+          environmentId: environment.id,
+          providerThreadId: "native-omp-session",
+          threadId: thread.id,
+        });
+        const connection = saveModelConnection(
+          harness.db,
+          modelConnectionSchema.parse({
+            id: "gateway-runtime",
+            name: "Personal gateway",
+            provider: "acp-omp",
+            hostId: null,
+            gateway: {
+              baseUrl: "https://gateway.example/v1",
+              protocol: "openai-responses",
+              accountPrefix: "personal",
+              modelProvider: "openai-codex",
+              credential: { kind: "file", path: "/run/secrets/cpa-key" },
+              allowedHostIds: [host.id],
+            },
+            createdAt: 1,
+            updatedAt: 1,
+          }),
+        );
+        persistThreadExecutionBinding(
+          harness.db,
+          thread.id,
+          resolveThreadExecutionBinding(harness.db, {
+            projectId: project.id,
+            hostId: host.id,
+            provider: "acp-omp",
+            modelConnectionId: connection.id,
+          }),
+        );
+        const execution = {
+          model: "bb-cpa/personal/gpt-5",
+          permissionMode: "accept-edits",
+          reasoningLevel: "medium",
+          serviceTier: "default",
+          source: "client/turn/requested",
+        } as const;
+        const buildStart = () =>
+          buildThreadStartCommand(harness.deps, {
+            environment,
+            execution,
+            fork: null,
+            permissionEscalation: "ask",
+            input: textInput("hello"),
+            projectId: project.id,
+            providerId: "acp-omp",
+            requestId: encodeClientTurnRequestIdNumber({ value: 102 }),
+            syncGeneratedTitle: false,
+            thread,
+          });
+        const buildSubmit = () =>
+          prepareTurnSubmitCommandPayload(harness.deps, {
+            environment,
+            execution,
+            permissionEscalation: "ask",
+            input: textInput("continue"),
+            target: { mode: "start" },
+            thread,
+          });
+        updateModelConnectionDefinition(harness.db, {
+          id: connection.id,
+          gateway: {
+            ...connection.gateway!,
+            baseUrl: "https://replacement.example/v1",
+          },
+        });
+        for (const build of [buildStart, buildSubmit]) {
+          const command = await build();
+          expect(command.options.providerOptions?.modelConnection).toEqual(
+            connection,
+          );
+        }
+        const submit = await buildSubmit();
+        expect(submit.resumeContext.providerThreadId).toBe("native-omp-session");
+        updateModelConnectionDefinition(harness.db, {
+          id: connection.id,
+          gateway: {
+            ...connection.gateway!,
+            allowedHostIds: [otherHost.id],
+          },
+        });
+        for (const build of [buildStart, buildSubmit])
+          await expect(build()).rejects.toThrow(/does not authorize/);
+        updateModelConnectionDefinition(harness.db, {
+          id: connection.id,
+          gateway: connection.gateway,
+          revoked: true,
+        });
+        for (const build of [buildStart, buildSubmit])
+          await expect(build()).rejects.toThrow(/revoked/);
+        updateModelConnectionDefinition(harness.db, {
+          id: connection.id,
+          revoked: false,
+          enabled: false,
+        });
+        for (const build of [buildStart, buildSubmit])
+          await expect(build()).rejects.toThrow(/disabled/);
+        deleteConnectionDefinition(harness.db, connection.id);
+        for (const build of [buildStart, buildSubmit])
+          await expect(build()).rejects.toThrow(/does not exist/);
+        expect(
+          getThreadExecutionBinding(harness.db, thread.id)?.modelConnection,
+        ).toEqual(connection);
+      },
+    );
+  });
+
   it("carries a configured ACP agent's launch spec on thread start and turn submit", async () => {
     await withTestHarness(
       {

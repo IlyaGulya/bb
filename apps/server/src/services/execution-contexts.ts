@@ -130,7 +130,7 @@ export function requireModelConnection(
     throw new ApiError(
       404,
       "model_connection_not_found",
-      `Model connection ${id} does not exist; select an available native connection`,
+      `Model connection ${id} does not exist; select an available connection`,
     );
   return connection;
 }
@@ -167,12 +167,12 @@ export function resolveProjectExecutionContext(
   return context;
 }
 
-function requireEnabledConnection(connection: ModelConnection): void {
+export function requireEnabledConnection(connection: ModelConnection): void {
   if (connection.revoked)
     throw new ApiError(
       409,
       "model_connection_revoked",
-      `Model connection ${connection.name} is revoked; select another native connection`,
+      `Model connection ${connection.name} is revoked; select another connection`,
     );
   if (!connection.enabled)
     throw new ApiError(
@@ -182,7 +182,7 @@ function requireEnabledConnection(connection: ModelConnection): void {
     );
 }
 
-function requireAvailableNativeHost(db: DbConnection, hostId: string): void {
+function requireAvailableExecutionHost(db: DbConnection, hostId: string): void {
   const host = getHost(db, hostId);
   if (
     !host ||
@@ -193,7 +193,36 @@ function requireAvailableNativeHost(db: DbConnection, hostId: string): void {
     throw new ApiError(
       409,
       "model_connection_host_unavailable",
-      `Native execution host ${hostId} is unavailable; select an available host and connection`,
+      `Execution host ${hostId} is unavailable; select an available host and connection`,
+    );
+}
+
+export function assertModelConnectionHostAuthorized(
+  connection: ModelConnection,
+  hostId: string,
+  providerId?: string,
+): void {
+  if (
+    (connection.gateway !== null && connection.provider !== "acp-omp") ||
+    (providerId !== undefined && connection.provider !== providerId)
+  )
+    throw new ApiError(
+      400,
+      "model_connection_provider_mismatch",
+      `Connection ${connection.name} uses provider ${connection.provider}, not ${providerId ?? "acp-omp"}; select its provider or another connection`,
+    );
+  if (connection.gateway !== null) {
+    if (!connection.gateway.allowedHostIds.includes(hostId))
+      throw new ApiError(
+        400,
+        "model_connection_host_mismatch",
+        `Connection ${connection.name} does not authorize execution host ${hostId}; select an allowed execution host`,
+      );
+  } else if (connection.hostId !== hostId)
+    throw new ApiError(
+      400,
+      "model_connection_host_mismatch",
+      `Connection ${connection.name} belongs to host ${connection.hostId}, not execution host ${hostId}; select a connection on the execution host`,
     );
 }
 
@@ -232,25 +261,18 @@ export function resolveThreadExecutionBinding(
       "execution_context_host_required",
       "Scoped context or model connection selection requires a concrete execution host; select an existing host environment",
     );
-  requireAvailableNativeHost(db, args.hostId);
+  requireAvailableExecutionHost(db, args.hostId);
   if (executionContext) requireEnabledContext(executionContext, args.projectId);
   const modelConnection = connectionId
     ? requireModelConnection(db, connectionId)
     : null;
   if (modelConnection) {
     requireEnabledConnection(modelConnection);
-    if (modelConnection.hostId !== args.hostId)
-      throw new ApiError(
-        400,
-        "model_connection_host_mismatch",
-        `Connection ${modelConnection.name} belongs to host ${modelConnection.hostId}, not execution host ${args.hostId}; select a connection on the execution host`,
-      );
-    if (args.provider && modelConnection.provider !== args.provider)
-      throw new ApiError(
-        400,
-        "model_connection_provider_mismatch",
-        `Connection ${modelConnection.name} uses provider ${modelConnection.provider}, not ${args.provider}; select its provider or another connection`,
-      );
+    assertModelConnectionHostAuthorized(
+      modelConnection,
+      args.hostId,
+      args.provider,
+    );
   }
   return { executionContext, modelConnection, createdAt: Date.now() };
 }
@@ -258,12 +280,25 @@ export function resolveThreadExecutionBinding(
 export function assertThreadExecutionBindingAvailable(
   db: DbConnection,
   binding: ResolvedThreadExecutionBinding | null,
+  hostId?: string | null,
+  providerId?: string,
 ): void {
   if (binding?.modelConnection) {
-    requireEnabledConnection(
-      requireModelConnection(db, binding.modelConnection.id),
-    );
-    requireAvailableNativeHost(db, binding.modelConnection.hostId);
+    const snapshot = binding.modelConnection;
+    const current = requireModelConnection(db, snapshot.id);
+    requireEnabledConnection(current);
+    requireEnabledConnection(snapshot);
+    const executionHostId =
+      hostId ?? (snapshot.gateway === null ? snapshot.hostId : null);
+    if (executionHostId !== null) {
+      requireAvailableExecutionHost(db, executionHostId);
+      assertModelConnectionHostAuthorized(snapshot, executionHostId, providerId);
+      assertModelConnectionHostAuthorized(
+        current,
+        executionHostId,
+        providerId ?? snapshot.provider,
+      );
+    }
   }
   if (binding?.executionContext) {
     const current = requireExecutionContext(db, binding.executionContext.id);
@@ -340,14 +375,17 @@ function validateConnectionDefinition(
   db: DbConnection,
   value: ModelConnection,
 ): void {
-  const host = getHost(db, value.hostId);
-  if (!host)
-    throw new ApiError(
-      404,
-      "host_not_found",
-      `Native connection host ${value.hostId} does not exist`,
-    );
-  requireAvailableNativeHost(db, value.hostId);
+  const hostIds =
+    value.gateway === null ? [value.hostId] : value.gateway.allowedHostIds;
+  for (const hostId of hostIds) {
+    if (hostId === null || !getHost(db, hostId))
+      throw new ApiError(
+        404,
+        "host_not_found",
+        `Connection execution host ${hostId} does not exist`,
+      );
+    requireAvailableExecutionHost(db, hostId);
+  }
 }
 
 export function createModelConnectionDefinition(

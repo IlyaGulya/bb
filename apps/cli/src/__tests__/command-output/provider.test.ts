@@ -14,6 +14,28 @@ describe("bb provider command output", () => {
   const register: CommandRegistrar = (program) =>
     registerProviderCommands(program, () => "http://server");
 
+  it("selects a model connection without selecting an execution context", async () => {
+    const get = vi.fn(async () => ({
+      providers: [],
+      models: [],
+      selectedOnlyModels: [],
+      modelLoadError: null,
+    }));
+    stubServerApi({ "v1.system.execution-options.$get": get });
+    await runCommand(
+      ["provider", "models", "acp-omp", "--environment", "env-worker",
+       "--model-connection", "conn-gateway", "--json"],
+      register,
+    );
+    expect(get).toHaveBeenCalledWith({
+      query: {
+        environmentId: "env-worker",
+        providerId: "acp-omp",
+        modelConnectionId: "conn-gateway",
+      },
+    });
+  });
+
   it("keeps cold providers visible with actionable readiness rather than claiming availability", async () => {
     const get = vi.fn(async () => [
       {

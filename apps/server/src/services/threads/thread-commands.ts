@@ -218,20 +218,12 @@ function toRuntimeExecutionOptions(
       ...(promptMode !== undefined ? { promptMode } : {}),
     }) ?? {};
   const binding = getThreadExecutionBinding(args.deps.db, args.threadId);
-  if (binding !== null) {
-    assertThreadExecutionBindingAvailable(args.deps.db, binding);
-    if (
-      binding.modelConnection !== null &&
-      (binding.modelConnection.hostId !== args.hostId ||
-        binding.modelConnection.provider !== args.providerId)
-    ) {
-      throw new ApiError(
-        409,
-        "model_connection_execution_mismatch",
-        "The thread's bound model connection belongs to a different host or provider. Start a new thread with a compatible connection.",
-      );
-    }
-  }
+  assertThreadExecutionBindingAvailable(
+    args.deps.db,
+    binding,
+    args.hostId,
+    args.providerId,
+  );
   const sessionOptions = resolvePendingThreadSessionOptions(
     args.deps.db,
     args.threadId,

@@ -10,8 +10,9 @@ import {
   reasoningEffortsForLevels,
   type AvailableModel,
   type ProviderInfo,
+  type ModelConnection,
 } from "@bb/domain";
-import { getAppSettings } from "@bb/db";
+import { getAppSettings, getThread, getThreadExecutionBinding } from "@bb/db";
 import type { LoggedWorkSessionDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
 import { callHostRetryableOnlineRpc } from "../hosts/online-rpc.js";
@@ -40,6 +41,7 @@ import { getSupportedReasoningLevelsForProvider } from "../threads/thread-reason
 import { resolveSystemLookupHostId } from "./host-lookup.js";
 import { resolveBridgeLaunchForProviderId } from "./provider-bridge-launch.js";
 import { mapProviderMaintenanceRequests } from "./provider-maintenance-concurrency.js";
+import { requireEnabledConnection, requireModelConnection } from "../execution-contexts.js";
 
 type SystemExecutionOptionsRequest = SystemExecutionOptionsQuery;
 
@@ -52,6 +54,8 @@ interface ResolveSystemProviderModelsArgs {
   cwd?: string;
   hostId: string;
   providerId: string;
+  modelConnectionId?: string;
+  modelConnection?: ModelConnection | null;
 }
 
 type ModelListResult = Pick<
@@ -373,16 +377,20 @@ export async function resolveSystemProviderModels(
     );
   }
 
+  const modelConnection = args.modelConnection ??
+    (args.modelConnectionId ? requireModelConnection(deps.db, args.modelConnectionId) : null);
+  if (modelConnection !== null) requireEnabledConnection(modelConnection);
   const result = await loadSystemProviderModels(deps, {
     cwd: args.cwd ?? null,
     hostId: args.hostId,
     provider,
     access: { kind: "validation", requiredModel: null },
+    modelConnection,
   });
   const { models, selectedOnlyModels } = appendCustomModels(
     deps.providerRegistry,
     {
-      customModels: deps.config.customModels,
+      customModels: modelConnection === null ? deps.config.customModels : [],
       models: result.models,
       providerId: provider.id,
       selectedOnlyModels: result.selectedOnlyModels,
@@ -479,18 +487,56 @@ export function resolveSystemExecutionOptionsForValidation(
   deps: LoggedWorkSessionDeps,
   query: SystemExecutionOptionsRequest,
   requiredModel: string | null,
+  modelConnection?: ModelConnection | null,
 ): Promise<SystemExecutionOptionsResponse> {
   return resolveExecutionOptions(deps, query, {
     kind: "validation",
     requiredModel,
-  });
+  }, modelConnection);
 }
 
 async function resolveExecutionOptions(
   deps: LoggedWorkSessionDeps,
   query: SystemExecutionOptionsRequest,
   access: ProviderModelCatalogAccess,
+  snapshotConnection?: ModelConnection | null,
 ): Promise<SystemExecutionOptionsResponse> {
+  if (query.threadId !== undefined) {
+    const thread = getThread(deps.db, query.threadId);
+    if (thread === null || thread.deletedAt !== null)
+      throw new ApiError(404, "thread_not_found", "Thread not found.");
+    const binding = getThreadExecutionBinding(deps.db, thread.id);
+    if (query.modelConnectionId !== undefined && query.modelConnectionId !== binding?.modelConnection?.id)
+      throw new ApiError(409, "thread_model_connection_mismatch", "Model discovery must use this thread's persisted connection.");
+    if (query.providerId !== undefined && query.providerId !== thread.providerId)
+      throw new ApiError(409, "thread_provider_mismatch", "Model discovery must use this thread's provider.");
+    if (query.environmentId !== undefined && query.environmentId !== thread.environmentId)
+      throw new ApiError(409, "thread_environment_mismatch", "Model discovery must use this thread's environment.");
+    if (query.projectId !== undefined && query.projectId !== thread.projectId)
+      throw new ApiError(409, "thread_project_mismatch", "Model discovery must use this thread's project.");
+    if (query.hostId !== undefined && thread.environmentId !== null &&
+        query.hostId !== requireEnvironment(deps.db, thread.environmentId).hostId)
+      throw new ApiError(409, "thread_host_mismatch", "Model discovery must use this thread's execution host.");
+    snapshotConnection = binding?.modelConnection ?? null;
+    query = {
+      threadId: thread.id,
+      providerId: thread.providerId,
+      ...(query.modelConnectionId === undefined ? {} : { modelConnectionId: query.modelConnectionId }),
+      ...(thread.environmentId !== null
+        ? { environmentId: thread.environmentId }
+        : query.hostId === undefined ? {} : { hostId: query.hostId }),
+    };
+  }
+  const modelConnection = snapshotConnection ?? (query.modelConnectionId
+    ? requireModelConnection(deps.db, query.modelConnectionId)
+    : null);
+  if (modelConnection !== null) {
+    requireEnabledConnection(modelConnection);
+    if (query.providerId !== undefined && query.providerId !== modelConnection.provider) {
+      throw new ApiError(400, "model_connection_provider_mismatch", "The selected model connection uses a different provider.");
+    }
+    query = { ...query, providerId: modelConnection.provider };
+  }
   if (query.providerId === undefined) {
     await deps.providerRegistry.whenRegistrationsSettled();
   } else {
@@ -521,6 +567,7 @@ async function resolveExecutionOptions(
           hostId,
           provider: configuredRequestedProvider,
           access,
+          modelConnection,
         })
       : null;
   let providers: ProviderInfo[];
@@ -568,7 +615,7 @@ async function resolveExecutionOptions(
   if (
     readiness !== undefined &&
     (readiness.status === "disabled" ||
-      (query.environmentId === undefined &&
+      (!modelConnection?.gateway && query.environmentId === undefined &&
         (readiness.freshness === "stale" ||
           (readiness.status !== "ready" &&
             (readiness.status !== "unknown" ||
@@ -592,7 +639,7 @@ async function resolveExecutionOptions(
     const { models, selectedOnlyModels } = appendCustomModels(
       deps.providerRegistry,
       {
-        customModels: listVisibleCustomModels(deps),
+        customModels: modelConnection === null ? listVisibleCustomModels(deps) : [],
         models: [],
         providerId: modelsProvider.id,
         selectedOnlyModels: [],
@@ -621,12 +668,13 @@ async function resolveExecutionOptions(
           hostId,
           provider: modelsProvider,
           access,
+          modelConnection,
         });
 
   const { models, selectedOnlyModels } = appendCustomModels(
     deps.providerRegistry,
     {
-      customModels: listVisibleCustomModels(deps),
+      customModels: modelConnection === null ? listVisibleCustomModels(deps) : [],
       models: modelResult.models,
       providerId: modelsProvider.id,
       selectedOnlyModels: modelResult.selectedOnlyModels,
@@ -649,6 +697,7 @@ async function loadSystemProviderModels(
     hostId: string;
     provider: ProviderInfo;
     access: ProviderModelCatalogAccess;
+    modelConnection?: ModelConnection | null;
   },
 ): Promise<ModelListResult> {
   if (!args.provider.available) {
@@ -666,7 +715,7 @@ async function loadSystemProviderModels(
     };
   }
   return {
-    models: listFallbackModelsForLoadError(deps, {
+    models: args.modelConnection ? [] : listFallbackModelsForLoadError(deps, {
       code: result.code,
       providerId: args.provider.id,
     }),

@@ -808,6 +808,7 @@ describe("@bb/sdk", () => {
       { body: [] },
       { body: executionOptions },
       { body: executionOptions },
+      { body: executionOptions },
     ]);
     const sdk = createBbSdk({
       transport: createHttpTransport({
@@ -824,6 +825,8 @@ describe("@bb/sdk", () => {
       sdk.providers.models({
         environmentId: "env_remote",
         providerId: "acp-remote",
+        modelConnectionId: "conn_gateway",
+        threadId: "thread_gateway",
       }),
     ).resolves.toMatchObject({ models: [], providers: [] });
     await expect(
@@ -831,6 +834,13 @@ describe("@bb/sdk", () => {
         hostId: "host_remote",
         projectId: "proj_remote",
         providerId: "acp-remote",
+      }),
+    ).resolves.toMatchObject({ models: [], providers: [] });
+    await expect(
+      sdk.system.executionOptions({
+        hostId: "host_remote",
+        modelConnectionId: "conn_gateway",
+        threadId: "thread_gateway",
       }),
     ).resolves.toMatchObject({ models: [], providers: [] });
 
@@ -843,12 +853,17 @@ describe("@bb/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/system/execution-options?environmentId=env_remote&providerId=acp-remote",
+        url: "http://bb.test/api/v1/system/execution-options?environmentId=env_remote&providerId=acp-remote&modelConnectionId=conn_gateway&threadId=thread_gateway",
       },
       {
         bodyText: undefined,
         method: "GET",
         url: "http://bb.test/api/v1/system/execution-options?hostId=host_remote&projectId=proj_remote&providerId=acp-remote",
+      },
+      {
+        bodyText: undefined,
+        method: "GET",
+        url: "http://bb.test/api/v1/system/execution-options?hostId=host_remote&modelConnectionId=conn_gateway&threadId=thread_gateway",
       },
     ]);
   });
