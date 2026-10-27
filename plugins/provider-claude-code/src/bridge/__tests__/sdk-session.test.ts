@@ -78,6 +78,8 @@ describe("SdkSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryMock.mockImplementation(() => mockQueryInstance);
+    mockQueryInstance.initializationResult.mockReset();
+    mockQueryInstance.mcpServerStatus.mockReset();
     mockQueryInstance.applyFlagSettings.mockResolvedValue(undefined);
     mockQueryInstance.interrupt.mockResolvedValue(undefined);
     mockQueryInstance.setModel.mockResolvedValue(undefined);
@@ -129,6 +131,68 @@ describe("SdkSession", () => {
     await consumed;
     expect((await next).value?.message.content).toBe("private prompt");
     session.stop();
+  });
+
+  it("withholds input while asynchronous Cloud discovery has not registered its inventory", async () => {
+    keepSdkStreamOpen();
+    mockQueryInstance.initializationResult.mockResolvedValue({
+      account: { subscriptionType: "Claude Team", apiProvider: "firstParty" },
+    });
+    let emptyObserved!: () => void;
+    let pendingObserved!: () => void;
+    const empty = new Promise<void>((resolve) => {
+      emptyObserved = resolve;
+    });
+    const pending = new Promise<void>((resolve) => {
+      pendingObserved = resolve;
+    });
+    mockQueryInstance.mcpServerStatus
+      .mockImplementationOnce(async () => {
+        emptyObserved();
+        return [{ name: "bb-bridge", scope: "dynamic", status: "connected" }];
+      })
+      .mockImplementationOnce(async () => {
+        pendingObserved();
+        return [{ name: "native-cloud", scope: "claudeai", status: "pending" }];
+      })
+      .mockResolvedValue([
+        { name: "native-cloud", scope: "claudeai", status: "connected" },
+      ]);
+    const session = new SdkSession(
+      { ...defaultOptions, requireNativeCloudMcp: true },
+      vi.fn(),
+      vi.fn(),
+    );
+    let state = "withheld";
+    const consumed = session.pushInput("private prompt");
+    void consumed.then(
+      () => {
+        state = "delivered";
+      },
+      () => {
+        state = "rejected";
+      },
+    );
+    session.start();
+    const next = getLatestPrompt()[Symbol.asyncIterator]().next();
+    const nextOutcome = next.then(
+      (value) => ({ ok: true, value }),
+      () => ({ ok: false, value: undefined }),
+    );
+    try {
+      await empty;
+      await waitForAsyncWork();
+      expect(state).toBe("withheld");
+      await pending;
+      await waitForAsyncWork();
+      expect(state).toBe("withheld");
+      await consumed;
+      const result = await nextOutcome;
+      expect(result.ok).toBe(true);
+      expect(result.value?.value?.message.content).toBe("private prompt");
+    } finally {
+      session.stop();
+    }
   });
 
   it.each([
@@ -187,6 +251,7 @@ describe("SdkSession", () => {
       );
       const consumed = session.pushInput("private prompt");
       const rejectedInput = expect(consumed).rejects.toThrow();
+      vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(30_001);
       session.start();
       await rejectedInput;
       expect(onDone).toHaveBeenCalledWith(expect.any(Error));

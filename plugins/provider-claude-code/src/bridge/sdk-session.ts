@@ -587,7 +587,11 @@ export class SdkSession {
       const servers = await q.mcpServerStatus();
       const cloud = servers.filter((server) => server.scope === "claudeai");
       if (cloud.some((server) => server.status === "connected")) return;
-      if (!cloud.some((server) => server.status === "pending")) break;
+      if (
+        cloud.length > 0 &&
+        !cloud.some((server) => server.status === "pending")
+      )
+        break;
       await delay(200, undefined, { signal: this.abortController.signal });
     } while (Date.now() < deadline);
     throw new Error(

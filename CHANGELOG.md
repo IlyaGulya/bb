@@ -13,6 +13,8 @@
   connector before model input; report the redacted prerequisite failure to queued
   callers rather than a generic stream-end error. Real Cloud qualification remains
   separate.
+  Wait for asynchronous native inventory registration within the existing
+  readiness deadline; an initial empty snapshot is not a failed grant.
 - Replace `BB_CPA_LOG_DIR` with endpoint-mapped `BB_CPA_LOG_DIRS`, choosing
   read-only log roots from frozen thread bindings without weakening exact
   thread-header download guards.
