@@ -590,14 +590,16 @@ describe("plugin service", () => {
   });
 
   it("expects a plugin to run until its load pass ends without reaching it", async () => {
-    const globals = globalThis as Record<string, unknown>;
-    globals.__slowFactoryEntered = false;
+    const { promise: gate, resolve: release } = Promise.withResolvers<void>();
+    const { promise: loading, resolve: entered } = Promise.withResolvers<void>();
+    vi.stubGlobal("__slowPluginGate", gate);
+    vi.stubGlobal("__slowPluginEntered", entered);
     const slowRoot = await writePlugin(workDir, {
       name: "bb-plugin-aaa-slow",
       serverSource: `
         export default async function plugin() {
-          (globalThis as any).__slowFactoryEntered = true;
-          await new Promise((resolve) => setTimeout(resolve, 300));
+          globalThis.__slowPluginEntered();
+          await globalThis.__slowPluginGate;
         }
       `,
     });
@@ -648,13 +650,12 @@ describe("plugin service", () => {
       loadTimeoutMs: 2000,
       bundledPlugins: [],
     });
+    const started = booting.start();
     try {
-      const started = booting.start();
-      await vi.waitFor(() => {
-        expect(globals.__slowFactoryEntered).toBe(true);
-      });
+      await loading;
       expect(booting.isPluginExpectedToRun("zzz-pending")).toBe(true);
       expect(booting.isPluginExpectedToRun("never-installed")).toBe(false);
+      release();
       await started;
 
       expect(booting.isPluginExpectedToRun("zzz-pending")).toBe(true);
@@ -669,8 +670,10 @@ describe("plugin service", () => {
       await booting.setEnabled("zzz-pending", false);
       expect(booting.isPluginExpectedToRun("zzz-pending")).toBe(false);
     } finally {
-      delete globals.__slowFactoryEntered;
+      release();
+      await started;
       await booting.stop();
+      vi.unstubAllGlobals();
     }
   });
 
