@@ -193,6 +193,12 @@ export function PresetDialog({
     draft.environmentKind === "new-worktree" && draft.machineId.trim() !== ""
       ? ({ kind: "host", hostId: draft.machineId.trim() } as const)
       : undefined;
+  const pickerConnectionId =
+    draft.modelConnectionId ||
+    selections.contexts.data?.find(
+      (context) => context.id === draft.executionContextId,
+    )?.defaultModelConnectionId ||
+    undefined;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -229,6 +235,9 @@ export function PresetDialog({
               {...(pickerRouting === undefined
                 ? {}
                 : { routing: pickerRouting })}
+              {...(pickerConnectionId === undefined
+                ? {}
+                : { modelConnectionId: pickerConnectionId })}
               className="h-8 max-w-full"
             />
           </Field>

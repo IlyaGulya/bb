@@ -3174,6 +3174,10 @@ export interface ExperimentalProviderModelPickerProps {
   onChange(value: ExperimentalProviderModelPickerValue): void;
   /** Route discovery through an explicit machine or existing environment. */
   routing?: ExperimentalProviderModelPickerRouting;
+  /** Resolve the model roster for this explicit connection, independent of routing. */
+  modelConnectionId?: string;
+  /** Use the saved thread binding and model receipt rather than mutable defaults. */
+  threadId?: string;
   /** Allow switching providers. Defaults to true; false hides provider tabs. */
   allowProviderChange?: boolean;
   /** Horizontal popover alignment. Defaults to `"start"`. */

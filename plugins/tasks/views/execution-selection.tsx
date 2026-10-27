@@ -28,7 +28,13 @@ export function connectionUnavailable(
   if (connection.revoked) return "revoked";
   if (!connection.enabled) return "disabled";
   if (provider && connection.provider !== provider) return "provider mismatch";
-  if (hostId && connection.hostId !== hostId) return "host mismatch";
+  if (
+    hostId &&
+    (connection.gateway
+      ? !connection.gateway.allowedHostIds.includes(hostId)
+      : connection.hostId !== hostId)
+  )
+    return "host mismatch";
   return null;
 }
 
@@ -126,7 +132,8 @@ export function ExecutionSelectionFields({
             const reason = connectionUnavailable(entry, provider, hostId);
             return (
               <option key={entry.id} value={entry.id} disabled={!!reason}>
-                {entry.name} · {entry.id} · {entry.provider} · {entry.hostId}
+                {entry.name} · {entry.id} · {entry.provider} ·{" "}
+                {entry.gateway ? "CPA gateway" : entry.hostId}
                 {reason ? ` · ${reason}` : ""}
               </option>
             );
@@ -134,9 +141,8 @@ export function ExecutionSelectionFields({
         </select>
       </label>
       <p className="text-xs text-muted-foreground">
-        Context and native account are independent of model selection. Inherited
-        connections are validated against the execution host and provider at
-        dispatch.
+        Context and model account are independent. Inherited connections are
+        validated against the execution host and provider at dispatch.
       </p>
       {[contexts.error, connections.error]
         .filter(Boolean)
