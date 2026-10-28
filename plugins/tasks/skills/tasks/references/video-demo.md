@@ -75,6 +75,8 @@ const capture = await beginCapture({
 });
 try {
   await tab.waitFor('role/button[name="New execution context" exact]');
+  await page.mouse.move(720, 500, { steps: 20 });
+  await capture.ready();
   await capture.hold(2000, "Read the ready settings page");
   const heading = 'form h2';
   const beforeOpen = await capture.snapshot(heading);
@@ -114,6 +116,12 @@ mousedown events (page epoch time, viewport coordinates, button), real CDP frame
 timestamps, observed before/after element state and bounds, explicit hold times,
 recordStop statistics, exact declared app/helper revisions, and SHA-256 of the
 original and adapter. Captured text must itself be safe to retain.
+
+A static page may send no CDP screencast frames until an actual visual update.
+Move the real pointer after starting, then call `ready()` before taking snapshots
+or readability holds. Do not insert artificial animation or a second recorder.
+The example uses the center of a 1440×1000 owned viewport; adapt the real action
+to your viewport and check that original pixel dimensions match CSS coordinates.
 
 Call `snapshot(selector)` before the action, wait for the actual new state, then
 `change(caption, selector, before)`. The after-element must be visible, changed,

@@ -60,12 +60,6 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
   startedAtBoundsMs.push(Date.now());
   try {
     if (!recorderSession) throw new Error("This OMP recorder does not expose its CDP session through page.createCDPSession; do not guess its frame clock");
-    await new Promise((resolve, reject) => {
-      if (frames.length) return resolve();
-      const timeout = setTimeout(() => { recorderSession.off("Page.screencastFrame", ready); reject(new Error("No real recorder frame received")); }, 10000);
-      const ready = () => { clearTimeout(timeout); recorderSession.off("Page.screencastFrame", ready); resolve(); };
-      recorderSession.on("Page.screencastFrame", ready);
-    });
   } catch (error) {
     await tab.recordStop();
     await cleanup();
@@ -83,6 +77,15 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
     }, selector);
   };
   return {
+    async ready() {
+      if (closed) throw new Error("Capture is already closed");
+      await new Promise((resolve, reject) => {
+        if (frames.length) return resolve();
+        const timeout = setTimeout(() => { recorderSession.off("Page.screencastFrame", ready); reject(new Error("No real recorder frame received after actual pointer movement")); }, 10000);
+        const ready = () => { clearTimeout(timeout); recorderSession.off("Page.screencastFrame", ready); resolve(); };
+        recorderSession.on("Page.screencastFrame", ready);
+      });
+    },
     snapshot,
     async change(caption, selector, before) {
       if (pendingChange) throw new Error("End the current cue after its readability hold before observing another change");
@@ -106,11 +109,11 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
     },
     async finish() {
       if (closed || pendingChange) throw new Error("End change cues before finishing exactly once");
-      closed = true;
       const clicks = await page.evaluate((id) => {
         if (!window[id]) throw new Error("Page navigated; this adapter intentionally supports one document only");
         return window[id].clicks;
       }, key);
+      closed = true;
       const stoppedAtBoundsMs = [Date.now()];
       let result;
       try {
