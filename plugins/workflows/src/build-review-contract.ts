@@ -19,6 +19,7 @@ export const buildEvidenceSchema = z
     branch: text,
     commit: z.string().regex(/^[a-f0-9]{40,64}$/),
     diff: text,
+    regressionCommand: text.optional(),
     commands: z
       .array(
         z
@@ -59,6 +60,7 @@ export const buildReviewStartSchema = z
     projectId: text,
     originThreadId: text,
     task: text,
+    template: z.enum(["development-review", "bugfix"]).default("development-review"),
     writer: buildReviewProfileSchema,
     reviewer: buildReviewProfileSchema,
     smokeCommands: z.array(text).min(1).max(30),

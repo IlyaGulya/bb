@@ -110,17 +110,21 @@ For an explicitly authorized Task build/review, use the existing Tasks surface
 instead of composing another scheduler or an open-ended agent council:
 
 ```sh
-bb tasks workflow start TASK --key unique-launch-key --origin thr_origin \
-  --writer writer-profile --reviewer reviewer-profile \
-  --smoke '["./scripts/platform-smoke"]' --ui --json
+bb tasks workflow draft set TASK --template development-review \
+  --machine "Execution machine" --writer "Personal OMP Sol" \
+  --reviewer "Personal OMP Sol" --checks '["./scripts/platform-smoke"]' --ui --json
+bb tasks workflow prepare TASK --json
+bb tasks workflow preparation TASK --json
+bb tasks workflow start TASK --json
 bb tasks workflow list TASK --json
 ```
 
-The identifiers and command above are illustrative. Choose an idle origin in
-the task's linked, clean, committed single-root workspace and two already
-authorized profiles. The reviewer must differ by provider/runtime or model;
-reasoning level alone is insufficient. Catalog membership alone does not prove
-environment readiness. Do not reconnect accounts or bypass readiness checks.
+Names and commands above are illustrative. The task derives its code project;
+Core prepares an owned clean single-root worktree and internal contexts without
+an origin donor or initialization LLM turn. Both roles may use the same provider,
+model and account. Independence is a fresh reviewer thread/conversation, retained
+separately across Return. Readiness and native Core admission remain mandatory;
+do not reconnect accounts, change payers implicitly or bypass readiness checks.
 
 The native sequence is plan → same writer implementation and actual platform
 smoke → independent reviewer → `in_review`. Required smoke commands must really
@@ -136,8 +140,8 @@ corrections, use `bb tasks workflow return twf_receipt --revision N --feedback
 "concrete correction" --json`. Return continues the same retained writer and
 provider session; generic workflow `--resume` is not a substitute.
 
-Reuse the launch key and identical input after a launch retry. Uncertain
-delivery fails closed; inspect the retained worker before another explicit
+Retry Start against the same prepared task; its launch key is server-owned.
+Uncertain delivery fails closed; inspect the retained worker before another explicit
 Return. A definitively rejected first launch may use repaired selected profiles
 only when native state proves no established or uncertain context exists.
 Never replace an established writer to evade an error. See references/runs.md

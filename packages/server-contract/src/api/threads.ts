@@ -111,6 +111,7 @@ export const createThreadRequestSchema = z
     visibility: threadVisibilitySchema.optional(),
     title: z.string().min(1).optional(),
     input: z.array(promptInputSchema),
+    preparationOnly: z.boolean().optional(),
     model: z.string().min(1).optional(),
     serviceTier: serviceTierSchema.optional(),
     reasoningLevel: reasoningLevelSchema.optional(),
@@ -171,7 +172,15 @@ export const createThreadRequestSchema = z
         path: ["originPluginId"],
       });
     }
-    if (value.originKind === null && value.input.length === 0) {
+    if (value.preparationOnly === true && (
+      value.input.length !== 0 || value.originKind !== null ||
+      value.sourceThreadId !== undefined || value.parentThreadId !== undefined ||
+      value.startedOnBehalfOf !== null || value.sendAt !== undefined ||
+      value.title === undefined || !["provider", "reuse"].includes(value.environment.type)
+    )) {
+      ctx.addIssue({ code: "custom", path: ["preparationOnly"], message: "Preparation requires a titled provider or reused workspace, empty input and no source, parent, scheduled turn or delegated seed" });
+    }
+    if (value.originKind === null && value.input.length === 0 && value.preparationOnly !== true) {
       ctx.addIssue({
         code: "custom",
         message: "input must contain at least one entry",

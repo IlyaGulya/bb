@@ -385,42 +385,72 @@ replace it with synchronous multi-root waits or a separate scheduler.
 
 ## Build → review
 
-Use this flow only when the user authorizes a bounded task implementation and
-independent review. Workflows must be enabled. The task must be open and linked
-to its BB code project; select an idle origin in a ready, clean, committed
-single-root workspace without other active work. This path does not require
-multi-repository preparation and cannot bypass an existing repository manifest.
+Use this flow only when the user authorizes bounded implementation and independent
+review. Workflows must already be enabled. The open task's tracker project must
+link to its code project; single-root admission cannot bypass an existing
+multi-repository manifest.
 
-Select two existing authorized execution profiles that differ by
-provider/runtime or model. A different reasoning level or CPA billing account
-alone does not provide independent review. Each selected preset carries its own
-optional `executionContextId` and `modelConnectionId`; authorized contexts and
-accounts can be combined independently. Stored preset `null` means no explicit
-override. Core resolves omitted selections normally and admits each native
-worker against its selected connection's model catalog and readiness, not the
-origin account or an unrelated native login/catalog. Invalid, disabled, revoked,
-or incompatible explicit selections fail without account fallback. Requests
-carry IDs only, never credentials.
+The task's **Launch workflow** button opens BB's responsive Dialog/sheet, not a
+permanent technical form. Choose a named machine, context, account, model version
+and optional profile for each role. Both roles may use the **same provider,
+model and account**. Independence is a fresh reviewer thread/conversation, not
+mandatory model diversity. The reviewer receives review-only instructions and
+the actual committed change/evidence; it never imports the writer conversation.
+
+Exactly two native templates ship: `development-review` runs plan → build/smoke
+→ independent review → human review; `bugfix` requires real failing-before
+reproduction, fix/regression, passing-after and platform smoke before review.
+Bugfix Return preserves the original genuine failing-before evidence while
+continuing the same writer and rerunning the regression/smoke/review.
 
 ```sh
-bb tasks workflow start TASK --key unique-launch-key --origin thr_origin \
-  --writer writer-profile --reviewer reviewer-profile \
-  --smoke '["./scripts/platform-smoke"]' --ui --json
+bb tasks workflow draft set TASK --template development-review \
+  --machine "Execution machine" --writer "Personal OMP Sol" \
+  --reviewer "Personal OMP Sol" --checks '["./scripts/platform-smoke"]' --ui --json
+bb tasks workflow draft show TASK --json
+bb tasks workflow prepare TASK --json
+bb tasks workflow preparation TASK --json
+bb tasks workflow start TASK --json
 bb tasks workflow list TASK --json
 ```
 
-These identifiers and smoke command are illustrative. Supply actual platform
-smoke commands, not unit tests substituted for real interaction. `--ui`
-requires screenshot or preview evidence. The task card offers the same
-**Build → review** controls and links native workers.
+Names and commands above are illustrative. `draft set` also accepts named
+`--writer-account`, `--reviewer-account`, `--writer-context`, `--reviewer-context`
+and `--writer-model`/`--reviewer-model` versions. Model names resolve uniquely
+against the explicitly chosen account catalog; no provider or model is substituted.
+Profiles are optional: first-use CLI setup can supply named accounts/contexts,
+model versions, and `--writer-reasoning`/`--reviewer-reasoning`,
+`--writer-permission`/`--reviewer-permission`, `--writer-tier`/`--reviewer-tier`
+and `--writer-instructions`/`--reviewer-instructions` directly. `--selection`
+accepts complete typed selection JSON for SDK automation. Task changes never save
+a global last preset. `workflow settings show/save/apply TASK` explicitly reads,
+saves or applies settings scoped to this tracker project **and template**.
+An existing task draft is not rewritten when project settings change.
 
-The native sequence is plan → implementation and actual smoke by the **same
-writer** → independent reviewer → `in_review`. The package records the plan,
-branch, full commit, diff summary, command results, UI evidence locations,
-limitations, reviewer findings/verdict, and next decision. Inspect worker logs
-and actual artifacts rather than trusting structured model claims. BB checks
-authoritative branch/commit identity and a clean working tree before/after
-review and on Accept.
+Drafts are persisted in this authenticated BB owner's Tasks database, keyed by
+task and revision, across close/Esc/reload/client sessions. Incomplete choices
+can be saved. Stale saves and network failures are explicit and preserve the
+last saved draft; the dialog can retry, load the saved draft or explicitly
+reconcile its local choices. Profile choices are copied snapshots, not live
+global preset bindings: editing/deleting a preset cannot silently retarget them.
+Deleted/revoked accounts and unavailable models/contexts fail readiness.
+
+Preparation reserves one isolated native git worktree and internal contexts
+through Core `threads.spawn({ preparationOnly: true, input: [] })`. It performs
+Core context/account/host/model admission and normal environment provisioning
+without a donor thread, session import or initialization LLM turn. Observe the
+durable receipt; preparation does **not** start implementation. Explicit Start
+uses the same receipt automatically, including retries; no origin or UUID entry
+is required. Source refs and technical IDs are copyable diagnostics.
+
+Checks must be explicitly configured for the project/template; there are no
+invented passing results. UI work requires inspectable screenshots/previews.
+The same writer session plans, builds and runs actual platform smoke; a separate
+reviewer inspects the committed checkout. The result includes branch/commit,
+diff, observed command/output/exit codes, UI locations, limitations and findings.
+Inspect native logs/artifacts: structured model claims alone are not proof.
+Core/Workflows checks authoritative clean checkout identity before/after review
+and again at human Accept. Result publication sets `in_review`, never Done.
 
 In this managed flow, a successful `bb_workflow_result` response means the
 value was persisted, not that the native turn finished. The next phase waits
@@ -447,8 +477,8 @@ Existing requests without overrides stay implicit; replay does not retrofit IDs.
 Retained worker contexts and native journals remain pinned until acceptance or
 task-deletion cleanup. Review does not grant external publication permission.
 
-Retry a launch with the same key and identical input. Duplicate results cannot
-publish duplicate revision comments. Uncertain native delivery fails closed
+Retry Start with the same prepared task; its launch identity is server-owned.
+Duplicate results cannot publish duplicate revision comments. Uncertain native delivery fails closed
 instead of spawning another writer or blindly resending; inspect the retained
 worker and request a deliberate Return. A definitively rejected first creation
 can retry with repaired original profiles only when there is no established
@@ -456,9 +486,12 @@ or uncertain context. Existing/uncertain sessions cannot change profiles.
 Inbox Needs input exposes launch/run errors, including failures before a worker
 exists; review keeps the writer's result as its source.
 
-SDK callers use Tasks RPCs `launchTaskWorkflow`, `taskWorkflows`,
-`acceptTaskWorkflow`, and `returnTaskWorkflow`; the validated Tasks contract is
-also used by the CLI and card. Workflows provides its native QuickJS engine,
+SDK callers use Tasks RPCs `getTaskWorkflowDraft`, `saveTaskWorkflowDraft`,
+`getProjectWorkflowSettings`, `saveProjectWorkflowSettings`,
+`prepareTaskWorkflow`, `getTaskWorkflowPreparation`, `getTaskWorkflowProject`,
+`launchTaskWorkflow({taskId, preparationId})`, `taskWorkflows`,
+`acceptTaskWorkflow`, and `returnTaskWorkflow`; the same validated contracts back
+the CLI and dialog. Workflows provides its native QuickJS engine,
 journal, bounded calls, and structured-result tool. Its orchestration sandbox
 does not sandbox provider-native tools: explicit profile permissions apply,
 but reviewer instructions and unchanged commit checks are not an OS read-only

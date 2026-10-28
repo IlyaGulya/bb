@@ -21,6 +21,7 @@ import { managedContextStarted, managedWorker } from "./build-review-policy.js";
 import { DEFAULT_WORKFLOW_SETTINGS } from "./settings.js";
 import {
   buildReviewInspectionSchema,
+  buildReviewResultSchema,
   type BuildReviewStart,
 } from "./build-review-contract.js";
 import { executeWorkflowScript } from "./runtime.js";
@@ -42,6 +43,7 @@ const request: BuildReviewStart = {
   projectId: "project",
   originThreadId: "thr_origin",
   task: "Owned bounded fixture",
+  template: "development-review",
   writer: {
     provider: "codex",
     model: "writer",
@@ -104,6 +106,7 @@ function setup(workerStatus: "idle" | "error" = "idle") {
         get: async ({ threadId }) =>
           makeThreadResponse({
             id: threadId,
+            projectId: request.projectId,
             providerId: "codex",
             environmentId: "env_fixture",
             status: workerStatus,
@@ -179,6 +182,46 @@ describe("native managed launch receipts", () => {
     ).rejects.toThrow(/different input/);
   });
 });
+
+describe("same-model independent native roles", () => {
+  it("admits the same Sol version/account, creates a distinct reviewer, and retains both role sessions across Return", async () => {
+    const { db, host, send } = setup();
+    const profile = { ...request.writer, provider: "acp-omp", model: "bb-cpa/personal-codex/gpt-6.1-sol", executionContextId: "personal", modelConnectionId: "personal-account" };
+    const shared: BuildReviewStart = { ...request, key: "same-model:1", group: "same-model", writer: profile, reviewer: { ...profile, instructions: "Independent inspection only; do not modify files" } };
+    host.harness.sdk.stub("threads.get", async ({ threadId }: { threadId: string }) => makeThreadResponse({ id: threadId, projectId: request.projectId, environmentId: "env_fixture", providerId: profile.provider }));
+    host.harness.sdk.stub("threads.defaultExecutionOptions", async () => ({ model: profile.model, reasoningLevel: profile.reasoningLevel, permissionMode: profile.permissionMode, serviceTier: "default", source: "client/thread/start" }));
+    const handlers = registerBuildReview(host.bb, db, createWorkflowService(host.bb, db));
+    const launched = await handlers.startBuildReview(shared);
+    const run = getRunRequired(db, launched.runId);
+    const nextCall = (runId: string, callIndex: number) => startCall(db, {
+      runId, callIndex, cacheKey: `${runId}:${callIndex}`, prompt: "Bounded role work", options: { selection: null, outputSchema: null, title: null, phase: null },
+      selection: { providerId: profile.provider, model: profile.model, reasoningLevel: profile.reasoningLevel, permissionMode: profile.permissionMode }, replay: null,
+    });
+    let created = 0;
+    const fresh = vi.fn(async () => ({ id: `thr_same_model_${++created}` }));
+    const plan = nextCall(run.id, 0);
+    const writer = await managedWorker(host.bb, db, run, plan, "Plan", fresh);
+    attachCallThread(db, plan.id, writer!.id);
+    settleCall(db, { id: plan.id, status: "succeeded", result: "Plan", error: null });
+    const build = nextCall(run.id, 1);
+    expect(await managedWorker(host.bb, db, run, build, "Build", fresh)).toEqual(writer);
+    settleCall(db, { id: build.id, status: "succeeded", result: { completed: true }, error: null });
+    const review = nextCall(run.id, 2);
+    const reviewer = await managedWorker(host.bb, db, run, review, "Independent review", fresh);
+    expect(reviewer?.id).not.toBe(writer?.id);
+    expect(fresh).toHaveBeenCalledTimes(2);
+    db.prepare("UPDATE workflow_runs SET status = 'failed' WHERE id = ?").run(run.id);
+    const returned = await handlers.startBuildReview({ ...shared, key: "same-model:2", feedback: "Correct the observed consumer defect" });
+    const next = getRunRequired(db, returned.runId);
+    expect(await managedWorker(host.bb, db, next, nextCall(next.id, 0), "Return feedback", fresh)).toEqual(writer);
+    expect(await managedWorker(host.bb, db, next, nextCall(next.id, 2), "Review returned changes", fresh)).toEqual(reviewer);
+    expect(fresh).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenNthCalledWith(1, expect.objectContaining({ threadId: writer!.id }));
+    expect(send).toHaveBeenNthCalledWith(2, expect.objectContaining({ threadId: writer!.id }));
+    expect(send).toHaveBeenNthCalledWith(3, expect.objectContaining({ threadId: reviewer!.id }));
+  });
+});
+
 
 describe("batch workflow deletion release", () => {
   it("refuses an active later group without releasing any earlier completed context", async () => {
@@ -379,33 +422,6 @@ describe("first-writer profile repair policy", () => {
       }),
     ).rejects.toThrow(/existing writer/);
   });
-  it("does not count another CPA account on the same runtime and model as independent review", async () => {
-    const { db, host } = setup();
-    const handlers = registerBuildReview(
-      host.bb,
-      db,
-      createWorkflowService(host.bb, db),
-    );
-    await expect(
-      handlers.startBuildReview({
-        ...request,
-        key: "account-only:1",
-        group: "account-only",
-        writer: {
-          ...request.writer,
-          model: "bb-cpa/personal/gpt-example",
-        },
-        reviewer: {
-          ...request.reviewer,
-          provider: request.writer.provider,
-          model: "bb-cpa/work/gpt-example",
-        },
-      }),
-    ).rejects.toThrow(/Independent review/);
-    expect(
-      db.prepare("SELECT 1 FROM workflow_build_reviews WHERE group_key = 'account-only'").get(),
-    ).toBeUndefined();
-  });
 });
 
 describe("managed connection admission", () => {
@@ -432,6 +448,7 @@ describe("managed connection admission", () => {
     host.harness.sdk.stub("threads.get", async ({ threadId }: { threadId: string }) =>
       makeThreadResponse({
         id: threadId,
+        projectId: request.projectId,
         providerId: "acp-omp",
         environmentId: "env_fixture",
         status: threadId === request.originThreadId ? "idle" : status,
@@ -766,6 +783,58 @@ describe("retained native build/review workers", () => {
   });
 });
 
+describe("shipped bugfix workflow evidence gates", () => {
+  const reproduction = { summary: "Consumer failure reproduced before editing", command: "reproduce-bug", exitCode: 1, output: "Expected consumer error" };
+  const fixed = {
+    branch: "owned-fix", commit: "a".repeat(40), diff: "Fix the reproduced consumer failure",
+    commands: [
+      { command: "reproduce-bug", exitCode: 0, output: "Consumer request now succeeds" },
+      { command: "consumer-regression", exitCode: 0, output: "Regression succeeds" },
+      { command: "platform smoke", exitCode: 0, output: "Real platform checks observed" },
+    ],
+    regressionCommand: "consumer-regression", uiEvidence: [], limitations: [], nextDecision: "Human review",
+  };
+  async function execute(reproduced = reproduction, build = fixed, previousReproduction: typeof reproduction | null = null) {
+    const agent = vi.fn().mockResolvedValueOnce(reproduced).mockResolvedValueOnce(build).mockResolvedValueOnce({ verdict: "ready", findings: [], summary: "Independent inspection complete" });
+    const result = executeWorkflowScript({
+      body: parseWorkflowSource(buildReviewSource({ ...request, template: "bugfix", uiRequired: false })).body,
+      args: { task: request.task, feedback: "", smokeCommands: request.smokeCommands, uiRequired: false, previousReproduction },
+      capabilities: { agent, phase() {}, log() {} },
+    });
+    return { result, agent };
+  }
+  it("retains failing-before and passing-after evidence in the human-review result", async () => {
+    const { result, agent } = await execute();
+    const parsed = buildReviewResultSchema.parse(await result);
+    expect(JSON.parse(parsed.plan)).toEqual(reproduction);
+    expect(parsed.build.commands).toEqual(fixed.commands);
+    expect(parsed.review.verdict).toBe("ready");
+    expect(agent).toHaveBeenCalledTimes(3);
+  });
+  it("stops before a fix when the bug was not actually reproduced", async () => {
+    const { result, agent } = await execute({ ...reproduction, exitCode: 0 });
+    await expect(result).rejects.toThrow(/failing-before/);
+    expect(agent).toHaveBeenCalledTimes(1);
+  });
+  it.each(["reproduce-bug", "consumer-regression", "platform smoke"])("refuses missing %s evidence before independent review", async missing => {
+    const { result, agent } = await execute(reproduction, { ...fixed, commands: fixed.commands.filter(command => command.command !== missing) });
+    await expect(result).rejects.toThrow(/Missing/);
+    expect(agent).toHaveBeenCalledTimes(2);
+  });
+  it("never publishes a passing review when the original failure still fails", async () => {
+    const { result, agent } = await execute(reproduction, { ...fixed, commands: fixed.commands.map(command => command.command === "reproduce-bug" ? { ...command, exitCode: 1 } : command) });
+    await expect(result).rejects.toThrow(/failed/);
+    expect(agent).toHaveBeenCalledTimes(2);
+  });
+  it("refuses a fabricated replacement of the original failing-before evidence on human Return", async () => {
+    const changed = { ...reproduction, command: "different-bug", output: "Unrelated failure" };
+    const build = { ...fixed, commands: [{ command: changed.command, exitCode: 0, output: "Unrelated check passes" }, ...fixed.commands.slice(1)] };
+    const { result, agent } = await execute(changed, build, reproduction);
+    await expect(result).rejects.toThrow(/original genuine reproduction/);
+    expect(agent).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("managed structured-result native handoff", () => {
   async function setupHandoff() {
     const native: {
@@ -780,6 +849,7 @@ describe("managed structured-result native handoff", () => {
         threads: {
           get: async ({ threadId }) => makeThreadResponse({
             id: threadId,
+            projectId: request.projectId,
             providerId: request.writer.provider,
             environmentId: "env_fixture",
             status: threadId === request.originThreadId ? "idle" : native.status,

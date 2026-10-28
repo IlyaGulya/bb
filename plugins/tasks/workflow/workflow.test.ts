@@ -46,6 +46,7 @@ function setup(explicitBindings = true) {
     title: "Disposable workflow task",
   });
   const request: BuildReviewStart = {
+    template: "development-review",
     key: "twf_fixture:1",
     group: "twf_fixture",
     projectId: "prj_fixture",

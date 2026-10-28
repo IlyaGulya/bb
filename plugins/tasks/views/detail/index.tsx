@@ -505,11 +505,9 @@ function TaskDetail({ task }: { task: Task }) {
             presets={presets.data ?? []}
           />
           <TaskWorkflowPanel
+            key={task.id}
             taskId={task.id}
-            profiles={(presets.data ?? []).map(({ id, name }) => ({
-              id,
-              name,
-            }))}
+            profiles={presets.data ?? []}
           />
 
           <div className="mt-6">

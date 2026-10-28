@@ -130,15 +130,17 @@ and phase/progress record. A child cannot invoke a grandchild.
 Tasks can use this native engine for a bounded implementation workflow without
 writing a separate script or installing another scheduler. Workflows must be
 enabled, and the task's tracker project must link to the BB code project.
-Choose an idle origin thread in that project's ready single-root workspace.
-Start from a clean, committed branch with no other active workspace work.
-Multi-repository support is not a prerequisite for this single-root path.
+Tasks derives the code project from the task. Its responsive **Launch workflow**
+dialog and draft/prepare/preparation/start CLI create an isolated single-root
+worktree and internal contexts through Core's supported preparation-only thread
+creation. No manual origin donor, imported session or initialization model turn
+is required. Preparation remains observable and explicit Start is separate.
+Multi-repository support is not a prerequisite and its manifest cannot be bypassed.
 
-Select two existing, authorized Tasks execution profiles. The reviewer must
-use a different provider/runtime or model from the writer; changing only the
-reasoning level is not independent review. Provider readiness and model
-availability still apply. No account reconnection or credential pooling is
-required by the workflow.
+Select authorized role choices. The reviewer starts in a fresh separate native
+thread/conversation, but may use the **same provider, model and account** as the
+writer. Model diversity is optional. Core readiness, account/context/host
+admission and actual checkout/evidence verification still apply without fallback.
 
 The three sequential native calls are:
 
@@ -146,6 +148,13 @@ The three sequential native calls are:
 2. The **same writer thread/provider session** implements it, commits its owned
    changes, and executes the actual platform smoke commands.
 3. A separate reviewer inspects the change and evidence.
+
+The `bugfix` template replaces the first phase with genuine failing-before
+reproduction and requires both passing-after evidence for that exact command and
+an executed consumer regression before platform smoke/review. On human Return,
+the original durable failing-before evidence is retained rather than fabricating
+a new failure in the already-fixed checkout. Both templates keep the same three
+managed role calls and quiescent transitions; no second orchestration engine exists.
 
 For these managed calls, `bb_workflow_result` acknowledges a validated,
 persisted result without stopping the native turn or waiting for it to finish.
@@ -170,21 +179,23 @@ before successful completion, and again on Accept. The reported branch and
 commit must match the checkout, and the working tree must be clean. A changed
 checkout cannot be accepted as the previously reviewed result.
 
-Use the Tasks card's **Build → review** section or its CLI. The following
-identifiers and smoke command are illustrative; use the real task, profile,
-origin, and platform command:
+Use the Tasks card's **Launch workflow** button or its CLI. Names and platform
+commands below are illustrative:
 
 ```sh
-bb tasks workflow start TASK --key unique-launch-key --origin thr_origin \
-  --writer writer-profile --reviewer reviewer-profile \
-  --smoke '["./scripts/platform-smoke"]' --ui --json
+bb tasks workflow draft set TASK --template development-review \
+  --machine "Execution machine" --writer "Personal OMP Sol" \
+  --reviewer "Personal OMP Sol" --checks '["./scripts/platform-smoke"]' --ui --json
+bb tasks workflow prepare TASK --json
+bb tasks workflow preparation TASK --json
+bb tasks workflow start TASK --json
 bb tasks workflow list TASK --json
 bb tasks workflow return twf_receipt --revision 1 --feedback "Fix the observed layout defect" --json
 bb tasks workflow accept twf_receipt --revision 2 --json
 ```
 
-Reuse the same launch key and identical input when retrying a launch. A durable
-receipt prevents duplicate native runs. Completed result publication is
+Retry Start against the same prepared task. Its server-owned durable receipt
+prevents duplicate native runs. Completed result publication is
 transactional and once per revision: the task becomes `in_review`, not `done`,
 including when the independent reviewer requests changes. Human **Accept**
 must name the exact current revision. Generic task status `done` is not an
@@ -205,10 +216,11 @@ transaction; an active group prevents release of the whole deletion set.
 An unavailable, deleted, archived, or execution-changed established writer
 must be repaired rather than replaced.
 
-Each role's selected Tasks preset carries optional `executionContextId` and
-`modelConnectionId` overrides. Context and billing account are independent;
-another CPA account alone is not another review model. Null preset selectors
-mean no explicit override, and older requests that omit them remain implicit.
+Each role has independent explicit context and model-account selections; the
+context never implicitly chooses the payer. Tasks stores copied role choices
+in a server-side task/owner-scoped revisioned draft. Project/template settings
+are saved or applied only by explicit actions, never as global last presets.
+Older managed requests that omit binding overrides remain implicit on replay.
 The managed request stores IDs only. Native Core spawn/send admission owns
 binding resolution, connection-specific model/readiness validation, and denial
 of missing, disabled, revoked, or incompatible selections without fallback.
@@ -239,7 +251,10 @@ Workflows grants its structured-result tool; other installed plugin and native
 tools retain their existing policies. Reviewer instructions and unchanged
 commit checks are not an OS read-only sandbox.
 
-SDK callers use Tasks RPCs `launchTaskWorkflow`, `taskWorkflows`,
+SDK callers use Tasks RPCs `getTaskWorkflowDraft`, `saveTaskWorkflowDraft`,
+`getProjectWorkflowSettings`, `saveProjectWorkflowSettings`,
+`prepareTaskWorkflow`, `getTaskWorkflowPreparation`, `getTaskWorkflowProject`,
+`launchTaskWorkflow({taskId, preparationId})`, `taskWorkflows`,
 `acceptTaskWorkflow`, and `returnTaskWorkflow` through
 `bb.sdk.plugins.callRpc({ pluginId: "tasks", method, input, outputSchema })`.
 Tasks owns its validated remote protocol schema; forked Tasks installations

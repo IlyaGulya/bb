@@ -2,6 +2,16 @@
 
 ## AgentOS fork — unreleased
 
+- Replace the Tasks inline Build/Review form with the existing responsive BB
+  Dialog, named searchable execution selections and server-persisted per-task
+  drafts. Project/template settings are explicit saves, not global last presets.
+  Prepare one isolated native worktree without a donor thread or initialization
+  model turn, then explicitly Start through the same SDK/RPC/CLI path.
+- Ship development-with-review and genuine-reproduction bugfix templates on the
+  existing managed Workflows engine. Allow the same provider, model and account
+  for both roles: independent review uses a fresh separate native conversation,
+  not a mandatory model-diversity heuristic. Retain writer/reviewer identities
+  through Return, quiescence, Core admission, delivery fencing and human Accept.
 - Extend explicit CPA gateway model connections to native OMP, Claude Code and
   Codex with per-engine protocols, worker-local credential references, allowed
   hosts and exact account-prefixed models. Native sessions remain native;

@@ -503,6 +503,7 @@ async function createPendingThreadAndAttemptFirstDispatch(
       : {}),
     startedOnBehalfOf: args.request.startedOnBehalfOf,
     titleProvided: Boolean(args.request.title),
+    ...(args.request.preparationOnly === undefined ? {} : { preparationOnly: args.request.preparationOnly }),
   };
   const placementHostId = hostIdForEnvironmentIntent(
     deps,

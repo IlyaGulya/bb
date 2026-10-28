@@ -1,4 +1,5 @@
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
+import { z } from "zod";
 import type { Db } from "./data.js";
 import type { WorkflowService } from "./service.js";
 import {
@@ -83,6 +84,27 @@ export function buildReviewSource(input: BuildReviewStart): string {
       title: role === "writer" ? "Task writer" : "Independent task reviewer",
       outputSchema,
     });
+  if (input.template === "bugfix") {
+    const reproductionSchema = { type: "object", additionalProperties: false, required: ["summary", "command", "exitCode", "output"], properties: { summary: string, command: string, exitCode: { type: "integer" }, output: string } };
+    const fixSchema = { ...buildSchema, required: [...buildSchema.required, "regressionCommand"], properties: { ...buildSchema.properties, regressionCommand: string } };
+    return `export const meta = { name: "task-bugfix-review", description: "Real reproduction, retained writer fix and regression, platform smoke, independent review", phases: [{title:"Reproduce"},{title:"Fix, regression and platform smoke"},{title:"Independent review"}] };
+phase("Reproduce");
+const reproduction = await agent((args.previousReproduction ? "This is a human Return in the SAME retained writer session. Preserve the original genuine failing-before command, nonzero exit code and exact output below; do not pretend the already-fixed bug must fail again. Re-plan the requested changes in summary, retaining the original reproduction fields unchanged. Original evidence: " + JSON.stringify(args.previousReproduction) : "Reproduce the reported bug in this owned workspace BEFORE changing implementation. Run the real failing command and record its exact command, nonzero exit code, observed output and concise root-cause/repair plan. Do not claim a reproduction from source inspection alone. If this cannot be reproduced, stop honestly.") + " Task: " + args.task + "\\nHuman feedback: " + args.feedback, ${options("writer", reproductionSchema)});
+if (reproduction.exitCode === 0) throw new Error("Bugfix requires genuine failing-before reproduction evidence");
+if (args.previousReproduction && (reproduction.command !== args.previousReproduction.command || reproduction.exitCode !== args.previousReproduction.exitCode || reproduction.output !== args.previousReproduction.output)) throw new Error("Return must retain the original genuine reproduction evidence");
+const plan = JSON.stringify(reproduction);
+phase("Fix, regression and platform smoke");
+const fixed = await agent("Continue in this SAME retained writer session. Fix the reproduced bug, add a meaningful consumer regression, run that regression and rerun the EXACT failing-before command to prove passing-after, then execute every required platform smoke command. Report regressionCommand as an executed command in commands. Include exact exit codes and observed output. Commit only owned changes; no publishing or acceptance. Task: " + args.task + "\\nReproduction: " + plan + "\\nRequired smoke: " + JSON.stringify(args.smokeCommands) + "\\nUI evidence required: " + args.uiRequired + "\\nHuman feedback: " + args.feedback, ${options("writer", fixSchema)});
+if (fixed.commands.some(c => c.exitCode !== 0)) throw new Error("Fix/regression/platform smoke failed");
+if (!fixed.commands.some(c => c.command === reproduction.command && c.exitCode === 0)) throw new Error("Missing passing-after evidence for the original reproduction");
+if (!fixed.commands.some(c => c.command === fixed.regressionCommand && c.exitCode === 0)) throw new Error("Missing executed consumer regression evidence");
+if (args.smokeCommands.some(command => !fixed.commands.some(c => c.command === command))) throw new Error("Missing required real smoke command evidence");
+if (args.uiRequired && fixed.uiEvidence.length === 0) throw new Error("UI screenshot or preview evidence is required");
+const build = fixed;
+phase("Independent review");
+const review = await agent("Independently inspect the actual fix and consumer regression against the original failing-before and passing-after evidence, actual repository and smoke output. Do not modify files, commit, publish, delegate or accept. Instructions are NOT a read-only security sandbox. Task: " + args.task + "\\nReproduction: " + plan + "\\nBuild: " + JSON.stringify(build), ${options("reviewer", reviewSchema)});
+return { plan, build, review };`;
+  }
   return `export const meta = { name: "task-build-review", description: "Bounded task plan, one retained writer, platform smoke, independent review", phases: [{title:"Plan"},{title:"Build and platform smoke"},{title:"Independent review"}] };
 phase("Plan");
 const plan = await agent("Plan this bounded task. Do not change files yet. Return the concrete plan, real platform smoke commands, and acceptance criteria. Task: " + args.task + "\\nHuman return feedback: " + args.feedback, ${options("writer", string)});
@@ -133,14 +155,6 @@ export function registerBuildReview(
   }
   const handlers: PluginRpcHandlers<typeof buildReviewRpcContract> = {
     async startBuildReview(input) {
-      if (
-        input.writer.provider === input.reviewer.provider &&
-        input.writer.model.replace(/^bb-cpa\/[^/]+\//, "") ===
-          input.reviewer.model.replace(/^bb-cpa\/[^/]+\//, "")
-      )
-        throw new Error(
-          "Independent review requires another allowed runtime/provider or model",
-        );
       const existing = managedRunId(db, input.key);
       if (existing) {
         if (
@@ -170,6 +184,7 @@ export function registerBuildReview(
           previous.projectId !== input.projectId
         )
           throw new Error("Return must retain the same origin and workspace");
+        if (previous.template !== input.template) throw new Error("Return must retain the same workflow template");
         if (
           managedContextStarted(db, input.group) &&
           (JSON.stringify(previous.writer) !== JSON.stringify(input.writer) ||
@@ -182,6 +197,10 @@ export function registerBuildReview(
         if (!input.feedback.trim())
           throw new Error("Return requires explicit human feedback");
       }
+      const priorEvidence = input.template === "bugfix" && group ? db.prepare<[string], { result_json: string }>(
+        "SELECT c.result_json FROM workflow_calls c JOIN workflow_build_reviews r ON r.run_id = c.run_id JOIN workflow_runs w ON w.id = c.run_id WHERE r.group_key = ? AND c.call_index = 0 AND c.status = 'succeeded' AND c.result_json IS NOT NULL ORDER BY w.created_at DESC LIMIT 1",
+      ).get(input.group) : undefined;
+      const previousReproduction = priorEvidence ? z.object({ summary: z.string().min(1), command: z.string().min(1), exitCode: z.number().int().refine(code => code !== 0), output: z.string().min(1) }).strict().parse(JSON.parse(priorEvidence.result_json)) : null;
       await service.start({
         projectId: input.projectId,
         originThreadId: input.originThreadId,
@@ -191,6 +210,7 @@ export function registerBuildReview(
           smokeCommands: input.smokeCommands,
           uiRequired: input.uiRequired,
           feedback: input.feedback,
+          previousReproduction,
         },
         resumedFromRunId: null,
         buildReview: input,

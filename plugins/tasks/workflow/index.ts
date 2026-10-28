@@ -5,22 +5,18 @@ import {
   type BuildReviewStart,
 } from "./remote-contract.js";
 import { publishTasksChanged, type TasksApiStore } from "../api/index.js";
-import {
-  taskExecutionSelection,
-  withTaskExecution,
-  requireIdleTask,
-  environmentThreads,
-} from "../delegate/execution.js";
+import { withTaskExecution } from "../delegate/execution.js";
 import {
   workflowRpcContract,
-  taskWorkflowLaunchSchema,
   type TaskWorkflow,
 } from "../shared/workflow-contract.js";
 import { TaskWorkflowStore, newTaskWorkflowId } from "./store.js";
 import { RepositoryStore } from "../repositories/store.js";
+import { createWorkflowPreparation, requireWorkflowSelection } from "./preparation.js";
+import type { workflowSetupContract } from "../shared/workflow-preparation.js";
 
 export type TaskWorkflowHandlers = PluginRpcHandlers<
-  typeof workflowRpcContract
+  typeof workflowRpcContract & typeof workflowSetupContract
 >;
 export function registerTaskWorkflows(
   bb: BbPluginApi,
@@ -28,6 +24,7 @@ export function registerTaskWorkflows(
   options: { background?: boolean } = {},
 ): TaskWorkflowHandlers {
   const workflows = new TaskWorkflowStore(store);
+  const preparation = createWorkflowPreparation(bb, store);
   const pending = new Map<string, Promise<TaskWorkflow>>();
   function publish(id: string) {
     const view = workflows.get(id);
@@ -114,120 +111,36 @@ export function registerTaskWorkflows(
     pending.set(id, work);
     return work;
   }
-  const handlers: TaskWorkflowHandlers = {
+  const handlers: PluginRpcHandlers<typeof workflowRpcContract> = {
     async launchTaskWorkflow(input) {
       return withTaskExecution(input.taskId, async () => {
         new RepositoryStore(store).assertSingleRootAllowed(input.taskId);
         const existing = store.database
-          .prepare<[string], { id: string; launch_json: string }>(
-            "SELECT id, launch_json FROM task_workflow_runs WHERE launch_key = ?",
-          )
-          .get(input.launchKey);
+          .prepare<[string], { id: string; task_id: string }>("SELECT id, task_id FROM task_workflow_runs WHERE launch_key = ?")
+          .get(input.preparationId);
         if (existing) {
-          if (existing.launch_json !== JSON.stringify(input))
-            throw new Error("Launch key already has different input");
+          if (existing.task_id !== input.taskId) throw new Error("Preparation belongs to another task");
           return reconcile(existing.id);
         }
         const task = store.tasks.getTask(input.taskId);
-        if (!task || ["done", "canceled"].includes(task.status))
-          throw new Error("Choose an open task");
-        const project = store.tasks.getProject(task.projectId);
-        const writer = store.tasks.getPreset(input.writerPresetId);
-        const reviewer = store.tasks.getPreset(input.reviewerPresetId);
-        if (!writer || !reviewer)
-          throw new Error("Choose two existing allowed execution profiles");
-        if (
-          writer.providerId === reviewer.providerId &&
-          writer.modelId.replace(/^bb-cpa\/[^/]+\//, "") ===
-            reviewer.modelId.replace(/^bb-cpa\/[^/]+\//, "")
-        )
-          throw new Error(
-            "Independent review requires another runtime/provider or model",
-          );
-        const origin = await bb.sdk.threads.get({
-          threadId: input.originThreadId,
-        });
-        if (
-          origin.archivedAt != null ||
-          origin.deletedAt != null ||
-          origin.status !== "idle" ||
-          !origin.environmentId
-        )
-          throw new Error(
-            "Choose an idle live origin thread with a prepared single-root workspace",
-          );
-        const environment = await bb.sdk.environments.get({
-          environmentId: origin.environmentId,
-        });
-        if (
-          !project?.linkedBbProjectId ||
-          environment.projectId !== project.linkedBbProjectId
-        )
-          throw new Error(
-            "Origin workspace must belong to the task's linked BB code project",
-          );
-        if (
-          environment.status !== "ready" ||
-          environment.lifecycle.phase !== "active" ||
-          environment.hostLifecycle !== "active"
-        )
-          throw new Error("Origin workspace is not ready");
-        await requireIdleTask(bb, store.tasks, task.id);
-        if (
-          (await environmentThreads(bb, environment.id)).some(
-            (thread) => !["idle", "error"].includes(thread.status),
-          )
-        )
-          throw new Error(
-            "Workspace already has active work; one-writer workflow requires an idle workspace",
-          );
-        const baseline = await bb.sdk.environments.status({
-          environmentId: environment.id,
-        });
-        if (
-          baseline.outcome !== "available" ||
-          baseline.workspace.workingTree.hasUncommittedChanges ||
-          baseline.workspace.checkout.kind !== "branch"
-        )
-          throw new Error(
-            "Start from a clean committed branch so unrelated source changes are preserved",
-          );
+        if (!task || ["done", "canceled"].includes(task.status)) throw new Error("Choose an open task");
+        const view = preparation.persistence.preparation(input.taskId);
+        if (!view || view.id !== input.preparationId) throw new Error("Prepare this task's workspace first");
+        const draft = preparation.persistence.draft(input.taskId);
+        if (JSON.stringify(draft.selection) !== JSON.stringify(view.selection)) throw new Error("Draft differs from prepared choices; restore the prepared choices before Start");
+        const ready = await preparation.advance(input.taskId);
+        if (ready.state !== "ready" || !ready.threadId || !ready.environmentId) throw new Error(ready.error ?? ready.progress);
+        await preparation.validate(input.taskId, ready.selection, ready.environmentId);
+        const roles = requireWorkflowSelection(ready.selection);
         const id = newTaskWorkflowId();
         const request: BuildReviewStart = {
-          key: `${id}:1`,
-          group: id,
-          projectId: environment.projectId,
-          originThreadId: origin.id,
+          key: `${id}:1`, group: id, projectId: ready.projectId, originThreadId: ready.threadId,
           task: `${task.key}: ${task.title}\n\n${task.description}`,
-          writer: {
-            provider: writer.providerId,
-            model: writer.modelId,
-            ...taskExecutionSelection(writer),
-            reasoningLevel: writer.reasoningLevel,
-            permissionMode: writer.permissionMode,
-            serviceTier: writer.serviceTier,
-            instructions: writer.instructions,
-          },
-          reviewer: {
-            provider: reviewer.providerId,
-            model: reviewer.modelId,
-            ...taskExecutionSelection(reviewer),
-            reasoningLevel: reviewer.reasoningLevel,
-            permissionMode: reviewer.permissionMode,
-            serviceTier: reviewer.serviceTier,
-            instructions: reviewer.instructions,
-          },
-          smokeCommands: input.smokeCommands,
-          uiRequired: input.uiRequired,
-          feedback: "",
+          template: ready.selection.template, writer: roles.writer, reviewer: roles.reviewer,
+          smokeCommands: ready.selection.smokeCommands, uiRequired: ready.selection.uiRequired, feedback: "",
         };
         store.transaction(() => {
-          workflows.create(
-            input.launchKey,
-            task.id,
-            request,
-            JSON.stringify(input),
-          );
+          workflows.create(input.preparationId, task.id, request, JSON.stringify(input));
           store.tasks.updateTask(task.id, { status: "in_progress" });
         });
         return reconcile(id);
@@ -286,49 +199,12 @@ export function registerTaskWorkflows(
           latest.state === "failed" &&
           latest.native?.contextStarted === false
         ) {
-          const row = store.database
-            .prepare<[string], { launch_json: string }>(
-              "SELECT launch_json FROM task_workflow_runs WHERE id = ?",
-            )
-            .get(id);
-          if (!row) throw new Error("Unknown task workflow");
-          const launch = taskWorkflowLaunchSchema.parse(
-            JSON.parse(row.launch_json),
-          );
-          const writer = store.tasks.getPreset(launch.writerPresetId);
-          const reviewer = store.tasks.getPreset(launch.reviewerPresetId);
-          if (!writer || !reviewer)
-            throw new Error(
-              "Restore the selected execution profiles before retrying the first writer launch",
-            );
-          if (
-            writer.providerId === reviewer.providerId &&
-            writer.modelId.replace(/^bb-cpa\/[^/]+\//, "") ===
-              reviewer.modelId.replace(/^bb-cpa\/[^/]+\//, "")
-          )
-            throw new Error(
-              "Independent review requires another runtime/provider or model",
-            );
-          retryProfiles = {
-            writer: {
-              provider: writer.providerId,
-              model: writer.modelId,
-              ...taskExecutionSelection(writer),
-              reasoningLevel: writer.reasoningLevel,
-              permissionMode: writer.permissionMode,
-              serviceTier: writer.serviceTier,
-              instructions: writer.instructions,
-            },
-            reviewer: {
-              provider: reviewer.providerId,
-              model: reviewer.modelId,
-              ...taskExecutionSelection(reviewer),
-              reasoningLevel: reviewer.reasoningLevel,
-              permissionMode: reviewer.permissionMode,
-              serviceTier: reviewer.serviceTier,
-              instructions: reviewer.instructions,
-            },
-          };
+          const draft = preparation.persistence.draft(current.taskId);
+          const origin = await bb.sdk.threads.get({ threadId: workflows.request(id).originThreadId });
+          if (!origin.environmentId) throw new Error("Prepared workspace is unavailable");
+          await preparation.validate(current.taskId, draft.selection, origin.environmentId);
+          const roles = requireWorkflowSelection(draft.selection);
+          retryProfiles = { writer: roles.writer, reviewer: roles.reviewer };
         }
         workflows.return(id, revision, feedback, retryProfiles);
         publish(id);
@@ -358,7 +234,7 @@ export function registerTaskWorkflows(
         }
       },
     });
-  return handlers;
+  return { ...preparation.handlers, ...handlers };
 }
 
 export function assertTaskWorkflowStatusTransition(

@@ -21,6 +21,7 @@ export const buildReviewStartSchema = z
     projectId: text,
     originThreadId: text,
     task: text,
+    template: z.enum(["development-review", "bugfix"]).default("development-review"),
     writer: profile,
     reviewer: profile,
     smokeCommands: z.array(text).min(1).max(30),
@@ -43,6 +44,7 @@ export const buildReviewInspectionSchema = z.object({
         branch: text,
         commit: z.string().regex(/^[a-f0-9]{40,64}$/),
         diff: text,
+        regressionCommand: text.optional(),
         commands: z
           .array(
             z.object({

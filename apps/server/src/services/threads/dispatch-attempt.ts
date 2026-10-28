@@ -98,6 +98,7 @@ export const pendingThreadStartContextSchema = z.object({
   providerInput: z.array(promptInputSchema).optional(),
   startedOnBehalfOf: startedOnBehalfOfSchema.nullable(),
   titleProvided: z.boolean(),
+  preparationOnly: z.boolean().optional(),
 });
 export type PendingThreadStartContext = z.infer<
   typeof pendingThreadStartContextSchema
@@ -791,6 +792,7 @@ async function admitPendingThread(
             : { providerInput: startContext.providerInput }),
           startedOnBehalfOf: startContext.startedOnBehalfOf,
           titleProvided: startContext.titleProvided,
+          preparationOnly: startContext.preparationOnly,
         });
         return starting;
       },

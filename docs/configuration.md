@@ -1231,15 +1231,28 @@ The builtin Workflows plugin is disabled on fresh installations
 The settings other than `maxActiveRuns` are snapshotted into each new run. See
 the `workflows` skill.
 
-Tasks exposes a bounded **Build → review** workflow using these native settings,
-not a second scheduler. Select an idle prepared origin workspace and two
-existing execution profiles with different providers or models. A single
-retained writer plans, implements and runs the required platform smoke; the
-independent reviewer inspects the same committed checkout. Result publication
-sets In Review, not Done. Explicit exact-revision Accept rechecks the commit
-and clean tree; Return continues the same writer/session. Provider permission
-modes are not an OS read-only sandbox. See the Tasks and Workflows skills for
-matching RPC and CLI operations.
+Tasks exposes exactly two native templates, **development-review** and **bugfix**,
+through its responsive Launch workflow dialog, SDK/RPC and `bb tasks workflow`.
+Drafts are server-persisted per task within the existing authenticated BB owner
+scope with revision checks. `workflow settings save` explicitly saves choices
+for that tracker project and template; applying them to another existing draft
+is also explicit. Neither task edits nor Start save global presets or defaults.
+Required platform smoke commands must be configured; there are no fabricated
+passing checks. Logical context and model account are independent explicit picks.
+
+Core prepares an isolated single-root git worktree and native internal contexts
+without a donor origin or model initialization turn. Preparation is observable,
+reuses its durable reservation after interruption, and never starts implementation.
+Explicit Start revalidates readiness and uses the same server-owned receipt.
+Both roles may select the same provider/model/account. Independence is a separate
+fresh native reviewer conversation, role-specific review-only instructions and
+inspection of the actual committed change/evidence, not mandatory model diversity.
+The writer is retained across Plan/Build/Return; the reviewer retains its own
+role identity. Uncertain delivery never creates a replacement writer.
+Publication sets In Review, not Done. Human exact-revision Accept rechecks the
+clean reviewed checkout; neither review nor acceptance merges or deploys.
+Provider permission modes are not an OS read-only sandbox. See the Tasks and
+Workflows skills for the matching draft, preparation and human-decision commands.
 
 ### Tasks repository workspace
 

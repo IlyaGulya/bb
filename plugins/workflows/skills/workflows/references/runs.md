@@ -145,13 +145,14 @@ but owns a durable task receipt and human review transitions. Inspect with
 Accept/Return. The task card links the retained writer and reviewer.
 
 The plan and implementation/smoke calls use one writer thread/provider session.
-The reviewer uses a different allowed provider/runtime or model. Real platform
-smoke is mandatory, with command/output/exit-code evidence and screenshot or
+The reviewer starts in a separate fresh native thread/conversation; the same
+provider, model and account are allowed for both roles. Real platform smoke is
+mandatory, with command/output/exit-code evidence and screenshot or
 preview evidence when UI is required. Authoritative branch, commit, and
 clean-tree checks must pass before the result becomes `in_review`.
 
-Launch retries reuse an identical launch key/input. Completion publication is
-once per revision and does not send an origin-agent completion turn. Only an
+Launch retries use the same prepared-task receipt and server-owned launch key.
+Completion publication is once per revision and does not send an origin-agent completion turn. Only an
 explicit human Accept of the exact current revision moves the task to `done`;
 Accept rechecks checkout identity. A reviewer verdict alone is not acceptance.
 

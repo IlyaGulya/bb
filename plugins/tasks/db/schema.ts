@@ -1,6 +1,7 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { repositoryMigrations } from "../repositories/store.js";
 import { taskWorkflowMigration } from "../workflow/store.js";
+import { workflowPreparationMigration } from "../workflow/preparation-store.js";
 
 type PluginDatabase = ReturnType<BbPluginApi["storage"]["database"]>;
 
@@ -373,6 +374,7 @@ const MIGRATIONS = [
     ALTER TABLE presets ADD COLUMN execution_context_id TEXT;
     ALTER TABLE presets ADD COLUMN model_connection_id TEXT;
   `,
+  workflowPreparationMigration,
 ] as const;
 
 export function initializeTasksSchema(db: PluginDatabase): void {

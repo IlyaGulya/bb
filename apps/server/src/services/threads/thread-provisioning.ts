@@ -64,6 +64,7 @@ interface RequestThreadProvisionArgs {
   startedOnBehalfOf: StartedOnBehalfOf | null;
   thread: Thread;
   titleProvided: boolean;
+  preparationOnly?: boolean;
 }
 
 interface RequestThreadTargetReprovisionArgs {
@@ -292,6 +293,16 @@ export function requestThreadProvision(
   args: RequestThreadProvisionArgs,
 ): ThreadProvisionContext {
   return deps.db.transaction(() => {
+    if (args.preparationOnly === true) {
+      const context = createThreadStartup({
+        ...args,
+        clientRequestId: createClientTurnRequestId(),
+        input: [],
+        seedWithoutRun: true,
+      });
+      saveThreadProvisionContext({ replace: true, db: deps.db, threadId: args.thread.id, context });
+      return context;
+    }
     const { initiator, senderThreadId } = resolveDispatchAuthor({
       retrying: false,
       senderThreadId: null,

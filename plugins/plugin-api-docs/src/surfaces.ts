@@ -1269,10 +1269,12 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Start plugin updates in the background and follow their progress or rollback",
           "Select independent execution contexts and native or gateway model-account references when creating a thread, and inspect its frozen binding",
           "Inspect named MCP configuration on the execution worker without returning native descriptors or credentials; validity is not authentication readiness",
+          "Prepare a real titled execution context with threads.spawn({ preparationOnly: true, input: [] }) through normal Core binding/admission and environment provisioning, without an origin donor, imported conversation or model turn; later workflow Start is explicit",
         ],
         apiSymbols: [
           "BbPluginApi",
           "PluginServerApi",
+          "PluginBbSdk.threads.spawn",
           "PluginBbSdk.hosts.get",
           "PluginBbSdk.hosts.experimental_discoverRepos",
           "PluginBbSdk.experimental_promptHistory.list",

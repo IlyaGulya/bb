@@ -24,11 +24,15 @@ The plugin is off by default. Commands must run inside a bb project thread.
 
 ## Task build → review
 
-With Tasks and Workflows enabled, choose an idle origin in the task's linked,
-clean single-root project workspace and two existing authorized profiles. The
-reviewer must differ by provider/runtime or model, not merely reasoning level.
-The bounded sequence is plan → **same writer** implementation and actual
-platform smoke → independent review → `in_review`.
+With Tasks and Workflows enabled, use the task's **Launch workflow** dialog or
+`bb tasks workflow draft/prepare/preparation/start` commands. Core prepares an
+isolated single-root workspace without a donor thread or initialization model
+turn. Start remains explicit. Exactly two templates ship: development with
+review and bugfix with genuine failing-before/passing-after regression evidence.
+The same retained writer builds and runs actual platform smoke, then a fresh
+reviewer conversation inspects the committed change before `in_review`.
+Both roles may use the same provider, model and account; model diversity is
+optional, not the definition of independence.
 
 The task card and `bb tasks workflow start/list/return/accept` expose the same
 workflow. The package includes branch, commit, diff summary, command results,

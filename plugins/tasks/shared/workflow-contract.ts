@@ -6,12 +6,7 @@ const id = z.string().min(1).max(200);
 export const taskWorkflowLaunchSchema = z
   .object({
     taskId: id,
-    launchKey: id,
-    originThreadId: id,
-    writerPresetId: id,
-    reviewerPresetId: id,
-    smokeCommands: z.array(z.string().trim().min(1).max(4000)).min(1).max(30),
-    uiRequired: z.boolean(),
+    preparationId: id,
   })
   .strict();
 export const taskWorkflowSchema = z.object({

@@ -736,6 +736,13 @@ export function registerTasksCli(
                 "workflow",
                 "Build, independently review, then explicitly accept or return",
                 [
+                  ["draft show", "Read the durable task workflow draft"],
+                  ["draft set", "Save named task-scoped workflow choices"],
+                  ["settings show", "Read project/template settings"],
+                  ["settings save", "Explicitly save project/template settings"],
+                  ["settings apply", "Copy project/template settings into this task"],
+                  ["prepare", "Prepare an isolated native workspace without a model turn"],
+                  ["preparation", "Observe and reconcile preparation"],
                   ["start", "Launch a bounded build and review workflow"],
                   ["list", "Inspect revisions, evidence and native workers"],
                   ["accept", "Accept the exact reviewed revision"],
@@ -746,6 +753,8 @@ export function registerTasksCli(
                 workflows,
                 (address) => resolveTask(domain, address),
                 guard,
+                bb,
+                store,
               ),
             }
           : {}),

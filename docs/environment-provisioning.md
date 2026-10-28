@@ -27,6 +27,24 @@ is consumed when provisioning is admitted. Once agent start has been handed to
 the daemon, recovery never resends an uncertain start automatically; use the
 normal interruption and retry behavior.
 
+For preparation without a model turn, the existing Core thread-create route and
+`BbSdk.threads.spawn` accept `preparationOnly: true` with `input: []`, an explicit
+title and a provider-selected or reused environment. Source/fork/parent seeds,
+scheduled messages and nonempty input are refused. This creates a real native
+preparation context, performs the same Core execution-binding and dispatch
+admission, provisions through the normal environment engine, and settles idle
+without a client turn request or `thread.start`. A provided title also prevents
+metadata-inference model work. No provider session or conversation is imported.
+The field is server-side only; no daemon wire field or permission policy changes.
+
+Tasks uses this operation for observable, receipt-fenced single-root workflow
+preparation and independent role admission. Its task/owner-scoped draft survives
+client close/reload; project/template settings are explicit saves. Start is a
+separate action and reuses the same owned workspace. An uncertain preparation
+response is reconciled from native ownership metadata, never by creating a
+second worktree. Human Accept/Return remain separate from preparation and Start.
+
+
 ## Project preparation and transfer API
 
 The core SDK exposes these methods under `BbSdk.projects`. Each input also

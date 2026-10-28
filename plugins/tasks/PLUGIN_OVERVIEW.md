@@ -9,6 +9,7 @@ Turn a plan into tracked tasks, hand each task to an agent, and see the worker's
 - Live thread cards on each task and a **Task** panel action inside a thread.
 - **Inbox** with independent manual incoming, New / Needs input / Review, source/context links, create-once or link-existing task actions, snooze/return, and retained decisions.
 - **Working** separates current native agent activity from human attention. Questions open the original interactive thread; idle is not acceptance.
+- **Launch workflow** opens the native responsive BB dialog with named searchable role/account/model choices and a server-saved task draft. Explicitly prepare an isolated workspace without a donor thread or initialization model turn, then Start development-with-review or bugfix. The fresh reviewer may use the same model/account; human Accept remains separate.
 
 ## How it works
 

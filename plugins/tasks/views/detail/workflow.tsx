@@ -1,288 +1,148 @@
 import { useEffect, useRef, useState } from "react";
 import { useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
-import type {
-  TaskWorkflow,
-  TaskWorkflowRpcContract,
-} from "../../shared/workflow-contract.js";
+import type { Preset } from "../../shared/contract.js";
+import type { TaskWorkflow, TaskWorkflowRpcContract } from "../../shared/workflow-contract.js";
+import { WORKFLOW_TEMPLATES, type WorkflowPreparation, type WorkflowSelection, type WorkflowSetupContract } from "../../shared/workflow-preparation.js";
+import { useTasksQuery } from "../../shell/data.js";
+import { useExecutionSelections } from "../execution-selection.js";
+import { useWorkflowDraft } from "./workflow-draft.js";
+import { WorkflowPicker, WorkflowRoleFields } from "./workflow-fields.js";
+import { Dialog, DialogTrigger, DialogClose, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
 
-export function TaskWorkflowPanel({
-  taskId,
-  profiles,
-  originThreadId = "",
-}: {
-  taskId: string;
-  profiles: Array<{ id: string; name: string }>;
-  originThreadId?: string;
-}) {
+export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profiles: Preset[] }) {
   const rpc = useRpc<TaskWorkflowRpcContract>();
+  const setup = useRpc<WorkflowSetupContract>();
   const navigate = useBbNavigate();
+  const draft = useWorkflowDraft(taskId);
+  const [open, setOpen] = useState(false);
   const [runs, setRuns] = useState<TaskWorkflow[]>([]);
-  const [origin, setOrigin] = useState(originThreadId);
-  const [writer, setWriter] = useState("");
-  const [reviewer, setReviewer] = useState("");
-  const [smoke, setSmoke] = useState("");
-  const [uiRequired, setUiRequired] = useState(false);
-  const [feedback, setFeedback] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [preparation, setPreparation] = useState<WorkflowPreparation | null>(null);
   const [busy, setBusy] = useState(false);
-  const launch = useRef<string | null>(null);
-  const locked = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState("");
+  const [settings, setSettings] = useState<{ revision: number; selection: WorkflowSelection | null } | null>(null);
+  const [checksText, setChecksText] = useState<string | null>(null);
+  const lock = useRef(false);
+  const selections = useExecutionSelections(open);
+  const machines = useTasksQuery(async query => (await query.call("listMachines", {})).machines, [], []);
+  const project = useTasksQuery(async () => setup.call("getTaskWorkflowProject", { taskId }), ["projects:changed"], [taskId]);
+  const selection = draft.draft?.selection;
+  const active = runs.some(run => run.state !== "accepted");
+  const ready = preparation?.state === "ready" && JSON.stringify(selection) === JSON.stringify(preparation.selection);
+  const template = WORKFLOW_TEMPLATES.find(entry => entry.id === selection?.template);
+
   useEffect(() => {
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const refresh = async () => {
+    async function refresh() {
       try {
-        const result = await rpc.call("taskWorkflows", { taskId });
-        if (!disposed) {
-          setRuns(result.runs);
-          setError(null);
-        }
+        const [result, prepared] = await Promise.all([rpc.call("taskWorkflows", { taskId }), setup.call("getTaskWorkflowPreparation", { taskId })]);
+        if (!disposed) { setRuns(result.runs); setPreparation(prepared); setConnectionError(null); }
       } catch (cause) {
-        if (!disposed)
-          setError(cause instanceof Error ? cause.message : String(cause));
+        if (!disposed) setConnectionError(cause instanceof Error ? cause.message : String(cause));
       }
-      if (!disposed) timer = setTimeout(refresh, 5000);
-    };
-    launch.current = null;
-    setRuns([]);
-    void refresh();
-    return () => {
-      disposed = true;
-      clearTimeout(timer);
-    };
-  }, [rpc, taskId]);
-  async function act(action: () => Promise<unknown>) {
-    if (locked.current) return;
-    locked.current = true;
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-      setRuns((await rpc.call("taskWorkflows", { taskId })).runs);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      locked.current = false;
-      setBusy(false);
+      if (!disposed) timer = setTimeout(refresh, 3000);
     }
+    void refresh();
+    return () => { disposed = true; clearTimeout(timer); };
+  }, [rpc, setup, taskId]);
+  useEffect(() => {
+    if (!selection) return;
+    let disposed = false;
+    setSettings(null);
+    void setup.call("getProjectWorkflowSettings", { taskId, template: selection.template }).then(value => { if (!disposed) setSettings(value); }).catch(cause => { if (!disposed) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { disposed = true; };
+  }, [setup, taskId, selection?.template]);
+
+  async function act(action: () => Promise<void>) {
+    if (lock.current) return;
+    lock.current = true; setBusy(true); setError(null);
+    try { await action(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { lock.current = false; setBusy(false); }
   }
-  const field =
-    "w-full rounded-md border border-input bg-background p-2 text-sm";
-  const active = runs.some((run) => run.state !== "accepted");
-  return (
-    <section className="space-y-3 rounded-lg border border-border p-4">
-      <h3 className="font-medium">Build → review</h3>
-      <p className="text-sm text-muted-foreground">
-        One retained writer plans, builds and executes platform smoke. Another
-        allowed runtime/model reviews independently. Human acceptance is
-        separate. Provider permission modes are not a read-only sandbox.
-      </p>
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
-      {!active && (
-        <div className="space-y-2">
-          <label className="block text-sm">
-            Idle origin thread in the linked project workspace
-            <input
-              className={field}
-              value={origin}
-              onChange={(event) => {
-                setOrigin(event.target.value);
-                launch.current = null;
-              }}
-            />
-          </label>
-          <label className="block text-sm">
-            Writer profile
-            <select
-              className={field}
-              value={writer}
-              onChange={(event) => {
-                setWriter(event.target.value);
-                launch.current = null;
-              }}
-            >
-              <option value="">Select allowed profile</option>
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm">
-            Independent reviewer profile
-            <select
-              className={field}
-              value={reviewer}
-              onChange={(event) => {
-                setReviewer(event.target.value);
-                launch.current = null;
-              }}
-            >
-              <option value="">Select another runtime/model</option>
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm">
-            Actual platform smoke commands (one per line)
-            <textarea
-              className={field}
-              value={smoke}
-              onChange={(event) => {
-                setSmoke(event.target.value);
-                launch.current = null;
-              }}
-            />
-          </label>
-          <label className="flex gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={uiRequired}
-              onChange={(event) => {
-                setUiRequired(event.target.checked);
-                launch.current = null;
-              }}
-            />
-            UI task: require screenshot or preview evidence
-          </label>
-          <Button
-            disabled={busy || !origin || !writer || !reviewer || !smoke.trim()}
-            onClick={() =>
-              void act(() => {
-                launch.current ??= crypto.randomUUID();
-                return rpc.call("launchTaskWorkflow", {
-                  taskId,
-                  launchKey: launch.current,
-                  originThreadId: origin,
-                  writerPresetId: writer,
-                  reviewerPresetId: reviewer,
-                  smokeCommands: smoke
-                    .split("\n")
-                    .map((command) => command.trim())
-                    .filter(Boolean),
-                  uiRequired,
-                });
-              })
-            }
-          >
-            Start bounded workflow
-          </Button>
-        </div>
-      )}
-      {runs.map((run) => (
-        <article key={run.id} className="space-y-2 border-t border-border pt-3">
-          <p className="text-sm">
-            Revision {run.revision} · {run.state}{" "}
-            {run.native?.phase && `· ${run.native.phase}`}
-          </p>
-          {run.error && (
-            <p role="alert" className="text-sm text-destructive">
-              {run.error}
-            </p>
-          )}
-          {run.state === "launching" && run.error && (
-            <Button
-              variant="outline"
-              disabled={busy}
-              onClick={() =>
-                void act(() => rpc.call("taskWorkflows", { taskId }))
-              }
-            >
-              Retry same launch
-            </Button>
-          )}
-          {run.state === "failed" && run.native?.contextStarted === false && (
-            <p className="text-sm text-muted-foreground">
-              No writer session was created. Repair the selected execution
-              profiles, then return this run to retry its first writer launch.
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {run.native?.workers.map((worker) => (
-              <Button
-                key={worker.threadId}
-                variant="outline"
-                size="sm"
-                onClick={() => navigate.toThread(worker.threadId)}
-              >
-                Inspect {worker.role}
-              </Button>
-            ))}
+  function change(patch: Partial<WorkflowSelection>) { if (selection) draft.change({ ...selection, ...patch }); }
+  const errors = [error, connectionError, draft.error, machines.error, project.error, selections.contexts.error, selections.connections.error].filter((value): value is string => !!value);
+  const preparationError = preparation?.error ?? null;
+  const frozen = active || busy;
+  const repairingFirstLaunch = runs.some(run => run.state === "failed" && run.native?.contextStarted === false);
+  const roleFrozen = busy || active && !repairingFirstLaunch;
+  return <section className="space-y-3">
+    <Dialog open={open} onOpenChange={next => { setOpen(next); if (!next) void draft.flush(); }}>
+      <DialogTrigger asChild><Button variant="outline">{active ? "Workflow details" : "Launch workflow"}</Button></DialogTrigger>
+      {draft.error && !open && <p role="alert" className="text-sm text-destructive">Draft not saved. Reopen workflow to retry; your choices are still held in this window.</p>}
+      {connectionError && !open && <p role="alert" className="text-sm text-destructive">Workflow connection lost. Last observed state is retained.</p>}
+      {preparation && !active && <p role="status" className="text-sm text-muted-foreground">{preparation.error ?? preparation.progress}</p>}
+      <DialogContent className="max-h-[90dvh] max-w-2xl overflow-y-auto" compactContentClassName="max-w-full">
+        <DialogHeader><DialogTitle>Launch workflow</DialogTitle><DialogDescription>Choose the roles, prepare a private workspace, then start explicitly. Closing never starts or cancels an agent.</DialogDescription></DialogHeader>
+        {!selection ? <div className="space-y-3" aria-label="Loading saved workflow draft"><Skeleton className="h-10 w-full" /><Skeleton className="h-40 w-full" /></div> : <div className="min-w-0 space-y-4">
+          <p className="text-sm text-muted-foreground">Code project: {project.data?.name ?? "Link this task's tracker project to a code project first"}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="min-w-0 space-y-1 text-sm"><span>Workflow</span><WorkflowPicker label="Workflow template" value={selection.template} options={WORKFLOW_TEMPLATES.map(entry => ({ value: entry.id, label: entry.name }))} dialogOpen={open} disabled={frozen} onChange={value => { const next = WORKFLOW_TEMPLATES.find(entry => entry.id === value); if (next) { change({ template: next.id }); setChecksText(null); } }} /></label>
+            <label className="min-w-0 space-y-1 text-sm"><span>Execution machine</span><WorkflowPicker label="Execution machine" value={selection.hostId} options={(machines.data ?? []).map(machine => ({ value: machine.id, label: machine.name }))} dialogOpen={open} disabled={frozen} onChange={hostId => change({ hostId })} /></label>
+            {(error ?? preparationError)?.toLowerCase().startsWith("machine:") && <p role="alert" className="text-sm text-destructive">{error ?? preparationError}</p>}
           </div>
-          {run.native?.result && (
-            <>
-              <p className="text-sm">
-                Independent review: {run.native.result.review.verdict} ·{" "}
-                {run.native.result.review.summary}
-              </p>
-              <details open>
-                <summary className="text-sm">Result package</summary>
-                <pre className="overflow-auto whitespace-pre-wrap break-words text-xs">
-                  {JSON.stringify(run.native.result, null, 2)}
-                </pre>
-              </details>
-            </>
-          )}
-          {run.native?.policyLimitations.map((limit) => (
-            <p key={limit} className="text-xs text-muted-foreground">
-              {limit}
-            </p>
-          ))}
-          {run.state === "in_review" && (
-            <Button
-              disabled={busy}
-              onClick={() =>
-                void act(() =>
-                  rpc.call("acceptTaskWorkflow", {
-                    id: run.id,
-                    revision: run.revision,
-                  }),
-                )
-              }
-            >
-              Accept result
-            </Button>
-          )}
-          {["in_review", "failed"].includes(run.state) && (
-            <div className="space-y-2">
-              <label className="block text-sm">
-                Return feedback
-                <textarea
-                  className={field}
-                  value={feedback}
-                  onChange={(event) => setFeedback(event.target.value)}
-                />
-              </label>
-              <Button
-                variant="outline"
-                disabled={busy || !feedback.trim()}
-                onClick={() =>
-                  void act(() =>
-                    rpc.call("returnTaskWorkflow", {
-                      id: run.id,
-                      revision: run.revision,
-                      feedback,
-                    }),
-                  )
-                }
-              >
-                {run.native?.contextStarted === false
-                  ? "Retry first writer with feedback"
-                  : "Return to same writer"}
-              </Button>
+          <p className="text-sm text-muted-foreground">{template?.description}</p>
+          <p className="text-xs text-muted-foreground">The reviewer starts in a fresh separate conversation. The same provider, model version and account are allowed for both roles.</p>
+          {repairingFirstLaunch && <p className="text-sm text-muted-foreground">No writer session was created. You can explicitly repair the role choices here, save the draft, then Return with feedback to retry. Existing or uncertain sessions are never replaced.</p>}
+          <WorkflowRoleFields label="Writer" role={selection.writer} onChange={writer => change({ writer })} profiles={profiles} contexts={selections.contexts.data ?? []} connections={selections.connections.data ?? []} hostId={selection.hostId} projectId={project.data?.id ?? null} open={open} disabled={roleFrozen} error={(error ?? preparationError)?.toLowerCase().startsWith("writer:") ? error ?? preparationError ?? undefined : undefined} />
+          <WorkflowRoleFields label="Independent reviewer" role={selection.reviewer} onChange={reviewer => change({ reviewer })} profiles={profiles} contexts={selections.contexts.data ?? []} connections={selections.connections.data ?? []} hostId={selection.hostId} projectId={project.data?.id ?? null} open={open} disabled={roleFrozen} error={(error ?? preparationError)?.toLowerCase().startsWith("reviewer:") ? error ?? preparationError ?? undefined : undefined} />
+          <details open={selection.smokeCommands.length === 0 ? true : undefined} className="border-t border-border pt-3">
+            <summary className="cursor-pointer text-sm font-medium">{selection.smokeCommands.length ? `Project checks · ${selection.smokeCommands.length} configured` : "First-use setup · configure real project checks"}</summary>
+            <div className="mt-3 space-y-3">
+              <p className="text-sm text-muted-foreground">Checks come from this project and template. Nothing has passed until the native writer executes them. Saving project settings is always explicit.</p>
+              {settings?.selection && <Button type="button" variant="outline" size="sm" disabled={frozen} onClick={() => { draft.change(settings.selection!); setChecksText(null); }}>Use saved project settings</Button>}
+              <label className="block space-y-1 text-sm"><span>Required platform smoke commands · one per line</span><Textarea disabled={frozen} value={checksText ?? selection.smokeCommands.join("\n")} onChange={event => { setChecksText(event.target.value); change({ smokeCommands: event.target.value.split("\n").map(command => command.trim()).filter(Boolean) }); }} rows={4} /></label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={frozen} checked={selection.uiRequired} onChange={event => change({ uiRequired: event.target.checked })} />Require real UI screenshot or preview evidence</label>
+              <Button type="button" variant="outline" size="sm" disabled={frozen || !settings || !!draft.error || draft.saving} onClick={() => void act(async () => {
+                if (!await draft.flush() || !settings) return;
+                const saved = await setup.call("saveProjectWorkflowSettings", { taskId, revision: settings.revision, selection });
+                setSettings(saved);
+              })}>Save as this project's template settings</Button>
             </div>
-          )}
-        </article>
-      ))}
-    </section>
-  );
+          </details>
+          {preparation && <div className="space-y-1 border-t border-border pt-3 text-sm" aria-live="polite">
+            <p>{preparation.progress}</p>
+            {preparationError && <p role="alert" className="text-destructive">{preparationError}</p>}
+            {preparation.workspacePath && <p className="break-all text-muted-foreground">Workspace: {preparation.workspacePath}</p>}
+            {preparation.head && <p className="text-muted-foreground">Source revision verified by the workspace status.</p>}
+            {!ready && JSON.stringify(selection) !== JSON.stringify(preparation.selection) && <Button variant="ghost" size="sm" disabled={frozen} onClick={() => { draft.change(preparation.selection); setChecksText(null); }}>Restore prepared choices</Button>}
+            <Button variant="ghost" size="sm" onClick={() => void act(async () => { await navigator.clipboard.writeText(JSON.stringify({ preparation, selection }, null, 2)); })}>Copy execution diagnostics</Button>
+          </div>}
+        </div>}
+        {errors.length > 0 && <div className="space-y-2" role="alert">{errors.map((message, index) => <p key={index} className="text-sm text-destructive">{message}</p>)}
+          {draft.error && <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => void draft.retry()}>Retry saving</Button><Button variant="outline" size="sm" onClick={() => { setChecksText(null); void draft.reload(); }}>Load saved draft</Button><Button variant="outline" size="sm" onClick={() => void draft.keepLocalChoices()}>Save my choices over latest draft</Button></div>}
+          {!selection && <Button variant="outline" size="sm" onClick={() => void draft.reload()}>Retry loading draft</Button>}
+        </div>}
+        <DialogFooter className="sticky bottom-0 items-center gap-2 bg-background py-2">
+          <span role="status" className="mr-auto text-xs text-muted-foreground">{draft.saving ? "Saving draft…" : draft.error ? "Draft not saved" : draft.draft?.revision ? "Draft saved on server" : "Choose workflow settings"}</span>
+          <DialogClose asChild><Button variant="outline">Close</Button></DialogClose>
+          {!active && <Button disabled={busy || draft.saving || !!draft.error || !project.data || !selection?.hostId || !selection.writer || !selection.reviewer || !selection.smokeCommands.length || !!connectionError} onClick={() => void act(async () => {
+            if (!await draft.flush()) return;
+            if (ready && preparation) {
+              const run = await rpc.call("launchTaskWorkflow", { taskId, preparationId: preparation.id });
+              setRuns(current => [run, ...current.filter(entry => entry.id !== run.id)]);
+              setOpen(false);
+            } else {
+              setPreparation(await setup.call("prepareTaskWorkflow", { taskId, revision: draft.savedRevision() }));
+            }
+          })}>{busy ? "Working…" : ready ? "Start workflow" : preparation ? "Check preparation" : "Prepare workspace"}</Button>}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    {runs.map(run => <article key={run.id} className="space-y-2 border-t border-border pt-3">
+      <p className="text-sm">Workflow · {run.state.replaceAll("_", " ")}{run.native?.phase ? ` · ${run.native.phase}` : ""} · revision {run.revision}</p>
+      {run.error && <p role="alert" className="text-sm text-destructive">{run.error}</p>}
+      <div className="flex flex-wrap gap-2">{run.native?.workers.map(worker => <Button key={worker.threadId} size="sm" variant="outline" onClick={() => navigate.toThread(worker.threadId)}>Open {worker.role === "writer" ? "writer" : "independent reviewer"}</Button>)}</div>
+      {run.native?.result && <><p className="text-sm">Independent review: {run.native.result.review.verdict.replaceAll("_", " ")} · {run.native.result.review.summary}</p><details><summary className="cursor-pointer text-sm">Result diagnostics and observed evidence</summary><Button size="sm" variant="ghost" onClick={() => void act(async () => { await navigator.clipboard.writeText(JSON.stringify(run.native?.result, null, 2)); })}>Copy result diagnostics</Button><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(run.native.result, null, 2)}</pre></details></>}
+      {run.native?.policyLimitations.map(limit => <p key={limit} className="text-xs text-muted-foreground">{limit}</p>)}
+      {run.state === "in_review" && <Button disabled={busy} onClick={() => void act(async () => { const accepted = await rpc.call("acceptTaskWorkflow", { id: run.id, revision: run.revision }); setRuns(current => current.map(entry => entry.id === accepted.id ? accepted : entry)); })}>Accept reviewed result</Button>}
+      {["in_review", "failed"].includes(run.state) && <div className="space-y-2"><label className="block space-y-1 text-sm"><span>Human feedback</span><Textarea value={feedback} onChange={event => setFeedback(event.target.value)} /></label><Button variant="outline" disabled={busy || !feedback.trim()} onClick={() => void act(async () => { const returned = await rpc.call("returnTaskWorkflow", { id: run.id, revision: run.revision, feedback }); setRuns(current => current.map(entry => entry.id === returned.id ? returned : entry)); })}>{run.native?.contextStarted === false ? "Retry first writer with feedback" : "Return to same writer"}</Button></div>}
+    </article>)}
+    {error && !open && <p role="alert" className="text-sm text-destructive">{error}</p>}
+  </section>;
 }

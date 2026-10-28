@@ -587,6 +587,17 @@ export function createWorkflowService(
     if (thread.environmentId === null) {
       throw new Error("Workflow origin thread has no environment");
     }
+    if (input.buildReview) {
+      if (thread.projectId !== input.projectId || thread.archivedAt !== null || thread.deletedAt !== null)
+        throw new Error("Prepared workflow context is unavailable or belongs to another project");
+      return {
+        environmentId: thread.environmentId,
+        providerId: input.buildReview.writer.provider,
+        model: input.buildReview.writer.model,
+        reasoningLevel: input.buildReview.writer.reasoningLevel,
+        permissionMode: input.buildReview.writer.permissionMode,
+      };
+    }
     const defaults = executionValuesSchema.parse(
       await bb.sdk.threads.defaultExecutionOptions({
         threadId: input.originThreadId,
