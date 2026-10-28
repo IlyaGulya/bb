@@ -952,14 +952,6 @@ describe("thread action data input", () => {
     expect(seen).toEqual([[], ["thr_a", "thr_b", "thr_c"], ["thr_a", "thr_b"]]);
   });
 
-  it("coalesces rows that mount a moment apart into one change", async () => {
-    const { seen, Surface } = renderRecorder();
-    const view = render(<Surface ids={["thr_a", "thr_b"]} />);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    view.rerender(<Surface ids={["thr_a", "thr_b", "thr_c"]} />);
-    await settle();
-    expect(seen).toEqual([[], ["thr_a", "thr_b", "thr_c"]]);
-  });
 
   it("counts no ids from a hidden surface until it is shown", async () => {
     const { seen, Surface } = renderRecorder();

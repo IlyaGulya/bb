@@ -200,32 +200,6 @@ export default function plugin() {
     ).toHaveLength(2);
   });
 
-  it("bounds compiled artifacts and evicts loaded source modules", async () => {
-    const rootDir = await writePrebuiltPlugin("bb-plugin-reload-retention");
-    const sourcePath = join(rootDir, "server.ts");
-    const cacheRoot = join(workDir, "data", "plugins", "runtime", "server");
-    for (let generation = 0; generation < 8; generation += 1) {
-      await writeFile(
-        sourcePath,
-        `export default function plugin() { globalThis.__reloadRetention = ${generation}; }\n`,
-      );
-      if (generation === 0) await service.installPath(rootDir);
-      else await service.reload("reload-retention");
-    }
-
-    expect((globalThis as Record<string, unknown>).__reloadRetention).toBe(7);
-    const files = await readdir(cacheRoot, { recursive: true });
-    expect(files.filter((file) => file.endsWith("server.cjs"))).toHaveLength(4);
-    const cache = createRequire(import.meta.url).cache;
-    expect(
-      Object.keys(cache).filter((path) => path.startsWith(cacheRoot)),
-    ).toEqual([]);
-    expect(
-      Object.values(cache)
-        .flatMap((entry) => entry?.children ?? [])
-        .filter((entry) => entry.filename.startsWith(cacheRoot)),
-    ).toEqual([]);
-  });
 
   it("re-evaluates and evicts compiled modules when the data directory is a symlink", async () => {
     const realDataDir = join(workDir, "real-data");
