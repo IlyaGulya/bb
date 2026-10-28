@@ -39,6 +39,7 @@ describe("Tasks RPC domain API", () => {
             projectId: "proj_guard",
             originThreadId: "thr_guard",
             task: task.title,
+            template: "development-review",
             writer: {
               provider: "test-provider",
               model: "writer",

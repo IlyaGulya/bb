@@ -169,7 +169,9 @@ describe("native workflow preparation receipts", () => {
       }
       return { models: [{ id: selection.writer!.model, model: selection.writer!.model, supportedReasoningEfforts: [{ reasoningEffort: "high" }] }], selectedOnlyModels: [], modelLoadError: null };
     });
-    const launch = handlers.launchTaskWorkflow({ taskId: task.id, preparationId: prepared!.id }).then(
+    const launch = Promise.resolve(
+      handlers.launchTaskWorkflow({ taskId: task.id, preparationId: prepared!.id }),
+    ).then(
       value => ({ value, error: null }),
       (error: unknown) => ({ value: null, error }),
     );
