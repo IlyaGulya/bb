@@ -7,7 +7,6 @@ import {
   PROJECT_CHANGE_KINDS,
   SYSTEM_CHANGE_KINDS,
   THREAD_CHANGE_KINDS,
-  threadChangeMetadataSchema,
   type ChangedMessage,
   type ThreadChangeMetadata,
 } from "../src/change-kinds.js";
