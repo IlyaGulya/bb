@@ -6,6 +6,8 @@ const profile = z
   .object({
     provider: text,
     model: text,
+    executionContextId: z.string().trim().min(1).optional(),
+    modelConnectionId: z.string().trim().min(1).optional(),
     reasoningLevel: text,
     permissionMode: z.enum(["auto", "accept-edits", "full"]),
     serviceTier: text.nullable(),

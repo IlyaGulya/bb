@@ -392,9 +392,15 @@ single-root workspace without other active work. This path does not require
 multi-repository preparation and cannot bypass an existing repository manifest.
 
 Select two existing authorized execution profiles that differ by
-provider/runtime or model. A different reasoning level alone does not provide
-independent review. Provider readiness is environment-specific; a provider's
-presence in the catalog is not proof of readiness.
+provider/runtime or model. A different reasoning level or CPA billing account
+alone does not provide independent review. Each selected preset carries its own
+optional `executionContextId` and `modelConnectionId`; authorized contexts and
+accounts can be combined independently. Stored preset `null` means no explicit
+override. Core resolves omitted selections normally and admits each native
+worker against its selected connection's model catalog and readiness, not the
+origin account or an unrelated native login/catalog. Invalid, disabled, revoked,
+or incompatible explicit selections fail without account fallback. Requests
+carry IDs only, never credentials.
 
 ```sh
 bb tasks workflow start TASK --key unique-launch-key --origin thr_origin \
@@ -428,9 +434,13 @@ These are alternative decisions, not commands to execute together. Accept
 requires the exact current revision and marks the task done. Generic status
 `done` is not acceptance of a pending workflow. Return preserves the writer's
 BB thread, provider session, workspace, and execution profile; it does not
-silently start a fresh writer. Retained worker contexts and native journals
-remain pinned until acceptance or task-deletion cleanup. Review does not grant
-external publication permission.
+silently start a fresh writer. Core retains each created worker's resolved
+context/connection snapshots, including an existing reviewer's binding. Later
+preset edits, project defaults, or connection/context definition edits do not
+retarget those workers; live revocation still blocks their next native admission.
+Existing requests without overrides stay implicit; replay does not retrofit IDs.
+Retained worker contexts and native journals remain pinned until acceptance or
+task-deletion cleanup. Review does not grant external publication permission.
 
 Retry a launch with the same key and identical input. Duplicate results cannot
 publish duplicate revision comments. Uncertain native delivery fails closed

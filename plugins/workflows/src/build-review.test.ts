@@ -41,6 +41,8 @@ const request: BuildReviewStart = {
   writer: {
     provider: "codex",
     model: "writer",
+    executionContextId: "writer-context",
+    modelConnectionId: "personal-cpa",
     reasoningLevel: "medium",
     permissionMode: "full",
     serviceTier: null,
@@ -49,6 +51,8 @@ const request: BuildReviewStart = {
   reviewer: {
     provider: "claude",
     model: "reviewer",
+    executionContextId: "reviewer-context",
+    modelConnectionId: "work-cpa",
     reasoningLevel: "medium",
     permissionMode: "auto",
     serviceTier: null,
@@ -96,6 +100,7 @@ function setup(workerStatus: "idle" | "error" = "idle") {
         get: async ({ threadId }) =>
           makeThreadResponse({
             id: threadId,
+            providerId: "codex",
             environmentId: "env_fixture",
             status: workerStatus,
           }),
@@ -339,7 +344,12 @@ describe("first-writer profile repair policy", () => {
     const repaired = {
       ...request,
       key: "task:2",
-      writer: { ...request.writer, model: "repaired-model" },
+      writer: {
+        ...request.writer,
+        model: "repaired-model",
+        executionContextId: "repaired-context",
+        modelConnectionId: "repaired-cpa",
+      },
       feedback: "Fix the invalid initial profile",
     };
     const next = await handlers.startBuildReview(repaired);
@@ -354,9 +364,139 @@ describe("first-writer profile repair policy", () => {
       handlers.startBuildReview({
         ...repaired,
         key: "task:3",
-        writer: { ...repaired.writer, model: "replacement" },
+        writer: { ...repaired.writer, modelConnectionId: "replacement" },
       }),
     ).rejects.toThrow(/existing writer/);
+    await expect(
+      handlers.startBuildReview({
+        ...repaired,
+        key: "task:3",
+        reviewer: { ...repaired.reviewer, executionContextId: "other-context" },
+      }),
+    ).rejects.toThrow(/existing writer/);
+  });
+  it("does not count another CPA account on the same runtime and model as independent review", async () => {
+    const { db, host } = setup();
+    const handlers = registerBuildReview(
+      host.bb,
+      db,
+      createWorkflowService(host.bb, db),
+    );
+    await expect(
+      handlers.startBuildReview({
+        ...request,
+        key: "account-only:1",
+        group: "account-only",
+        writer: {
+          ...request.writer,
+          model: "bb-cpa/personal/gpt-example",
+        },
+        reviewer: {
+          ...request.reviewer,
+          provider: request.writer.provider,
+          model: "bb-cpa/work/gpt-example",
+        },
+      }),
+    ).rejects.toThrow(/Independent review/);
+    expect(
+      db.prepare("SELECT 1 FROM workflow_build_reviews WHERE group_key = 'account-only'").get(),
+    ).toBeUndefined();
+  });
+});
+
+describe("managed connection admission", () => {
+  it("reaches retained native admission for a gateway model outside the default catalog and preserves the worker on revocation", async () => {
+    const { db, run, host } = setup();
+    db.prepare("UPDATE workflow_runs SET status = 'failed' WHERE id = ?").run(run.id);
+    const launch: BuildReviewStart = {
+      ...request,
+      key: "gateway:1",
+      group: "gateway",
+      writer: {
+        ...request.writer,
+        provider: "acp-omp",
+        model: "bb-cpa/personal/gpt-writer",
+      },
+      reviewer: {
+        ...request.reviewer,
+        provider: "acp-omp",
+        model: "bb-cpa/work/gpt-reviewer",
+      },
+    };
+    let status: "active" | "idle" = "active";
+    host.harness.sdk.stub("threads.list", async () => []);
+    host.harness.sdk.stub("threads.get", async ({ threadId }: { threadId: string }) =>
+      makeThreadResponse({
+        id: threadId,
+        providerId: "acp-omp",
+        environmentId: "env_fixture",
+        status: threadId === request.originThreadId ? "idle" : status,
+      }),
+    );
+    host.harness.sdk.stub("threads.defaultExecutionOptions", async () => ({
+      model: launch.writer.model,
+      reasoningLevel: "medium",
+      permissionMode: "full",
+      serviceTier: "default",
+      source: "client/thread/start",
+    }));
+    host.harness.sdk.stub("providers.list", async () => [{
+      id: "acp-omp",
+      available: true,
+      readiness: { verification: "unsupported" },
+      capabilities: { permissionModes: ["full", "auto"] },
+    }]);
+    host.harness.sdk.stub("providers.models", async () => ({
+      providers: [],
+      models: [{
+        id: "native-only",
+        model: "native-only",
+        supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
+      }],
+      selectedOnlyModels: [],
+      modelLoadError: null,
+    }));
+    host.harness.sdk.stub("threads.spawn", async () =>
+      makeThreadResponse({ id: "thr_gateway_writer" }),
+    );
+    host.harness.sdk.stub("threads.queuedMessages.list", async () => []);
+    host.harness.sdk.stub("threads.stop", async () => ({ ok: true }));
+    host.harness.sdk.stub("threads.send", async () => {
+      throw Object.assign(new Error("Selected connection is revoked"), {
+        status: 409,
+        code: "model_connection_revoked",
+      });
+    });
+    const service = createWorkflowService(host.bb, db);
+    const handlers = registerBuildReview(host.bb, db, service);
+    const started = await handlers.startBuildReview(launch);
+    const controller = new AbortController();
+    const worker = service.runWorker(controller.signal);
+    try {
+      await vi.waitFor(() =>
+        expect(getCall(db, started.runId, 0)).toMatchObject({
+          status: "running",
+          childThreadId: "thr_gateway_writer",
+        }),
+      );
+      status = "idle";
+      service.onThreadIdle("thr_gateway_writer", JSON.stringify("bounded plan"));
+      await vi.waitFor(() =>
+        expect(service.get(started.runId)).toMatchObject({
+          status: "failed",
+          error: "Selected connection is revoked",
+        }),
+      );
+      expect(await handlers.inspectBuildReview({ key: launch.key })).toMatchObject({
+        contextStarted: true,
+        workers: [{ role: "writer", threadId: "thr_gateway_writer" }],
+      });
+      expect(getCall(db, started.runId, 1)?.resolvedModel).toBe(launch.writer.model);
+      expect(host.harness.sdk.callsTo("threads.spawn")).toHaveLength(1);
+    } finally {
+      controller.abort();
+      await worker;
+    }
   });
 });
 
@@ -537,6 +677,28 @@ describe("retained native build/review workers", () => {
       await managedWorker(host.bb, db, run, build, "restart", spawn),
     ).toEqual({ id: "thr_writer" });
     expect(send).toHaveBeenCalledTimes(1);
+  });
+  it("refuses a retargeted native provider even when its model and execution options still match", async () => {
+    const { db, run, host, send, call } = setup();
+    const plan = call(0);
+    const spawn = vi.fn(async () => ({ id: "thr_writer" }));
+    await managedWorker(host.bb, db, run, plan, "plan", spawn);
+    host.harness.sdk.stub("threads.get", async () =>
+      makeThreadResponse({
+        id: "thr_writer",
+        providerId: "claude",
+        environmentId: "env_fixture",
+        status: "idle",
+      }),
+    );
+    await expect(
+      managedWorker(host.bb, db, run, call(1), "build", spawn),
+    ).rejects.toThrow(/original profile/);
+    expect(send).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(db.prepare(
+      "SELECT thread_id FROM workflow_build_review_workers WHERE group_key = ? AND role = 'writer'",
+    ).get(request.group)).toEqual({ thread_id: "thr_writer" });
   });
   it("fails closed on uncertain follow-up delivery instead of launching a replacement writer", async () => {
     const { db, run, host, send, call } = setup();

@@ -15,7 +15,7 @@ const hosts: FakePluginHost[] = [];
 afterEach(async () => {
   for (const host of hosts.splice(0)) await host.harness.dispose();
 });
-function setup() {
+function setup(explicitBindings = true) {
   const statuses = new Map<string, "idle" | "active">();
   const host = createFakePluginHost({
     pluginId: "tasks",
@@ -54,6 +54,9 @@ function setup() {
     writer: {
       provider: "codex",
       model: "writer",
+      ...(explicitBindings
+        ? { executionContextId: "context-writer", modelConnectionId: "personal-cpa" }
+        : {}),
       reasoningLevel: "medium",
       permissionMode: "full",
       serviceTier: null,
@@ -62,6 +65,9 @@ function setup() {
     reviewer: {
       provider: "claude",
       model: "reviewer",
+      ...(explicitBindings
+        ? { executionContextId: "context-reviewer", modelConnectionId: "work-cpa" }
+        : {}),
       reasoningLevel: "medium",
       permissionMode: "auto",
       serviceTier: null,
@@ -208,35 +214,63 @@ describe("first-writer profile repair", () => {
       error: "Model unavailable before spawn",
     });
     const profiles = {
-      writer: { ...request.writer, model: "repaired-writer" },
+      writer: {
+        ...request.writer,
+        model: "repaired-writer",
+        executionContextId: "repaired-context",
+        modelConnectionId: "repaired-cpa",
+      },
       reviewer: request.reviewer,
     };
     workflows.return("twf_fixture", 1, "Selected profile repaired", profiles);
-    expect(workflows.request("twf_fixture").writer.model).toBe(
-      "repaired-writer",
-    );
+    expect(workflows.request("twf_fixture").writer).toEqual(profiles.writer);
     expect(workflows.request("twf_fixture").group).toBe(request.group);
     expect(workflows.request("twf_fixture").originThreadId).toBe(
       request.originThreadId,
     );
   });
-  it("refuses profile replacement for an existing or uncertain writer", () => {
-    const { workflows, request, native } = setup();
-    workflows.publish("twf_fixture", {
-      ...native,
-      status: "failed",
-      contextStarted: true,
-      workers: [],
-      result: null,
-      error: "Ambiguous delivery",
-    });
-    expect(() =>
-      workflows.return("twf_fixture", 1, "Try another model", {
-        writer: { ...request.writer, model: "other" },
-        reviewer: request.reviewer,
-      }),
-    ).toThrow(/existing or uncertain/);
-    expect(workflows.get("twf_fixture").revision).toBe(1);
+  it.each([true, undefined])(
+    "refuses binding replacement when contextStarted is %s",
+    (contextStarted) => {
+      const { store, workflows, request, native } = setup();
+      workflows.publish("twf_fixture", {
+        ...native,
+        status: "failed",
+        contextStarted: true,
+        workers: [],
+        result: null,
+        error: "Ambiguous delivery",
+      });
+      if (contextStarted === undefined)
+        store.database.prepare(
+          "UPDATE task_workflow_runs SET view_json = json_remove(view_json, '$.native.contextStarted') WHERE id = ?",
+        ).run("twf_fixture");
+      expect(() =>
+        workflows.return("twf_fixture", 1, "Switch account", {
+          writer: { ...request.writer, modelConnectionId: "other-account" },
+          reviewer: request.reviewer,
+        }),
+      ).toThrow(/existing or uncertain/);
+      expect(workflows.get("twf_fixture").revision).toBe(1);
+      expect(workflows.request("twf_fixture").writer).toEqual(request.writer);
+    },
+  );
+  it("keeps legacy omitted bindings implicit across replay and Return", () => {
+    const { store, workflows, native } = setup(false);
+    const original = store.database.prepare<[string], { request_json: string }>(
+      "SELECT request_json FROM task_workflow_runs WHERE id = ?",
+    ).get("twf_fixture")!.request_json;
+    workflows.publish("twf_fixture", native);
+    const restarted = new TaskWorkflowStore(store);
+    restarted.publish("twf_fixture", native);
+    expect(store.database.prepare<[string], { request_json: string }>(
+      "SELECT request_json FROM task_workflow_runs WHERE id = ?",
+    ).get("twf_fixture")!.request_json).toBe(original);
+    restarted.return("twf_fixture", 1, "Correct the result without selecting an account");
+    for (const profile of [restarted.request("twf_fixture").writer, restarted.request("twf_fixture").reviewer]) {
+      expect(profile).not.toHaveProperty("executionContextId");
+      expect(profile).not.toHaveProperty("modelConnectionId");
+    }
   });
 });
 

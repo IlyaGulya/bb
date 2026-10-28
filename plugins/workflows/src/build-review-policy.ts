@@ -204,6 +204,7 @@ export async function managedWorker(
   });
   if (
     !execution ||
+    thread.providerId !== call.resolvedProvider ||
     execution.model !== call.resolvedModel ||
     execution.reasoningLevel !== call.resolvedReasoningLevel ||
     execution.permissionMode !== call.resolvedPermissionMode ||

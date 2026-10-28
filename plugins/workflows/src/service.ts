@@ -773,7 +773,15 @@ export function createWorkflowService(
   ): Promise<ResolvedSelection> {
     const inherited = options.selection === null;
     const policy = managedProfile(db, run.id, callIndex);
-    const requested = policy ??
+    if (policy !== null) {
+      return selectedExecutionSchema.parse({
+        providerId: policy.provider,
+        model: policy.model,
+        reasoningLevel: policy.reasoningLevel,
+        permissionMode: policy.permissionMode,
+      });
+    }
+    const requested =
       options.selection ?? {
         provider: run.originProvider,
         model: run.originModel,
@@ -831,7 +839,7 @@ export function createWorkflowService(
       );
     }
     const permissionMode = executionValuesSchema.shape.permissionMode.parse(
-      policy?.permissionMode ?? run.originPermissionMode,
+      run.originPermissionMode,
     );
     if (!provider.capabilities.permissionModes.includes(permissionMode)) {
       throw new Error(
@@ -1032,6 +1040,12 @@ export function createWorkflowService(
             model: selection.model,
             reasoningLevel: selection.reasoningLevel,
             permissionMode: selection.permissionMode,
+            ...(profile?.executionContextId === undefined
+              ? {}
+              : { executionContextId: profile.executionContextId }),
+            ...(profile?.modelConnectionId === undefined
+              ? {}
+              : { modelConnectionId: profile.modelConnectionId }),
             ...(profile?.serviceTier
               ? { serviceTier: profile.serviceTier }
               : {}),

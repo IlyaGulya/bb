@@ -196,6 +196,24 @@ transaction; an active group prevents release of the whole deletion set.
 An unavailable, deleted, archived, or execution-changed established writer
 must be repaired rather than replaced.
 
+Each role's selected Tasks preset carries optional `executionContextId` and
+`modelConnectionId` overrides. Context and billing account are independent;
+another CPA account alone is not another review model. Null preset selectors
+mean no explicit override, and older requests that omit them remain implicit.
+The managed request stores IDs only. Native Core spawn/send admission owns
+binding resolution, connection-specific model/readiness validation, and denial
+of missing, disabled, revoked, or incompatible selections without fallback.
+Managed workers are not prevalidated against the origin/native default catalog
+or login. Generic unmanaged workflows retain their existing selection policy.
+
+Plan/build and Return reuse the native writer and its resolved binding; an
+existing reviewer retains its own binding too. Preset/project-default changes
+and later definition edits cannot retarget these workers. Continuation checks
+the retained thread's execution options rather than a mutable/default catalog;
+Core still checks live revocation/authorization at the next native admission.
+Only a definitive first-launch rejection with no established or uncertain
+context permits repairing the original presets, including these selectors.
+
 `threads.send` has no idempotency key. An uncertain continuation delivery fails
 closed, preserving the same worker for inspection and a subsequent explicit
 Return; it does not blindly send again. A missing launch acknowledgement is

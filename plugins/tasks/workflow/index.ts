@@ -6,7 +6,7 @@ import {
 } from "./remote-contract.js";
 import { publishTasksChanged, type TasksApiStore } from "../api/index.js";
 import {
-  validateProfileAvailability,
+  taskExecutionSelection,
   withTaskExecution,
   requireIdleTask,
   environmentThreads,
@@ -138,7 +138,8 @@ export function registerTaskWorkflows(
           throw new Error("Choose two existing allowed execution profiles");
         if (
           writer.providerId === reviewer.providerId &&
-          writer.modelId === reviewer.modelId
+          writer.modelId.replace(/^bb-cpa\/[^/]+\//, "") ===
+            reviewer.modelId.replace(/^bb-cpa\/[^/]+\//, "")
         )
           throw new Error(
             "Independent review requires another runtime/provider or model",
@@ -191,18 +192,6 @@ export function registerTaskWorkflows(
           throw new Error(
             "Start from a clean committed branch so unrelated source changes are preserved",
           );
-        await validateProfileAvailability(
-          bb,
-          writer,
-          environment.hostId,
-          environment.id,
-        );
-        await validateProfileAvailability(
-          bb,
-          reviewer,
-          environment.hostId,
-          environment.id,
-        );
         const id = newTaskWorkflowId();
         const request: BuildReviewStart = {
           key: `${id}:1`,
@@ -213,6 +202,7 @@ export function registerTaskWorkflows(
           writer: {
             provider: writer.providerId,
             model: writer.modelId,
+            ...taskExecutionSelection(writer),
             reasoningLevel: writer.reasoningLevel,
             permissionMode: writer.permissionMode,
             serviceTier: writer.serviceTier,
@@ -221,6 +211,7 @@ export function registerTaskWorkflows(
           reviewer: {
             provider: reviewer.providerId,
             model: reviewer.modelId,
+            ...taskExecutionSelection(reviewer),
             reasoningLevel: reviewer.reasoningLevel,
             permissionMode: reviewer.permissionMode,
             serviceTier: reviewer.serviceTier,
@@ -312,7 +303,8 @@ export function registerTaskWorkflows(
             );
           if (
             writer.providerId === reviewer.providerId &&
-            writer.modelId === reviewer.modelId
+            writer.modelId.replace(/^bb-cpa\/[^/]+\//, "") ===
+              reviewer.modelId.replace(/^bb-cpa\/[^/]+\//, "")
           )
             throw new Error(
               "Independent review requires another runtime/provider or model",
@@ -321,6 +313,7 @@ export function registerTaskWorkflows(
             writer: {
               provider: writer.providerId,
               model: writer.modelId,
+              ...taskExecutionSelection(writer),
               reasoningLevel: writer.reasoningLevel,
               permissionMode: writer.permissionMode,
               serviceTier: writer.serviceTier,
@@ -329,6 +322,7 @@ export function registerTaskWorkflows(
             reviewer: {
               provider: reviewer.providerId,
               model: reviewer.modelId,
+              ...taskExecutionSelection(reviewer),
               reasoningLevel: reviewer.reasoningLevel,
               permissionMode: reviewer.permissionMode,
               serviceTier: reviewer.serviceTier,

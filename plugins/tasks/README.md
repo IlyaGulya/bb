@@ -198,6 +198,15 @@ reviewer models/providers, and name the actual platform smoke commands.
 Native Workflows must be enabled. Its three phases are Plan, Build and
 platform smoke, Independent review. A published package is never acceptance.
 
+Writer and reviewer presets retain their independent context/account overrides
+(`executionContextId`, `modelConnectionId`). A different CPA account alone does
+not make the same runtime/model an independent reviewer. Null selectors mean
+no explicit override; legacy requests that omit them remain implicit. Core
+admits workers against the selected binding without origin/default-account
+fallback. Once created, each worker's resolved context and connection remain
+frozen across plan/build and Return, despite preset/default/definition edits;
+revocation still blocks its next native admission.
+
 Return preserves the established writer/session and workspace. An uncertain
 send is not blindly resent or replaced. Before the first writer is established,
 a definitive launch rejection permits repairing the originally selected

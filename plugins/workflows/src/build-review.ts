@@ -135,7 +135,8 @@ export function registerBuildReview(
     async startBuildReview(input) {
       if (
         input.writer.provider === input.reviewer.provider &&
-        input.writer.model === input.reviewer.model
+        input.writer.model.replace(/^bb-cpa\/[^/]+\//, "") ===
+          input.reviewer.model.replace(/^bb-cpa\/[^/]+\//, "")
       )
         throw new Error(
           "Independent review requires another allowed runtime/provider or model",
