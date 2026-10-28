@@ -1,4 +1,12 @@
 import {
+  productAnalyticsBatchSchema,
+  productAnalyticsReportQuerySchema,
+  type ProductAnalyticsBatch,
+  type ProductAnalyticsAck,
+  type ProductAnalyticsReportQuery,
+  type ProductAnalyticsReport,
+} from "./api/product-analytics.js";
+import {
   gatewayLogListQuerySchema,
   gatewayLogReadQuerySchema,
   gatewayLogDownloadQuerySchema,
@@ -1931,6 +1939,18 @@ export const publicApiRoutes = {
   },
 
   system: {
+    productAnalyticsEvents: defineRoute({
+      path: "/system/product-analytics/events",
+      method: "post",
+      request: jsonRequest<EmptyInput, ProductAnalyticsBatch>(productAnalyticsBatchSchema),
+      response: jsonResponse<ProductAnalyticsAck>(),
+    }),
+    productAnalyticsReport: defineRoute({
+      path: "/system/product-analytics/report",
+      method: "get",
+      request: queryRequest<EmptyInput, ProductAnalyticsReportQuery>(productAnalyticsReportQuerySchema),
+      response: jsonResponse<ProductAnalyticsReport>(),
+    }),
     setMachineEnvironmentVariable: defineRoute({
       path: "/settings/machine-environment",
       method: "post",

@@ -2,6 +2,13 @@
 
 ## AgentOS fork — unreleased
 
+- Add owner-local private feature analytics across Core routes, live plugin
+  registrations, UI navigation and command intent, CLI/SDK/MCP calls and actual
+  root-turn/provider outcomes. Keep anonymous vendor telemetry unchanged.
+  Add Settings → Private analytics, `bb analytics --json`, typed SDK/plugin
+  contracts, durable admission and bounded acknowledged browser delivery.
+  Keep logical projects and QA modes separate; expose delivery gaps, unknown
+  availability and incomplete coverage rather than treating them as unused.
 - Fence Tasks Start against concurrent draft revision/selection changes in its
   launch-receipt transaction. Retain the first validated bugfix reproduction
   across Return, permit retry after an exit-zero attempt, and keep legacy

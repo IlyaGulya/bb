@@ -51,3 +51,6 @@ export { createBbSdk, createBuiltinPlanCommandTextInput, createHttpTransport };
 export type { BbSdk, BbSdkAreas, BbSdkContext, BbSdkTransport };
 export type * from "./areas/skills.js";
 export type * from "./public-types.js";
+export * from "./product-analytics.js";
+export type * from "./areas/product-analytics.js";
+export * from "./product-analytics-outbox.js";

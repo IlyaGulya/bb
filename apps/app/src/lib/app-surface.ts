@@ -1,3 +1,4 @@
+import { productAnalyticsRequestInit } from "./product-analytics";
 import {
   APP_SURFACE_DESKTOP,
   APP_SURFACE_HEADER_NAME,
@@ -21,10 +22,11 @@ export function getAppSurface(): RequestAppSurface {
 export function appSurfaceRequestInit(init?: RequestInit): RequestInit {
   const headers = new Headers(init?.headers);
   headers.set(APP_SURFACE_HEADER_NAME, getAppSurface());
+  const analytics = productAnalyticsRequestInit({ ...init, headers });
   return {
     ...init,
     cache: init?.cache ?? "no-store",
-    headers,
+    headers: analytics.headers,
   };
 }
 

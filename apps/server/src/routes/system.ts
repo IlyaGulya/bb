@@ -1,3 +1,4 @@
+import { getPrivateProductAnalytics } from "../services/system/product-analytics.js";
 import { createMobileAppReleaseService } from "../services/install/mobile-app-releases.js";
 import {
   setMachineEnvironmentVariable,
@@ -154,6 +155,16 @@ export function registerSystemRoutes(
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
   const routes = publicApiRoutes.system;
+  post(routes.productAnalyticsEvents, (context, payload) => {
+    context.header("cache-control", "no-store");
+    return context.json(getPrivateProductAnalytics(deps.db).admitBatch(payload.events));
+  });
+  get(routes.productAnalyticsReport, (context, query) => {
+    const analytics = getPrivateProductAnalytics(deps.db);
+    if (!analytics.scopeAllowed(query.projectId === undefined ? { kind: "instance" } : { kind: "project", projectId: query.projectId })) throw new ApiError(403, "forbidden", "Analytics scope is not available");
+    context.header("cache-control", "no-store");
+    return context.json(analytics.report(query));
+  });
 
   const themeRoot = resolveThemeRootPath(deps.config.dataDir);
 

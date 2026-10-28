@@ -53,6 +53,7 @@ export function createBbMcpServer(
     { name: "bb", version },
     { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS },
   );
+  const observe = (action: "search" | "read" | "run", run: () => Promise<ToolTextResult>) => dependencies.observeAnalytics ? dependencies.observeAnalytics(action, run) : run();
 
   server.registerTool(
     "search",
@@ -77,7 +78,7 @@ export function createBbMcpServer(
       },
     },
     async ({ query, limit }) =>
-      toolResult(await runSearchTool(query, limit, dependencies)),
+      toolResult(await observe("search", () => runSearchTool(query, limit, dependencies))),
   );
 
   server.registerTool(
@@ -98,7 +99,7 @@ export function createBbMcpServer(
       },
     },
     async ({ code }, context) =>
-      toolResult(await runReadTool(code, dependencies, context.mcpReq.signal)),
+      toolResult(await observe("read", () => runReadTool(code, dependencies, context.mcpReq.signal))),
   );
 
   server.registerTool(
@@ -120,7 +121,7 @@ export function createBbMcpServer(
       },
     },
     async ({ code }, context) =>
-      toolResult(await runRunTool(code, dependencies, context.mcpReq.signal)),
+      toolResult(await observe("run", () => runRunTool(code, dependencies, context.mcpReq.signal))),
   );
 
   return server;

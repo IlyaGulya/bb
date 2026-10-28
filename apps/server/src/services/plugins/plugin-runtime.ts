@@ -1,3 +1,7 @@
+import { getPrivateProductAnalytics } from "../system/product-analytics.js";
+import { pluginAnalyticsFeature } from "../system/product-analytics-catalog.js";
+import { pluginAnalyticsAction } from "../system/product-analytics-plugin-catalog.js";
+import { privateAnalyticsLoopbackFetch } from "../system/product-analytics-loopback.js";
 import type { MachineEnrollmentService } from "../machines/machine-services.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
@@ -36,6 +40,7 @@ import {
 import { PluginHostArtifactRegistry } from "./plugin-host-artifact-registry.js";
 import { getPluginBuildToolchain } from "./build-toolchain.js";
 import { createNodeBbSdk, type BbSdk } from "@bb/sdk";
+import { createRequestTimeoutFetch, DEFAULT_BB_REQUEST_TIMEOUT_MS } from "@bb/sdk";
 import {
   getInstalledPlugin,
   getPluginSafeMode,
@@ -539,7 +544,19 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
       uncaughtError: undefined,
     };
     const current = serviceContext.run(instance, async () => {
-      await service.record.start(controller.signal);
+      const analytics = getPrivateProductAnalytics(deps.db);
+      const action = pluginAnalyticsAction("service", service.record.name);
+      const attribution = { operationId: randomUUID(), scope: { kind: "instance" as const }, actorKind: "system" as const, surface: "system" as const, actorSessionId: null, mode: analytics.mode };
+      analytics.register(pluginAnalyticsFeature(id, action, ["system"], "observation"));
+      analytics.record(`plugin.${id}`, action, "started", "none", "none", null, attribution);
+      const started = performance.now();
+      let outcome: "failed" | "cancelled" | "succeeded" = "failed";
+      try {
+        await service.record.start(controller.signal);
+        outcome = instance.uncaughtError !== undefined ? "failed" : controller.signal.aborted ? "cancelled" : "succeeded";
+      } finally {
+        analytics.record(`plugin.${id}`, action, "completed", outcome, outcome === "failed" ? "internal" : outcome === "cancelled" ? "cancelled" : "none", performance.now() - started, attribution);
+      }
     });
     service.current = current;
     current.then(
@@ -2028,7 +2045,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
   }
 
   function bindSdk(args: { baseUrl: string }): void {
-    boundSdk = createNodeBbSdk({ baseUrl: args.baseUrl });
+    boundSdk = createNodeBbSdk({ baseUrl: args.baseUrl, fetch: privateAnalyticsLoopbackFetch(createRequestTimeoutFetch({ timeoutMs: DEFAULT_BB_REQUEST_TIMEOUT_MS })) });
     boundLoopbackBaseUrl = args.baseUrl;
   }
 

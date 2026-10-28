@@ -25,3 +25,9 @@ export type {
 } from "@bb/sdk";
 
 export type * from "./machine-bootstrap.js";
+export type {
+  ProductAnalyticsEvent as ExperimentalProductAnalyticsEvent,
+  ProductAnalyticsActionDeclaration as ExperimentalProductAnalyticsActionDeclaration,
+  ProductAnalyticsReceipt as ExperimentalProductAnalyticsReceipt,
+  ProductAnalyticsReport as ExperimentalProductAnalyticsReport,
+} from "@bb/server-contract";

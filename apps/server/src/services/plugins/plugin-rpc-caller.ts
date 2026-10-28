@@ -1,3 +1,4 @@
+import { privateAnalyticsLoopbackFetch } from "../system/product-analytics-loopback.js";
 import { createHash, randomBytes } from "node:crypto";
 import {
   createNodeBbSdk,
@@ -60,10 +61,10 @@ export function createPluginRpcCallerSdk(args: {
   });
   return createNodeBbSdk({
     baseUrl: args.baseUrl,
-    fetch: (input, init) => {
+    fetch: privateAnalyticsLoopbackFetch((input, init) => {
       const headers = new Headers(init?.headers);
       headers.set(PLUGIN_RPC_CALLER_HEADER, args.token);
       return timeoutFetch(input, { ...init, headers });
-    },
+    }),
   });
 }

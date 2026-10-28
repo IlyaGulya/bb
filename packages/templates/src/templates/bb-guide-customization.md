@@ -10,6 +10,39 @@ Customization commands
 Bundled plugins such as Keep Awake, Concurrency limit, Thread list, and Push
 notifications own their settings and commands; run `bb guide plugins`.
 
+Private product analytics
+
+Settings → Private analytics and `bb analytics` read the same owner-local
+feature usage, outcomes, coverage and delivery report. No vendor backend is
+required or enabled. Low usage never automatically removes a feature.
+
+  bb analytics [--project <id>] [--days <1-30>] [--mode <mode>]
+               [--actor <actor>] [--surface <surface>] [--release <version>]
+               [--json]
+
+The default window is 7 days and the default mode is production. Modes are
+production, preview, smoke and test. Actors are human, agent, system and unknown;
+surfaces are web, compact, mobile, desktop, cli, sdk, agent, mcp, api and system.
+Omitting --project selects instance-only actions, never a combined Work/Personal
+report. A model account never chooses the logical project scope.
+
+The JSON report includes the full feature/action catalog, funnels, terminal
+outcomes, observed duration, last use, actor split, returning actor sessions,
+availability, coverage and pending/failed/gap/freshness diagnostics. Unknown
+coverage or availability is not zero popularity. Accepted asynchronous work is
+not downstream success. Delivery gaps prevent a trustworthy unused conclusion.
+
+Collection retains only declared metadata, not prompts, task/chat content,
+commands, arguments, URLs, file contents, headers, tokens or raw errors. The
+server retains events for 30 days with 100,000 total / 10,000 pending limits;
+the browser retains at most 500 queued events for 7 days. ACK means committed
+admission, not completed projection, and does not promise lossless collection
+after device loss, expiry, overflow or a failed admission.
+
+For owned non-production verification, set BB_PRODUCT_ANALYTICS_MODE to preview,
+smoke or test in that server's process environment and restart it. This knob
+does not enable or change anonymous vendor telemetry and is not an opt-out.
+
 Theming — the app-wide palette and typography
 
 `bb theme` controls a set of CSS-variable overrides for the app palette and

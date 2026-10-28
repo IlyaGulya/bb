@@ -28,6 +28,7 @@ export const SETTINGS_NAV_SECTIONS = [
   { icon: "Beaker", id: "experiments", label: "Experiments" },
   { icon: "MessageSquare", id: "community", label: "Community" },
   { icon: "Archive", id: "archived", label: "Archived threads" },
+  { icon: "SlidersHorizontal", id: "analytics", label: "Private analytics" },
 ] as const satisfies readonly {
   icon: IconName;
   id: string;

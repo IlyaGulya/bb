@@ -1402,3 +1402,37 @@ export const threadExecutionBindings = sqliteTable(
       .notNull(),
   },
 );
+
+export const productAnalyticsEvents = sqliteTable("product_analytics_events", {
+  id: text("id").primaryKey(),
+  scope: text("scope").notNull(),
+  operationId: text("operation_id").notNull(),
+  featureId: text("feature_id").notNull(),
+  action: text("action").notNull(),
+  version: integer("version").notNull(),
+  actorKind: text("actor_kind").notNull(),
+  actorSessionId: text("actor_session_id"),
+  surface: text("surface").notNull(),
+  mode: text("mode").notNull(),
+  stage: text("stage").notNull(),
+  outcome: text("outcome").notNull(),
+  errorCode: text("error_code").notNull(),
+  timestamp: integer("timestamp").notNull(),
+  durationMs: integer("duration_ms"),
+  release: text("release").notNull(),
+  admittedAt: integer("admitted_at").notNull(),
+  projectedAt: integer("projected_at"),
+}, (table) => [
+  index("product_analytics_scope_mode_time").on(table.scope, table.mode, table.timestamp),
+  index("product_analytics_projection").on(table.projectedAt, table.admittedAt),
+]);
+
+export const productAnalyticsHealth = sqliteTable("product_analytics_health", {
+  scopeMode: text("scope_mode").primaryKey(),
+  instanceId: text("instance_id").notNull(),
+  gaps: integer("gaps").notNull().default(0),
+  expired: integer("expired").notNull().default(0),
+  failed: integer("failed").notNull().default(0),
+  lastAcceptedAt: integer("last_accepted_at"),
+  lastProjectedAt: integer("last_projected_at"),
+});

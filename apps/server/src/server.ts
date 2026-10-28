@@ -1,3 +1,6 @@
+import { livePluginAnalyticsCatalog } from "./services/system/product-analytics-plugin-catalog.js";
+import { analyticsMode, initializePrivateProductAnalytics } from "./services/system/product-analytics.js";
+import { privateAnalyticsMiddleware } from "./services/system/product-analytics-http.js";
 import { createPluginUpdateJobs } from "./services/plugins/plugin-update-jobs.js";
 import { registerPluginUpdateJobRoutes } from "./routes/plugin-update-jobs.js";
 import { recheckEnvironmentProvisioning } from "./services/threads/thread-environment-providers.js";
@@ -464,6 +467,8 @@ export function createApp(
   options?: CreateAppOptions,
 ): ServerApp {
   const app = new Hono();
+  const productAnalytics = initializePrivateProductAnalytics({ db: deps.db, release: deps.config.appVersion, mode: analyticsMode(deps.config.isDevelopment), logger: deps.logger });
+  productAnalytics.start();
   const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({
     app,
   });
@@ -790,6 +795,7 @@ export function createApp(
     watchBuiltinPluginSources:
       process.env.BB_MANAGED_DEV_BUILTIN_PLUGIN_HOT_RELOAD === "1",
   });
+  productAnalytics.setCatalogProvider(() => livePluginAnalyticsCatalog(pluginService));
   // Messages queued while a thread awaited user interaction stop waiting once
   // that interaction settles (#1650); the idle drain then delivers them.
   deps.pendingInteractions.setThreadInteractionSettledListener((threadId) => {
@@ -867,6 +873,7 @@ export function createApp(
     }
     return next();
   });
+  publicApi.use("*", privateAnalyticsMiddleware(deps.db, productAnalytics));
   const pluginCatalogService = createPluginCatalogService({
     db: deps.db,
     appVersion: deps.config.appVersion,
@@ -913,6 +920,7 @@ export function createApp(
   );
   registerSkillsRegistryRoutes(publicApi, deps);
   registerServerMoveRoutes(publicApi, deps, serverMove);
+  productAnalytics.registerRouteGaps(publicApi.routes);
   app.route("/api/v1", publicApi);
   app.use("/api/v1/*", () => {
     throw new ApiError(404, "not_found", "Not found");
@@ -1044,12 +1052,14 @@ export function createApp(
 
   return {
     app,
-    closeWebSockets: () =>
-      closeWebSocketServer({
+    closeWebSockets: () => {
+      productAnalytics.stop();
+      return closeWebSocketServer({
         forceCloseAfterMs: WEB_SOCKET_SHUTDOWN_FORCE_CLOSE_MS,
         reason: WEB_SOCKET_SHUTDOWN_REASON,
         server: wss,
-      }),
+      });
+    },
     injectWebSocket,
     pluginService,
     pluginCatalogService,

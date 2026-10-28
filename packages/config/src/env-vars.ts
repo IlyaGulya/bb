@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { delimiter } from "node:path";
 import { defaultFeatureFlags } from "@bb/domain";
+import { productAnalyticsModeSchema, type ProductAnalyticsMode } from "@bb/domain";
 import { DEFAULTS } from "./defaults.js";
 import {
   APP_UPDATE_MODE_ENV_NAME,
@@ -287,6 +288,12 @@ export const BB_PERF_DIAGNOSTICS_ENV = defineEnvVar<boolean>({
     "Permit server performance diagnostics when the performanceDiagnostics experiment is on. Requires restart.",
   name: "BB_PERF_DIAGNOSTICS",
   parse: parseBooleanEnvValue,
+});
+
+export const BB_PRODUCT_ANALYTICS_MODE_ENV = defineEnvVar<ProductAnalyticsMode>({
+  description: "Owner-local product analytics collection mode. Use smoke or preview for owned QA; does not enable anonymous vendor telemetry. Requires restart.",
+  name: "BB_PRODUCT_ANALYTICS_MODE",
+  parse: ({ value }) => productAnalyticsModeSchema.parse(value),
 });
 
 export const BB_TELEMETRY_ENV = defineEnvVar<boolean>({

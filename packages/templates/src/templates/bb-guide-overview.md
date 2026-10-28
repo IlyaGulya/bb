@@ -72,7 +72,7 @@ Run `bb guide <chapter>` for command details:
   terminals            Persistent PTY sessions across all supported scopes
   browser              Experimental built-in browser tabs and control leases
   customization        Theme, server-backed settings, keyboard shortcuts,
-                       sidebar preferences, host files, voice
+                       sidebar preferences, host files, voice, private analytics
   plugins              Installing plugins, plugin marketplaces, bundled
                        plugins, and their contributed bb commands
   json                 The --json contract: output shapes and the error envelope

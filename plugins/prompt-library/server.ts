@@ -37,6 +37,7 @@ const JSON_OPTION = {
 } as const;
 
 export default function promptLibraryPlugin(bb: BbPluginApi): void {
+  bb.experimental_productAnalytics.declareAction({ action: "command.search-prompts", surfaces: ["web", "compact", "mobile", "desktop"], completionSource: "client" });
   const db = bb.storage.database();
   bb.storage.migrate(db, STARRED_PROMPT_MIGRATIONS);
   const store = createStarredPromptStore(db);
