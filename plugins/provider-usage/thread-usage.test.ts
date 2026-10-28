@@ -69,7 +69,7 @@ function fixture(connection = nativeConnection()) {
   let fetchStarted: (() => void) | null = null;
   const started = new Promise<void>((resolve) => { fetchStarted = resolve; });
   let hold = false;
-  const sourceRpc = vi.fn(async ({ pluginId, method, input }: { pluginId: string; method: string; input: unknown }) => {
+  const sourceRpc = vi.fn(async ({ pluginId, method, input }: { pluginId: string; method: string; input?: unknown }) => {
     if (pluginId !== "provider-claude-code") throw new Error("An unrelated source was queried");
     if (method === usageListMethod) return state.inventory;
     const request = usageFetchInputSchema.parse(input);
