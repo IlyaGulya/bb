@@ -205,6 +205,24 @@ profiles and retrying with explicit feedback. Generic Done cannot bypass
 pending workflow acceptance. Human Accept requires the exact latest revision
 and an unchanged clean reviewed commit.
 
+## Lists, boards, and parent tasks
+
+List and Board show all tasks in the selected tracker project, including
+subtasks, grouped by each task's own status. A child in **In Review** remains
+visible when its parent is **In Progress**. Each child has a clickable parent
+key/title badge, even when the parent is outside the current filtered results.
+
+**Parent/Epic: All** is the default. Select a top-level task to show only its
+direct children; choose **All** to remove just the parent restriction or
+**Clear** to clear every filter. Parent combines with status, priority, and
+label filters. A parent with no children yields an empty result; a deleted
+selected parent is shown as unavailable until the filter is cleared.
+
+Project and sidebar **All tasks** totals include children, as do active-agent
+indicators and the previous/next task pager. The visible task count respects
+filters and can differ from the project total. Epic cards retain progress
+across all their direct children, independently of the visible filters.
+
 ## CLI reference
 
 Run `bb tasks --help` or `bb tasks <command> --help` for exact options; help
@@ -228,7 +246,7 @@ machine; pass `--machine <id-or-name>` to target another enrolled machine.
 | `bb tasks project create\|list\|show\|update`       | Manage tracker projects, folders, colors, prefixes, and bb-project links.                                                                  |
 | `bb tasks folder create\|list\|update\|delete`      | Organize tracker projects into nested folders. Deleting a folder moves its projects and subfolders to the top level; no tasks are deleted. |
 | `bb tasks create`                                   | Create a task with description, priority, labels, due date, optional parent, and file attachments (repeatable `--attach <path>`).          |
-| `bb tasks list`                                     | Page/filter tasks by project, status, priority, label, active agents, or search text; supports `--sort`, `--limit`, and `--cursor`.        |
+| `bb tasks list`                                     | Page/filter tasks by project, parent (`--parent <key-or-id>`), status, priority, label, active agents, or search; supports `--sort`, `--limit`, and `--cursor`. |
 | `bb tasks show <key-or-id>`                         | Show the complete task record, including comments, attachments, subtasks, and attached threads.                                            |
 | `bb tasks update <key-or-id>`                       | Update status, priority, title, description, due date, or labels.                                                                          |
 | `bb tasks move <key-or-id>`                         | Move a task and its sub-tasks to `--project`. Moved tasks get new keys; old keys keep resolving, and labels are matched by name.           |
@@ -259,6 +277,32 @@ and current task-list revision. If tasks are added, removed, reordered, or
 updated between requests—or label links/names, active task threads, or project
 prefixes change—the old cursor is rejected. Restart from the first page rather
 than traversing an inconsistent snapshot.
+
+### Parent filtering
+
+Without `--parent`, `bb tasks list` includes roots and children. Use
+`--parent <key-or-id>` for only that task's direct children, not the parent
+itself or an additional tree view. Keys and IDs resolve case-insensitively.
+
+```sh
+bb tasks list --project PROD --parent PROD-1 --json
+bb tasks list --project PROD --parent PROD-1 --status in_review --priority high --label Release --search "release notes" --limit 25 --json
+```
+
+All filters intersect. The parent must belong to the explicit `--project` or
+the tracker project inferred from the current bb project; a mismatch fails
+with `subtask_project_mismatch`. When neither supplies a project, the parent
+scopes label-name lookup to its own project. Pagination uses `nextCursor` with
+the same resolved parent and other filters; omit `--parent` to list all tasks
+again.
+
+SDK callers use the existing Tasks `listTasks` RPC through
+`bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listTasks", input })`.
+In `input`, omit `parentTaskId` for all tasks, pass `null` for roots only, or
+pass a task ID for its direct children. Unlike the CLI, RPC `projectId` and
+`parentTaskId` take tracker IDs, not prefixes or task keys. Combine them with
+`statuses`, `priorities`, `labelIds`, `activeOnly`, `search`, `sort`, `limit`,
+and `cursor`; an incompatible project/parent pair returns no matching tasks.
 
 ### Selective Jira synchronization
 
