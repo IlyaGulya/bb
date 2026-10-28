@@ -909,6 +909,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Call its server from its UI with schema-checked RPC",
           "Receive webhooks and serve HTTP or WebSocket routes",
           "Push live updates to open bb windows",
+          "Subscribe to Core execution-definition changes with useRealtime('system:changed'); payloads carry changes and an optional definition id. Other channels stay plugin-scoped. Reconcile missed changes through useRealtimeConnectionState, without switching saved selections.",
           "Publish RPC methods other plugins can discover",
         ],
         apiSymbols: [

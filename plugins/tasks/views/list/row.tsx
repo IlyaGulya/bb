@@ -172,10 +172,10 @@ export const TaskRow = memo(function TaskRow({
           onOpenChange={(next) => setOpenMenu(next ? "status" : null)}
           className="col-start-1 row-start-1"
         />
-        <span className="col-start-2 col-span-2 row-start-1 min-w-0 truncate text-sm @md:flex-1">
+        <span className="col-start-2 col-span-2 row-start-1 min-w-0 break-words text-sm @md:flex-1 @md:truncate">
           {task.title}
         </span>
-        <span className="col-start-3 row-start-2 flex min-w-0 items-center gap-1.5 justify-self-end text-xs text-subtle-foreground @max-md:overflow-hidden @md:shrink-0">
+        <span className="col-start-3 row-start-2 flex min-w-0 flex-wrap items-center justify-end gap-1.5 justify-self-end text-xs text-subtle-foreground @md:shrink-0 @md:flex-nowrap">
           {parent ? <ParentBadge parent={parent} onOpen={onOpen} /> : null}
           {meta ? <ActiveChip threads={meta.activeThreads} /> : null}
           <LabelChips task={task} labelsById={labelsById} />

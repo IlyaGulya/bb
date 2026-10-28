@@ -7,6 +7,7 @@ import {
 } from "@/lib/execution-binding-selection";
 import { getSettingsRoutePath } from "@/lib/route-paths";
 import { useHosts } from "@/hooks/queries/host-queries";
+import { useSystemProviderCatalog } from "@/hooks/queries/system-queries";
 
 export function ExecutionBindingPicker({
   selection,
@@ -21,6 +22,8 @@ export function ExecutionBindingPicker({
   disabled: boolean;
 }) {
   const hosts = useHosts();
+  const providers = useSystemProviderCatalog();
+  const providerName = (id: string) => providers.data?.find(provider => provider.id === id)?.displayName ?? "Provider unavailable";
   const executionHost = hosts.data?.find((host) => host.id === hostId);
   const mcpServers = selection.effectiveContext?.mcpServers ?? [];
   const inspection = selection.mcpInspection;
@@ -67,8 +70,8 @@ export function ExecutionBindingPicker({
         value: entry.id,
         label: entry.name,
         description: entry.gateway
-          ? `CPA gateway · ${entry.gateway.accountPrefix} · ${entry.provider}`
-          : `${entry.provider} · ${entry.hostId}`,
+          ? `CPA account: ${entry.gateway.accountPrefix} · ${providerName(entry.provider)}`
+          : `${providerName(entry.provider)} · ${hosts.data?.find(host => host.id === entry.hostId)?.name ?? "Machine unavailable"}`,
         disabled: reason !== null,
         disabledReason: reason ?? undefined,
       };
@@ -100,7 +103,7 @@ export function ExecutionBindingPicker({
       </div>
       <div className="space-y-1 text-xs text-muted-foreground">
         <p className="break-all">
-          Execution machine: {executionHost?.name ?? hostId ?? "Not selected"}
+          Execution machine: {executionHost?.name ?? (hostId ? "Unavailable" : "Not selected")}
           {executionHost ? ` · ${executionHost.status}` : ""}
         </p>
         <p className="break-words">
@@ -122,7 +125,7 @@ export function ExecutionBindingPicker({
           <p className="break-all">
             CPA gateway: {selection.effectiveConnection.gateway.accountPrefix} ·{" "}
             {selection.effectiveConnection.gateway.baseUrl}. Native engine:{" "}
-            {selection.effectiveConnection.provider}. Account selection is
+            {providerName(selection.effectiveConnection.provider)}. Account selection is
             independent of the context and MCP profile.
           </p>
         ) : null}

@@ -179,11 +179,22 @@ Original source URLs must be HTTP(S); all source text is untrusted context.
 
 ## Multi-repository and reviewed execution
 
-The task card includes **Repository workspace** and **Launch workflow**.
+The task header has one primary **Launch workflow** action. The task card also
+includes **Repository workspace**; ordinary single-agent dispatch remains
+available under **Agent actions**.
+
 The shipped Tasks skill documents the complete validated input and CLI/RPC
 surface: `repositories inspect|prepare|show|continue`, workflow draft/settings
 commands, and `workflow prepare|preparation|start|list|accept|return`. These are
 explicit operations; moving a board card does not start either flow.
+
+Workflow launch uses the shared persistent responsive drawer. Machine, code
+project, profile, context and model-account choices are named and searchable;
+the selected actual model/version remains explicit. Context never selects the
+payer. Routine execution summaries show names; internal IDs are available in
+collapsed copyable diagnostics. Core definition/account changes and reconnects
+refresh open selectors without resetting unsaved drafts or silently replacing
+an unavailable selection. Existing worker bindings remain frozen.
 
 Repository bindings name each code project, source environment/owner/HEAD,
 target path, isolated branch, role, instructions and permitted profile. The
@@ -247,6 +258,13 @@ Project and sidebar **All tasks** totals include children, as do active-agent
 indicators and the previous/next task pager. The visible task count respects
 filters and can differ from the project total. Epic cards retain progress
 across all their direct children, independently of the visible filters.
+
+List and Board remain selectable on compact screens instead of silently
+substituting List for Board. Board cards open with keyboard activation; change
+status in the task editor when not using drag. Touch dragging uses the card's
+grip so gestures elsewhere can scroll the board and its columns. Parent badges
+have independent navigation and do not start a card drag. Filter chips scroll
+separately from the visible result count and task navigation controls.
 
 ## CLI reference
 
@@ -378,6 +396,11 @@ nullable `priority`/`assignee`, and `updatedAt`. Search uses enhanced Jira
 `/search/jql` and the configured account's visibility. Permitted tracker
 `projectIds` constrain native import destinations and link visibility, not Jira
 project keys or JQL. Search is read-only; explicitly import a selected issue.
+
+The import/link drawer uses searchable named connections and tracker projects.
+Choose a permitted destination explicitly; loss of access does not silently
+substitute another project. Refresh connections retains the entered issue, and
+an unconfigured connection is reported without attempting an external action.
 
 `links` takes at most 100 comma-separated immutable numeric issue IDs and
 returns `{ links: [{ issueId, taskId, taskKey, projectId }] }` without contacting

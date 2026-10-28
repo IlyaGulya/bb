@@ -30,7 +30,7 @@ function toggled<T>(values: readonly T[], value: T, checked: boolean): T[] {
 
 function chipTriggerClass(active: boolean): string {
   return cn(
-    "flex h-6 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs max-md:pointer-coarse:h-8",
+    "flex min-h-11 shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs sm:min-h-6",
     active
       ? "border-border bg-secondary text-foreground"
       : "border-dashed border-border text-muted-foreground hover:border-input hover:text-foreground",
@@ -56,7 +56,7 @@ function FilterChip({
           <Icon name={icon} className="size-3" />
           {label}
           {active ? (
-            <span className="max-w-48 truncate font-medium @max-md:max-w-24">
+            <span className="max-w-48 whitespace-normal break-words font-medium sm:truncate">
               {selectedNames.join(", ")}
             </span>
           ) : null}
@@ -153,8 +153,8 @@ export function ListFilterBar({
     labelOptions.length > 0 || filters.labelNames.length > 0;
   const selectedParent = parents.find((parent) => parent.id === filters.parentTaskId);
   return (
-    <div className="flex shrink-0 items-center gap-1.5 border-b border-border-hairline px-3.5 py-1.5">
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-hairline px-3.5 py-2">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 max-sm:basis-full sm:flex-nowrap sm:overflow-x-auto">
         <FilterChip
           icon="Circle"
           label="Status"
@@ -294,7 +294,7 @@ export function ListFilterBar({
               checked={filters.parentTaskId === parent.id}
               onCheckedChange={() => onChange({ ...filters, parentTaskId: parent.id })}
             >
-              <span className="max-w-72 truncate" title={`${parent.key} · ${parent.title}`}>
+              <span className="max-w-72 whitespace-normal break-words" title={`${parent.key} · ${parent.title}`}>
                 {parent.key} · {parent.title}
               </span>
             </DropdownMenuCheckboxItem>
@@ -304,7 +304,7 @@ export function ListFilterBar({
           <button
             type="button"
             onClick={() => onChange(EMPTY_FILTERS)}
-            className="flex h-6 shrink-0 items-center gap-1 rounded-md border border-dashed border-border px-2.5 text-xs text-muted-foreground hover:border-input hover:text-foreground max-md:pointer-coarse:h-8"
+            className="flex min-h-11 shrink-0 items-center gap-1 rounded-md border border-dashed border-border px-2.5 text-xs text-muted-foreground hover:border-input hover:text-foreground sm:min-h-6"
           >
             <Icon name="X" className="size-3" />
             Clear

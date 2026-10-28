@@ -4,10 +4,11 @@ import type { Preset } from "../../shared/contract.js";
 import type { TaskWorkflow, TaskWorkflowRpcContract } from "../../shared/workflow-contract.js";
 import { WORKFLOW_TEMPLATES, type WorkflowPreparation, type WorkflowSelection, type WorkflowSetupContract } from "../../shared/workflow-preparation.js";
 import { useTasksQuery } from "../../shell/data.js";
-import { useExecutionSelections } from "../execution-selection.js";
+import { useExecutionSelections, executionSelectionsValid } from "../execution-selection.js";
 import { useWorkflowDraft } from "./workflow-draft.js";
-import { WorkflowPicker, WorkflowRoleFields } from "./workflow-fields.js";
-import { Dialog, DialogTrigger, DialogClose, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { WorkflowRoleFields } from "./workflow-fields.js";
+import { ExecutionPicker } from "../execution-picker.js";
+import { ResponsiveDrawerShell } from "@/components/ui/responsive-overlay";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -71,19 +72,23 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
   const frozen = active || busy;
   const repairingFirstLaunch = runs.some(run => run.state === "failed" && run.native?.contextStarted === false);
   const roleFrozen = busy || active && !repairingFirstLaunch;
-  return <section className="space-y-3">
-    <Dialog open={open} onOpenChange={next => { setOpen(next); if (!next) void draft.flush(); }}>
-      <DialogTrigger asChild><Button variant="outline">{active ? "Workflow details" : "Launch workflow"}</Button></DialogTrigger>
-      {draft.error && !open && <p role="alert" className="text-sm text-destructive">Draft not saved. Reopen workflow to retry; your choices are still held in this window.</p>}
-      {connectionError && !open && <p role="alert" className="text-sm text-destructive">Workflow connection lost. Last observed state is retained.</p>}
-      {preparation && !active && <p role="status" className="text-sm text-muted-foreground">{preparation.error ?? preparation.progress}</p>}
-      <DialogContent className="max-h-[90dvh] max-w-2xl overflow-y-auto" compactContentClassName="max-w-full">
-        <DialogHeader><DialogTitle>Launch workflow</DialogTitle><DialogDescription>Choose the roles, prepare a private workspace, then start explicitly. Closing never starts or cancels an agent.</DialogDescription></DialogHeader>
+  const rolesAvailable = !!selection?.hostId && !!project.data && machines.data?.some(machine => machine.id === selection.hostId) && [selection.writer, selection.reviewer].every(role => role && role.executionContextId && role.modelConnectionId && role.model && executionSelectionsValid(selections, role.executionContextId, role.modelConnectionId, role.provider, selection.hostId ?? undefined, project.data?.id));
+  return <section className="mb-4 space-y-3" aria-label="Task workflow">
+    <div className="flex flex-wrap items-center gap-2">
+      <Button type="button" className="min-h-11 sm:min-h-9" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>{active ? "Workflow details" : "Launch workflow"}</Button>
+      <span className="text-xs text-muted-foreground">Plan, build, independent review, then human acceptance</span>
+    </div>
+    {draft.error && !open && <p role="alert" className="text-sm text-destructive">Draft not saved. Reopen workflow to retry; your choices are still held in this window.</p>}
+    {connectionError && !open && <p role="alert" className="text-sm text-destructive">Workflow connection lost. Last observed state is retained.</p>}
+    {preparation && !active && <p role="status" className="text-sm text-muted-foreground">{preparation.error ?? preparation.progress}</p>}
+    <ResponsiveDrawerShell open={open} onOpenChange={next => { setOpen(next); if (!next) void draft.flush(); }} srLabel="Launch workflow" contentClassName="max-w-2xl">
+      <div className="min-h-0 flex-auto space-y-4 overflow-y-auto p-4">
+        <header className="space-y-1"><h2 className="text-lg font-semibold">Launch workflow</h2><p className="text-sm text-muted-foreground">Choose the roles, prepare a private workspace, then start explicitly. Closing never starts or cancels an agent.</p></header>
         {!selection ? <div className="space-y-3" aria-label="Loading saved workflow draft"><Skeleton className="h-10 w-full" /><Skeleton className="h-40 w-full" /></div> : <div className="min-w-0 space-y-4">
           <p className="text-sm text-muted-foreground">Code project: {project.data?.name ?? "Link this task's tracker project to a code project first"}</p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="min-w-0 space-y-1 text-sm"><span>Workflow</span><WorkflowPicker label="Workflow template" value={selection.template} options={WORKFLOW_TEMPLATES.map(entry => ({ value: entry.id, label: entry.name }))} dialogOpen={open} disabled={frozen} onChange={value => { const next = WORKFLOW_TEMPLATES.find(entry => entry.id === value); if (next) { change({ template: next.id }); setChecksText(null); } }} /></label>
-            <label className="min-w-0 space-y-1 text-sm"><span>Execution machine</span><WorkflowPicker label="Execution machine" value={selection.hostId} options={(machines.data ?? []).map(machine => ({ value: machine.id, label: machine.name }))} dialogOpen={open} disabled={frozen} onChange={hostId => change({ hostId })} /></label>
+            <label className="min-w-0 space-y-1 text-sm"><span>Workflow</span><ExecutionPicker label="Workflow template" value={selection.template} options={WORKFLOW_TEMPLATES.map(entry => ({ value: entry.id, label: entry.name }))} dialogOpen={open} disabled={frozen} onChange={value => { const next = WORKFLOW_TEMPLATES.find(entry => entry.id === value); if (next) { change({ template: next.id }); setChecksText(null); } }} /></label>
+            <label className="min-w-0 space-y-1 text-sm"><span>Execution machine</span><ExecutionPicker label="Execution machine" value={selection.hostId} options={(machines.data ?? []).map(machine => ({ value: machine.id, label: machine.name }))} dialogOpen={open} disabled={frozen} onChange={hostId => change({ hostId })} /></label>
             {(error ?? preparationError)?.toLowerCase().startsWith("machine:") && <p role="alert" className="text-sm text-destructive">{error ?? preparationError}</p>}
           </div>
           <p className="text-sm text-muted-foreground">{template?.description}</p>
@@ -117,11 +122,12 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
         {errors.length > 0 && <div className="space-y-2" role="alert">{errors.map((message, index) => <p key={index} className="text-sm text-destructive">{message}</p>)}
           {draft.error && <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => void draft.retry()}>Retry saving</Button><Button variant="outline" size="sm" onClick={() => { setChecksText(null); void draft.reload(); }}>Load saved draft</Button><Button variant="outline" size="sm" onClick={() => void draft.keepLocalChoices()}>Save my choices over latest draft</Button></div>}
           {!selection && <Button variant="outline" size="sm" onClick={() => void draft.reload()}>Retry loading draft</Button>}
+          {(machines.error || project.error || selections.contexts.error || selections.connections.error) && <Button type="button" variant="outline" size="sm" onClick={() => { machines.refresh(); project.refresh(); selections.contexts.refresh(); selections.connections.refresh(); }}>Retry execution choices</Button>}
         </div>}
-        <DialogFooter className="sticky bottom-0 items-center gap-2 bg-background py-2">
+        <footer className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-background py-3">
           <span role="status" className="mr-auto text-xs text-muted-foreground">{draft.saving ? "Saving draft…" : draft.error ? "Draft not saved" : draft.draft?.revision ? "Draft saved on server" : "Choose workflow settings"}</span>
-          <DialogClose asChild><Button variant="outline">Close</Button></DialogClose>
-          {!active && <Button disabled={busy || draft.saving || !!draft.error || !project.data || !selection?.hostId || !selection.writer || !selection.reviewer || !selection.smokeCommands.length || !!connectionError} onClick={() => void act(async () => {
+          <Button type="button" variant="outline" onClick={() => { setOpen(false); void draft.flush(); }}>Close</Button>
+          {!active && <Button className="min-h-11 sm:min-h-9" disabled={busy || draft.saving || !!draft.error || !rolesAvailable || !selection?.smokeCommands.length || !!connectionError} onClick={() => void act(async () => {
             if (!await draft.flush()) return;
             if (ready && preparation) {
               const run = await rpc.call("launchTaskWorkflow", { taskId, preparationId: preparation.id });
@@ -131,18 +137,29 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
               setPreparation(await setup.call("prepareTaskWorkflow", { taskId, revision: draft.savedRevision() }));
             }
           })}>{busy ? "Working…" : ready ? "Start workflow" : preparation ? "Check preparation" : "Prepare workspace"}</Button>}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-    {runs.map(run => <article key={run.id} className="space-y-2 border-t border-border pt-3">
-      <p className="text-sm">Workflow · {run.state.replaceAll("_", " ")}{run.native?.phase ? ` · ${run.native.phase}` : ""} · revision {run.revision}</p>
+        </footer>
+      </div>
+    </ResponsiveDrawerShell>
+    {runs.map(run => { const result = run.native?.result; return <article key={run.id} className="space-y-3 border-t border-border pt-4 max-sm:[&_button]:min-h-11">
+      <p className="text-sm font-medium">{run.state === "in_review" ? "Waiting for human review" : run.state === "failed" ? "Workflow needs attention" : `Workflow · ${run.state.replaceAll("_", " ")}`}{run.native?.phase ? ` · ${run.native.phase.replaceAll("_", " ")}` : ""} · revision {run.revision}</p>
       {run.error && <p role="alert" className="text-sm text-destructive">{run.error}</p>}
       <div className="flex flex-wrap gap-2">{run.native?.workers.map(worker => <Button key={worker.threadId} size="sm" variant="outline" onClick={() => navigate.toThread(worker.threadId)}>Open {worker.role === "writer" ? "writer" : "independent reviewer"}</Button>)}</div>
-      {run.native?.result && <><p className="text-sm">Independent review: {run.native.result.review.verdict.replaceAll("_", " ")} · {run.native.result.review.summary}</p><details><summary className="cursor-pointer text-sm">Result diagnostics and observed evidence</summary><Button size="sm" variant="ghost" onClick={() => void act(async () => { await navigator.clipboard.writeText(JSON.stringify(run.native?.result, null, 2)); })}>Copy result diagnostics</Button><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(run.native.result, null, 2)}</pre></details></>}
+      {result && <section className="min-w-0 space-y-3" aria-label="Reviewed result package">
+        <h3 className="text-sm font-semibold">Reviewed result</h3>
+        <p className="break-words text-sm">Independent review: {result.review.verdict.replaceAll("_", " ")} · {result.review.summary}</p>
+        {result.review.findings.length > 0 && <ul className="list-disc space-y-1 pl-5 text-sm">{result.review.findings.map((finding, index) => <li key={index} className="break-words">{finding}</li>)}</ul>}
+        <dl className="space-y-1 text-sm"><div><dt className="inline font-medium">Branch: </dt><dd className="inline break-all">{result.build.branch}</dd></div><div><dt className="inline font-medium">Reviewed commit: </dt><dd className="inline break-all font-mono text-xs">{result.build.commit}</dd></div></dl>
+        <details><summary className="cursor-pointer py-2 text-sm font-medium">Plan and changes</summary><p className="whitespace-pre-wrap break-words text-sm">{result.plan}</p><pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs">{result.build.diff}</pre></details>
+        <div className="space-y-2"><h4 className="text-sm font-medium">Observed verification</h4>{result.build.commands.map((command, index) => <details key={index}><summary className="cursor-pointer break-words py-2 text-sm">{command.exitCode === 0 ? "Passed" : "Failed"} · {command.command} · exit {command.exitCode}</summary><pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs">{command.output}</pre></details>)}</div>
+        {result.build.uiEvidence.map((evidence, index) => <div key={index} className="space-y-1 text-sm"><p className="break-words">{evidence.kind}: {evidence.description}</p><p className="break-all text-xs text-muted-foreground">{evidence.location}</p></div>)}
+        {result.build.limitations.map((limitation, index) => <p key={index} className="break-words text-sm text-warning-text">{limitation}</p>)}
+        <p className="break-words text-sm"><span className="font-medium">Next decision: </span>{result.build.nextDecision}</p>
+        <details><summary className="cursor-pointer py-2 text-sm">Result diagnostics</summary><Button size="sm" variant="ghost" onClick={() => void act(async () => { await navigator.clipboard.writeText(JSON.stringify(result, null, 2)); })}>Copy result diagnostics</Button><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(result, null, 2)}</pre></details>
+      </section>}
       {run.native?.policyLimitations.map(limit => <p key={limit} className="text-xs text-muted-foreground">{limit}</p>)}
       {run.state === "in_review" && <Button disabled={busy} onClick={() => void act(async () => { const accepted = await rpc.call("acceptTaskWorkflow", { id: run.id, revision: run.revision }); setRuns(current => current.map(entry => entry.id === accepted.id ? accepted : entry)); })}>Accept reviewed result</Button>}
       {["in_review", "failed"].includes(run.state) && <div className="space-y-2"><label className="block space-y-1 text-sm"><span>Human feedback</span><Textarea value={feedback} onChange={event => setFeedback(event.target.value)} /></label><Button variant="outline" disabled={busy || !feedback.trim()} onClick={() => void act(async () => { const returned = await rpc.call("returnTaskWorkflow", { id: run.id, revision: run.revision, feedback }); setRuns(current => current.map(entry => entry.id === returned.id ? returned : entry)); })}>{run.native?.contextStarted === false ? "Retry first writer with feedback" : "Return to same writer"}</Button></div>}
-    </article>)}
+    </article>; })}
     {error && !open && <p role="alert" className="text-sm text-destructive">{error}</p>}
   </section>;
 }

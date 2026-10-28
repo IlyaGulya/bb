@@ -8,15 +8,11 @@ import { errorMessage } from "../../shared/errors.js";
 import { useProjects, useTasksQuery } from "../../shell/data.js";
 import { useTasksNavigation } from "../../shell/routes.js";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ResponsiveDrawerShell } from "@/components/ui/responsive-overlay";
+import { ExecutionPicker } from "../execution-picker.js";
 
 export const JIRA_INPUT =
-  "w-full rounded-md border border-input bg-background px-3 py-2 text-sm";
+  "min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm sm:min-h-9";
 
 export function JiraImportDialog({
   open,
@@ -55,7 +51,7 @@ export function JiraImportDialog({
     (project) => project.id === selectedProjectId,
   )
     ? selectedProjectId
-    : (allowedProjects[0]?.id ?? "");
+    : "";
   const submit = async () => {
     if (busy || !connection?.ready || !targetProjectId || !issue.trim()) return;
     setBusy(true);
@@ -79,68 +75,43 @@ export function JiraImportDialog({
     }
   };
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogTitle>
+    <ResponsiveDrawerShell open={open} onOpenChange={next => { if (!busy) onOpenChange(next); }} srLabel={taskId === null ? "Import Jira task" : "Link Jira issue"} contentClassName="max-w-lg">
+      <div className="min-h-0 flex-auto space-y-4 overflow-y-auto p-4">
+        <h2 className="text-lg font-semibold">
           {taskId === null ? "Import Jira task" : "Link Jira issue"}
-        </DialogTitle>
-        <DialogDescription>
+        </h2>
+        <p className="text-sm text-muted-foreground">
           {taskId === null
             ? "Selectively import an issue into native Tasks. Re-importing opens the existing linked task."
             : "Attach a source without replacing this task’s local planning fields or conversations."}{" "}
           This does not dispatch an agent or enable automatic synchronization.
-        </DialogDescription>
+        </p>
         {connections.isLoading ? (
           <p className="text-sm text-muted-foreground">
             Loading configured connections…
           </p>
         ) : null}
-        {connections.data?.length === 0 && !connections.isLoading ? (
+        {connections.data?.length === 0 && !connections.isLoading && !connections.error ? (
           <p role="status" className="text-sm text-muted-foreground">
             Jira is not configured. Ask your operator to configure a Tasks Jira
             connection and its permitted tracker projects on the server. No
             credentials are entered here.
           </p>
         ) : null}
-        <label className="space-y-1 text-sm">
-          Connection
-          <select
-            className={JIRA_INPUT}
-            value={connectionId}
-            onChange={(event) => setConnectionId(event.target.value)}
-            disabled={busy}
-          >
-            <option value="">Choose a configured connection</option>
-            {connections.data?.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-                {item.ready ? "" : " — unavailable"}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="space-y-1 text-sm">
+          <span>Connection</span>
+          <ExecutionPicker label="Jira connection" value={connectionId} dialogOpen={open} disabled={busy} options={(connections.data ?? []).map(item => ({ value: item.id, label: `${item.label}${item.ready ? "" : " — unavailable"}`, disabled: !item.ready }))} onChange={setConnectionId} />
+        </div>
         {connection ? (
           <p className="break-words text-xs text-muted-foreground">
             {connection.siteUrl}
             {connection.error ? ` — ${connection.error}` : ""}
           </p>
         ) : null}
-        <label className="space-y-1 text-sm">
-          Tracker project
-          <select
-            className={JIRA_INPUT}
-            value={targetProjectId}
-            onChange={(event) => setSelectedProjectId(event.target.value)}
-            disabled={busy || taskId !== null}
-          >
-            <option value="">Choose a permitted project</option>
-            {allowedProjects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="space-y-1 text-sm">
+          <span>Tracker project</span>
+          <ExecutionPicker label="Tracker project" value={targetProjectId} dialogOpen={open} disabled={busy || taskId !== null} options={allowedProjects.map(project => ({ value: project.id, label: project.name }))} onChange={setSelectedProjectId} />
+        </div>
         {connection && allowedProjects.length === 0 ? (
           <p role="status" className="text-sm text-muted-foreground">
             This connection does not permit any available tracker project
@@ -163,7 +134,8 @@ export function JiraImportDialog({
             {error ?? connections.error ?? projects.error}
           </p>
         ) : null}
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="sticky bottom-0 flex flex-wrap justify-end gap-2 bg-background py-3 max-sm:[&_button]:min-h-11">
+          <Button type="button" variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button
             variant="outline"
             onClick={() => connections.refresh()}
@@ -184,7 +156,7 @@ export function JiraImportDialog({
                 : "Link issue"}
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </ResponsiveDrawerShell>
   );
 }

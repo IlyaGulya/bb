@@ -388,7 +388,7 @@ function TaskDetail({ task }: { task: Task }) {
   return (
     <div className="@container flex min-h-full flex-col bg-surface-recessed-solid p-3">
       <div className="flex flex-1 items-stretch rounded-lg border border-border bg-card shadow-2xs">
-        <div className="mx-auto w-full min-w-0 max-w-[55rem] flex-1 px-7 pb-16 pt-8 @3xl:px-13 @3xl:pt-11">
+        <div className="mx-auto w-full min-w-0 max-w-[55rem] flex-1 px-4 pb-16 pt-6 @sm:px-7 @3xl:px-13 @3xl:pt-11">
           {parentTask || subtasks.data?.length ? (
             <div className="mb-4 flex flex-wrap items-center gap-2">
               {parentTask ? (
@@ -424,6 +424,11 @@ function TaskDetail({ task }: { task: Task }) {
             onSave={(title) => void updateTask({ title })}
           />
 
+          <TaskWorkflowPanel
+            key={task.id}
+            taskId={task.id}
+            profiles={presets.data ?? []}
+          />
           <InlineProperties
             task={task}
             project={project}
@@ -503,11 +508,6 @@ function TaskDetail({ task }: { task: Task }) {
           <TaskRepositoriesControl
             taskId={task.id}
             presets={presets.data ?? []}
-          />
-          <TaskWorkflowPanel
-            key={task.id}
-            taskId={task.id}
-            profiles={presets.data ?? []}
           />
 
           <div className="mt-6">

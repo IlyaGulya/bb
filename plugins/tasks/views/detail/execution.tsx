@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useRpc } from "@get-bb/plugin-sdk/app";
+import { useRpc, useSdk, useRealtime } from "@get-bb/plugin-sdk/app";
 import type { DelegationRpcContract } from "../../delegate/contract.js";
 import type { Preset, TaskThread } from "../../shared/contract.js";
 import type {
@@ -18,10 +18,14 @@ import {
   executionSelectionsValid,
   useExecutionSelections,
 } from "../execution-selection.js";
+import { ExecutionPicker } from "../execution-picker.js";
+import { z } from "zod";
+
+const executionDefaultsChangeSchema = z.object({ changes: z.array(z.string()), id: z.string().optional() });
 
 const fieldClass = "flex flex-col gap-1 text-sm";
 const selectClass =
-  "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
+  "h-11 w-full rounded-md border border-input bg-background px-2 text-sm sm:h-9";
 
 export interface ExecutionControlProps {
   execution?: TaskExecution;
@@ -37,6 +41,7 @@ export function ExecutionTargetControl({
   onExecutionChange,
 }: ExecutionControlProps & { taskId: string; presets: Preset[] | undefined }) {
   const rpc = useRpc<DelegationRpcContract>();
+  const sdk = useSdk();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +54,7 @@ export function ExecutionTargetControl({
   const [presetId, setPresetId] = useState("");
   const [executionContextId, setExecutionContextId] = useState("");
   const [modelConnectionId, setModelConnectionId] = useState("");
-  const selections = useExecutionSelections(open);
+  const selections = useExecutionSelections(true);
   const selectedPreset = presets?.find((entry) => entry.id === presetId);
   const projects = useTasksQuery(
     async (query) => (await query.call("listBbProjects")).bbProjects,
@@ -113,9 +118,9 @@ export function ExecutionTargetControl({
     (entry) => entry.id === environmentId && entry.hostId === hostId,
   );
   const canSave =
-    !!projectId &&
-    !!hostId &&
-    !!presetId &&
+    projects.data?.some(project => project.id === projectId) &&
+    machines.data?.some(machine => machine.id === hostId) &&
+    !!selectedPreset &&
     (kind !== "existing-environment" || validEnvironment) &&
     executionSelectionsValid(
       selections,
@@ -135,26 +140,30 @@ export function ExecutionTargetControl({
   const resolvedProfile = presets?.find(
     (entry) => entry.id === resolved?.presetId,
   );
-  const resolvedEnvironmentId =
-    resolved?.workspace.kind === "existing-environment"
-      ? resolved.workspace.environmentId
-      : null;
+  const defaults = useTasksQuery(async () => resolved ? sdk.experimental_executionContexts.getProjectDefaults({ projectId: resolved.bbProjectId }) : null, [], [resolved?.bbProjectId]);
+  useRealtime("system:changed", payload => {
+    const parsed = executionDefaultsChangeSchema.safeParse(payload);
+    if (parsed.success && parsed.data.changes.includes("project-context-defaults-changed") && (!parsed.data.id || parsed.data.id === resolved?.bbProjectId)) defaults.refresh();
+  });
   const workspaceSummary =
     resolved?.workspace.kind === "managed-worktree"
       ? `Isolated managed worktree · ${resolved.workspace.baseBranch ?? "default branch"}`
       : resolved?.workspace.kind === "existing-environment"
-        ? `Existing environment · ${environments.data?.find((entry) => entry.id === resolvedEnvironmentId)?.path ?? resolvedEnvironmentId}`
+        ? "Existing prepared workspace"
         : "Project checkout";
-  const summary =
-    resolved && resolvedProject && resolvedMachine && resolvedProfile
-      ? `${resolvedProject.name} · ${resolvedMachine.name} · ${workspaceSummary} · ${resolvedProfile.name}`
-      : (execution?.summary ?? "Loading execution target…");
+  const summary = resolved
+    ? `${resolvedProject?.name ?? "Code project unavailable"} · ${resolvedMachine?.name ?? "Machine unavailable"}`
+    : execution ? "Choose a linked code project and an execution profile, or configure a task override." : "Loading execution target…";
+  const effectiveContextId = resolved?.executionContextId ?? defaults.data?.executionContextId;
+  const resolvedContext = selections.contexts.data?.find(entry => entry.id === effectiveContextId);
+  const effectiveConnectionId = resolved?.modelConnectionId ?? defaults.data?.modelConnectionId ?? resolvedContext?.defaultModelConnectionId;
+  const resolvedConnection = selections.connections.data?.find(entry => entry.id === effectiveConnectionId);
 
   return (
     <div className="min-w-0">
       <button
         type="button"
-        className="text-left text-xs underline underline-offset-2"
+        className="min-h-11 text-left text-xs underline underline-offset-2 sm:min-h-8"
         onClick={edit}
       >
         Configure task execution
@@ -162,24 +171,18 @@ export function ExecutionTargetControl({
       <p className="mt-1 break-words text-xs text-muted-foreground">
         {summary}
       </p>
-      {resolved?.executionContextId ? (
-        <p className="text-xs text-muted-foreground">
-          Execution context:{" "}
-          {selections.contexts.data?.find(
-            (entry) => entry.id === resolved.executionContextId,
-          )?.name ?? resolved.executionContextId}{" "}
-          · {resolved.executionContextId}
-        </p>
-      ) : null}
-      {resolved?.modelConnectionId ? (
-        <p className="text-xs text-muted-foreground">
-          Model connection:{" "}
-          {selections.connections.data?.find(
-            (entry) => entry.id === resolved.modelConnectionId,
-          )?.name ?? resolved.modelConnectionId}{" "}
-          · {resolved.modelConnectionId}
-        </p>
-      ) : null}
+      {resolved && <>
+        <p className="break-words text-xs text-muted-foreground">Profile: {resolvedProfile?.name ?? "unavailable"} · Model: {resolvedProfile?.modelId ?? "unavailable"}{resolvedProfile ? ` · ${resolvedProfile.reasoningLevel} · ${resolvedProfile.permissionMode}` : ""}</p>
+        <p className="break-words text-xs text-muted-foreground">Context: {resolvedContext?.name ?? (effectiveContextId ? "unavailable" : defaults.isLoading ? "loading defaults…" : defaults.error ? "defaults unavailable" : "none")}; account: {resolvedConnection?.name ?? (effectiveConnectionId ? "unavailable" : defaults.isLoading ? "loading defaults…" : defaults.error ? "defaults unavailable" : "native login; identity not known here")}.</p>
+        <details className="mt-1 text-xs text-muted-foreground">
+          <summary className="cursor-pointer py-2">Workspace &amp; execution diagnostics</summary>
+          <p>{workspaceSummary}</p>
+          <button type="button" className="min-h-11 underline sm:min-h-8" onClick={() => { void navigator.clipboard.writeText(JSON.stringify({ target: resolved, context: resolvedContext?.id, connection: resolvedConnection?.id }, null, 2)).catch(() => setError("Could not copy execution diagnostics. Select the diagnostics text instead.")); }}>Copy execution diagnostics</button>
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(resolved, null, 2)}</pre>
+        </details>
+      </>}
+      {(selections.contexts.error || selections.connections.error) && <p role="alert" className="text-xs text-destructive">Execution definitions could not refresh. Last known names are retained. <button className="underline" type="button" onClick={() => { selections.contexts.refresh(); selections.connections.refresh(); }}>Retry</button></p>}
+      {defaults.error && <p role="alert" className="text-xs text-destructive">Project defaults could not refresh. <button type="button" className="underline" onClick={defaults.refresh}>Retry</button></p>}
       {execution ? (
         <p className="text-xs text-muted-foreground">
           {execution.inherited
@@ -232,44 +235,14 @@ export function ExecutionTargetControl({
             Profiles retain provider, model, and permissions.
           </p>
           <fieldset disabled={saving} className="space-y-3">
-            <label className={fieldClass}>
-              Code project
-              <select
-                aria-label="Code project"
-                className={selectClass}
-                value={projectId}
-                onChange={(event) => {
-                  setProjectId(event.target.value);
-                  setEnvironmentId("");
-                }}
-              >
-                <option value="">Choose code project</option>
-                {projects.data?.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className={fieldClass}>
-              Execution machine
-              <select
-                aria-label="Execution machine"
-                className={selectClass}
-                value={hostId}
-                onChange={(event) => {
-                  setHostId(event.target.value);
-                  setEnvironmentId("");
-                }}
-              >
-                <option value="">Choose machine</option>
-                {machines.data?.map((machine) => (
-                  <option key={machine.id} value={machine.id}>
-                    {machine.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className={fieldClass}>
+              <span>Code project</span>
+              <ExecutionPicker label="Code project" value={projectId} dialogOpen={open} options={(projects.data ?? []).map(project => ({ value: project.id, label: project.name }))} onChange={id => { setProjectId(id); setEnvironmentId(""); }} />
+            </div>
+            <div className={fieldClass}>
+              <span>Execution machine</span>
+              <ExecutionPicker label="Execution machine" value={hostId} dialogOpen={open} options={(machines.data ?? []).map(machine => ({ value: machine.id, label: machine.name }))} onChange={id => { setHostId(id); setEnvironmentId(""); }} />
+            </div>
             <label className={fieldClass}>
               Workspace
               <select
@@ -305,41 +278,18 @@ export function ExecutionTargetControl({
               </label>
             ) : null}
             {kind === "existing-environment" ? (
-              <label className={fieldClass}>
-                Existing environment
-                <select
-                  aria-label="Existing environment"
-                  className={selectClass}
-                  value={environmentId}
-                  onChange={(event) => setEnvironmentId(event.target.value)}
-                >
-                  <option value="">Choose environment</option>
-                  {environments.data?.map((entry) => (
-                    <option key={entry.id} value={entry.id}>
-                      {entry.name} · {entry.path}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className={fieldClass}>
+                <span>Existing environment</span>
+                <ExecutionPicker label="Existing environment" value={environmentId} dialogOpen={open} options={(environments.data ?? []).map(entry => ({ value: entry.id, label: `${entry.name} · ${entry.path}` }))} onChange={setEnvironmentId} />
+              </div>
             ) : null}
-            <label className={fieldClass}>
-              Execution profile
-              <select
-                aria-label="Execution profile"
-                className={selectClass}
-                value={presetId}
-                onChange={(event) => setPresetId(event.target.value)}
-              >
-                <option value="">Choose profile</option>
-                {presets?.map((preset) => (
-                  <option key={preset.id} value={preset.id}>
-                    {preset.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className={fieldClass}>
+              <span>Execution profile</span>
+              <ExecutionPicker label="Execution profile" value={presetId} dialogOpen={open} options={(presets ?? []).map(preset => ({ value: preset.id, label: `${preset.name} · ${preset.modelId}` }))} onChange={setPresetId} />
+            </div>
             <ExecutionSelectionFields
               selections={selections}
+              open={open}
               executionContextId={executionContextId}
               modelConnectionId={modelConnectionId}
               onContextChange={setExecutionContextId}
@@ -350,12 +300,12 @@ export function ExecutionTargetControl({
             />
             {selectedPreset?.executionContextId ? (
               <p className="text-xs text-muted-foreground">
-                Profile context default: {selectedPreset.executionContextId}
+                Profile context default: {selections.contexts.data?.find(entry => entry.id === selectedPreset.executionContextId)?.name ?? "unavailable"}
               </p>
             ) : null}
             {selectedPreset?.modelConnectionId ? (
               <p className="text-xs text-muted-foreground">
-                Profile connection default: {selectedPreset.modelConnectionId}
+                Profile connection default: {selections.connections.data?.find(entry => entry.id === selectedPreset.modelConnectionId)?.name ?? "unavailable"}
               </p>
             ) : null}
             {!executionSelectionsValid(
@@ -381,7 +331,7 @@ export function ExecutionTargetControl({
                 {message}
               </p>
             ))}
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="sticky bottom-0 flex flex-wrap justify-end gap-2 bg-background py-3 max-sm:[&_button]:min-h-11">
             <Button
               type="button"
               variant="ghost"
@@ -540,9 +490,9 @@ export function ContinuationDialog({
         </p>
         {retry ? (
           <div className="break-words text-sm">
-            Operation {retry.operationId} · ready
+            Prepared continuation · {machines.data?.find(machine => machine.id === retry.targetHostId)?.name ?? "Target machine unavailable"}
             <br />
-            {retry.targetHostId} · {retry.targetPath}
+            {retry.targetPath}
             <p>{retry.lastError}</p>
           </div>
         ) : null}
@@ -551,24 +501,7 @@ export function ContinuationDialog({
             <>
               <label className={fieldClass}>
                 Target machine
-                <select
-                  aria-label="Target machine"
-                  className={selectClass}
-                  value={targetHostId}
-                  onChange={(event) => {
-                    setTargetHostId(event.target.value);
-                    setIncludePaths([]);
-                    setExtraPathsInput("");
-                    setError(null);
-                  }}
-                >
-                  <option value="">Choose target machine</option>
-                  {machines.data?.map((machine) => (
-                    <option key={machine.id} value={machine.id}>
-                      {machine.name}
-                    </option>
-                  ))}
-                </select>
+                <ExecutionPicker label="Target machine" value={targetHostId} dialogOpen={open} options={(machines.data ?? []).map(machine => ({ value: machine.id, label: machine.name }))} onChange={id => { setTargetHostId(id); setIncludePaths([]); setExtraPathsInput(""); setError(null); }} />
               </label>
               <label className={fieldClass}>
                 New target path
@@ -581,19 +514,7 @@ export function ContinuationDialog({
               </label>
               <label className={fieldClass}>
                 Continuation profile
-                <select
-                  aria-label="Continuation profile"
-                  className={selectClass}
-                  value={presetId}
-                  onChange={(event) => setPresetId(event.target.value)}
-                >
-                  <option value="">Choose profile</option>
-                  {presets.data?.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.name}
-                    </option>
-                  ))}
-                </select>
+                <ExecutionPicker label="Continuation profile" value={presetId} dialogOpen={open} options={(presets.data ?? []).map(preset => ({ value: preset.id, label: `${preset.name} · ${preset.modelId}` }))} onChange={setPresetId} />
               </label>
               <label className={fieldClass}>
                 New branch (optional)
@@ -608,7 +529,7 @@ export function ContinuationDialog({
               {preview.data ? (
                 <section className="space-y-2 text-sm">
                   <p className="break-words">
-                    Source: {preview.data.sourceHostId} ·{" "}
+                    Source: {machines.data?.find(machine => machine.id === preview.data?.sourceHostId)?.name ?? "Source machine unavailable"} ·{" "}
                     {preview.data.branch ?? "detached HEAD"} ·{" "}
                     {preview.data.head}
                   </p>
@@ -708,12 +629,9 @@ export function ContinuationDialog({
             </p>
           ))}
         {operationId ? (
-          <p role="status" className="break-all text-sm">
-            New native thread started. Operation {operationId}. Source thread
-            retained.
-          </p>
+          <div className="space-y-2 text-sm"><p role="status">New native thread started. Source thread retained.</p><details><summary className="cursor-pointer py-2">Continuation receipt</summary><code className="break-all">{operationId}</code></details></div>
         ) : null}
-        <div className="flex justify-end gap-2">
+        <div className="sticky bottom-0 flex flex-wrap justify-end gap-2 bg-background py-3 max-sm:[&_button]:min-h-11">
           <Button
             type="button"
             variant="outline"

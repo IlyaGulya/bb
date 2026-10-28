@@ -120,15 +120,16 @@ function TaskCard({
       ref={cardRef}
       data-task-key={task.key}
       onPointerDown={onPointerDown}
-      onClick={onClick}
       className={cn(
-        "shrink-0 rounded-lg border border-border bg-card px-2.5 py-2 shadow-2xs select-none",
+        "relative shrink-0 rounded-lg border border-border bg-card px-2.5 py-2 pr-12 shadow-2xs select-none",
         ghost
           ? "rotate-2 shadow-md"
-          : "cursor-pointer touch-none hover:border-input",
+          : "cursor-pointer touch-auto hover:border-input",
         dragging && "opacity-40",
       )}
     >
+      <button type="button" aria-label={`Open ${task.key}: ${task.title}`} disabled={ghost} tabIndex={ghost ? -1 : 0} className="absolute inset-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" onClick={onClick} />
+      <span aria-hidden="true" data-task-drag-handle="" title="Drag task; open the task to change status with keyboard" className="absolute right-0 top-0 flex size-11 touch-none items-center justify-center text-muted-foreground hover:text-foreground"><Icon name="DragDropVertical" className="pointer-events-none size-4" /></span>
       <div className="flex items-center gap-1.5 text-2xs text-muted-foreground">
         <span className="tabular-nums">{task.key}</span>
         <WorkingAgentsChip threads={meta.workingThreads} />
@@ -322,6 +323,7 @@ export function BoardView({ projectId }: BoardViewProps) {
     task: Task,
   ) => {
     if (event.button !== 0 || dragCleanupRef.current) return;
+    if (event.pointerType === "touch" && !(event.target instanceof Element && event.target.closest("[data-task-drag-handle]"))) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const start = {
       x: event.clientX,
@@ -386,10 +388,12 @@ export function BoardView({ projectId }: BoardViewProps) {
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("blur", onCancel);
     dragCleanupRef.current = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("blur", onCancel);
     };
   };
 

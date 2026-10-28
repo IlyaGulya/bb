@@ -77,6 +77,9 @@ function ThreadCard({
   onContinue,
   continuedTo,
   continuedFrom,
+  continuedToName,
+  continuedFromName,
+  targetMachineName,
 }: {
   thread: TaskThread;
   pullRequest: TaskPullRequest | undefined;
@@ -86,11 +89,14 @@ function ThreadCard({
   onContinue?: () => void;
   continuedTo: TaskContinuation | undefined;
   continuedFrom: TaskContinuation | undefined;
+  continuedToName: string;
+  continuedFromName: string;
+  targetMachineName: string;
 }) {
   const navigate = useBbNavigate();
   const meta = THREAD_STATUS_META[thread.liveStatus];
   return (
-    <div className="mb-2 flex flex-wrap items-center gap-3 rounded-md border border-border bg-card px-3 py-2 shadow-2xs">
+    <article aria-label={`Agent thread ${thread.title}`} className="mb-2 flex flex-wrap items-center gap-3 rounded-md border border-border bg-card px-3 py-2 shadow-2xs max-sm:[&_button]:min-h-11 max-sm:[&_button]:min-w-11">
       <span
         className={cn(
           "flex shrink-0 items-center gap-1.5 text-xs font-medium",
@@ -104,17 +110,17 @@ function ThreadCard({
         {meta.label}
       </span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{thread.title}</div>
+        <div className="break-words text-sm font-medium">{thread.title}</div>
         <div className="text-xs text-muted-foreground">
           {thread.presetName} · attached {formatRelativeTime(thread.attachedAt)}
         </div>
         {continuedTo ? (
           <p className="break-words text-xs text-muted-foreground">
-            {`Continued to ${continuedTo.threadId} on ${continuedTo.targetHostId}; previous executor`}
+            Previous executor · continued to <button type="button" className="underline" onClick={() => { if (continuedTo.threadId) navigate.toThread(continuedTo.threadId); }}>{continuedToName}</button> on {targetMachineName}
           </p>
         ) : continuedFrom ? (
           <p className="break-words text-xs font-medium">
-            {`Current executor · continued from ${continuedFrom.sourceThreadId}`}
+            Current executor · continued from <button type="button" className="underline" onClick={() => navigate.toThread(continuedFrom.sourceThreadId)}>{continuedFromName}</button>
           </p>
         ) : null}
       </div>
@@ -143,7 +149,7 @@ function ThreadCard({
       >
         <Icon name="X" className="size-3" />
       </button>
-    </div>
+    </article>
   );
 }
 
@@ -203,19 +209,18 @@ export function DispatchControl({
     void dispatch(preset.id);
   };
 
-  const primarySegment =
-    "bg-primary text-primary-foreground hover:bg-primary/90";
+  const primarySegment = "border border-input bg-transparent text-foreground hover:bg-state-hover";
 
   if (presets !== undefined && presets.length === 0) {
     return (
       <>
         <Button
           size="sm"
-          className={cn("h-7 gap-1.5", primarySegment, className)}
+          className={cn("min-h-11 gap-1.5 sm:min-h-8", primarySegment, className)}
           onClick={() => setCreateDialogKey(Date.now())}
         >
           <Icon name="Plus" className="size-3.5 shrink-0" />
-          Add a preset…
+          Add single-agent preset…
         </Button>
         {createDialogKey !== null ? (
           <PresetDialog
@@ -246,16 +251,18 @@ export function DispatchControl({
           size="sm"
           disabled={dispatching || !current}
           className={cn(
-            "h-7 min-w-0 flex-1 gap-1.5 rounded-r-none",
+            "min-h-11 min-w-0 flex-1 gap-1.5 rounded-r-none sm:min-h-8",
             primarySegment,
           )}
+          aria-label={current ? `Run single agent with ${current.name}` : "Run single agent"}
+          title={current ? `Run single agent · ${current.name}` : "Run single agent"}
           onClick={() => {
             if (execution?.override) void dispatch();
             else if (current) pickPreset(current);
           }}
         >
           <span className="truncate">
-            {dispatching ? "Dispatching…" : (current?.name ?? "Dispatch")}
+            {dispatching ? "Dispatching…" : "Run single agent"}
           </span>
         </Button>
         <DropdownMenu>
@@ -264,7 +271,7 @@ export function DispatchControl({
               size="sm"
               aria-label="Choose dispatch preset"
               className={cn(
-                "h-7 shrink-0 rounded-l-none border-l border-primary-foreground/25 px-1",
+                "min-h-11 min-w-11 shrink-0 rounded-l-none sm:min-h-8 sm:min-w-8",
                 primarySegment,
               )}
             >
@@ -272,7 +279,7 @@ export function DispatchControl({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align={align}>
-            <DropdownMenuLabel>Dispatch with preset</DropdownMenuLabel>
+            <DropdownMenuLabel>Run single agent with preset</DropdownMenuLabel>
             {(presets ?? []).map((preset) => (
               <DropdownMenuItem
                 key={preset.id}
@@ -317,6 +324,8 @@ export function ThreadsSection({
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   const rpc = useRpc<DelegationRpcContract>();
   const continuations = useTasksQuery(async () => (await rpc.call("getTaskContinuations", { taskId })).continuations, ["threads:changed"], [taskId], { relevantTaskIds: [taskId] });
+  const machines = useTasksQuery(async query => (await query.call("listMachines", {})).machines, []);
+  const machineName = (id: string) => machines.data?.find(machine => machine.id === id)?.name ?? "Machine unavailable";
   const [continuation, setContinuation] = useState<{ thread: TaskThread | null; retry: TaskContinuation | null; key: number } | null>(null);
   const [continuationOpen, setContinuationOpen] = useState(false);
   const changed = () => { continuations.refresh(); onContinued(); };
@@ -366,6 +375,9 @@ export function ThreadsSection({
           thread={thread}
           continuedTo={continuedBySource.get(thread.threadId)}
           continuedFrom={continuedByTarget.get(thread.threadId)}
+          continuedToName={threads.find(entry => entry.threadId === continuedBySource.get(thread.threadId)?.threadId)?.title ?? "Unavailable thread"}
+          continuedFromName={threads.find(entry => entry.threadId === continuedByTarget.get(thread.threadId)?.sourceThreadId)?.title ?? "Unavailable source thread"}
+          targetMachineName={machineName(continuedBySource.get(thread.threadId)?.targetHostId ?? "")}
           pullRequest={pullRequestByThread.get(thread.threadId)}
           pullRequestUnavailable={unavailable.has(thread.threadId)}
           busy={pending.has(thread.id)}
@@ -375,11 +387,12 @@ export function ThreadsSection({
             : undefined}
         />
       ))}
-      {continuations.error ? <p role="alert" className="text-sm text-destructive">{continuations.error}</p> : null}
+      {continuations.error ? <p role="alert" className="text-sm text-destructive">{continuations.error} <button type="button" className="underline" onClick={continuations.refresh}>Retry</button></p> : null}
       {continuations.data?.map((entry) => (
         <div key={entry.operationId} className="mb-2 break-words rounded-md border border-border p-3 text-xs">
-          <p>Continuation operation {entry.operationId} · {entry.state}</p>
-          <p>{entry.targetHostId} · {entry.targetPath}</p>
+          <p>Continuation · {entry.state.replaceAll("_", " ")}</p>
+          <p>{machineName(entry.targetHostId)} · {entry.targetPath}</p>
+          <details><summary className="cursor-pointer py-2">Continuation diagnostics</summary><pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(entry, null, 2)}</pre><button type="button" className="min-h-11 underline sm:min-h-8" onClick={() => { void navigator.clipboard.writeText(JSON.stringify(entry, null, 2)).catch(cause => onError(errorMessage(cause))); }}>Copy diagnostics</button></details>
           {entry.lastError ? <p role="alert" className="text-destructive">{entry.lastError}</p> : null}
           {entry.state === "ready" ? <Button type="button" size="sm" variant="outline" onClick={() => { setContinuation({ thread: null, retry: entry, key: Date.now() }); setContinuationOpen(true); }}>Retry prepared continuation</Button> : null}
         </div>

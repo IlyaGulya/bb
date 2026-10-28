@@ -405,6 +405,7 @@ const PERSISTENT_DRAWER_FOCUSABLE_SELECTOR = [
   "input:not([disabled])",
   "select:not([disabled])",
   "textarea:not([disabled])",
+  "summary",
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
@@ -446,9 +447,28 @@ function readPersistentDrawerStack(
 function getDrawerFocusableElements(panel: HTMLElement): HTMLElement[] {
   return Array.from(
     panel.querySelectorAll<HTMLElement>(PERSISTENT_DRAWER_FOCUSABLE_SELECTOR),
-  ).filter(
-    (element) => element.closest('[aria-hidden="true"], [inert]') === null,
-  );
+  ).filter((element) => {
+    if (element.matches(':disabled, input[type="hidden"], [tabindex="-1"]')) return false;
+    if (element.hasAttribute("tabindex") && element.tabIndex < 0) return false;
+    if (element.tagName === "SUMMARY" && !element.hasAttribute("tabindex")) {
+      const details = element.parentElement;
+      if (!(details instanceof HTMLDetailsElement) || details.querySelector(":scope > summary") !== element) return false;
+    }
+    if (element.closest('[aria-hidden="true"], [inert], [hidden]')) return false;
+    const style = getComputedStyle(element);
+    if (style.visibility === "hidden" || style.visibility === "collapse") return false;
+    let ancestor: HTMLElement | null = element;
+    while (ancestor && ancestor !== panel) {
+      if (getComputedStyle(ancestor).display === "none") return false;
+      const parent: HTMLElement | null = ancestor.parentElement;
+      if (parent instanceof HTMLDetailsElement && !parent.open) {
+        const summary = parent.querySelector(":scope > summary");
+        if (!summary?.contains(element)) return false;
+      }
+      ancestor = parent;
+    }
+    return true;
+  });
 }
 
 function activeElementIsInAnotherOverlay(
@@ -485,11 +505,11 @@ function handleDrawerTab(event: KeyboardEvent, panel: HTMLElement): void {
       activeElement === panel ||
       activeElement === first
     ) {
-      last?.focus({ preventScroll: true });
+      last?.focus();
       return;
     }
     const index = focusable.indexOf(activeElement as HTMLElement);
-    focusable[Math.max(0, index - 1)]?.focus({ preventScroll: true });
+    focusable[Math.max(0, index - 1)]?.focus();
     return;
   }
 
@@ -498,13 +518,11 @@ function handleDrawerTab(event: KeyboardEvent, panel: HTMLElement): void {
     activeElement === panel ||
     activeElement === last
   ) {
-    first?.focus({ preventScroll: true });
+    first?.focus();
     return;
   }
   const index = focusable.indexOf(activeElement as HTMLElement);
-  focusable[Math.min(focusable.length - 1, index + 1)]?.focus({
-    preventScroll: true,
-  });
+  focusable[Math.min(focusable.length - 1, index + 1)]?.focus();
 }
 
 function registerOpenDrawer(

@@ -4,11 +4,13 @@ import { sdk } from "@/lib/sdk";
 import { useThread } from "@/hooks/queries/thread-queries";
 import { useEnvironment } from "@/hooks/queries/environment-queries";
 import { useHosts } from "@/hooks/queries/host-queries";
+import { useSystemProviderCatalog } from "@/hooks/queries/system-queries";
 
 export function ThreadExecutionBindingCard({ threadId }: { threadId: string }) {
   const thread = useThread(threadId);
   const environment = useEnvironment(thread.data?.environmentId);
   const hosts = useHosts();
+  const providers = useSystemProviderCatalog();
   const executionHostId = environment.data?.hostId;
   const executionHost = hosts.data?.find((host) => host.id === executionHostId);
   const binding = useQuery({
@@ -45,10 +47,10 @@ export function ThreadExecutionBindingCard({ threadId }: { threadId: string }) {
             </DetailRow>
             {binding.data?.modelConnection ? (
               <DetailRow label="Provider · connection mode">
-                {binding.data.modelConnection.provider} ·{" "}
+                {providers.data?.find(provider => provider.id === binding.data?.modelConnection?.provider)?.displayName ?? "Provider unavailable"} ·{" "}
                 {binding.data.modelConnection.gateway
                   ? "CPA gateway"
-                  : binding.data.modelConnection.hostId}
+                  : "Native provider login"}
               </DetailRow>
             ) : null}
             {binding.data?.modelConnection?.gateway ? (
@@ -77,7 +79,7 @@ export function ThreadExecutionBindingCard({ threadId }: { threadId: string }) {
                   {binding.data.modelConnection.gateway.allowedHostIds.map(
                     (id) => (
                       <div key={id} className="break-all">
-                        {hosts.data?.find((host) => host.id === id)?.name ?? id}
+                        {hosts.data?.find((host) => host.id === id)?.name ?? "Machine unavailable"}
                       </div>
                     ),
                   )}
@@ -91,7 +93,7 @@ export function ThreadExecutionBindingCard({ threadId }: { threadId: string }) {
             ) : null}
             <DetailRow label="Execution machine">
               {executionHost?.name ??
-                executionHostId ??
+                (executionHostId ? "Machine unavailable" : null) ??
                 (thread.isError || environment.isError
                   ? "Unavailable"
                   : thread.isPending || environment.isFetching

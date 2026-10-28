@@ -22,7 +22,6 @@ import { Icon } from "@/components/ui/icon";
 import { TasksRefreshProvider } from "./refresh.js";
 import { InboxView, WorkingView } from "../views/inbox/index.js";
 
-const BOARD_MIN_WIDTH = 448;
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -41,13 +40,7 @@ function hasOpenOverlay(): boolean {
   );
 }
 
-function RouteOutlet({
-  route,
-  boardUsable,
-}: {
-  route: ResolvedTasksRoute;
-  boardUsable: boolean;
-}) {
+function RouteOutlet({ route }: { route: ResolvedTasksRoute }) {
   switch (route.kind) {
     case "inbox":
       return <InboxView />;
@@ -62,7 +55,7 @@ function RouteOutlet({
     case "task":
       return <TaskRouteView taskKey={route.taskKey} />;
     case "project":
-      return route.view === "board" && boardUsable ? (
+      return route.view === "board" ? (
         <BoardView projectId={route.projectId} />
       ) : (
         <ListView projectId={route.projectId} />
@@ -114,20 +107,6 @@ function TasksAppShellContent({ subPath }: PluginNavPanelProps) {
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
 
-  const mainRef = useRef<HTMLElement>(null);
-  const [boardUsable, setBoardUsable] = useState(true);
-  useEffect(() => {
-    const main = mainRef.current;
-    if (!main || typeof ResizeObserver === "undefined") return;
-    const update = () => {
-      const mainWidth = main.clientWidth;
-      setBoardUsable(!(mainWidth > 0 && mainWidth < BOARD_MIN_WIDTH));
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(main);
-    return () => observer.disconnect();
-  }, []);
   const projects = useProjects();
 
   const lastBrowseRouteRef = useRef<TasksRoute | null>(null);
@@ -171,7 +150,7 @@ function TasksAppShellContent({ subPath }: PluginNavPanelProps) {
 
   return (
     <div className="relative flex h-full min-h-0 bg-background text-foreground">
-      <main ref={mainRef} className="@container flex min-w-0 flex-1 flex-col">
+      <main className="@container flex min-w-0 flex-1 flex-col">
         <TasksTopbar
           route={route}
           projects={projects.data}
@@ -207,7 +186,7 @@ function TasksAppShellContent({ subPath }: PluginNavPanelProps) {
               }
             />
           ) : (
-            <RouteOutlet route={route} boardUsable={boardUsable} />
+            <RouteOutlet route={route} />
           )}
         </div>
       </main>

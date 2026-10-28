@@ -1,14 +1,19 @@
 import {
   useSdk,
+  useRealtime,
   type ExecutionContext,
   type ModelConnection,
 } from "@get-bb/plugin-sdk/app";
+import { z } from "zod";
 import { useTasksQuery } from "../shell/data.js";
+import { ExecutionPicker } from "./execution-picker.js";
 
 interface ExecutionSelections {
-  contexts: { data: ExecutionContext[] | undefined; error: string | null };
-  connections: { data: ModelConnection[] | undefined; error: string | null };
+  contexts: { data: ExecutionContext[] | undefined; error: string | null; refresh: () => void };
+  connections: { data: ModelConnection[] | undefined; error: string | null; refresh: () => void };
 }
+
+const systemChangeSchema = z.object({ changes: z.array(z.string()), id: z.string().optional() });
 
 export function contextUnavailable(
   context: ExecutionContext,
@@ -50,6 +55,13 @@ export function useExecutionSelections(open: boolean) {
     [],
     [open],
   );
+  useRealtime("system:changed", payload => {
+    if (!open) return;
+    const parsed = systemChangeSchema.safeParse(payload);
+    if (!parsed.success) return;
+    if (parsed.data.changes.includes("execution-contexts-changed")) contexts.refresh();
+    if (parsed.data.changes.includes("model-connections-changed")) connections.refresh();
+  });
   return { contexts, connections };
 }
 
@@ -62,6 +74,7 @@ export function ExecutionSelectionFields({
   provider,
   hostId,
   projectId,
+  open,
 }: {
   selections: ExecutionSelections;
   executionContextId: string;
@@ -71,75 +84,31 @@ export function ExecutionSelectionFields({
   provider?: string;
   hostId?: string;
   projectId?: string;
+  open: boolean;
 }) {
   const { contexts, connections } = selections;
   const context = contexts.data?.find(
     (entry) => entry.id === executionContextId,
   );
-  const connection = connections.data?.find(
-    (entry) => entry.id === modelConnectionId,
-  );
-  const selectClass =
-    "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
   return (
     <>
-      <label className="flex flex-col gap-1 text-sm">
-        Execution context
-        <select
-          aria-label="Execution context"
-          className={selectClass}
-          value={executionContextId}
-          onChange={(event) => onContextChange(event.target.value)}
-        >
-          <option value="">Inherit execution context</option>
-          {executionContextId && !context ? (
-            <option value={executionContextId} disabled>
-              {executionContextId} · unavailable
-            </option>
-          ) : null}
-          {contexts.data?.map((entry) => {
-            const reason = contextUnavailable(entry, projectId);
-            return (
-              <option key={entry.id} value={entry.id} disabled={!!reason}>
-                {entry.name} · {entry.id}
-                {reason ? ` · ${reason}` : ""}
-              </option>
-            );
-          })}
-        </select>
-      </label>
-      {context?.projectIds.length ? (
-        <p className="text-xs text-muted-foreground">
-          Code project must belong to this context:{" "}
-          {context.projectIds.join(", ")}. Membership is checked at dispatch.
-        </p>
+      <div className="space-y-1 text-sm">
+        <span>Execution context</span>
+        <ExecutionPicker label="Execution context" value={executionContextId} dialogOpen={open} onChange={onContextChange} options={[
+          { value: "", label: "Inherit execution context" },
+          ...(contexts.data ?? []).map(entry => { const reason = contextUnavailable(entry, projectId); return { value: entry.id, label: `${entry.name}${reason ? ` · ${reason}` : ""}`, disabled: !!reason }; }),
+        ]} />
+      </div>
+      {context && projectId && !context.projectIds.includes(projectId) ? (
+        <p role="alert" className="text-xs text-destructive">This code project is not a member of the selected context. Change the context or update its project membership before dispatch.</p>
       ) : null}
-      <label className="flex flex-col gap-1 text-sm">
-        Model connection
-        <select
-          aria-label="Model connection"
-          className={selectClass}
-          value={modelConnectionId}
-          onChange={(event) => onConnectionChange(event.target.value)}
-        >
-          <option value="">Inherit model connection</option>
-          {modelConnectionId && !connection ? (
-            <option value={modelConnectionId} disabled>
-              {modelConnectionId} · unavailable
-            </option>
-          ) : null}
-          {connections.data?.map((entry) => {
-            const reason = connectionUnavailable(entry, provider, hostId);
-            return (
-              <option key={entry.id} value={entry.id} disabled={!!reason}>
-                {entry.name} · {entry.id} · {entry.provider} ·{" "}
-                {entry.gateway ? "CPA gateway" : entry.hostId}
-                {reason ? ` · ${reason}` : ""}
-              </option>
-            );
-          })}
-        </select>
-      </label>
+      <div className="space-y-1 text-sm">
+        <span>Model connection</span>
+        <ExecutionPicker label="Model connection" value={modelConnectionId} dialogOpen={open} onChange={onConnectionChange} options={[
+          { value: "", label: "Inherit model connection" },
+          ...(connections.data ?? []).map(entry => { const reason = connectionUnavailable(entry, provider, hostId); return { value: entry.id, label: `${entry.name} · ${entry.gateway ? `CPA account: ${entry.gateway.accountPrefix}` : "Native provider login"}${reason ? ` · ${reason}` : ""}`, disabled: !!reason }; }),
+        ]} />
+      </div>
       <p className="text-xs text-muted-foreground">
         Context and model account are independent. Inherited connections are
         validated against the execution host and provider at dispatch.
@@ -151,6 +120,7 @@ export function ExecutionSelectionFields({
             {error}
           </p>
         ))}
+      {(contexts.error || connections.error) && <button type="button" className="min-h-11 text-sm underline sm:min-h-9" onClick={() => { contexts.refresh(); connections.refresh(); }}>Retry context and account lists</button>}
     </>
   );
 }

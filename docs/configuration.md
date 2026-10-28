@@ -36,6 +36,13 @@ the same persisted records. See the
 [agent-configuration guide](../packages/templates/src/templates/bb-guide-agent-configuration.md)
 for exact fields and CLI commands.
 
+Context and account names, provider labels and project memberships are shown
+separately. A context does not choose the model or payer. Unknown native account
+identity is reported as unknown, not inferred from Work/Personal names. Editors
+keep basic settings separate from optional MCP and advanced native/gateway fields;
+Cancel discards an unsaved edit. Deletion requires confirmation naming the saved
+definition and remains subject to the server's reference checks.
+
 Changes made through any UI, CLI or SDK client refresh mounted Settings and
 new-thread selectors without reloading. Core publishes ID-only
 `system:changed` notifications using `execution-contexts-changed`,
@@ -54,6 +61,13 @@ Independent SDK consumers can subscribe with `sdk.subscribe({ event:
 selected-connection catalogs when relevant). Subscribe to `realtime:connection`
 and reread after reconnect because change notifications are not durable replay.
 Existing SDK CRUD and CLI commands share the same notifying server routes.
+
+Core's plugin-bound SDK path also publishes these existing system changes to
+plugin subscribers. Tasks execution selectors refresh the affected definition
+list and only model catalogs bound to the changed account; reconnect refreshes
+the active definitions and selected-account catalogs. Unsaved form text and
+explicit selections survive refresh. An unavailable selection remains visible
+and blocks launch rather than switching context, account or model.
 
 A context's `projectIds` is an explicit membership list; `[]` admits no project.
 Work/Personal names are not account ownership rules or ACLs. Native configuration

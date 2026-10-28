@@ -65,14 +65,14 @@ function TaskPager({
     if (key !== null) onNavigate({ kind: "task", taskKey: key });
   };
   return (
-    <div className="hidden shrink-0 items-center gap-0.5 text-xs tabular-nums text-muted-foreground @sm:flex">
+    <div className="flex shrink-0 items-center gap-0.5 text-xs tabular-nums text-muted-foreground">
       <span className="hidden px-1 @md:inline">
         {position.index} / {position.total}
       </span>
       <Button
         variant="ghost"
         size="icon"
-        className="size-6 max-md:pointer-coarse:size-9"
+        className="size-11 sm:size-6"
         aria-label="Previous task"
         disabled={position.prevKey === null}
         onClick={() => step(position.prevKey)}
@@ -82,7 +82,7 @@ function TaskPager({
       <Button
         variant="ghost"
         size="icon"
-        className="size-6 max-md:pointer-coarse:size-9"
+        className="size-11 sm:size-6"
         aria-label="Next task"
         disabled={position.nextKey === null}
         onClick={() => step(position.nextKey)}
@@ -106,7 +106,7 @@ function ViewToggle({
       onClick={() => onChange(mode)}
       aria-pressed={view === mode}
       className={cn(
-        "rounded-sm px-2.5 py-0.5 text-xs max-md:pointer-coarse:py-1.5",
+        "min-h-11 rounded-sm px-2.5 py-1 text-xs sm:min-h-7",
         view === mode
           ? "bg-background text-foreground shadow-2xs"
           : "text-muted-foreground hover:text-foreground",
@@ -139,7 +139,7 @@ function RefreshTasksButton() {
             type="button"
             variant="ghost"
             size="icon"
-            className="size-7 shrink-0 text-muted-foreground hover:text-foreground active:bg-state-active active:text-foreground max-md:pointer-coarse:size-9"
+            className="size-11 shrink-0 text-muted-foreground hover:text-foreground active:bg-state-active active:text-foreground sm:size-7"
             aria-label={REFRESH_TASKS_LABEL}
             aria-busy={isRefreshing}
             disabled={isRefreshing}
@@ -234,7 +234,7 @@ export function TasksTopbar({
             <Button
               variant="ghost"
               size="icon"
-              className="size-6 shrink-0 max-md:pointer-coarse:size-9"
+              className="size-11 shrink-0 sm:size-6"
               aria-label="Back (Esc)"
               onClick={onBack}
             >
@@ -275,7 +275,7 @@ export function TasksTopbar({
   })();
 
   return (
-    <header className="flex h-11 shrink-0 items-center gap-2.5 border-b border-border-hairline bg-background px-3.5 text-sm max-md:pointer-coarse:h-12 max-md:pl-12 max-md:pointer-coarse:pl-14">
+    <header className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border-hairline bg-background px-3.5 text-sm max-md:pl-12 max-md:pointer-coarse:pl-14">
       <div className="min-w-0 flex-1 overflow-hidden">{breadcrumb}</div>
       {route.kind === "task" &&
       (pagerScope !== null || projects !== undefined) ? (
@@ -288,7 +288,7 @@ export function TasksTopbar({
         />
       ) : null}
       {route.kind === "project" ? (
-        <span className="hidden @md:block">
+        <span className="shrink-0">
           <ViewToggle
             view={route.view}
             onChange={(view) => onNavigate({ ...route, view })}
@@ -299,7 +299,7 @@ export function TasksTopbar({
       {route.kind !== "task" && route.kind !== "manage" ? (
         <Button
           size="sm"
-          className="h-7 gap-1.5 max-md:pointer-coarse:h-9"
+          className="h-11 gap-1.5 sm:h-7"
           aria-label="New task"
           onClick={onNewTask}
         >

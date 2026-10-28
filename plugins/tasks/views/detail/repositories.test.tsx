@@ -104,7 +104,7 @@ function renderRepositories(
           }),
           listComments: () => ({ comments: [] }),
           listBbProjects: () => ({ bbProjects: [] }),
-          listMachines: () => ({ machines: [] }),
+          listMachines: () => ({ machines: [{ id: "host_source", name: "Source laptop" }, { id: "host_target", name: "Target worker" }] }),
           getTaskExecution: () => ({
             override: null,
             resolved: null,
@@ -129,8 +129,8 @@ describe("multi-repository task preparation surface", () => {
     });
     expect(button).toHaveProperty("disabled", true);
     expect(slot.getByText("Actions target unavailable")).toBeTruthy();
-    expect(slot.getByText(/host_source:\/source\/android/u)).toBeTruthy();
-    expect(slot.getByText(/host_target:\/target\/actions/u)).toBeTruthy();
+    expect(await slot.findByText(/Source laptop:\/source\/android/u)).toBeTruthy();
+    expect(slot.getByText(/Target worker:\/target\/actions/u)).toBeTruthy();
     fireEvent.click(button);
     expect(continueTaskRepositories).not.toHaveBeenCalled();
   });
@@ -160,8 +160,8 @@ describe("multi-repository task preparation surface", () => {
       root.error = null;
     }
     const { slot } = renderRepositories(receipt);
-    await waitFor(() =>
-      expect(slot.getAllByText(/Writer: thr_coherent_writer/u)).toHaveLength(2),
-    );
+    const actions = await slot.findAllByRole("button", { name: "Open repository writer" });
+    fireEvent.click(actions[1]!);
+    expect(slot.navigateCalls).toContainEqual({ method: "toThread", threadId: "thr_coherent_writer" });
   });
 });

@@ -32,6 +32,7 @@ export function JiraSourcePanel({ task }: { task: Task }) {
     { relevantTaskIds: [task.id] },
   );
   const [source, setSource] = useState<JiraSource | null>(null);
+  const connections = useTasksQuery(async () => source ? (await rpc.call("jiraConnections", {})).connections : [], [], [source?.connectionId]);
   const [linkOpen, setLinkOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -138,7 +139,7 @@ export function JiraSourcePanel({ task }: { task: Task }) {
     });
   return (
     <section
-      className="my-6 min-w-0 space-y-3 rounded-lg border border-border p-4"
+      className="my-6 min-w-0 space-y-3 rounded-lg border border-border p-4 max-sm:[&_button]:min-h-11 max-sm:[&_label:has(input[type=checkbox])]:min-h-11"
       aria-label="Jira source"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -213,7 +214,7 @@ export function JiraSourcePanel({ task }: { task: Task }) {
               </span>
             </div>
             <p className="text-xs text-muted-foreground">
-              Connection: {source.connectionId} · Stored revision{" "}
+              Connection: {connections.data?.find(connection => connection.id === source.connectionId)?.label ?? "Unavailable connection"} · Stored revision{" "}
               {source.revision}
               <br />
               Last successful fetch: {displayTime(source.remote.fetchedAt)}
@@ -274,7 +275,7 @@ export function JiraSourcePanel({ task }: { task: Task }) {
                 Operation: {source.operation.state} ({source.operation.kind})
               </p>
               <p className="break-all text-xs text-muted-foreground">
-                Receipt {source.operation.id} ·{" "}
+                Started {" "}
                 {displayTime(source.operation.createdAt)}
                 {source.operation.finishedAt
                   ? ` · Finished ${displayTime(source.operation.finishedAt)}`
@@ -283,11 +284,7 @@ export function JiraSourcePanel({ task }: { task: Task }) {
               {source.operation.message ? (
                 <p>{source.operation.message}</p>
               ) : null}
-              {source.operation.externalCommentId ? (
-                <p className="text-xs">
-                  Jira comment ID: {source.operation.externalCommentId}
-                </p>
-              ) : null}
+              {source.operation.externalCommentId ? <p className="text-xs">Comment receipt retained in sync diagnostics.</p> : null}
               {unresolved ? (
                 <>
                   <p>
@@ -319,6 +316,7 @@ export function JiraSourcePanel({ task }: { task: Task }) {
               ) : null}
             </div>
           ) : null}
+          <details className="text-xs text-muted-foreground"><summary className="cursor-pointer py-2">Sync diagnostics</summary><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify({ connectionId: source.connectionId, revision: source.revision, operation: source.operation, previewId: source.preview?.id }, null, 2)}</pre><Button size="sm" variant="ghost" onClick={() => void run("Copying diagnostics", () => navigator.clipboard.writeText(JSON.stringify({ connectionId: source.connectionId, revision: source.revision, operation: source.operation, previewId: source.preview?.id }, null, 2)))}>Copy diagnostics</Button></details>
           <div className="space-y-3 border-t border-border pt-3">
             <h3 className="text-sm font-semibold">Jira proposal</h3>
             <p className="text-xs text-muted-foreground">
@@ -618,7 +616,7 @@ export function JiraSourcePanel({ task }: { task: Task }) {
             <div className="space-y-3 border-t border-border pt-3">
               <h3 className="text-sm font-semibold">Explicit push preview</h3>
               <p className="break-all text-xs text-muted-foreground">
-                Preview {source.preview.id} ·{" "}
+                Generated {" "}
                 {displayTime(source.preview.createdAt)}
               </p>
               {source.preview.changes.map((change) => (

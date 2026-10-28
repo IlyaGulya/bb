@@ -1,5 +1,5 @@
 export const CHROME_SECTION_LABEL_CLASS =
-  "text-xs font-normal leading-5 text-subtle-foreground/75";
+  "text-xs font-normal leading-5 text-muted-foreground";
 
 export const SIDEBAR_DISCLOSURE_ACTION_CLASS =
   "text-sm leading-5 text-subtle-foreground [&>[data-icon-root]]:size-3.5";

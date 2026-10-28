@@ -223,6 +223,8 @@ export function PresetDialog({
           <Field label="Provider, model, and reasoning">
             <ProviderModelPicker
               value={pickerValue}
+              allowProviderChange={!pickerConnectionId}
+              disabled={submitting}
               onChange={(value) =>
                 setDraft((current) => ({
                   ...current,
@@ -238,11 +240,12 @@ export function PresetDialog({
               {...(pickerConnectionId === undefined
                 ? {}
                 : { modelConnectionId: pickerConnectionId })}
-              className="h-8 max-w-full"
+              className="min-h-11 max-w-full sm:min-h-9"
             />
           </Field>
           <ExecutionSelectionFields
             selections={selections}
+            open={open}
             executionContextId={draft.executionContextId ?? ""}
             modelConnectionId={draft.modelConnectionId ?? ""}
             onContextChange={(id) => set("executionContextId", id)}
@@ -340,7 +343,7 @@ export function PresetDialog({
                       (machine) => machine.id === draft.machineId,
                     ) ? (
                       <SelectItem value={draft.machineId}>
-                        {draft.machineId}
+                        Saved machine unavailable
                       </SelectItem>
                     ) : null}
                   </SelectContent>

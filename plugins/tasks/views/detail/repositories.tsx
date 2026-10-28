@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useRpc } from "@get-bb/plugin-sdk/app";
+import { useRpc, useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,10 +13,12 @@ import {
 } from "../../shared/repositories";
 import { errorMessage } from "../../shared/errors";
 import type { Preset } from "../../shared/contract";
+import type { DelegationRpcContract } from "../../delegate/contract.js";
+import { ExecutionPicker } from "../execution-picker.js";
 
 function emptyBinding(index: number, presetId: string): RepositoryBinding {
   return {
-    id: `repo-${index}`,
+    id: `repo-${index}-${crypto.randomUUID()}`,
     bbProjectId: "",
     role: "",
     owner: "",
@@ -43,6 +45,8 @@ export function TaskRepositoriesControl({
   presets: Preset[] | undefined;
 }) {
   const rpc = useRpc<RepositoryRpcContract>();
+  const executionRpc = useRpc<DelegationRpcContract>();
+  const navigate = useBbNavigate();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +64,18 @@ export function TaskRepositoriesControl({
     ["tasks:changed"],
     [taskId, revision],
   );
+  const projects = useTasksQuery(async query => (await query.call("listBbProjects")).bbProjects, ["projects:changed"]);
+  const machines = useTasksQuery(async query => (await query.call("listMachines", {})).machines, []);
+  const sourceProjectIds = [...new Set(bindings.map(binding => binding.bbProjectId).filter(Boolean))].sort();
+  const sourceEnvironments = useTasksQuery(async () => {
+    if (!open) return [];
+    return (await Promise.all(sourceProjectIds.map(async bbProjectId => {
+      const result = await executionRpc.call("listTaskExecutionEnvironments", { bbProjectId });
+      return result.environments.map(environment => ({ ...environment, bbProjectId }));
+    }))).flat();
+  }, ["projects:changed"], [open, ...sourceProjectIds]);
+  const projectName = (id: string) => projects.data?.find(project => project.id === id)?.name ?? "Code project unavailable";
+  const machineName = (id: string) => machines.data?.find(machine => machine.id === id)?.name ?? "Machine unavailable";
   const update = (index: number, patch: Partial<RepositoryBinding>) =>
     setBindings((current) =>
       current.map((binding, position) =>
@@ -119,7 +135,7 @@ export function TaskRepositoriesControl({
       {checkpoints.data?.map((checkpoint) => (
         <article key={checkpoint.id} className="space-y-2 rounded border p-3">
           <p className="break-words text-sm">
-            <strong>{checkpoint.state}</strong> · {checkpoint.id}
+            <strong>{checkpoint.state.replaceAll("_", " ")}</strong> · {checkpoint.roots.length} repositories
           </p>
           {checkpoint.roots.map((root) => (
             <div
@@ -132,29 +148,25 @@ export function TaskRepositoriesControl({
               </p>
               <p className="break-words">
                 Owner: {root.binding.owner} · Project:{" "}
-                {root.binding.bbProjectId}
+                {projectName(root.binding.bbProjectId)}
               </p>
               <p className="break-words">
-                Source preserved: {root.binding.sourceHostId}:
+                Source preserved: {machineName(root.binding.sourceHostId)}:
                 {root.binding.sourcePath} ·{" "}
-                {root.binding.sourceBranch ?? "detached"} ·{" "}
-                {root.binding.sourceHead}
+                {root.binding.sourceBranch ?? "detached"}
               </p>
               <p className="break-words">
-                Target: {root.binding.targetHostId}:{root.binding.targetPath} ·{" "}
+                Target: {machineName(root.binding.targetHostId)}:{root.binding.targetPath} ·{" "}
                 {root.binding.branch}
               </p>
               <p className="break-words">
                 History transport:{" "}
                 {root.binding.remoteBase
-                  ? `${root.binding.remoteBase.url} ${root.binding.remoteBase.ref} · exact published prerequisite ${root.binding.remoteBase.head}; target-local Git/LFS authorization`
+                  ? "Approved published prerequisite; target-local Git/LFS authorization"
                   : "Bounded full Git bundle; no remote-base authorization supplied"}
               </p>
-              <p className="break-words">
-                Environment: {root.environmentId ?? "not prepared"} · Writer:{" "}
-                {root.threadId ?? "not started"} · Transfer:{" "}
-                {root.transferOperationId ?? "not verified"}
-              </p>
+              <p className="break-words">Workspace {root.environmentId ? "prepared" : "not prepared"} · Writer {root.threadId ? "attached" : "not started"} · Transfer {root.transferOperationId ? "verified" : "not verified"}</p>
+              {root.threadId && <Button size="sm" variant="outline" onClick={() => navigate.toThread(root.threadId!)}>Open repository writer</Button>}
               {root.error ? (
                 <p role="alert" className="text-destructive">
                   {root.error}
@@ -162,8 +174,8 @@ export function TaskRepositoriesControl({
               ) : null}
               {root.attempts.map((attempt, index) => (
                 <p key={index} className="break-words text-muted-foreground">
-                  Preserved attempt: {attempt.targetHostId}:{attempt.targetPath}{" "}
-                  · {attempt.transferOperationId ?? "no verified receipt"} ·{" "}
+                  Preserved attempt: {machineName(attempt.targetHostId)}:{attempt.targetPath}{" "}
+                  ·{" "}
                   {attempt.error}
                 </p>
               ))}
@@ -175,6 +187,7 @@ export function TaskRepositoriesControl({
                   {root.handoff}
                 </pre>
               </details>
+              <details className="text-xs text-muted-foreground"><summary className="cursor-pointer py-2">Copyable repository diagnostics</summary><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(root, null, 2)}</pre><Button size="sm" variant="ghost" onClick={() => void act(() => navigator.clipboard.writeText(JSON.stringify(root, null, 2)))}>Copy diagnostics</Button></details>
             </div>
           ))}
           <div className="flex flex-wrap gap-2">
@@ -254,6 +267,8 @@ export function TaskRepositoriesControl({
               {error}
             </p>
           ) : null}
+          {(projects.error || machines.error || sourceEnvironments.error) && <div role="alert" className="text-sm text-destructive"><p>{projects.error ?? machines.error ?? sourceEnvironments.error}</p><Button type="button" variant="outline" onClick={() => { projects.refresh(); machines.refresh(); sourceEnvironments.refresh(); }}>Retry execution choices</Button></div>}
+          {sourceEnvironments.isLoading && open && <p role="status" className="text-sm text-muted-foreground">Loading ready source workspaces…</p>}
           {bindings.map((binding, index) => {
             const receipt = checkpoints.data
               ?.find((checkpoint) => checkpoint.id === checkpointId)
@@ -262,12 +277,8 @@ export function TaskRepositoriesControl({
               !!receipt &&
               ["ready", "spawning", "started"].includes(receipt.state);
             const textFields = [
-              ["id", "Repository identifier"],
               ["role", "Role / scope"],
               ["owner", "Source owner"],
-              ["bbProjectId", "BB code project ID"],
-              ["sourceEnvironmentId", "Source environment ID"],
-              ["targetHostId", "Target host ID"],
               ["targetPath", "Fresh absolute target path"],
               ["branch", "Isolated target branch"],
             ] as const;
@@ -282,6 +293,9 @@ export function TaskRepositoriesControl({
                   {index === 0 ? " · primary workspace" : ""}
                   {locked ? " · verified (read only)" : ""}
                 </legend>
+                <div className="space-y-1 text-sm"><span>Code project</span><ExecutionPicker label={`Repository ${index + 1} code project`} value={binding.bbProjectId} dialogOpen={open} options={(projects.data ?? []).map(project => ({ value: project.id, label: project.name }))} disabled={busy || locked} onChange={id => update(index, { bbProjectId: id, sourceEnvironmentId: "", sourceHostId: "", sourcePath: "", sourceHead: "", sourceBranch: null, remoteBase: undefined })} /></div>
+                <div className="space-y-1 text-sm"><span>Source workspace</span><ExecutionPicker label={`Repository ${index + 1} source workspace`} value={binding.sourceEnvironmentId} dialogOpen={open} options={(sourceEnvironments.data ?? []).filter(environment => environment.bbProjectId === binding.bbProjectId).map(environment => ({ value: environment.id, label: `${environment.name} · ${machineName(environment.hostId)} · ${environment.path}` }))} disabled={busy || locked || !binding.bbProjectId} onChange={id => { const environment = sourceEnvironments.data?.find(entry => entry.id === id); if (environment) update(index, { sourceEnvironmentId: id, sourceHostId: environment.hostId, sourcePath: environment.path, sourceHead: "", sourceBranch: null, remoteBase: undefined }); }} /></div>
+                <div className="space-y-1 text-sm"><span>Target machine</span><ExecutionPicker label={`Repository ${index + 1} target machine`} value={binding.targetHostId} dialogOpen={open} options={(machines.data ?? []).map(machine => ({ value: machine.id, label: machine.name }))} disabled={busy || locked} onChange={id => update(index, { targetHostId: id })} /></div>
                 {textFields.map(([key, label]) => (
                   <label key={key} className="flex flex-col gap-1 text-sm">
                     {label}
@@ -294,7 +308,7 @@ export function TaskRepositoriesControl({
                     />
                   </label>
                 ))}
-                <label className="flex items-center gap-2 text-sm">
+                <label className="flex min-h-11 items-center gap-2 text-sm sm:min-h-8">
                   <input
                     type="checkbox"
                     checked={binding.required}
@@ -304,23 +318,10 @@ export function TaskRepositoriesControl({
                   />
                   Required before any writer starts
                 </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  Shared execution profile (use the same profile for every root)
-                  <select
-                    className="h-9 rounded border bg-background px-2"
-                    value={binding.presetId}
-                    onChange={(event) =>
-                      update(index, { presetId: event.target.value })
-                    }
-                  >
-                    <option value="">Choose profile</option>
-                    {presets?.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div className="space-y-1 text-sm">
+                  <span>Shared execution profile (same profile for every root)</span>
+                  <ExecutionPicker label={`Repository ${index + 1} execution profile`} value={binding.presetId} dialogOpen={open} options={(presets ?? []).map(preset => ({ value: preset.id, label: `${preset.name} · ${preset.modelId}` }))} disabled={busy || locked} onChange={id => update(index, { presetId: id })} />
+                </div>
                 <Button
                   type="button"
                   variant="outline"
@@ -382,7 +383,7 @@ export function TaskRepositoriesControl({
                   Inspect source and select portable dirty files
                 </Button>
                 <p className="break-words text-sm">
-                  {binding.sourceHostId}:{binding.sourcePath} ·{" "}
+                  {machineName(binding.sourceHostId)}:{binding.sourcePath} ·{" "}
                   {binding.sourceBranch ?? "detached"} · HEAD{" "}
                   {binding.sourceHead || "not inspected"}
                 </p>
@@ -543,7 +544,7 @@ export function TaskRepositoriesControl({
               </fieldset>
             );
           })}
-          <div className="flex gap-2">
+          <div className="sticky bottom-0 flex flex-wrap gap-2 bg-background py-3 max-sm:[&_button]:min-h-11">
             {!checkpointId ? (
               <Button
                 type="button"
@@ -559,7 +560,7 @@ export function TaskRepositoriesControl({
                 Add repository
               </Button>
             ) : null}
-            <Button type="submit" disabled={busy}>
+            <Button type="submit" disabled={busy || bindings.some(binding => !binding.bbProjectId || !binding.sourceEnvironmentId || !binding.sourceHead || !binding.targetHostId || !binding.presetId)}>
               Prepare without starting
             </Button>
             <Button

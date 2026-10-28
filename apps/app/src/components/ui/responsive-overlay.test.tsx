@@ -730,6 +730,34 @@ describe("PersistentResponsiveDrawerShell", () => {
     expect(onAfterCloseAutoFocus).toHaveBeenCalledWith(trigger);
   });
 
+  it("reaches disclosure summaries and Save without entering closed or hidden controls", () => {
+    render(
+      <PersistentResponsiveDrawerShell open onOpenChange={() => {}} srLabel="Context editor">
+        <input aria-label="Context name" />
+        <details><summary>Native configuration</summary><input aria-label="Native path" /></details>
+        <div hidden><button>Hidden action</button></div>
+        <div style={{ display: "none" }}><input aria-label="Hidden input" /></div>
+        <fieldset disabled><button>Disabled action</button></fieldset>
+        <button>Save context</button>
+      </PersistentResponsiveDrawerShell>,
+    );
+    const name = screen.getByRole("textbox", { name: "Context name" });
+    const summary = screen.getByText("Native configuration");
+    const save = screen.getByRole("button", { name: "Save context" });
+    name.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(summary);
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(save);
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(summary);
+    summary.closest("details")!.open = true;
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Native path" }));
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(save);
+  });
+
   it("retries focus restoration after closing chrome becomes visible", () => {
     mockPointerCoarse(true);
     const onAfterCloseAutoFocus = vi.fn();

@@ -10,7 +10,7 @@ import { errorMessage } from "../../shared/errors.js";
 import { Button } from "@/components/ui/button";
 
 const field =
-  "min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm";
+  "min-h-11 min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm sm:min-h-9";
 const contexts = ["unknown", "work", "personal"] as const;
 
 function InboxCard({
@@ -53,7 +53,7 @@ function InboxCard({
     }
   };
   return (
-    <article className="space-y-3 rounded-lg border border-border p-4">
+    <article className="space-y-3 rounded-lg border border-border p-4 max-sm:[&_button]:min-h-11">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <h3 className="min-w-0 break-words font-medium">{item.title}</h3>
         <span className="text-xs text-muted-foreground">
@@ -170,14 +170,9 @@ function InboxCard({
             );
           }}
         >
-          <input
-            className={field}
-            type="datetime-local"
-            aria-label={`Snooze ${item.title} until`}
-            value={until}
-            required
-            onChange={(event) => setUntil(event.target.value)}
-          />
+          <label className="flex min-w-0 flex-col gap-1 text-sm">Snooze until (local time)
+            <input className={`${field} max-w-full`} type="datetime-local" aria-label={`Snooze ${item.title} until`} value={until} required onChange={(event) => setUntil(event.target.value)} />
+          </label>
           <Button size="sm" variant="outline" disabled={busy}>
             Snooze
           </Button>
@@ -301,7 +296,7 @@ export function InboxView() {
   const [busy, setBusy] = useState(false);
   const locked = useRef(false);
   return (
-    <section className="mx-auto max-w-5xl space-y-5 p-4">
+    <section className="mx-auto max-w-5xl space-y-5 p-4 max-sm:[&_button]:min-h-11">
       <p className="text-sm text-muted-foreground">
         Incoming is not a task. A task is not a thread. Resolve dismisses a
         reminder, not a question or a result. Work/Personal organize attention;
@@ -420,7 +415,7 @@ export function InboxView() {
           <option value="all">All contexts</option>
           {contexts.map((value) => (
             <option key={value} value={value}>
-              {value}
+                {value === "unknown" ? "Unclassified" : value === "work" ? "Work" : "Personal"}
             </option>
           ))}
         </select>
@@ -488,12 +483,13 @@ export function WorkingView() {
     return () => clearInterval(timer);
   }, [query.refresh]);
   return (
-    <section className="mx-auto max-w-5xl space-y-4 p-4">
+    <section className="mx-auto max-w-5xl space-y-4 p-4 max-sm:[&_button]:min-h-11">
       <p className="text-sm text-muted-foreground">
         Native agents starting or working now. Pending questions belong in
         Inbox. Idle and completed threads are not accepted results.
       </p>
-      {query.error && <p role="alert">{query.error}</p>}
+      {!query.data && query.isLoading && <p role="status">Loading active agents…</p>}
+      {query.error && <p role="alert">{query.error} <button type="button" className="underline" onClick={query.refresh}>Retry</button></p>}
       {query.data?.warnings.map((warning) => (
         <p
           key={warning}

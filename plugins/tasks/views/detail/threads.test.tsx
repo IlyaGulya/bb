@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { makeTask, rpcInput } from "../../test-fixtures.js";
 
@@ -19,7 +19,8 @@ if (!window.matchMedia) {
 
 const app = await loadPluginApp(() => import("../../app"));
 
-afterEach(cleanup);
+beforeEach(() => { vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const PROJECT_ID = "01HZZZZZZZZZZZZZZZZZZZZZP1";
 const TASK_ID = "01HZZZZZZZZZZZZZZZZZZZZZT5";
@@ -234,6 +235,11 @@ describe("task detail pull request pills", () => {
   });
 });
 
+async function chooseExecution(slot: ReturnType<typeof renderSlot>, label: string, option: RegExp) {
+  fireEvent.click(await slot.findByRole("combobox", { name: label }));
+  fireEvent.click(await slot.findByRole("option", { name: option }));
+}
+
 const PROFILE_ID = "01HZZZZZZZZZZZZZZZZZZZZZS1";
 const continuationProfile = {
   id: PROFILE_ID,
@@ -392,10 +398,7 @@ describe("native task continuation", () => {
         .getByRole("textbox", { name: "Task title" })
         .closest("[inert], [aria-hidden='true']"),
     ).toBeNull();
-    fireEvent.change(
-      await slot.findByRole("combobox", { name: "Target machine" }),
-      { target: { value: "host_target" } },
-    );
+    await chooseExecution(slot, "Target machine", /^Target machine$/);
     await slot.findByRole("checkbox", { name: "notes.txt" });
     const tracked = slot.getByRole("checkbox", {
       name: "src/change.ts",
@@ -418,10 +421,7 @@ describe("native task continuation", () => {
     fireEvent.change(slot.getByRole("textbox", { name: "New target path" }), {
       target: { value: "/work/new" },
     });
-    fireEvent.change(
-      slot.getByRole("combobox", { name: "Continuation profile" }),
-      { target: { value: PROFILE_ID } },
-    );
+    await chooseExecution(slot, "Continuation profile", /^Continuation profile/);
     expect(
       (slot.getByRole("button", { name: "Continue task" }) as HTMLButtonElement)
         .disabled,
@@ -450,12 +450,9 @@ describe("native task continuation", () => {
         },
       }),
     );
-    await slot.findByText(/New native thread started. Operation transfer_new/);
+    fireEvent.click(await slot.findByRole("button", { name: "Review target" }));
+    expect(slot.navigateCalls).toContainEqual({ method: "toThread", threadId: "thr_continued" });
     expect(slot.getByText("Worker")).toBeTruthy();
-    await slot.findByText(
-      "Continued to thr_continued on host_target; previous executor",
-    );
-    await slot.findByText("Current executor · continued from thr_worker000");
     expect(
       slot.queryByRole("button", { name: "Continue on another machine" }),
     ).toBeNull();
@@ -522,10 +519,7 @@ describe("native task continuation", () => {
     fireEvent.click(
       await slot.findByRole("button", { name: "Continue on another machine" }),
     );
-    fireEvent.change(
-      await slot.findByRole("combobox", { name: "Target machine" }),
-      { target: { value: "host_target" } },
-    );
+    await chooseExecution(slot, "Target machine", /^Target machine$/);
     await slot.findByText(
       "Source threads are active. Wait until every source thread is idle.",
     );
@@ -565,10 +559,7 @@ describe("native task continuation", () => {
     fireEvent.click(
       await slot.findByRole("button", { name: "Continue on another machine" }),
     );
-    fireEvent.change(
-      await slot.findByRole("combobox", { name: "Target machine" }),
-      { target: { value: "host_target" } },
-    );
+    await chooseExecution(slot, "Target machine", /^Target machine$/);
     const consent = (await slot.findByRole("checkbox", {
       name: "tracked-secret",
     })) as HTMLInputElement;
@@ -577,10 +568,7 @@ describe("native task continuation", () => {
     fireEvent.change(slot.getByRole("textbox", { name: "New target path" }), {
       target: { value: "/work/new" },
     });
-    fireEvent.change(
-      slot.getByRole("combobox", { name: "Continuation profile" }),
-      { target: { value: PROFILE_ID } },
-    );
+    await chooseExecution(slot, "Continuation profile", /^Continuation profile/);
     fireEvent.change(
       slot.getByRole("textbox", { name: "Next operation / handoff" }),
       { target: { value: "Continue after explicit sensitive-file consent" } },
@@ -622,18 +610,12 @@ describe("native task continuation", () => {
     fireEvent.click(
       await slot.findByRole("button", { name: "Continue on another machine" }),
     );
-    fireEvent.change(
-      await slot.findByRole("combobox", { name: "Target machine" }),
-      { target: { value: "host_target" } },
-    );
+    await chooseExecution(slot, "Target machine", /^Target machine$/);
     await slot.findByRole("checkbox", { name: "notes.txt" });
     fireEvent.change(slot.getByRole("textbox", { name: "New target path" }), {
       target: { value: "/work/new" },
     });
-    fireEvent.change(
-      slot.getByRole("combobox", { name: "Continuation profile" }),
-      { target: { value: PROFILE_ID } },
-    );
+    await chooseExecution(slot, "Continuation profile", /^Continuation profile/);
     fireEvent.change(
       slot.getByRole("textbox", { name: "Next operation / handoff" }),
       { target: { value: "Implement next operation" } },
@@ -654,7 +636,6 @@ describe("native task continuation", () => {
         }),
       },
     );
-    await slot.findByText("Continuation operation transfer_ready · ready");
     await slot.findByText(readyContinuation.lastError);
     fireEvent.click(
       slot.getByRole("button", { name: "Retry prepared continuation" }),
@@ -705,10 +686,7 @@ describe("task continuation preview errors", () => {
     fireEvent.click(
       await slot.findByRole("button", { name: "Continue on another machine" }),
     );
-    fireEvent.change(
-      await slot.findByRole("combobox", { name: "Target machine" }),
-      { target: { value: "host_target" } },
-    );
+    await chooseExecution(slot, "Target machine", /^Target machine$/);
     await slot.findByText("Source environment is no longer current");
     expect(
       (slot.getByRole("button", { name: "Continue task" }) as HTMLButtonElement)
@@ -721,8 +699,8 @@ describe("task continuation preview errors", () => {
   });
 });
 
-describe("continued task executor labels", () => {
-  it("keeps the source inspectable as the previous executor and marks the target current", async () => {
+describe("continued task executor actions", () => {
+  it("keeps the source inspectable and makes the target independently reachable", async () => {
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "task/TSK-5" },
@@ -761,14 +739,9 @@ describe("continued task executor labels", () => {
         }),
       },
     );
-    await slot.findByText(
-      "Continued to thr_review000 on host_target; previous executor",
-    );
-    expect(slot.getByText("Triage source")).toBeTruthy();
-    expect(slot.getByText("Review target")).toBeTruthy();
-    expect(
-      slot.getByText("Current executor · continued from thr_worker000"),
-    ).toBeTruthy();
+    fireEvent.click(await slot.findByRole("button", { name: "Review target" }));
+    expect(slot.navigateCalls).toContainEqual({ method: "toThread", threadId: "thr_review000" });
+    expect(within(slot.getByRole("article", { name: "Agent thread Triage source" })).queryByRole("button", { name: "Continue on another machine" })).toBeNull();
     expect(
       slot.getAllByRole("button", { name: "Continue on another machine" }),
     ).toHaveLength(1);
@@ -782,7 +755,7 @@ describe("continued task executor labels", () => {
     });
   });
 
-  it("does not label an intermediate executor current after a second continuation", async () => {
+  it("offers the next continuation only on the latest executor after a second transfer", async () => {
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "task/TSK-5" },
@@ -838,20 +811,12 @@ describe("continued task executor labels", () => {
         }),
       },
     );
-    await slot.findByText(
-      "Continued to thr_latest000 on host_next; previous executor",
-    );
-    expect(
-      slot.getByText(
-        "Continued to thr_review000 on host_target; previous executor",
-      ),
-    ).toBeTruthy();
-    expect(
-      slot.queryByText("Current executor · continued from thr_worker000"),
-    ).toBeNull();
-    expect(
-      slot.getByText("Current executor · continued from thr_review000"),
-    ).toBeTruthy();
+    const current = await slot.findByRole("article", { name: "Agent thread Latest target" });
+    expect(await within(current).findByRole("button", { name: "Continue on another machine" })).toBeDefined();
+    const intermediate = slot.getByRole("article", { name: "Agent thread Review target" });
+    expect(within(intermediate).queryByRole("button", { name: "Continue on another machine" })).toBeNull();
+    fireEvent.click(within(intermediate).getByRole("button", { name: "Latest target" }));
+    expect(slot.navigateCalls).toContainEqual({ method: "toThread", threadId: "thr_latest000" });
     expect(
       slot.getAllByRole("button", { name: "Continue on another machine" }),
     ).toHaveLength(1);

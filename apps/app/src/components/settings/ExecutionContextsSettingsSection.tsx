@@ -8,6 +8,7 @@ import { ResponsiveDrawerShell } from "@bb/shared-ui/responsive-overlay";
 import { SettingsSection } from "@/components/ui/settings-section";
 import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
 import { useHosts } from "@/hooks/queries/host-queries";
+import { useSystemProviderCatalog } from "@/hooks/queries/system-queries";
 import { sdk } from "@/lib/sdk";
 import { invalidateExecutionBindingDefinitions } from "@/hooks/cache-owners/system-cache-effects";
 import {
@@ -21,7 +22,7 @@ import { McpServerManager } from "./McpServerManager";
 type ContextFields = Omit<ExecutionContext, "id" | "createdAt" | "updatedAt">;
 type ConnectionFields = Omit<ModelConnection, "id" | "createdAt" | "updatedAt">;
 const selectClass =
-  "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
+  "h-11 w-full rounded-md border border-input bg-background px-2 text-sm sm:h-9";
 const lines = (value: string) =>
   value
     .split("\n")
@@ -30,7 +31,7 @@ const lines = (value: string) =>
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="flex flex-col gap-1 text-sm">
+    <label className="flex flex-col gap-1 text-sm max-sm:[&_input]:min-h-11">
       <span>{label}</span>
       {children}
     </label>
@@ -53,15 +54,25 @@ export function ExecutionContextsSettingsSection() {
     | null
   >(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ kind: "context" | "connection"; id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const projects = useSidebarNavigation();
+  const hosts = useHosts();
+  const providers = useSystemProviderCatalog();
+  const projectNames = new Map((projects.data ? [...projects.data.projects, projects.data.personalProject] : []).map(project => [project.id, project.name]));
+  const providerName = (id: string) => providers.data?.find(provider => provider.id === id)?.displayName ?? "Provider unavailable";
   const refresh = (kind: "context" | "connection" | "project-defaults", id?: string) =>
     invalidateExecutionBindingDefinitions({ queryClient, kind, id });
   const remove = async (kind: "context" | "connection", id: string) => {
+    if (deleting) return;
+    setDeleting(true);
     setError(null);
     try {
       if (kind === "context")
         await sdk.experimental_executionContexts.delete({ id });
       else await sdk.experimental_modelConnections.delete({ id });
       await refresh(kind, id);
+      setPendingDelete(null);
     } catch (cause) {
       setError(
         getMutationErrorMessage({
@@ -69,22 +80,18 @@ export function ExecutionContextsSettingsSection() {
           fallbackMessage: "Could not delete this definition.",
         }),
       );
+    } finally {
+      setDeleting(false);
     }
   };
   return (
     <div className="space-y-6">
-      <p className="text-sm text-muted-foreground">
-        Execution contexts select project instructions and tools, not a physical
-        worktree. Model connections select a native provider account or a CPA
-        gateway independently of context, tools and session storage. Work and
-        Personal are ordinary labels, not security domains. Configuration
-        separation is not a filesystem sandbox.
+      <h1 className="text-lg font-semibold sm:sr-only">Contexts &amp; connections</h1>
+      <p className="max-w-prose text-sm text-muted-foreground">
+        Contexts choose project instructions and tools. Model connections choose
+        an account independently. Work and Personal are labels, not security
+        domains; neither a context nor a connection is a filesystem sandbox.
       </p>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive-text">
-          {error}
-        </p>
-      ) : null}
       <SettingsSection
         title="Execution contexts"
         description="Changes apply to new threads. Existing threads keep their persisted binding."
@@ -111,21 +118,23 @@ export function ExecutionContextsSettingsSection() {
         {contexts.data?.map((context) => (
           <div
             key={context.id}
-            className="flex items-center justify-between gap-2 py-2"
+            className="flex flex-wrap items-start justify-between gap-2 py-3"
           >
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium">
+              <p className="break-words text-sm font-medium">
                 {context.name}
                 {context.enabled ? "" : " · disabled"}
               </p>
               <p className="text-xs text-muted-foreground">
-                {context.projectIds.length} projects
+                {context.projectIds.length ? context.projectIds.map(id => projectNames.get(id) ?? "Project unavailable").join(", ") : "No project membership"}
               </p>
             </div>
-            <div className="flex gap-1">
+            <div className="flex shrink-0 gap-3">
               <Button
                 size="sm"
                 variant="ghost"
+                className="min-h-11 sm:min-h-8"
+                aria-label={`Edit context ${context.name}`}
                 onClick={() => setEditor({ kind: "context", value: context })}
               >
                 Edit
@@ -133,7 +142,9 @@ export function ExecutionContextsSettingsSection() {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => void remove("context", context.id)}
+                className="min-h-11 sm:min-h-8"
+                aria-label={`Delete context ${context.name}`}
+                onClick={() => { setError(null); setPendingDelete({ kind: "context", id: context.id, name: context.name }); }}
               >
                 Delete
               </Button>
@@ -143,6 +154,7 @@ export function ExecutionContextsSettingsSection() {
         <Button
           size="sm"
           variant="outline"
+          className="min-h-11 sm:min-h-8"
           onClick={() => setEditor({ kind: "context", value: null })}
         >
           New execution context
@@ -174,10 +186,10 @@ export function ExecutionContextsSettingsSection() {
         {connections.data?.map((connection) => (
           <div
             key={connection.id}
-            className="flex items-center justify-between gap-2 py-2"
+            className="flex flex-wrap items-start justify-between gap-2 py-3"
           >
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium">
+              <p className="break-words text-sm font-medium">
                 {connection.name}
                 {connection.revoked
                   ? " · revoked"
@@ -185,16 +197,18 @@ export function ExecutionContextsSettingsSection() {
                     ? " · disabled"
                     : ""}
               </p>
-              <p className="break-all text-xs text-muted-foreground">
-                {connection.gateway
-                  ? `${connection.provider} · CPA gateway · ${connection.gateway.accountPrefix}`
-                  : `${connection.provider} · ${connection.hostId}`}
+              <p className="break-words text-xs text-muted-foreground">
+                {providerName(connection.provider)} · {connection.gateway
+                  ? `CPA account: ${connection.gateway.accountPrefix}`
+                  : hosts.data?.find(host => host.id === connection.hostId)?.name ?? "Machine unavailable"}
               </p>
             </div>
-            <div className="flex gap-1">
+            <div className="flex shrink-0 gap-3">
               <Button
                 size="sm"
                 variant="ghost"
+                className="min-h-11 sm:min-h-8"
+                aria-label={`Edit model connection ${connection.name}`}
                 onClick={() =>
                   setEditor({ kind: "connection", value: connection })
                 }
@@ -204,7 +218,9 @@ export function ExecutionContextsSettingsSection() {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => void remove("connection", connection.id)}
+                className="min-h-11 sm:min-h-8"
+                aria-label={`Delete model connection ${connection.name}`}
+                onClick={() => { setError(null); setPendingDelete({ kind: "connection", id: connection.id, name: connection.name }); }}
               >
                 Delete
               </Button>
@@ -214,6 +230,7 @@ export function ExecutionContextsSettingsSection() {
         <Button
           size="sm"
           variant="outline"
+          className="min-h-11 sm:min-h-8"
           onClick={() => setEditor({ kind: "connection", value: null })}
         >
           New model connection
@@ -240,6 +257,7 @@ export function ExecutionContextsSettingsSection() {
           <ContextEditor
             key={`context:${editor.value?.id ?? "new"}`}
             value={editor.value}
+            onCancel={() => setEditor(null)}
             connections={connections.data ?? []}
             onSave={async (fields) => {
               const saved = editor.value
@@ -256,6 +274,7 @@ export function ExecutionContextsSettingsSection() {
           <ConnectionEditor
             key={`connection:${editor.value?.id ?? "new"}`}
             value={editor.value}
+            onCancel={() => setEditor(null)}
             onSave={async (fields) => {
               const saved = editor.value
                 ? await sdk.experimental_modelConnections.update({
@@ -269,6 +288,17 @@ export function ExecutionContextsSettingsSection() {
           />
         ) : null}
       </ResponsiveDrawerShell>
+      <ResponsiveDrawerShell open={pendingDelete !== null} onOpenChange={open => { if (!open && !deleting) setPendingDelete(null); }} srLabel={`Delete ${pendingDelete?.name ?? "definition"}`} contentClassName="max-w-lg">
+        <div className="min-h-0 flex-auto space-y-4 overflow-y-auto p-4">
+          <h2 className="break-words text-lg font-semibold">Delete {pendingDelete?.name}?</h2>
+          <p className="text-sm text-muted-foreground">This cannot be undone. Clear or replace saved {pendingDelete?.kind === "context" ? "project context" : "context and project connection"} defaults first. Existing thread snapshots are preserved, but a missing definition can block new launches and continuation. No other account is selected automatically.</p>
+          {error && <p role="alert" className="text-sm text-destructive-text">{error}</p>}
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button type="button" variant="outline" disabled={deleting} className="min-h-11 sm:min-h-9" onClick={() => setPendingDelete(null)}>Cancel</Button>
+            <Button type="button" variant="destructive" disabled={deleting} className="min-h-11 sm:min-h-9" onClick={() => { if (pendingDelete) void remove(pendingDelete.kind, pendingDelete.id); }}>{deleting ? "Deleting…" : "Delete definition"}</Button>
+          </div>
+        </div>
+      </ResponsiveDrawerShell>
     </div>
   );
 }
@@ -277,10 +307,12 @@ function EditorForm({
   title,
   children,
   onSave,
+  onCancel,
 }: {
   title: string;
   children: ReactNode;
   onSave: () => Promise<void>;
+  onCancel?: () => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -315,9 +347,12 @@ function EditorForm({
           {error}
         </p>
       ) : null}
-      <Button type="submit" disabled={saving}>
-        {saving ? "Saving…" : "Save"}
-      </Button>
+      <div className="sticky bottom-0 flex flex-wrap justify-end gap-3 border-t border-border bg-background py-3">
+        {onCancel && <Button type="button" variant="outline" disabled={saving} className="min-h-11 sm:min-h-9" onClick={onCancel}>Cancel</Button>}
+        <Button type="submit" disabled={saving} className="min-h-11 sm:min-h-9">
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </div>
     </form>
   );
 }
@@ -326,10 +361,12 @@ function ContextEditor({
   value,
   connections,
   onSave,
+  onCancel,
 }: {
   value: ExecutionContext | null;
   connections: ModelConnection[];
   onSave: (fields: ContextFields) => Promise<void>;
+  onCancel: () => void;
 }) {
   const [draft, setDraft] = useState<ContextFields>(() => ({
     name: value?.name ?? "",
@@ -361,6 +398,7 @@ function ContextEditor({
   return (
     <EditorForm
       title={value ? "Edit execution context" : "New execution context"}
+      onCancel={onCancel}
       onSave={() =>
         onSave({
           ...draft,
@@ -380,7 +418,7 @@ function ContextEditor({
           onChange={(event) => set("name", event.target.value)}
         />
       </Field>
-      <label className="flex items-center gap-2 text-sm">
+      <label className="flex min-h-11 items-center gap-2 text-sm sm:min-h-8">
         <input
           type="checkbox"
           checked={draft.enabled}
@@ -399,7 +437,7 @@ function ContextEditor({
               (project) => (
                 <label
                   key={project.id}
-                  className="flex items-center gap-2 text-sm"
+                  className="flex min-h-11 items-center gap-2 text-sm sm:min-h-8"
                 >
                   <input
                     type="checkbox"
@@ -418,7 +456,8 @@ function ContextEditor({
               ),
             )
           : null}
-        {projects.isError ? <p role="alert">Could not load projects.</p> : null}
+        {projects.isPending && <p role="status" className="text-sm text-muted-foreground">Loading projects…</p>}
+        {projects.isError && <p role="alert">Could not load projects. <button type="button" className="underline" onClick={() => void projects.refetch()}>Retry</button></p>}
       </div>
       <Field label="Instructions">
         <Textarea
@@ -434,7 +473,7 @@ function ContextEditor({
             set("defaultModelConnectionId", event.target.value || null)
           }
         >
-          <option value="">Native/project default</option>
+          <option value="">Use project account, otherwise native login</option>
           {connections.map((entry) => (
             <option key={entry.id} value={entry.id}>
               {entry.name}
@@ -445,13 +484,16 @@ function ContextEditor({
                   : ""}
             </option>
           ))}
+          {draft.defaultModelConnectionId && !connections.some(entry => entry.id === draft.defaultModelConnectionId) && <option value={draft.defaultModelConnectionId} disabled>Saved connection unavailable</option>}
         </select>
       </Field>
+      <details className="space-y-3" open={draft.mcpServers.length > 0 || draft.nativeMcpProfile !== undefined ? true : undefined}>
+        <summary className="cursor-pointer py-3 text-sm font-medium">Tools &amp; MCP · {draft.mcpServers.length} selected servers</summary>
       <McpServerManager
         value={draft.mcpServers}
         onChange={(refs) => set("mcpServers", refs)}
       />
-      <label className="flex items-center gap-2 text-sm">
+      <label className="flex min-h-11 items-center gap-2 text-sm sm:min-h-8">
         <input
           type="checkbox"
           checked={draft.nativeMcpProfile !== undefined}
@@ -484,6 +526,7 @@ function ContextEditor({
           </p>
         </Field>
       ) : null}
+      </details>
       <details className="space-y-3">
         <summary className="cursor-pointer text-sm font-medium">
           Native context configuration
@@ -528,7 +571,7 @@ function ContextEditor({
             onChange={(event) => set("hooksPath", event.target.value || null)}
           />
         </Field>
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex min-h-11 items-center gap-2 text-sm sm:min-h-8">
           <input
             type="checkbox"
             checked={draft.autoMemory}
@@ -576,15 +619,14 @@ function ContextEditor({
 function ConnectionEditor({
   value,
   onSave,
+  onCancel,
 }: {
   value: ModelConnection | null;
   onSave: (fields: ConnectionFields) => Promise<void>;
+  onCancel: () => void;
 }) {
   const hosts = useHosts();
-  const providers = useQuery({
-    queryKey: ["provider-catalog"],
-    queryFn: () => sdk.providers.catalog(),
-  });
+  const providers = useSystemProviderCatalog();
   const [draft, setDraft] = useState<ConnectionFields>(() => ({
     name: value?.name ?? "",
     provider: value?.provider ?? "",
@@ -610,6 +652,7 @@ function ConnectionEditor({
   return (
     <EditorForm
       title={value ? "Edit model connection" : "New model connection"}
+      onCancel={onCancel}
       onSave={() => onSave({ ...draft, name: draft.name.trim() })}
     >
       <Field label="Name">
@@ -730,7 +773,7 @@ function ConnectionEditor({
               onChange={(event) => setGateway({ baseUrl: event.target.value })}
             />
           </Field>
-          <Field label="Account namespace (accountPrefix)">
+          <Field label="Account namespace">
             <Input
               required
               pattern="[A-Za-z0-9][A-Za-z0-9._-]*"
@@ -741,7 +784,9 @@ function ConnectionEditor({
               }
             />
           </Field>
-          <Field label="Native model catalog provider (modelProvider)">
+          <details className="space-y-3" open={!draft.gateway.baseUrl ? true : undefined}>
+            <summary className="cursor-pointer py-3 text-sm font-medium">Gateway transport &amp; credential references</summary>
+          <Field label="Native model catalog provider">
             <Input
               required
               value={draft.gateway.modelProvider}
@@ -843,6 +888,7 @@ function ConnectionEditor({
             client key on every explicitly allowed worker outside this form.
             Never use the CPA administrator key.
           </p>
+          </details>
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium">
               Allowed execution machines
@@ -852,7 +898,7 @@ function ConnectionEditor({
               any other machine; selecting it does not select a machine.
             </p>
             {hosts.data?.map((host) => (
-              <label key={host.id} className="flex items-center gap-2 text-sm">
+              <label key={host.id} className="flex min-h-11 items-center gap-2 text-sm sm:min-h-8">
                 <input
                   type="checkbox"
                   checked={
@@ -884,7 +930,7 @@ function ConnectionEditor({
             {draft.gateway.allowedHostIds
               .filter((id) => !hosts.data?.some((host) => host.id === id))
               .map((id) => (
-                <label key={id} className="flex items-center gap-2 text-sm">
+                <label key={id} className="flex min-h-11 items-center gap-2 text-sm sm:min-h-8">
                   <input
                     type="checkbox"
                     checked
@@ -896,7 +942,7 @@ function ConnectionEditor({
                       })
                     }
                   />
-                  {id} · unavailable
+                  Saved machine unavailable
                 </label>
               ))}
           </fieldset>
@@ -919,7 +965,7 @@ function ConnectionEditor({
               {draft.hostId &&
               !hosts.data?.some((host) => host.id === draft.hostId) ? (
                 <option value={draft.hostId}>
-                  {draft.hostId} · unavailable
+                  Saved machine unavailable
                 </option>
               ) : null}
             </select>
@@ -1005,7 +1051,7 @@ function ConnectionEditor({
           </details>
         </>
       )}
-      <label className="flex items-center gap-2 text-sm">
+      <label className="flex min-h-11 items-center gap-2 text-sm sm:min-h-8">
         <input
           type="checkbox"
           checked={draft.enabled}
@@ -1013,7 +1059,7 @@ function ConnectionEditor({
         />
         Enabled for new threads
       </label>
-      <label className="flex items-center gap-2 text-sm">
+      <label className="flex min-h-11 items-center gap-2 text-sm sm:min-h-8">
         <input
           type="checkbox"
           checked={draft.revoked}
@@ -1045,7 +1091,7 @@ function ProjectContextDefaultsEditor({
   return (
     <SettingsSection
       title="Project defaults"
-      description="Default context and model connection are independent. Leave both unassigned to retain legacy behavior."
+      description="Context supplies instructions and tools; the model connection supplies the account. Explicit thread or profile choices take precedence."
     >
       <Field label="Project">
         <select
@@ -1066,10 +1112,10 @@ function ProjectContextDefaultsEditor({
         </select>
       </Field>
       {defaults.isError ? (
-        <p role="alert">Could not load project defaults.</p>
-      ) : projectId && defaults.data ? (
+        <p role="alert">Could not load project defaults. <button type="button" className="underline" onClick={() => void defaults.refetch()}>Retry</button></p>
+      ) : projectId && defaults.isPending ? <p role="status" className="mt-3 text-sm text-muted-foreground">Loading project defaults…</p> : projectId && defaults.data ? (
         <ProjectDefaultsForm
-          key={`${projectId}:${defaults.data.executionContextId}:${defaults.data.modelConnectionId}`}
+          key={projectId}
           projectId={projectId}
           initialContextId={defaults.data.executionContextId}
           initialConnectionId={defaults.data.modelConnectionId}
@@ -1099,9 +1145,13 @@ function ProjectDefaultsForm({
 }) {
   const [contextId, setContextId] = useState(initialContextId ?? "");
   const [connectionId, setConnectionId] = useState(initialConnectionId ?? "");
+  const context = contexts.find(entry => entry.id === contextId);
+  const effectiveConnectionId = connectionId || context?.defaultModelConnectionId;
+  const effectiveConnection = connections.find(entry => entry.id === effectiveConnectionId);
   return (
     <EditorForm
       title="Project binding defaults"
+      onCancel={() => { setContextId(initialContextId ?? ""); setConnectionId(initialConnectionId ?? ""); }}
       onSave={async () => {
         await sdk.experimental_executionContexts.setProjectDefaults({
           projectId,
@@ -1117,7 +1167,7 @@ function ProjectDefaultsForm({
           value={contextId}
           onChange={(event) => setContextId(event.target.value)}
         >
-          <option value="">Unassigned</option>
+          <option value="">No project context</option>
           {contexts.map((entry) => (
             <option
               key={entry.id}
@@ -1132,6 +1182,7 @@ function ProjectDefaultsForm({
                   : ""}
             </option>
           ))}
+          {contextId && !context && <option value={contextId} disabled>Saved context unavailable</option>}
         </select>
       </Field>
       <Field label="Default model connection">
@@ -1140,14 +1191,14 @@ function ProjectDefaultsForm({
           value={connectionId}
           onChange={(event) => setConnectionId(event.target.value)}
         >
-          <option value="">Context/native default</option>
+          <option value="">Use context account, otherwise native login</option>
           {connections.map((entry) => (
             <option
               key={entry.id}
               value={entry.id}
               disabled={!entry.enabled || entry.revoked}
             >
-              {entry.name} · {entry.provider}
+              {entry.name}
               {entry.revoked
                 ? " · revoked"
                 : !entry.enabled
@@ -1155,8 +1206,10 @@ function ProjectDefaultsForm({
                   : ""}
             </option>
           ))}
+          {connectionId && !connections.some(entry => entry.id === connectionId) && <option value={connectionId} disabled>Saved connection unavailable</option>}
         </select>
       </Field>
+      <p role="status" className="text-sm text-muted-foreground">For new threads without an explicit thread/profile override: context — {context?.name ?? (contextId ? "unavailable" : "none")}; model account — {effectiveConnection?.name ?? (effectiveConnectionId ? "unavailable; choose another connection" : "native provider login; account identity is not known here")}. {effectiveConnection && (!effectiveConnection.enabled || effectiveConnection.revoked) ? "This account is unavailable; launches are refused, not redirected." : "The model version is selected when creating the thread, not on this page."}</p>
     </EditorForm>
   );
 }

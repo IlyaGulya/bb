@@ -56,6 +56,7 @@ import {
 import { BbHttpError, sdk } from "@/lib/sdk";
 import { getPluginBoundSdk } from "@/lib/plugin-bound-sdk";
 import { useSystemProviders } from "@/hooks/queries/system-queries";
+import { useSystemRealtimeSubscription } from "@/hooks/useRealtimeSubscription";
 import { useSystemEnvironmentProviders } from "@/hooks/queries/environment-provider-queries";
 import { requestComposerFocus } from "@/lib/composer-focus-requests";
 import { setComposerTextEffect } from "@/lib/composer-text-effects";
@@ -250,6 +251,7 @@ export function useRealtime(
   handler: (payload: unknown) => void,
 ): void {
   const pluginId = usePluginId();
+  useSystemRealtimeSubscription({ enabled: channel === "system:changed" });
   const handlerRef = useRef(handler);
   useEffect(() => {
     handlerRef.current = handler;
@@ -262,6 +264,12 @@ export function useRealtime(
       }),
     [pluginId, channel],
   );
+  useEffect(() => {
+    if (channel !== "system:changed") return;
+    return wsManager.onChanged(message => {
+      if (message.entity === "system") handlerRef.current(message);
+    });
+  }, [channel]);
 }
 
 export function useRealtimeConnectionState(): PluginRealtimeConnectionState {

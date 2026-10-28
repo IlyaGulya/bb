@@ -2,6 +2,23 @@
 
 ## AgentOS fork — unreleased
 
+- Give Tasks one header workflow action backed by the shared persistent drawer;
+  retain single-agent dispatch as a secondary action. Keep draft selections and
+  explicit unavailable choices while Core definition/account catalog events and
+  reconnects refresh open plugin consumers without retargeting existing workers.
+- Replace execution UUID walls and manual repository routing IDs with named,
+  searchable choices and collapsed copyable diagnostics. Keep actual model and
+  account identities distinct from context, tracker project and code project.
+- Add named context/account deletion confirmation and visible editor Cancel;
+  separate basic settings from MCP and advanced transport details. Improve
+  settings contrast and compact hit areas using existing BB tokens/components.
+- Fix persistent drawer keyboard traversal of native disclosures, exclude hidden
+  descendants and scroll focused controls into view. Preserve focus return,
+  app-root accessibility and deferred content realization.
+- Keep Board available on compact screens, preserve horizontal/vertical touch
+  scrolling outside its drag grip, and retain task navigation/view controls.
+  Make parent navigation independent from card drag and keep filter counts out
+  of scrolling chips. Require explicit permitted Jira import destinations.
 - Fence Tasks Start against concurrent draft revision/selection changes in its
   launch-receipt transaction. Retain the first validated bugfix reproduction
   across Return, permit retry after an exit-zero attempt, and keep legacy
