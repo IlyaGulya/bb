@@ -48,9 +48,9 @@ export class NotificationBuffer implements DbNotifier {
     });
   }
 
-  notifySystem(changes: SystemChangeKind[]): void {
+  notifySystem(changes: SystemChangeKind[], id?: string): void {
     this.notifications.push({
-      flush: (notifier) => notifier.notifySystem([...changes]),
+      flush: (notifier) => notifier.notifySystem([...changes], id),
     });
   }
 

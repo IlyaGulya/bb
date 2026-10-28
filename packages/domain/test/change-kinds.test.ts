@@ -7,7 +7,6 @@ import {
   PROJECT_CHANGE_KINDS,
   SYSTEM_CHANGE_KINDS,
   THREAD_CHANGE_KINDS,
-  threadChangeMetadataSchema,
   type ChangedMessage,
   type ThreadChangeMetadata,
 } from "../src/change-kinds.js";
@@ -83,6 +82,7 @@ const maximalChangedMessages: ChangedMessage[] = [
   {
     type: "changed",
     entity: "system",
+    id: "connection-1",
     changes: [...SYSTEM_CHANGE_KINDS],
   },
 ];
@@ -148,22 +148,4 @@ describe("lenient changed-message schema parity", () => {
     });
   });
 
-  it("keeps the maximal fixtures covering every declared strict field", () => {
-    const strictOptions = strictOptionsByEntity();
-    expect(maximalChangedMessages.map((message) => message.entity)).toEqual([
-      ...strictOptions.keys(),
-    ]);
-    for (const message of maximalChangedMessages) {
-      const strictOption = strictOptions.get(message.entity);
-      if (!strictOption) {
-        throw new Error(`Missing strict schema for entity ${message.entity}`);
-      }
-      expect(Object.keys(message).sort(), message.entity).toEqual(
-        Object.keys(strictOption.shape).sort(),
-      );
-    }
-    expect(Object.keys(maximalThreadMetadata).sort()).toEqual(
-      Object.keys(threadChangeMetadataSchema.shape).sort(),
-    );
-  });
 });

@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { useExecutionBindingSelection } from "./useExecutionBindingSelection";
+import { createRealtimeCacheEffects } from "./realtime-cache-effects";
 
 vi.mock("@/lib/sdk", () => ({
   sdk: {
@@ -89,6 +90,58 @@ afterEach(() => {
 });
 
 describe("execution binding MCP selection", () => {
+  it("updates mounted defaults and rejects a remotely revoked or deleted explicit account without silently replacing it", async () => {
+    vi.mocked(sdk.experimental_executionContexts.list).mockResolvedValue(
+      contexts.map((context) => ({ ...context, mcpServers: [] })),
+    );
+    vi.mocked(sdk.experimental_executionContexts.getProjectDefaults).mockResolvedValue({
+      projectId: "project", executionContextId: "work", modelConnectionId: "work-account",
+    });
+    const { wrapper, queryClient } = createQueryClientTestHarness();
+    const effects = createRealtimeCacheEffects({ queryClient });
+    const { result, unmount } = renderHook(() => useExecutionBindingSelection({
+      projectId: "project", providerId: "claude-code", hostId: "worker",
+    }), { wrapper });
+    try {
+      await waitFor(() => expect(result.current.unavailableReason).toBeNull());
+      expect(result.current.effectiveConnectionId).toBe("work-account");
+      vi.mocked(sdk.experimental_executionContexts.getProjectDefaults).mockResolvedValue({
+        projectId: "project", executionContextId: "personal", modelConnectionId: "personal-account",
+      });
+      act(() => effects.handleChanged({ type: "changed", entity: "system", id: "project", changes: ["project-context-defaults-changed"] }));
+      await waitFor(() => {
+        expect(result.current.effectiveContextId).toBe("personal");
+        expect(result.current.effectiveConnectionId).toBe("personal-account");
+      });
+      act(() => result.current.selectConnection("work-account"));
+      vi.mocked(sdk.experimental_modelConnections.list).mockResolvedValue(
+        connections.map((connection) => connection.id === "work-account"
+          ? { ...connection, enabled: false } : connection),
+      );
+      act(() => effects.handleChanged({ type: "changed", entity: "system", id: "work-account", changes: ["model-connections-changed"] }));
+      await waitFor(() => expect(result.current.effectiveConnection?.enabled).toBe(false));
+      expect(result.current.unavailableReason).not.toBeNull();
+      vi.mocked(sdk.experimental_modelConnections.list).mockResolvedValue(
+        connections.map((connection) => connection.id === "work-account"
+          ? { ...connection, revoked: true } : connection),
+      );
+      act(() => effects.handleChanged({ type: "changed", entity: "system", id: "work-account", changes: ["model-connections-changed"] }));
+      await waitFor(() => expect(result.current.effectiveConnection?.revoked).toBe(true));
+      expect(result.current.unavailableReason).not.toBeNull();
+      vi.mocked(sdk.experimental_modelConnections.list).mockResolvedValue(
+        connections.filter((connection) => connection.id !== "work-account"),
+      );
+      act(() => effects.handleChanged({ type: "changed", entity: "system", id: "work-account", changes: ["model-connections-changed"] }));
+      await waitFor(() => expect(result.current.effectiveConnection).toBeUndefined());
+      expect(result.current.unavailableReason).not.toBeNull();
+      expect(result.current.effectiveConnectionId).toBe("work-account");
+      expect(result.current.effectiveContextId).toBe("personal");
+    } finally {
+      unmount();
+      effects.dispose();
+      queryClient.clear();
+    }
+  });
   it("keeps context tools independent of explicitly selected model accounts", async () => {
     const { wrapper } = createQueryClientTestHarness();
     const { result } = renderHook(

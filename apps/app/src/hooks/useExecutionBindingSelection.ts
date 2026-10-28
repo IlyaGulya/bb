@@ -12,6 +12,11 @@ import {
 } from "@/hooks/useMcpInspection";
 import { sdk } from "@/lib/sdk";
 import {
+  executionContextsQueryKey,
+  modelConnectionsQueryKey,
+  projectContextDefaultsQueryKey,
+} from "./queries/query-keys";
+import {
   executionContextUnavailableReason,
   modelConnectionUnavailableReason,
 } from "@/lib/execution-binding-selection";
@@ -44,15 +49,15 @@ export function useExecutionBindingDefinitions({
   projectId: string;
 }): ExecutionBindingDefinitions {
   const contexts = useQuery({
-    queryKey: ["execution-contexts"],
+    queryKey: executionContextsQueryKey(),
     queryFn: () => sdk.experimental_executionContexts.list(),
   });
   const connections = useQuery({
-    queryKey: ["model-connections"],
+    queryKey: modelConnectionsQueryKey(),
     queryFn: () => sdk.experimental_modelConnections.list(),
   });
   const defaults = useQuery({
-    queryKey: ["project-context-defaults", projectId],
+    queryKey: projectContextDefaultsQueryKey(projectId),
     queryFn: () =>
       sdk.experimental_executionContexts.getProjectDefaults({ projectId }),
   });

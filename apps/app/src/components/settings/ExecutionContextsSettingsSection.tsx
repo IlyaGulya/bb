@@ -10,6 +10,11 @@ import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
 import { useHosts } from "@/hooks/queries/host-queries";
 import { sdk } from "@/lib/sdk";
 import { invalidateExecutionBindingDefinitions } from "@/hooks/cache-owners/system-cache-effects";
+import {
+  executionContextsQueryKey,
+  modelConnectionsQueryKey,
+  projectContextDefaultsQueryKey,
+} from "@/hooks/queries/query-keys";
 import { getMutationErrorMessage } from "@/lib/mutation-errors";
 import { McpServerManager } from "./McpServerManager";
 
@@ -35,11 +40,11 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 export function ExecutionContextsSettingsSection() {
   const queryClient = useQueryClient();
   const contexts = useQuery({
-    queryKey: ["execution-contexts"],
+    queryKey: executionContextsQueryKey(),
     queryFn: () => sdk.experimental_executionContexts.list(),
   });
   const connections = useQuery({
-    queryKey: ["model-connections"],
+    queryKey: modelConnectionsQueryKey(),
     queryFn: () => sdk.experimental_modelConnections.list(),
   });
   const [editor, setEditor] = useState<
@@ -48,14 +53,15 @@ export function ExecutionContextsSettingsSection() {
     | null
   >(null);
   const [error, setError] = useState<string | null>(null);
-  const refresh = () => invalidateExecutionBindingDefinitions({ queryClient });
+  const refresh = (kind: "context" | "connection" | "project-defaults", id?: string) =>
+    invalidateExecutionBindingDefinitions({ queryClient, kind, id });
   const remove = async (kind: "context" | "connection", id: string) => {
     setError(null);
     try {
       if (kind === "context")
         await sdk.experimental_executionContexts.delete({ id });
       else await sdk.experimental_modelConnections.delete({ id });
-      await refresh();
+      await refresh(kind, id);
     } catch (cause) {
       setError(
         getMutationErrorMessage({
@@ -216,7 +222,7 @@ export function ExecutionContextsSettingsSection() {
       <ProjectContextDefaultsEditor
         contexts={contexts.data ?? []}
         connections={connections.data ?? []}
-        onSaved={refresh}
+        onSaved={(projectId) => refresh("project-defaults", projectId)}
       />
       <ResponsiveDrawerShell
         open={editor !== null}
@@ -236,13 +242,13 @@ export function ExecutionContextsSettingsSection() {
             value={editor.value}
             connections={connections.data ?? []}
             onSave={async (fields) => {
-              if (editor.value)
-                await sdk.experimental_executionContexts.update({
-                  id: editor.value.id,
-                  ...fields,
-                });
-              else await sdk.experimental_executionContexts.create(fields);
-              await refresh();
+              const saved = editor.value
+                ? await sdk.experimental_executionContexts.update({
+                    id: editor.value.id,
+                    ...fields,
+                  })
+                : await sdk.experimental_executionContexts.create(fields);
+              await refresh("context", saved.id);
               setEditor(null);
             }}
           />
@@ -251,13 +257,13 @@ export function ExecutionContextsSettingsSection() {
             key={`connection:${editor.value?.id ?? "new"}`}
             value={editor.value}
             onSave={async (fields) => {
-              if (editor.value)
-                await sdk.experimental_modelConnections.update({
-                  id: editor.value.id,
-                  ...fields,
-                });
-              else await sdk.experimental_modelConnections.create(fields);
-              await refresh();
+              const saved = editor.value
+                ? await sdk.experimental_modelConnections.update({
+                    id: editor.value.id,
+                    ...fields,
+                  })
+                : await sdk.experimental_modelConnections.create(fields);
+              await refresh("connection", saved.id);
               setEditor(null);
             }}
           />
@@ -1026,12 +1032,12 @@ function ProjectContextDefaultsEditor({
 }: {
   contexts: ExecutionContext[];
   connections: ModelConnection[];
-  onSaved: () => Promise<void>;
+  onSaved: (projectId: string) => Promise<void>;
 }) {
   const projects = useSidebarNavigation();
   const [projectId, setProjectId] = useState("");
   const defaults = useQuery({
-    queryKey: ["project-context-defaults", projectId],
+    queryKey: projectContextDefaultsQueryKey(projectId),
     queryFn: () =>
       sdk.experimental_executionContexts.getProjectDefaults({ projectId }),
     enabled: !!projectId,
@@ -1089,7 +1095,7 @@ function ProjectDefaultsForm({
   initialConnectionId: string | null;
   contexts: ExecutionContext[];
   connections: ModelConnection[];
-  onSaved: () => Promise<void>;
+  onSaved: (projectId: string) => Promise<void>;
 }) {
   const [contextId, setContextId] = useState(initialContextId ?? "");
   const [connectionId, setConnectionId] = useState(initialConnectionId ?? "");
@@ -1102,7 +1108,7 @@ function ProjectDefaultsForm({
           executionContextId: contextId || null,
           modelConnectionId: connectionId || null,
         });
-        await onSaved();
+        await onSaved(projectId);
       }}
     >
       <Field label="Default execution context">

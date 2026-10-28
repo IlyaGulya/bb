@@ -40,22 +40,29 @@ export function registerExecutionContextRoutes(app: Hono, deps: AppDeps): void {
   get(contexts.get, (context) =>
     context.json(requireExecutionContext(deps.db, context.req.param("id"))),
   );
-  post(contexts.create, (context, input) =>
-    context.json(createExecutionContextDefinition(deps.db, input), 201),
-  );
-  patch(contexts.update, (context, input) =>
-    context.json(updateExecutionContextDefinition(deps.db, input)),
-  );
+  post(contexts.create, (context, input) => {
+    const result = createExecutionContextDefinition(deps.db, input);
+    deps.hub.notifySystem(["execution-contexts-changed"], result.id);
+    return context.json(result, 201);
+  });
+  patch(contexts.update, (context, input) => {
+    const result = updateExecutionContextDefinition(deps.db, input);
+    deps.hub.notifySystem(["execution-contexts-changed"], result.id);
+    return context.json(result);
+  });
   del(contexts.delete, (context, input) => {
     deleteContextDefinition(deps.db, input.id);
+    deps.hub.notifySystem(["execution-contexts-changed"], input.id);
     return context.json({ id: input.id });
   });
   get(contexts.getProjectDefaults, (context) =>
     context.json(getProjectContextDefaults(deps.db, context.req.param("id"))),
   );
-  put(contexts.setProjectDefaults, (context, input) =>
-    context.json(updateProjectContextDefaults(deps.db, input)),
-  );
+  put(contexts.setProjectDefaults, (context, input) => {
+    const result = updateProjectContextDefaults(deps.db, input);
+    deps.hub.notifySystem(["project-context-defaults-changed"], result.projectId);
+    return context.json(result);
+  });
   get(contexts.getThreadBinding, (context) => {
     const threadId = context.req.param("id");
     if (!getThread(deps.db, threadId))
@@ -72,14 +79,19 @@ export function registerExecutionContextRoutes(app: Hono, deps: AppDeps): void {
   get(connections.get, (context) =>
     context.json(requireModelConnection(deps.db, context.req.param("id"))),
   );
-  post(connections.create, (context, input) =>
-    context.json(createModelConnectionDefinition(deps.db, input), 201),
-  );
-  patch(connections.update, (context, input) =>
-    context.json(updateModelConnectionDefinition(deps.db, input)),
-  );
+  post(connections.create, (context, input) => {
+    const result = createModelConnectionDefinition(deps.db, input);
+    deps.hub.notifySystem(["model-connections-changed"], result.id);
+    return context.json(result, 201);
+  });
+  patch(connections.update, (context, input) => {
+    const result = updateModelConnectionDefinition(deps.db, input);
+    deps.hub.notifySystem(["model-connections-changed"], result.id);
+    return context.json(result);
+  });
   del(connections.delete, (context, input) => {
     deleteConnectionDefinition(deps.db, input.id);
+    deps.hub.notifySystem(["model-connections-changed"], input.id);
     return context.json({ id: input.id });
   });
 }

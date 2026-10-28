@@ -8,6 +8,9 @@ import {
   environmentDiffFilesQueryKey,
   environmentDiffPatchQueryKey,
   hostsQueryKey,
+  executionContextsQueryKey,
+  modelConnectionsQueryKey,
+  projectContextDefaultsQueryKey,
   sidebarNavigationQueryKey,
   systemProvidersQueryKey,
   systemExecutionOptionsQueryKey,
@@ -102,6 +105,31 @@ async function waitForQueryCalls(
 }
 
 describe("system cache effects", () => {
+  it.each(["initial", "reconnect"])("reloads mounted definitions missed before %s connection without overwriting newer fetches", async (connection) => {
+    const queryClient = createCacheEffectQueryClient();
+    const keys = [executionContextsQueryKey(), modelConnectionsQueryKey(), projectContextDefaultsQueryKey("project-1")];
+    const connectedAt = Date.now();
+    for (const key of keys) queryClient.setQueryData(key, "stale", { updatedAt: connectedAt - 100 });
+    const freshDefaults = projectContextDefaultsQueryKey("project-2");
+    queryClient.setQueryData(freshDefaults, "fresh", { updatedAt: connectedAt + 100 });
+    const observed = keys.map((queryKey) => observeIdleQuery(queryClient, queryKey));
+    const fresh = observeIdleQuery(queryClient, freshDefaults);
+    try {
+      if (connection === "reconnect") {
+        invalidateRealtimeQueriesAfterServerReconnect({ queryClient, disconnectedAt: connectedAt });
+      } else {
+        invalidateRealtimeQueriesFetchedBeforeInitialConnect({ queryClient, connectedAt });
+      }
+      await vi.waitFor(() => {
+        for (const key of keys) expect(queryClient.getQueryData(key)).toBe("loaded");
+      });
+      expect(queryClient.getQueryData(freshDefaults)).toBe("fresh");
+      expect(fresh.queryFn).not.toHaveBeenCalled();
+    } finally {
+      for (const query of [...observed, fresh]) query.unsubscribe();
+      queryClient.clear();
+    }
+  });
   it("applies readiness only to its routed provider and refreshes only that provider's model queries", async () => {
     const queryClient = createCacheEffectQueryClient();
     const roster = systemProvidersQueryKey({

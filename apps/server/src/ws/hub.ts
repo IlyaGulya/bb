@@ -1024,10 +1024,11 @@ export class NotificationHub implements DbNotifier {
     return true;
   }
 
-  notifySystem(changes: SystemChangeKind[]): void {
+  notifySystem(changes: SystemChangeKind[], id?: string): void {
     this.notifyClients({
       type: "changed",
       entity: "system",
+      ...(id === undefined ? {} : { id }),
       changes,
     });
   }

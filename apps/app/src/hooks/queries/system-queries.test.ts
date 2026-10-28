@@ -16,6 +16,7 @@ import type { ProviderCliStatusResponse } from "@bb/host-daemon-contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
+import { createRealtimeCacheEffects } from "../realtime-cache-effects";
 import {
   hostProviderCliStatusQueryKey,
   systemExecutionOptionsQueryKey,
@@ -363,6 +364,60 @@ describe("useSystemExecutionOptions", () => {
     );
     expect(observer.getCurrentResult().data?.models).toBeUndefined();
     expect(observer.getCurrentResult().isPlaceholderData).toBe(false);
+  });
+
+  it("refreshes an edited or revoked connection's mounted catalog without refetching sibling or native catalogs", async () => {
+    const original = { ...CODEX_MODEL, model: "bb-cpa/work/original" };
+    const replacement = { ...CODEX_MODEL, model: "bb-cpa/work/replacement" };
+    const personal = { ...CODEX_MODEL, model: "bb-cpa/personal/model" };
+    let workModels = [original];
+    let revoked = false;
+    vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) => {
+      if (args?.modelConnectionId === "work-cpa" && revoked) throw new Error("Connection revoked");
+      return {
+        ...EXECUTION_OPTIONS_RESPONSE,
+        models: args?.modelConnectionId === "work-cpa"
+          ? workModels
+          : args?.modelConnectionId === "personal-cpa" ? [personal] : [CODEX_MODEL],
+      };
+    });
+    const { queryClient } = createQueryClientTestHarness();
+    const effects = createRealtimeCacheEffects({ queryClient });
+    const options = (modelConnectionId?: string) => ({
+      ...liveSystemExecutionOptionsQueryOptions({ hostId: "worker", providerId: "acp-omp", modelConnectionId }),
+      retry: false,
+    });
+    const selected = observe(queryClient, options("work-cpa"));
+    const sibling = observe(queryClient, options("personal-cpa"));
+    const native = observe(queryClient, options());
+    try {
+      await vi.waitFor(() => {
+        expect(selected.getCurrentResult().data?.models).toEqual([original]);
+        expect(sibling.getCurrentResult().data?.models).toEqual([personal]);
+        expect(native.getCurrentResult().data?.models).toEqual([CODEX_MODEL]);
+      });
+      vi.mocked(sdk.system.executionOptions).mockClear();
+      workModels = [replacement];
+      effects.handleChanged({ type: "changed", entity: "system", id: "work-cpa", changes: ["model-connections-changed"] });
+      await vi.waitFor(() => expect(selected.getCurrentResult().data?.models).toEqual([replacement]));
+      expect(sdk.system.executionOptions).toHaveBeenCalledTimes(1);
+      expect(sibling.getCurrentResult().data?.models).toEqual([personal]);
+      expect(native.getCurrentResult().data?.models).toEqual([CODEX_MODEL]);
+
+      vi.mocked(sdk.system.executionOptions).mockClear();
+      revoked = true;
+      effects.handleChanged({ type: "changed", entity: "system", id: "work-cpa", changes: ["model-connections-changed"] });
+      await vi.waitFor(() => expect(selected.getCurrentResult().isError).toBe(true));
+      expect(sdk.system.executionOptions).toHaveBeenCalledTimes(1);
+      expect(sibling.getCurrentResult().isSuccess).toBe(true);
+      expect(sibling.getCurrentResult().data?.models).toEqual([personal]);
+      expect(native.getCurrentResult().isSuccess).toBe(true);
+      expect(native.getCurrentResult().data?.models).toEqual([CODEX_MODEL]);
+    } finally {
+      effects.dispose();
+      stopObserving();
+      queryClient.clear();
+    }
   });
 
   it("separates requests and cache entries for different hosts", async () => {

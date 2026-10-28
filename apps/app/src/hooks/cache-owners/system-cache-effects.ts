@@ -38,6 +38,9 @@ import {
   allThreadTimelineQueryKeyPrefix,
   allThreadTimelineTurnSummaryDetailsQueryKeyPrefix,
   environmentQueryKey,
+  executionContextsQueryKey,
+  modelConnectionsQueryKey,
+  projectContextDefaultsQueryKey,
   hostPathExistenceQueryKeyPrefix,
   hostsQueryKey,
   projectsQueryKey,
@@ -236,15 +239,29 @@ export function invalidateSystemExecutionOptions({
 
 export async function invalidateExecutionBindingDefinitions({
   queryClient,
-}: QueryClientArg): Promise<void> {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: ["execution-contexts"] }),
-    queryClient.invalidateQueries({ queryKey: ["model-connections"] }),
-    queryClient.invalidateQueries({ queryKey: ["project-context-defaults"] }),
-    queryClient.invalidateQueries({
-      queryKey: allSystemExecutionOptionsQueryKeyPrefix(),
-    }),
-  ]);
+  kind,
+  id,
+}: QueryClientArg & {
+  kind: "context" | "connection" | "project-defaults";
+  id?: string;
+}): Promise<void> {
+  if (kind === "context") {
+    await queryClient.invalidateQueries({ queryKey: executionContextsQueryKey() });
+  } else if (kind === "project-defaults") {
+    await queryClient.invalidateQueries({
+      queryKey: projectContextDefaultsQueryKey(id),
+    });
+  } else {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: modelConnectionsQueryKey() }),
+      queryClient.invalidateQueries({
+        queryKey: allSystemExecutionOptionsQueryKeyPrefix(),
+        predicate: (query) =>
+          typeof query.queryKey[5] === "string" &&
+          (id === undefined || query.queryKey[5] === id),
+      }),
+    ]);
+  }
 }
 
 export function invalidateGeneralSettingsDependencies({
@@ -275,6 +292,9 @@ function getServerReconnectInvalidationQueryKeys(): QueryKey[] {
     hostsQueryKey(),
     allHostQueryKeyPrefix(),
     projectsQueryKey(),
+    executionContextsQueryKey(),
+    modelConnectionsQueryKey(),
+    projectContextDefaultsQueryKey(),
     sidebarNavigationQueryKey(),
     allProjectPathsQueryKeyPrefix(),
     threadsQueryKey(),

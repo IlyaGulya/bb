@@ -22,6 +22,9 @@ import {
   environmentQueryKey,
   environmentWorkStatusQueryKey,
   hostPathExistenceQueryKey,
+  executionContextsQueryKey,
+  modelConnectionsQueryKey,
+  projectContextDefaultsQueryKey,
   hostsQueryKey,
   projectPathsQueryKey,
   projectCommandsQueryKey,
@@ -285,6 +288,64 @@ describe("createRealtimeCacheEffects", () => {
     expect(queryClient.getQueryState(statusKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(configKey)?.isInvalidated).toBe(false);
     effects.dispose();
+  });
+
+  it.each([false, true])("refreshes only affected definition and connection caches, hidden=%s", (hidden) => {
+    const visibility = createFakeVisibility();
+    const { effects, queryClient } = createRealtimeEffectsTestContext(visibility);
+    const contexts = executionContextsQueryKey();
+    const connections = modelConnectionsQueryKey();
+    const firstDefaults = projectContextDefaultsQueryKey("project-1");
+    const secondDefaults = projectContextDefaultsQueryKey("project-2");
+    const thirdDefaults = projectContextDefaultsQueryKey("project-3");
+    const catalog = (modelConnectionId: string | null, threadId: string | null = null) =>
+      systemExecutionOptionsQueryKey({
+        environmentId: "env-1", hostId: "host-1", providerId: "acp-omp",
+        projectId: "project-1", modelConnectionId, threadId,
+      });
+    const firstCatalog = catalog("connection-1");
+    const secondCatalog = catalog("connection-2");
+    const thirdCatalog = catalog("connection-3");
+    const frozenCatalog = catalog("connection-1", "thread-1");
+    const nativeCatalog = catalog(null);
+    const frozenThread = threadQueryKey("thread-1");
+    const keys = [contexts, connections, firstDefaults, secondDefaults, thirdDefaults,
+      firstCatalog, secondCatalog, thirdCatalog, frozenCatalog, nativeCatalog, frozenThread];
+    const seed = () => {
+      for (const key of keys) queryClient.setQueryData(key, { revision: "old" });
+    };
+    const invalidated = (key: readonly unknown[]) => queryClient.getQueryState(key)?.isInvalidated;
+    seed();
+    visibility.setVisible(!hidden);
+    effects.handleChanged({ type: "changed", entity: "system", id: "context-1", changes: ["execution-contexts-changed"] });
+    if (hidden) {
+      expect(keys.map(invalidated)).toEqual(keys.map(() => false));
+      visibility.setVisible(true);
+    }
+    expect(invalidated(contexts)).toBe(true);
+    expect(keys.filter((key) => key !== contexts).map(invalidated)).toEqual(keys.slice(1).map(() => false));
+
+    seed();
+    visibility.setVisible(!hidden);
+    for (const id of ["connection-1", "connection-2"]) {
+      effects.handleChanged({ type: "changed", entity: "system", id, changes: ["model-connections-changed"] });
+    }
+    if (hidden) expect(keys.map(invalidated)).toEqual(keys.map(() => false));
+    visibility.setVisible(true);
+    for (const key of [connections, firstCatalog, secondCatalog, frozenCatalog]) expect(invalidated(key)).toBe(true);
+    for (const key of [contexts, firstDefaults, secondDefaults, thirdDefaults, thirdCatalog, nativeCatalog, frozenThread]) expect(invalidated(key)).toBe(false);
+
+    seed();
+    visibility.setVisible(!hidden);
+    for (const id of ["project-1", "project-2"]) {
+      effects.handleChanged({ type: "changed", entity: "system", id, changes: ["project-context-defaults-changed"] });
+    }
+    if (hidden) expect(keys.map(invalidated)).toEqual(keys.map(() => false));
+    visibility.setVisible(true);
+    for (const key of [firstDefaults, secondDefaults]) expect(invalidated(key)).toBe(true);
+    for (const key of [contexts, connections, thirdDefaults, firstCatalog, secondCatalog, thirdCatalog, frozenCatalog, nativeCatalog, frozenThread]) expect(invalidated(key)).toBe(false);
+    effects.dispose();
+    queryClient.clear();
   });
 
   it("refreshes only the app update status when the launcher reports progress", () => {

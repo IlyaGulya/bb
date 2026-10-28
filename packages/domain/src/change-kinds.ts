@@ -68,6 +68,9 @@ export const SYSTEM_CHANGE_KINDS = [
   "environment-availability-changed",
   "server-move-changed",
   "app-update-changed",
+  "execution-contexts-changed",
+  "model-connections-changed",
+  "project-context-defaults-changed",
 ] as const;
 export type SystemChangeKind = (typeof SYSTEM_CHANGE_KINDS)[number];
 
@@ -281,6 +284,7 @@ export const systemChangedMessageSchema = z
   .object({
     type: z.literal("changed"),
     entity: z.literal("system"),
+    id: z.string().optional(),
     changes: z.array(systemChangeKindSchema).readonly(),
   })
   .strict();
@@ -355,6 +359,7 @@ const hostChangedMessageLenientSchema = z.object({
 const systemChangedMessageLenientSchema = z.object({
   type: z.literal("changed"),
   entity: z.literal("system"),
+  id: z.string().optional(),
   changes: lenientKinds(SYSTEM_CHANGE_KINDS),
 });
 
