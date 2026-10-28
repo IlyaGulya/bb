@@ -118,6 +118,11 @@ export function buildClaudeGatewayEnvironment(args: {
   }
   env.ENABLE_CLAUDEAI_MCP_SERVERS = args.nativeMcp ? "true" : "false";
   env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
+  // Native Claude before 2.1.304 disables discovery behind custom base URLs.
+  // CPA forwards client-side ToolSearch; preserve explicit operator overrides.
+  if (env.ENABLE_TOOL_SEARCH === undefined || env.ENABLE_TOOL_SEARCH === "") {
+    env.ENABLE_TOOL_SEARCH = "true";
+  }
   if (args.threadId) {
     if (/[\r\n]/.test(args.threadId)) {
       throw new Error(

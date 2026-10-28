@@ -15,6 +15,9 @@
   separate.
   Wait for asynchronous native inventory registration within the existing
   readiness deadline; an initial empty snapshot is not a failed grant.
+- Keep native Claude tool search enabled behind CPA unless explicitly overridden.
+  Discover MCP schemas on demand instead of eagerly consuming the context window;
+  native Cloud access and model/account bindings remain unchanged.
 - Replace `BB_CPA_LOG_DIR` with endpoint-mapped `BB_CPA_LOG_DIRS`, choosing
   read-only log roots from frozen thread bindings without weakening exact
   thread-header download guards.

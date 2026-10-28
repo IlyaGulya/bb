@@ -46,14 +46,14 @@ CLI/session history stays native. Select an exact `bb-cpa/<prefix>/<id>` model
 and worker-local key reference. Missing/incompatible selections refuse without
 native/pool fallback. Context and model payer remain independent.
 
-Optional `nativeMcpProfile: {configDir: string|null}` opts into the entire native
-user/project MCP plus account Cloud profile, not BB's per-server allowlist.
-`null` uses the host-native profile. With CPA, model `nativeAuth` stays null:
-custom model Authorization carries the CPA key; native OAuth stays only for
-Cloud, without copying tokens. A compatible CLI/SDK must prove first-party OAuth
-and at least one connected `claudeai` connector before input. Missing/empty
-inventory refuses; it cannot prove a valid-empty grant. Other contexts stay
-strict. This is broader tool scope, not a sandbox/ACL.
+`nativeMcpProfile: {configDir: string|null}` explicitly selects the whole native
+user/project MCP and Cloud profile; null means host-native. Absent keeps strict
+scoped MCP. This mode is not a per-server ACL or sandbox.
+CPA model `nativeAuth` stays null: custom Authorization uses the CPA key; native
+OAuth stays Cloud-only, without copying tokens. Before input, a compatible CLI/SDK
+must prove first-party OAuth and a connected `claudeai` server; empty inventory refuses.
+CPA enables `ToolSearch` unless explicitly overridden, discovering schemas
+on demand without changing permissions or Cloud identity.
 
 Hash-only host receipts protect selected settings/MCP/hooks/root content and
 secret-free gateway references across
