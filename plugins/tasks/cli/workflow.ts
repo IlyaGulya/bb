@@ -110,6 +110,20 @@ export function workflowCommands(
     "workflow start": cliCommand({ summary: "Explicitly start the prepared task workflow; idempotent, no origin thread input and no automatic acceptance", positionals: [task], options: { json }, run: input => emit(async () => { const address = await target(input.positionals.task); const preparation = await handlers.getTaskWorkflowPreparation(address); if (!preparation) throw new Error("Run workflow prepare first"); return handlers.launchTaskWorkflow({ ...address, preparationId: preparation.id }); }) }),
     "workflow list": cliCommand({ summary: "Inspect workflow receipts, retained native workers and observed result packages", positionals: [task], options: { json }, run: input => emit(async () => handlers.taskWorkflows(await target(input.positionals.task))) }),
     "workflow accept": cliCommand({ summary: "Human acceptance of the exact reviewed revision; never merges or deploys", positionals: [id], options: { json, revision }, run: input => emit(async () => handlers.acceptTaskWorkflow(workflowRpcContract.acceptTaskWorkflow.input.parse({ id: input.positionals.id, revision: Number(input.options.revision) }))) }),
-    "workflow return": cliCommand({ summary: "Return feedback to the same retained writer session and owned workspace", positionals: [id], options: { json, revision, feedback: { type: "string", required: true, description: "Explicit human revision feedback" } }, run: input => emit(async () => handlers.returnTaskWorkflow(workflowRpcContract.returnTaskWorkflow.input.parse({ id: input.positionals.id, revision: Number(input.options.revision), feedback: input.options.feedback }))) }),
+    "workflow return": cliCommand({
+      summary: "Return feedback to the same retained writer session and owned workspace",
+      positionals: [id],
+      options: {
+        json, revision,
+        feedback: { type: "string", required: true, description: "Explicit human revision feedback" },
+        "repair-revision": { type: "integer", min: 1, description: "Exact acknowledged task draft revision for an explicit first-writer profile repair; omit to retain persisted roles" },
+      },
+      run: input => emit(async () => handlers.returnTaskWorkflow(workflowRpcContract.returnTaskWorkflow.input.parse({
+        id: input.positionals.id,
+        revision: Number(input.options.revision),
+        feedback: input.options.feedback,
+        repairDraftRevision: input.options["repair-revision"] ?? null,
+      }))),
+    }),
   };
 }

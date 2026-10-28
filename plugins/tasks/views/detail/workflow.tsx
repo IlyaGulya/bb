@@ -158,7 +158,18 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
       </section>}
       {run.native?.policyLimitations.map(limit => <p key={limit} className="text-xs text-muted-foreground">{limit}</p>)}
       {run.state === "in_review" && <Button disabled={busy} onClick={() => void act(async () => { const accepted = await rpc.call("acceptTaskWorkflow", { id: run.id, revision: run.revision }); setRuns(current => current.map(entry => entry.id === accepted.id ? accepted : entry)); })}>Accept reviewed result</Button>}
-      {["in_review", "failed"].includes(run.state) && <div className="space-y-2"><label className="block space-y-1 text-sm"><span>Human feedback</span><Textarea value={feedback} onChange={event => setFeedback(event.target.value)} /></label><Button variant="outline" disabled={busy || !feedback.trim()} onClick={() => void act(async () => { const returned = await rpc.call("returnTaskWorkflow", { id: run.id, revision: run.revision, feedback }); setRuns(current => current.map(entry => entry.id === returned.id ? returned : entry)); })}>{run.native?.contextStarted === false ? "Retry first writer with feedback" : "Return to same writer"}</Button></div>}
+      {["in_review", "failed"].includes(run.state) && <div className="space-y-2"><label className="block space-y-1 text-sm"><span>Human feedback</span><Textarea value={feedback} onChange={event => setFeedback(event.target.value)} /></label><Button variant="outline" disabled={busy || !feedback.trim()} onClick={() => void act(async () => {
+        let repairDraftRevision: number | null = null;
+        if (run.native?.contextStarted === false) {
+          if (!draft.draft) throw new Error("Wait for the saved workflow draft to load before retrying");
+          if (draft.savedRevision() > 0 || draft.saving || draft.error !== null) {
+            if (!await draft.flush()) return;
+            repairDraftRevision = draft.savedRevision();
+          }
+        }
+        const returned = await rpc.call("returnTaskWorkflow", { id: run.id, revision: run.revision, feedback, repairDraftRevision });
+        setRuns(current => current.map(entry => entry.id === returned.id ? returned : entry));
+      })}>{run.native?.contextStarted === false ? "Retry first writer with feedback" : "Return to same writer"}</Button></div>}
     </article>; })}
     {error && !open && <p role="alert" className="text-sm text-destructive">{error}</p>}
   </section>;

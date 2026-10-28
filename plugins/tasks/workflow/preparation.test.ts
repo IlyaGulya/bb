@@ -239,12 +239,12 @@ describe("legacy first-writer Return handlers", () => {
     if (projectSettings) await handlers.saveProjectWorkflowSettings({ taskId: task.id, revision: 0, selection: repair });
     expect(store.database.prepare("SELECT task_id FROM task_workflow_drafts WHERE task_id = ?").all(task.id)).toEqual([]);
     const feedback = "Provider admission repaired; retry the original stored choices";
-    const returned = await handlers.returnTaskWorkflow({ id: original.group, revision: 1, feedback });
+    const returned = await handlers.returnTaskWorkflow({ id: original.group, revision: 1, feedback, repairDraftRevision: null });
     expect(returned).toMatchObject({ id: original.group, revision: 2, state: "running" });
     expect(workflows.request(original.group)).toEqual({ ...original, key: "legacy-workflow:2", feedback });
     expect(store.database.prepare("SELECT launch_json FROM task_workflow_runs WHERE id = ?").get(original.group)).toEqual({ launch_json: launch });
     expect(store.database.prepare("SELECT task_id FROM task_workflow_drafts WHERE task_id = ?").all(task.id)).toEqual([]);
-    expect((await handlers.returnTaskWorkflow({ id: original.group, revision: 1, feedback })).revision).toBe(2);
+    expect((await handlers.returnTaskWorkflow({ id: original.group, revision: 1, feedback, repairDraftRevision: null })).revision).toBe(2);
     expect(fixture.counts()).toEqual({ roots: 0, nativeStarts: 1, preparationContexts: 0 });
     expect(store.tasks.getTask(task.id)?.status).toBe("in_progress");
   });
@@ -253,9 +253,9 @@ describe("legacy first-writer Return handlers", () => {
     const fixture = legacyFixture();
     const { handlers, task, workflows, original } = fixture;
     await handlers.saveProjectWorkflowSettings({ taskId: task.id, revision: 0, selection });
-    await handlers.saveTaskWorkflowDraft({ taskId: task.id, revision: 0, selection: repair });
+    const repaired = await handlers.saveTaskWorkflowDraft({ taskId: task.id, revision: 0, selection: repair });
     const feedback = "Use the explicitly selected repaired account and model for the first context";
-    expect(await handlers.returnTaskWorkflow({ id: original.group, revision: 1, feedback })).toMatchObject({ revision: 2, state: "running" });
+    expect(await handlers.returnTaskWorkflow({ id: original.group, revision: 1, feedback, repairDraftRevision: repaired.revision })).toMatchObject({ revision: 2, state: "running" });
     expect(workflows.request(original.group)).toEqual({ ...original, writer: repair.writer, reviewer: repair.reviewer, key: "legacy-workflow:2", feedback });
     expect(fixture.counts()).toEqual({ roots: 0, nativeStarts: 1, preparationContexts: 0 });
     expect(fixture.store.tasks.getTask(task.id)?.status).toBe("in_progress");
@@ -275,7 +275,7 @@ describe("legacy first-writer Return handlers", () => {
       await released;
       return { models: [selection.writer!.model, repair.writer!.model].map(model => ({ id: model, model, supportedReasoningEfforts: [{ reasoningEffort: "high" }] })), selectedOnlyModels: [], modelLoadError: null };
     });
-    const input = { id: original.group, revision: before.revision, feedback: "Retry with my saved repair choices" };
+    const input = { id: original.group, revision: before.revision, feedback: "Retry with my saved repair choices", repairDraftRevision: saved.revision };
     const returning = Promise.resolve(handlers.returnTaskWorkflow(input)).then(
       value => ({ value, error: null }),
       (error: unknown) => ({ value: null, error }),
@@ -295,10 +295,11 @@ describe("legacy first-writer Return handlers", () => {
     expect(fixture.counts().nativeStarts).toBe(0);
     expect(outcome).toMatchObject({ value: null, error: expect.any(Error) });
     expect(await handlers.getTaskWorkflowDraft({ taskId: task.id })).toMatchObject({ revision: changed.revision, selection: restoreChoices ? selection : repair });
-    const retried = await handlers.returnTaskWorkflow(input);
+    const retryInput = { ...input, repairDraftRevision: changed.revision };
+    const retried = await handlers.returnTaskWorkflow(retryInput);
     expect(retried).toMatchObject({ revision: before.revision + 1, state: "running" });
     expect(workflows.request(original.group).writer).toEqual((restoreChoices ? selection : repair).writer);
-    expect((await handlers.returnTaskWorkflow(input)).revision).toBe(retried.revision);
+    expect((await handlers.returnTaskWorkflow(retryInput)).revision).toBe(retried.revision);
     expect(fixture.counts()).toEqual({ roots: 0, nativeStarts: 1, preparationContexts: 0 });
   });
 
@@ -307,7 +308,22 @@ describe("legacy first-writer Return handlers", () => {
     workflows.publish(original.group, { runId: "retained-native", key: original.key, contextStarted: true, status: "failed", phase: "Build", error: "Human feedback required", result: null, workers: [{ role: "writer", threadId: "retained-writer", callIndex: 1 }], policyLimitations: [] });
     await handlers.saveTaskWorkflowDraft({ taskId: task.id, revision: 0, selection: { ...selection, hostId: null, writer: null, reviewer: null } });
     const feedback = "Continue the same retained writer without changing its binding";
-    expect(await handlers.returnTaskWorkflow({ id: original.group, revision: 1, feedback })).toMatchObject({ revision: 2, state: "running" });
+    expect(await handlers.returnTaskWorkflow({ id: original.group, revision: 1, feedback, repairDraftRevision: null })).toMatchObject({ revision: 2, state: "running" });
     expect(workflows.request(original.group)).toEqual({ ...original, key: "legacy-workflow:2", feedback });
+  });
+
+  it("rejects a first-writer repair revision that changed before Return admission", async () => {
+    const fixture = legacyFixture();
+    const { handlers, workflows, original, task } = fixture;
+    const acknowledged = await handlers.saveTaskWorkflowDraft({ taskId: task.id, revision: 0, selection });
+    const newer = await handlers.saveTaskWorkflowDraft({ taskId: task.id, revision: acknowledged.revision, selection: repair });
+    const feedback = "Retry only the revision acknowledged by this client";
+    await expect(handlers.returnTaskWorkflow({ id: original.group, revision: 1, feedback, repairDraftRevision: acknowledged.revision })).rejects.toThrow();
+    expect(workflows.get(original.group)).toMatchObject({ revision: 1, state: "failed" });
+    expect(workflows.request(original.group)).toEqual(original);
+    expect(fixture.counts().nativeStarts).toBe(0);
+    expect(await handlers.getTaskWorkflowDraft({ taskId: task.id })).toMatchObject({ revision: newer.revision, selection: repair });
+    expect(await handlers.returnTaskWorkflow({ id: original.group, revision: 1, feedback, repairDraftRevision: newer.revision })).toMatchObject({ revision: 2, state: "running" });
+    expect(workflows.request(original.group).writer).toEqual(repair.writer);
   });
 });

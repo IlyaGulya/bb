@@ -21,6 +21,7 @@ import {
 } from "../shared/repositories";
 import { RepositoryStore } from "./store";
 import { ExecutionStore } from "../delegate/execution-store";
+import { assertTaskWorkflowExecutionAvailable } from "../workflow/store.js";
 
 export interface RepositoryEffects {
   prompt(task: Task, preset: Preset, instructions?: string): string;
@@ -545,6 +546,7 @@ export function repositoryHandlers(
     async continueTaskRepositories({ taskId, checkpointId }) {
       return withTaskExecution(taskId, async () => {
         const task = requireTask(taskId);
+        assertTaskWorkflowExecutionAvailable(store, task.id);
         const checkpoint = checkpoints.get(checkpointId);
         if (checkpoint.taskId !== taskId)
           throw new Error("Checkpoint belongs to another task");
@@ -635,6 +637,7 @@ export function repositoryHandlers(
               },
               preset,
             );
+            assertTaskWorkflowExecutionAvailable(store, task.id);
             const thread = await bb.sdk.threads.spawn({
               projectId: primary.binding.bbProjectId,
               environment,

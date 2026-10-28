@@ -35,6 +35,7 @@ import {
 } from "./execution";
 import { RepositoryStore } from "../repositories/store";
 import type { RepositoryEffects } from "../repositories";
+import { assertTaskWorkflowExecutionAvailable } from "../workflow/store.js";
 
 const MAX_DELEGATED_THREAD_TITLE_WIDTH = 120;
 const SYSTEM_AUTHOR_NAME = "Tasks";
@@ -423,6 +424,7 @@ export function handlers(
     async delegate(input) {
       return withTaskExecution(input.taskId, async () => {
         const task = requireTask(store.tasks, input.taskId);
+        assertTaskWorkflowExecutionAvailable(store, task.id);
         repositories.assertSingleRootAllowed(task.id);
         const project = requireProject(store.tasks, task.projectId);
         const persisted = executions.target(task.id);
@@ -457,6 +459,7 @@ export function handlers(
               preset,
             )
           : await presetSpawnEnvironment(bb, preset, linkedBbProjectId);
+        assertTaskWorkflowExecutionAvailable(store, task.id);
         const thread = await bb.sdk.threads
           .spawn({
             projectId: linkedBbProjectId,

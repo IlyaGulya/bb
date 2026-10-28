@@ -39,7 +39,8 @@ export const workflowRpcContract = defineRpcContract({
       id,
       revision: z.number().int().positive(),
       feedback: z.string().trim().min(1).max(100000),
-    }),
+      repairDraftRevision: z.number().int().positive().nullable(),
+    }).strict(),
     output: taskWorkflowSchema,
   },
 });

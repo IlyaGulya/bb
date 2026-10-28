@@ -18,6 +18,13 @@ export const taskWorkflowMigration = `CREATE TABLE task_workflow_runs (
 CREATE INDEX task_workflow_task ON task_workflow_runs(task_id);
 CREATE UNIQUE INDEX task_workflow_active ON task_workflow_runs(task_id) WHERE state <> 'accepted';`;
 
+export function assertTaskWorkflowExecutionAvailable(store: TasksApiStore, taskId: string): void {
+  const owner = store.database.prepare<[string], { id: string }>(
+    "SELECT id FROM task_workflow_runs WHERE task_id = ? AND state <> 'accepted' AND released <> 1 LIMIT 1",
+  ).get(taskId);
+  if (owner) throw new Error(`Task is owned by workflow ${owner.id}; use its retained Return or complete explicit acceptance/release before independent execution`);
+}
+
 export class TaskWorkflowStore {
   constructor(readonly store: TasksApiStore) {}
   get(id: string): TaskWorkflow {

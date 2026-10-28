@@ -6,6 +6,7 @@ import { errorMessage } from "../shared/errors";
 import { delegationRpcContract } from "./contract";
 import { ExecutionStore, type StoredContinuation } from "./execution-store";
 import { RepositoryStore } from "../repositories/store";
+import { assertTaskWorkflowExecutionAvailable } from "../workflow/store.js";
 import {
   environmentThreads,
   requireIdleTask,
@@ -196,6 +197,7 @@ export function continuationHandlers(
         new RepositoryStore(store).assertSingleRootAllowed(input.taskId);
         const task = store.tasks.getTask(input.taskId);
         if (!task) throw new Error(`Task not found: ${input.taskId}`);
+        assertTaskWorkflowExecutionAvailable(store, task.id);
         const preset = store.tasks.getPreset(input.presetId);
         if (!preset) throw new Error(`Profile not found: ${input.presetId}`);
         let continuation = input.operationId
@@ -298,6 +300,7 @@ export function continuationHandlers(
               );
             }
           }
+          assertTaskWorkflowExecutionAvailable(store, task.id);
           const transfer = await bb.sdk.projects
             .transferWorkspace({
               projectId: source.projectId,
@@ -425,6 +428,7 @@ export function continuationHandlers(
               input.extraInstructions ?? ready.request.extraInstructions,
             ) +
             `\n## Verified workspace continuation\n\nTransfer operation: ${ready.receipt.operationId}\nSource session: ${input.sourceThreadId} (retained; this is a NEW native session, not a live process resume).\n\n${ready.handoff}\n`;
+          assertTaskWorkflowExecutionAvailable(store, task.id);
           executions.state(ready.receipt.operationId, "spawning", null, null);
           spawning = true;
           const thread = await bb.sdk.threads.spawn({

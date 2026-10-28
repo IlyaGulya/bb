@@ -193,29 +193,35 @@ export function registerTaskWorkflows(
         return reconcile(id);
       });
     },
-    async returnTaskWorkflow({ id, revision, feedback }) {
+    async returnTaskWorkflow({ id, revision, feedback, repairDraftRevision }) {
       const current = workflows.get(id);
       return withTaskExecution(current.taskId, async () => {
         if (pending.has(id)) await pending.get(id);
-        let retryProfiles:
-          | Pick<BuildReviewStart, "writer" | "reviewer">
-          | undefined;
         const latest = workflows.get(id);
-        if (
-          latest.revision === revision &&
-          latest.state === "failed" &&
-          latest.native?.contextStarted === false
-        ) {
-          const draft = preparation.persistence.savedDraft(current.taskId);
-          if (draft) {
-            const origin = await bb.sdk.threads.get({ threadId: workflows.request(id).originThreadId });
-            if (!origin.environmentId) throw new Error("Prepared workspace is unavailable");
-            await preparation.validate(current.taskId, draft.selection, origin.environmentId);
-            const roles = requireWorkflowSelection(draft.selection);
-            retryProfiles = { writer: roles.writer, reviewer: roles.reviewer };
-          }
+        const repairingFirstWriter = latest.revision === revision && latest.state === "failed" && latest.native?.contextStarted === false;
+        if (latest.revision === revision && repairDraftRevision !== null && !repairingFirstWriter)
+          throw new Error("An established or uncertain writer cannot change execution profiles on Return");
+        const repairDraft = repairingFirstWriter && repairDraftRevision !== null
+          ? preparation.persistence.savedDraft(current.taskId)
+          : null;
+        let retryProfiles: Pick<BuildReviewStart, "writer" | "reviewer"> | undefined;
+        if (repairingFirstWriter && repairDraftRevision !== null) {
+          if (!repairDraft || repairDraft.revision !== repairDraftRevision)
+            throw new Error("Repair draft changed; reload and confirm the saved revision before Return");
+          const origin = await bb.sdk.threads.get({ threadId: workflows.request(id).originThreadId });
+          if (!origin.environmentId) throw new Error("Prepared workspace is unavailable");
+          await preparation.validate(current.taskId, repairDraft.selection, origin.environmentId);
+          const roles = requireWorkflowSelection(repairDraft.selection);
+          retryProfiles = { writer: roles.writer, reviewer: roles.reviewer };
         }
-        workflows.return(id, revision, feedback, retryProfiles);
+        store.transaction(() => {
+          if (repairDraft) {
+            const saved = preparation.persistence.savedDraft(current.taskId);
+            if (!saved || saved.revision !== repairDraftRevision || JSON.stringify(saved.selection) !== JSON.stringify(repairDraft.selection))
+              throw new Error("Repair draft changed during readiness; reload and confirm the saved revision before Return");
+          }
+          workflows.return(id, revision, feedback, retryProfiles);
+        });
         publish(id);
         return reconcile(id);
       });
