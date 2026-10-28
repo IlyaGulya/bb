@@ -2,6 +2,11 @@
 
 ## AgentOS fork — unreleased
 
+- Keep workflow and Jira detail siblings in separate reconciliation key spaces
+  so asynchronous detail refreshes cannot orphan launchers or open portals.
+  Present workflow setup as a centered persistent desktop overlay and compact
+  bottom drawer; retain deferred content, first-open focus return and Tasks
+  shortcuts after dismissal.
 - Give Tasks one header workflow action backed by the shared persistent drawer;
   retain single-agent dispatch as a secondary action. Keep draft selections and
   explicit unavailable choices while Core definition/account catalog events and
