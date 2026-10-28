@@ -15,7 +15,6 @@ export interface BoardCardMeta {
 
 export interface BoardData {
   tasks: Task[];
-  subtasks: Task[];
   labelsById: Map<string, Label>;
   metaByTaskId: Map<string, BoardCardMeta>;
 }
@@ -32,7 +31,6 @@ export async function fetchBoard(
   projectId: string,
 ): Promise<BoardData> {
   const tasks = await listAllTasks(rpc, { projectId });
-  const topLevel = tasks.filter((task) => task.parentTaskId === null);
 
   const labels = await rpc.call("listLabels", { projectId }).then(
     (result) => result.labels,
@@ -55,7 +53,7 @@ export async function fetchBoard(
   );
   const workingByTaskId = new Map<string, TaskThread[]>();
   await Promise.all(
-    topLevel
+    tasks
       .filter((task) => activeTaskIds.has(task.id))
       .map(async (task) => {
         const threads = await rpc
@@ -69,7 +67,7 @@ export async function fetchBoard(
   );
   const attachmentCounts = new Map<string, number>();
   await Promise.all(
-    topLevel.map(async (task) => {
+    tasks.map(async (task) => {
       const count = await rpc.call("listAttachments", { taskId: task.id }).then(
         (result) => result.attachments.length,
         () => 0,
@@ -79,11 +77,10 @@ export async function fetchBoard(
   );
 
   return {
-    tasks: topLevel,
-    subtasks: tasks.filter((task) => task.parentTaskId !== null),
+    tasks,
     labelsById: new Map(labels.map((label) => [label.id, label])),
     metaByTaskId: new Map(
-      topLevel.map((task) => [
+      tasks.map((task) => [
         task.id,
         {
           workingThreads: workingByTaskId.get(task.id) ?? [],
@@ -125,22 +122,17 @@ export async function patchBoard(
   const changed = new Map(fetched);
   const keep = (task: Task) => !changed.has(task.id);
   const tasks = current.tasks.filter(keep);
-  const subtasks = current.subtasks.filter(keep);
   const metaByTaskId = new Map(current.metaByTaskId);
   for (const taskId of changed.keys()) metaByTaskId.delete(taskId);
   const refreshedCards: Task[] = [];
   for (const task of changed.values()) {
     if (task === null || task.projectId !== projectId) continue;
-    if (task.parentTaskId === null) {
-      tasks.push(task);
-      refreshedCards.push(task);
-    } else {
-      subtasks.push(task);
-    }
+    tasks.push(task);
+    refreshedCards.push(task);
   }
-  const topLevelIds = new Set(tasks.map((task) => task.id));
+  const taskIds = new Set(tasks.map((task) => task.id));
   const threadIds = signalTaskIds(signals, "threads:changed").filter(
-    (taskId) => topLevelIds.has(taskId) && !changed.has(taskId),
+    (taskId) => taskIds.has(taskId) && !changed.has(taskId),
   );
   await Promise.all([
     ...refreshedCards.map(async (task) => {
@@ -166,7 +158,7 @@ export async function patchBoard(
     }),
   ]);
   const progress = new Map<string, { done: number; total: number }>();
-  for (const task of subtasks) {
+  for (const task of tasks) {
     if (task.parentTaskId === null) continue;
     const entry = progress.get(task.parentTaskId) ?? { done: 0, total: 0 };
     entry.total += 1;
@@ -186,5 +178,5 @@ export async function patchBoard(
     (a, b) =>
       a.position - b.position || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   );
-  return { ...current, tasks, subtasks, metaByTaskId };
+  return { ...current, tasks, metaByTaskId };
 }

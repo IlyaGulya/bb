@@ -52,7 +52,6 @@ function TaskPager({
     async (rpc) =>
       listAllTasks(rpc, {
         ...(projectId === null ? {} : { projectId }),
-        parentTaskId: null,
       }),
     ["tasks:changed"],
     [projectId],

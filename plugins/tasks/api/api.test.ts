@@ -1180,8 +1180,8 @@ describe("Tasks RPC domain API", () => {
       projects: [
         {
           projectId: project.id,
-          taskCount: 3,
-          activeAgentCount: 1,
+          taskCount: 4,
+          activeAgentCount: 2,
         },
       ],
     });

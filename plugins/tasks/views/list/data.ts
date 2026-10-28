@@ -22,6 +22,7 @@ interface ListTaskFilters {
   statuses: readonly TaskStatus[];
   priorities: readonly TaskPriority[];
   labelIds: readonly string[] | null;
+  parentTaskId?: string;
 }
 
 function belongsToList(
@@ -29,7 +30,10 @@ function belongsToList(
   projectId: string | null,
   filters: ListTaskFilters,
 ): boolean {
-  if (task.parentTaskId !== null) return false;
+  if (
+    filters.parentTaskId !== undefined &&
+    task.parentTaskId !== filters.parentTaskId
+  ) return false;
   if (projectId !== null && task.projectId !== projectId) return false;
   if (filters.statuses.length > 0 && !filters.statuses.includes(task.status)) {
     return false;
@@ -60,7 +64,9 @@ export function listTasksQuery(
       : {}),
     ...(filters.labelIds !== null ? { labelIds: [...filters.labelIds] } : {}),
     activeOnly,
-    parentTaskId: null,
+    ...(filters.parentTaskId === undefined
+      ? {}
+      : { parentTaskId: filters.parentTaskId }),
   };
 }
 
@@ -82,6 +88,7 @@ export function useListTasks(
       filters.statuses.join(),
       filters.priorities.join(),
       filters.labelIds === null ? "" : `active:${filters.labelIds.join()}`,
+      filters.parentTaskId,
     ],
     activeOnly
       ? {}
@@ -94,6 +101,27 @@ export function useListTasks(
               (task) => belongsToList(task, projectId, filters),
             ),
         },
+  );
+}
+
+export function useParentTasks(projectId: string | null) {
+  return useTasksQuery<Task[]>(
+    (rpc) => listAllTasks(rpc, {
+      ...(projectId === null ? {} : { projectId }),
+      parentTaskId: null,
+    }),
+    ["tasks:changed"],
+    [projectId],
+    {
+      applySignals: (rpc, current, signals) =>
+        patchTasks(
+          rpc,
+          current,
+          signalTaskIds(signals, "tasks:changed"),
+          (task) => task.parentTaskId === null &&
+            (projectId === null || task.projectId === projectId),
+        ),
+    },
   );
 }
 
@@ -148,7 +176,6 @@ export function useTaskListMeta(projectId: string | null) {
       const activeTasks = await listAllTasks(rpc, {
         ...(projectId === null ? {} : { projectId }),
         activeOnly: true,
-        parentTaskId: null,
       });
       const entries = await Promise.all(
         activeTasks.map(

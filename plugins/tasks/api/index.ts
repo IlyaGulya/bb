@@ -146,7 +146,6 @@ export function createStore(bb: BbPluginApi): TasksApiStore {
             FROM projects p
             LEFT JOIN tasks t
               ON t.project_id = p.id
-              AND t.parent_task_id IS NULL
             LEFT JOIN task_threads tt ON tt.task_id = t.id
             GROUP BY p.id
             ORDER BY p.name COLLATE NOCASE, p.id
