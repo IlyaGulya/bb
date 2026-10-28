@@ -32,7 +32,7 @@ export function productAnalyticsInput(event: Event): void {
 function activeInput() { return currentInput?.event.eventPhase === Event.NONE ? null : currentInput; }
 export function productAnalyticsRequestInit(init: RequestInit = {}): RequestInit {
   const input = activeInput();
-  const context: ExperimentalProductAnalyticsContext = { actorKind: input?.actor ?? "unknown", surface, mode, actorSessionId: actorSessionId(), ...(input === null ? {} : { operationId: input.operationId }), ...(currentScope.kind === "project" ? { projectId: currentScope.projectId } : {}) };
+  const context: ExperimentalProductAnalyticsContext = { actorKind: input?.actor ?? "unknown", surface, mode, intentional: input !== null, actorSessionId: actorSessionId(), ...(input === null ? {} : { operationId: input.operationId }), ...(currentScope.kind === "project" ? { projectId: currentScope.projectId } : {}) };
   return experimental_productAnalyticsRequestInit(context, init);
 }
 export function recordProductAnalytics(featureId: string, action: string, stage: ProductAnalyticsEvent["stage"], options: { operationId?: string; outcome?: ProductAnalyticsEvent["outcome"]; errorCode?: ProductAnalyticsEvent["errorCode"]; durationMs?: number; scope?: ProductAnalyticsScope; actorKind?: ProductAnalyticsActor } = {}): void {
