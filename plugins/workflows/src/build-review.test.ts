@@ -836,7 +836,7 @@ describe("shipped bugfix workflow evidence gates", () => {
 });
 
 describe("managed structured-result native handoff", () => {
-  async function setupHandoff() {
+  async function setupHandoff(input: BuildReviewStart = request) {
     const native: {
       status: "active" | "stopping" | "idle" | "error";
       spawns: number;
@@ -882,7 +882,7 @@ describe("managed structured-result native handoff", () => {
     await plugin(host.bb);
     let db = host.bb.storage.database();
     const launch = buildReviewInspectionSchema.parse(
-      await host.harness.callRpc("startBuildReview", request),
+      await host.harness.callRpc("startBuildReview", input),
     );
     let worker = host.harness.runService("workflow-worker");
     const writerId = "thr_handoff_1";
@@ -895,11 +895,12 @@ describe("managed structured-result native handoff", () => {
       native,
       launch,
       writerId,
-      submit: () => host.harness.callAgentTool(
+      submit: (value: unknown = "bounded plan") => host.harness.callAgentTool(
         "bb_workflow_result",
-        { value: "bounded plan" },
+        { value },
         { threadId: writerId, projectId: request.projectId },
       ),
+      startReturn: (returned: BuildReviewStart) => host.harness.callRpc("startBuildReview", returned),
       async idle() {
         native.status = "idle";
         const event = {
@@ -939,6 +940,71 @@ describe("managed structured-result native handoff", () => {
       },
     };
   }
+
+  it("retries bugfix reproduction on human Return after an exit-zero attempt without replacing the writer", async () => {
+    const input: BuildReviewStart = { ...request, template: "bugfix", uiRequired: false, key: "bugfix-unreproduced:1", group: "bugfix-unreproduced" };
+    const test = await setupHandoff(input);
+    const reproduction = { summary: "Corrected steps reproduce the consumer failure", command: "reproduce-consumer", exitCode: 1, output: "Consumer request failed" };
+    try {
+      await test.submit({ ...reproduction, summary: "Initial steps did not reproduce the issue", exitCode: 0, output: "Consumer request succeeded" });
+      await test.idle();
+      await vi.waitFor(() => expect(getRunRequired(test.db, test.launch.runId)).toMatchObject({ status: "failed", error: expect.stringMatching(/failing-before/) }), { timeout: 4000 });
+      expect(getCall(test.db, test.launch.runId, 0)).toMatchObject({ status: "succeeded" });
+      expect(getCall(test.db, test.launch.runId, 1)).toBeNull();
+      const returnedInput = { ...input, key: "bugfix-unreproduced:2", feedback: "Use the corrected consumer request and retry reproduction" };
+      const returned = buildReviewInspectionSchema.parse(await test.startReturn(returnedInput));
+      await vi.waitFor(() => expect(getCall(test.db, returned.runId, 0)).toMatchObject({ status: "running", childThreadId: test.writerId }), { timeout: 4000 });
+      expect(JSON.parse(getRunRequired(test.db, returned.runId).argsJson)).toMatchObject({ previousReproduction: null });
+      await test.submit(reproduction);
+      await test.idle();
+      await vi.waitFor(() => expect(getCall(test.db, returned.runId, 1)).toMatchObject({ status: "running", childThreadId: test.writerId }), { timeout: 4000 });
+      expect(getCall(test.db, returned.runId, 0)).toMatchObject({ status: "succeeded", resultJson: JSON.stringify(reproduction) });
+      expect(buildReviewInspectionSchema.parse(await test.startReturn(returnedInput)).runId).toBe(returned.runId);
+      expect(test.native.spawns).toBe(1);
+      expect(test.native.continuations).toEqual([test.writerId, test.writerId]);
+      expect(getRunRequired(test.db, returned.runId).status).toBe("running");
+    } finally {
+      await test.dispose();
+    }
+  });
+
+  it("retains genuine failing-before evidence across bugfix Returns after rejecting a replacement reproduction", async () => {
+    const input: BuildReviewStart = { ...request, template: "bugfix", uiRequired: false, key: "bugfix-retained-evidence:1", group: "bugfix-retained-evidence" };
+    const test = await setupHandoff(input);
+    const reproduction = { summary: "Original consumer failure reproduced", command: "reproduce-original-consumer", exitCode: 7, output: "Original consumer failure output" };
+    try {
+      await test.submit(reproduction);
+      await test.idle();
+      await vi.waitFor(() => expect(getCall(test.db, test.launch.runId, 1)).toMatchObject({ status: "running", childThreadId: test.writerId }), { timeout: 4000 });
+      await test.submit({
+        branch: "owned-fix", commit: "a".repeat(40), diff: "Incomplete consumer fix", regressionCommand: "consumer-regression",
+        commands: [
+          { command: reproduction.command, exitCode: 0, output: "Original request now succeeds" },
+          { command: "consumer-regression", exitCode: 1, output: "Another consumer case still fails" },
+          { command: "platform smoke", exitCode: 0, output: "Platform reached" },
+        ],
+        uiEvidence: [], limitations: [], nextDecision: "Human Return required",
+      });
+      await test.idle();
+      await vi.waitFor(() => expect(getRunRequired(test.db, test.launch.runId).status).toBe("failed"), { timeout: 4000 });
+      const returned = buildReviewInspectionSchema.parse(await test.startReturn({ ...input, key: "bugfix-retained-evidence:2", feedback: "Correct the remaining regression without replacing the original evidence" }));
+      await vi.waitFor(() => expect(getCall(test.db, returned.runId, 0)).toMatchObject({ status: "running", childThreadId: test.writerId }), { timeout: 4000 });
+      await test.submit({ ...reproduction, command: "unrelated-failure", output: "Unrelated failing check" });
+      await test.idle();
+      await vi.waitFor(() => expect(getRunRequired(test.db, returned.runId)).toMatchObject({ status: "failed", error: expect.stringMatching(/original genuine reproduction/) }), { timeout: 4000 });
+      expect(getCall(test.db, returned.runId, 1)).toBeNull();
+      const corrected = buildReviewInspectionSchema.parse(await test.startReturn({ ...input, key: "bugfix-retained-evidence:3", feedback: "Keep the original reproduction command, code and exact output" }));
+      await vi.waitFor(() => expect(getCall(test.db, corrected.runId, 0)).toMatchObject({ status: "running", childThreadId: test.writerId }), { timeout: 4000 });
+      expect(JSON.parse(getRunRequired(test.db, corrected.runId).argsJson)).toMatchObject({ previousReproduction: reproduction });
+      await test.submit(reproduction);
+      await test.idle();
+      await vi.waitFor(() => expect(getCall(test.db, corrected.runId, 1)).toMatchObject({ status: "running", childThreadId: test.writerId }), { timeout: 4000 });
+      expect(test.native.spawns).toBe(1);
+      expect(getRunRequired(test.db, corrected.runId).status).toBe("running");
+    } finally {
+      await test.dispose();
+    }
+  });
 
   it("acknowledges a stored plan while native work continues, then delivers Build once after idle", async () => {
     const test = await setupHandoff();

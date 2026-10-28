@@ -6,6 +6,8 @@ import { createStore } from "../api/index.js";
 import { createWorkflowPreparation } from "./preparation.js";
 import { registerTaskWorkflows } from "./index.js";
 import type { WorkflowSelection } from "../shared/workflow-preparation.js";
+import { TaskWorkflowStore } from "./store.js";
+import type { BuildReviewStart } from "./remote-contract.js";
 
 const hosts: FakePluginHost[] = [];
 afterEach(async () => { for (const host of hosts.splice(0)) await host.harness.dispose(); });
@@ -137,5 +139,123 @@ describe("native workflow preparation receipts", () => {
     expect(fixture.counts()).toEqual({ roots: 1, nativeStarts: 1, preparationContexts: 2 });
     expect(fixture.store.tasks.getTask(fixture.task.id)?.status).toBe("in_progress");
     expect((await handlers.getTaskWorkflowDraft({ taskId: fixture.task.id })).selection).toEqual(selection);
+  });
+  it.each([
+    ["preparation", false],
+    ["preparation", true],
+    ["final readiness", false],
+    ["final readiness", true],
+  ] as const)("fences Start after a concurrent draft revision during %s (restored choices: %s)", async (boundary, restoreChoices) => {
+    const fixture = setup(true);
+    const { host, store, task } = fixture;
+    const handlers = registerTaskWorkflows(host.bb, store, { background: false });
+    const draft = await handlers.saveTaskWorkflowDraft({ taskId: task.id, revision: 0, selection });
+    await handlers.prepareTaskWorkflow({ taskId: task.id, revision: draft.revision });
+    const prepared = await handlers.getTaskWorkflowPreparation({ taskId: task.id });
+    expect(prepared?.state).toBe("ready");
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const released = new Promise<void>(resolve => { release = resolve; });
+    let preparedStatusObserved = false;
+    host.harness.sdk.stub("environments.status", async () => {
+      preparedStatusObserved = true;
+      return { outcome: "available", workspace: { checkout: { kind: "branch", branchName: "owned-branch", headSha: "a".repeat(40) }, workingTree: { hasUncommittedChanges: false } } };
+    });
+    host.harness.sdk.stub("providers.models", async () => {
+      if (boundary === "preparation" || preparedStatusObserved) {
+        enter();
+        await released;
+      }
+      return { models: [{ id: selection.writer!.model, model: selection.writer!.model, supportedReasoningEfforts: [{ reasoningEffort: "high" }] }], selectedOnlyModels: [], modelLoadError: null };
+    });
+    const launch = handlers.launchTaskWorkflow({ taskId: task.id, preparationId: prepared!.id }).then(
+      value => ({ value, error: null }),
+      (error: unknown) => ({ value: null, error }),
+    );
+    let revision = draft.revision;
+    const changed = { ...selection, smokeCommands: ["newly-selected-smoke"] };
+    try {
+      await entered;
+      const saved = await handlers.saveTaskWorkflowDraft({ taskId: task.id, revision, selection: changed });
+      revision = saved.revision;
+      expect(saved.selection.smokeCommands).toEqual(["newly-selected-smoke"]);
+      if (restoreChoices) revision = (await handlers.saveTaskWorkflowDraft({ taskId: task.id, revision, selection })).revision;
+      expect(revision).toBeGreaterThan(draft.revision);
+    } finally {
+      release();
+    }
+    expect(await launch).toMatchObject({ value: null, error: expect.objectContaining({ message: expect.stringMatching(/draft|changed|stale/i) }) });
+    expect(store.database.prepare("SELECT id FROM task_workflow_runs WHERE task_id = ?").all(task.id)).toEqual([]);
+    expect(store.tasks.getTask(task.id)?.status).toBe(task.status);
+    expect(fixture.counts()).toEqual({ roots: 1, nativeStarts: 0, preparationContexts: 2 });
+    expect(await handlers.getTaskWorkflowDraft({ taskId: task.id })).toMatchObject({ revision, selection: restoreChoices ? selection : changed });
+    await handlers.saveTaskWorkflowDraft({ taskId: task.id, revision, selection });
+    const started = await handlers.launchTaskWorkflow({ taskId: task.id, preparationId: prepared!.id });
+    expect((await handlers.launchTaskWorkflow({ taskId: task.id, preparationId: prepared!.id })).id).toBe(started.id);
+    expect(fixture.counts()).toEqual({ roots: 1, nativeStarts: 1, preparationContexts: 2 });
+    expect(store.tasks.getTask(task.id)?.status).toBe("in_progress");
+  });
+});
+
+describe("legacy first-writer Return handlers", () => {
+  const repair: WorkflowSelection = {
+    ...selection,
+    writer: { ...selection.writer!, model: "bb-cpa/personal-codex/repaired-model", executionContextId: "repair-context", modelConnectionId: "repair-account", instructions: "Explicit writer repair" },
+    reviewer: { ...selection.reviewer!, executionContextId: "repair-context", modelConnectionId: "repair-account" },
+    smokeCommands: ["current-project-smoke"],
+  };
+  function legacyFixture() {
+    const fixture = setup(true);
+    const { host, store, task } = fixture;
+    const handlers = registerTaskWorkflows(host.bb, store, { background: false });
+    const workflows = new TaskWorkflowStore(store);
+    const original: BuildReviewStart = {
+      key: "legacy-workflow:1", group: "legacy-workflow", projectId: "proj_code", originThreadId: "legacy-origin",
+      task: task.title, template: "development-review", writer: selection.writer!, reviewer: selection.reviewer!,
+      smokeCommands: selection.smokeCommands, uiRequired: selection.uiRequired, feedback: "",
+    };
+    const launch = JSON.stringify({ taskId: task.id, launchKey: "legacy-launch", originThreadId: original.originThreadId, writer: original.writer, reviewer: original.reviewer, smokeCommands: original.smokeCommands, uiRequired: original.uiRequired });
+    workflows.create("legacy-launch", task.id, original, launch);
+    workflows.publish(original.group, { runId: "legacy-native-run", key: original.key, contextStarted: false, status: "failed", phase: null, error: "Core rejected the first context before creating a worker", result: null, workers: [], policyLimitations: [] });
+    host.harness.sdk.stub("threads.get", async ({ threadId }: { threadId: string }) => makeThreadResponse({ id: threadId, projectId: "proj_code", environmentId: "owned-environment", status: "idle" }));
+    host.harness.sdk.stub("experimental_executionContexts.list", async () => [
+      { id: "personal", name: "Personal", enabled: true, projectIds: ["proj_code"] },
+      { id: "repair-context", name: "Explicit repair", enabled: true, projectIds: ["proj_code"] },
+    ]);
+    host.harness.sdk.stub("experimental_modelConnections.list", async () => [
+      { id: "personal-account", name: "Original CPA", provider: "acp-omp", hostId: null, gateway: { allowedHostIds: ["owned-host"] }, enabled: true, revoked: false },
+      { id: "repair-account", name: "Repair CPA", provider: "acp-omp", hostId: null, gateway: { allowedHostIds: ["owned-host"] }, enabled: true, revoked: false },
+    ]);
+    host.harness.sdk.stub("providers.models", async () => ({ models: [selection.writer!.model, repair.writer!.model].map(model => ({ id: model, model, supportedReasoningEfforts: [{ reasoningEffort: "high" }] })), selectedOnlyModels: [], modelLoadError: null }));
+    return { ...fixture, handlers, workflows, original, launch };
+  }
+
+  it.each([false, true])("preserves stored legacy selections without a new draft on first-writer Return (project settings: %s)", async projectSettings => {
+    const fixture = legacyFixture();
+    const { store, task, handlers, workflows, original, launch } = fixture;
+    if (projectSettings) await handlers.saveProjectWorkflowSettings({ taskId: task.id, revision: 0, selection: repair });
+    expect(store.database.prepare("SELECT task_id FROM task_workflow_drafts WHERE task_id = ?").all(task.id)).toEqual([]);
+    const feedback = "Provider admission repaired; retry the original stored choices";
+    const returned = await handlers.returnTaskWorkflow({ id: original.group, revision: 1, feedback });
+    expect(returned).toMatchObject({ id: original.group, revision: 2, state: "running" });
+    expect(workflows.request(original.group)).toEqual({ ...original, key: "legacy-workflow:2", feedback });
+    expect(store.database.prepare("SELECT launch_json FROM task_workflow_runs WHERE id = ?").get(original.group)).toEqual({ launch_json: launch });
+    expect(store.database.prepare("SELECT task_id FROM task_workflow_drafts WHERE task_id = ?").all(task.id)).toEqual([]);
+    expect((await handlers.returnTaskWorkflow({ id: original.group, revision: 1, feedback })).revision).toBe(2);
+    expect(fixture.counts()).toEqual({ roots: 0, nativeStarts: 1, preparationContexts: 0 });
+    expect(store.tasks.getTask(task.id)?.status).toBe("in_progress");
+  });
+
+  it("applies an explicitly saved repair draft to a definitively rejected legacy first writer without replacing its workspace", async () => {
+    const fixture = legacyFixture();
+    const { handlers, task, workflows, original } = fixture;
+    await handlers.saveProjectWorkflowSettings({ taskId: task.id, revision: 0, selection });
+    await handlers.saveTaskWorkflowDraft({ taskId: task.id, revision: 0, selection: repair });
+    const feedback = "Use the explicitly selected repaired account and model for the first context";
+    expect(await handlers.returnTaskWorkflow({ id: original.group, revision: 1, feedback })).toMatchObject({ revision: 2, state: "running" });
+    expect(workflows.request(original.group)).toEqual({ ...original, writer: repair.writer, reviewer: repair.reviewer, key: "legacy-workflow:2", feedback });
+    expect(fixture.counts()).toEqual({ roots: 0, nativeStarts: 1, preparationContexts: 0 });
+    expect(fixture.store.tasks.getTask(task.id)?.status).toBe("in_progress");
   });
 });
