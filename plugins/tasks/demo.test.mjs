@@ -23,7 +23,7 @@ function receipt() {
       adapterSha256: "d".repeat(64),
     },
     clicks: [{ timestampMs: 3000, x: 300, y: 200, button: 0, isTrusted: true }],
-    changes: [{ timestampMs: 4000, untilTimestampMs: 7000, caption: "The unsaved name changed", selector: "input", before: { timestampMs: 2000, state: "empty", rect: { x: 200, y: 200, width: 400, height: 40 } }, after: { timestampMs: 4000, state: "Demo draft", rect: { x: 200, y: 200, width: 400, height: 40 } } }],
+    changes: [{ timestampMs: 4000, untilTimestampMs: 7000, caption: "The unsaved name changed", selector: "input", before: { timestampMs: 2000, state: JSON.stringify({ text: "", value: "", checked: false, expanded: null, visible: true }), rect: { x: 200, y: 200, width: 400, height: 40 } }, after: { timestampMs: 4000, state: JSON.stringify({ text: "", value: "Demo draft", checked: false, expanded: null, visible: true }), rect: { x: 200, y: 200, width: 400, height: 40 } } }],
     holds: [{ fromTimestampMs: 4000, toTimestampMs: 7000, reason: "Read the actual value" }],
   };
 }
@@ -57,6 +57,14 @@ describe("local video demo cue boundaries", () => {
 
   it.each([999, 11001, Number.NaN])("rejects outside-media timestamp %s instead of silently clamping it", (timestamp) => {
     expect(() => mediaTime(timestamp, receipt().capture, video.durationMs)).toThrow();
+  });
+
+  it.each([false, undefined, "true"])("rejects positive-size changed elements without observed visibility: %s", (visible) => {
+    const input = receipt();
+    input.changes[0].after.state = JSON.stringify({ ...JSON.parse(input.changes[0].after.state), visible });
+    const before = structuredClone(input);
+    expect(() => validateCapture(input, video)).toThrow(/observed visible/);
+    expect(input).toEqual(before);
   });
 
   it.each([

@@ -113,6 +113,9 @@ export function validateCapture(input, video) {
     }
     requireValue(change.after.timestampMs === change.timestampMs && change.before.timestampMs <= change.after.timestampMs, "Change time must be its actual observation time");
     requireValue(change.before.state !== change.after.state, "Cannot accent an unchanged state");
+    const afterState = JSON.parse(change.after.state);
+    object(afterState, ["text", "value", "checked", "expanded", "visible"], "change after-state");
+    requireValue(afterState.visible === true, "Change after-state must be observed visible");
     const rect = change.after.rect;
     object(rect, ["x", "y", "width", "height"], "change rectangle");
     for (const key of ["x", "y"]) number(rect[key], 0, key === "x" ? width : height, `region ${key}`);

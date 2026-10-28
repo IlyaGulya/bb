@@ -57,56 +57,85 @@ after starting, and checks that its observed frame count matches recordStop.
 
 A safe example is opening an execution-context draft, entering a disposable name,
 then dismissing it without Save. Observe the actual page before using selectors.
-The following is the body of a `tab.run` function; supply `options` as a run arg
-with `captureModuleUrl`, `directory`, `runId`, `applicationRevision`,
-`helperRevision`, and the installed `recorderVersion`:
+The following scenario function runs entirely within one `tab.run`. Supply
+`options` with `captureModuleUrl`, `directory`, `runId`, `applicationRevision`,
+`helperRevision`, the installed `recorderVersion`, and the owned preview `url`:
 
 ```js
-const { beginCapture } = await import(options.captureModuleUrl);
-const capture = await beginCapture({
-  tab, page,
-  directory: options.directory,
-  title: "Unsaved draft; no settings saved",
-  scenario: "execution-context-unsaved-name",
-  runId: options.runId,
-  applicationRevision: options.applicationRevision,
-  helperRevision: options.helperRevision,
-  recorderVersion: options.recorderVersion,
-});
-try {
-  await tab.waitFor('role/button[name="New execution context" exact]');
-  await page.mouse.move(720, 500, { steps: 20 });
-  await capture.ready();
-  await capture.hold(2000, "Read the ready settings page");
-  const heading = 'form h2';
-  const beforeOpen = await capture.snapshot(heading);
-  await tab.click('role/button[name="New execution context" exact]');
-  await tab.waitForSelector('input[placeholder="e.g. Work or Personal"]');
-  await page.evaluate(async () => {
-    await Promise.all(document.getAnimations()
-      .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
-      .map((animation) => animation.finished.catch(() => undefined)));
+async function captureScenario({ tab, page }, options) {
+  const { beginCapture } = await import(options.captureModuleUrl);
+  const capture = await beginCapture({
+    tab, page,
+    directory: options.directory,
+    title: "Unsaved draft; no settings saved",
+    scenario: "execution-context-unsaved-name",
+    runId: options.runId,
+    applicationRevision: options.applicationRevision,
+    helperRevision: options.helperRevision,
+    recorderVersion: options.recorderVersion,
   });
-  await capture.change("The new execution-context draft is open", heading, beforeOpen);
-  await capture.hold(4000, "Read the actual unsaved editor");
-  await capture.endChange();
-  const name = 'input[placeholder="e.g. Work or Personal"]';
-  const beforeName = await capture.snapshot(name);
-  await tab.click(name);
-  await tab.type(name, "Demo draft - not saved");
-  await page.waitForFunction((selector) => document.querySelector(selector)?.value === "Demo draft - not saved", {}, name);
-  await capture.change("Only the unsaved name has changed", name, beforeName);
-  await capture.hold(4000, "Read the typed value without saving");
-  await capture.endChange();
-  await tab.press("Escape");
-  await tab.waitForSelector(name, { hidden: true });
-  await capture.hold(2000, "Confirm the editor is dismissed");
-  return await capture.finish();
-} catch (error) {
-  await capture.abort();
-  throw error;
+  try {
+    await tab.waitFor('role/button[name="New execution context" exact]');
+    await page.mouse.move(720, 500, { steps: 20 });
+    await capture.ready();
+    await capture.hold(2000, "Read the ready settings page");
+    const heading = 'form h2';
+    const beforeOpen = await capture.snapshot(heading);
+    await tab.click('role/button[name="New execution context" exact]');
+    await tab.waitForSelector('input[placeholder="e.g. Work or Personal"]');
+    await page.evaluate(async () => {
+      await Promise.all(document.getAnimations()
+        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined)));
+    });
+    await capture.change("The new execution-context draft is open", heading, beforeOpen);
+    await capture.hold(4000, "Read the actual unsaved editor");
+    await capture.endChange();
+    const name = 'input[placeholder="e.g. Work or Personal"]';
+    const beforeName = await capture.snapshot(name);
+    await tab.click(name);
+    await tab.type(name, "Demo draft - not saved");
+    await page.waitForFunction((selector) => document.querySelector(selector)?.value === "Demo draft - not saved", {}, name);
+    await capture.change("Only the unsaved name has changed", name, beforeName);
+    await capture.hold(4000, "Read the typed value without saving");
+    await capture.endChange();
+    await tab.press("Escape");
+    await tab.waitForSelector(name, { hidden: true });
+    await capture.hold(2000, "Confirm the editor is dismissed");
+    return await capture.finish();
+  } catch (error) {
+    await capture.abort();
+    throw error;
+  }
 }
 ```
+
+The caller must own and close the tab **outside** `tab.run`, including when the
+run times out or is cancelled. Run-scoped `tab`, `page`, and CDP session facades
+are revoked on cancellation, so an inner `catch` cannot guarantee teardown.
+Use the existing browser lifecycle; never inspect or reuse the page between a
+failed run and its outer close:
+
+```js
+const ownedTab = await browser.open({
+  name: `demo-${crypto.randomUUID()}`,
+  url: options.url,
+  viewport: { width: 1440, height: 1000 },
+});
+try {
+  await ownedTab.emulate({ viewport: { width: 1440, height: 1000, scale: 1 } });
+  const result = await ownedTab.run(captureScenario, { args: [options], timeout: 90 });
+  console.log(result);
+} finally {
+  await ownedTab.close();
+}
+```
+
+The outer handle's close is a fresh browser operation, not a saved run facade.
+OMP's owned-tab teardown stops/discards an unfinished recording and closes the
+owned page even if recorder finalization fails. An aborted recording is not a
+successful demo and must not be attached as one. This requirement also covers
+errors during `beginCapture`, before the inner scenario's `try` is entered.
 
 Wait for actual application readiness, **then** use explicit readability holds.
 A timeout is a failure deadline, not readiness. For slower pointer movement,
@@ -127,10 +156,16 @@ Call `snapshot(selector)` before the action, wait for the actual new state, then
 `change(caption, selector, before)`. The after-element must be visible, changed,
 and within the viewport. Keep its state/bounds stable through `endChange()`;
 use a smaller element rather than a moving panel. Each cue needs at least 500ms.
+Both capture and rendering require the serialized after-state's `visible` field
+to be the boolean `true`. A positive rectangle alone is not visibility evidence:
+`visibility:hidden`/`collapse`, absent elements, or missing/unknown visibility
+must never become a captioned result.
 End the cue before another action. `hold(ms, reason)` supports 500–20000ms and
-records the real wait; it inserts no frames. `abort()` finalizes the existing
-recorder and removes event instrumentation after a failed scenario. Close only
-your own tab in a finally block after inspecting the result.
+records the real wait; it inserts no frames. While its run is still live,
+`abort()` attempts recorder stop and event cleanup, and marks the capture closed
+only after both complete. Failed cleanup may be retried in that live run; a
+cancelled run's facades cannot be revived. The caller's outer `finally` must
+always close only its owned tab, rather than relying on `abort()` after cancellation.
 
 ## Render locally, or call programmatically
 

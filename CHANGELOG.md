@@ -8,6 +8,8 @@
   and app/helper/run/hash provenance in portable replay bundles. Optional local
   approved narration stays separate; no new recorder, cloud upload, server
   encoding API, task-video schema, or analytics transport.
+  Reject hidden or unobserved change results even when their boxes have positive
+  size, and require fresh outer owned-tab teardown after cancelled capture runs.
 
 - Fence Tasks Start against concurrent draft revision/selection changes in its
   launch-receipt transaction. Retain the first validated bugfix reproduction

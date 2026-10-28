@@ -40,8 +40,11 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
   }, key);
   const startedAtBoundsMs = [Date.now()];
   const cleanup = async () => {
-    recorderSession?.off("Page.screencastFrame", onFrame);
-    await page.evaluate((id) => { window[id]?.cleanup(); delete window[id]; }, key);
+    try {
+      recorderSession?.off("Page.screencastFrame", onFrame);
+    } finally {
+      await page.evaluate((id) => { window[id]?.cleanup(); delete window[id]; }, key);
+    }
   };
   page.createCDPSession = async function (...args) {
     const session = await createSession.apply(this, args);
@@ -74,7 +77,7 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
       const timestampMs = performance.timeOrigin + performance.now();
       if (!element) return { timestampMs, state: "absent", rect: null };
       const box = element.getBoundingClientRect();
-      const state = JSON.stringify({ text: element.textContent, value: "value" in element ? element.value : null, checked: "checked" in element ? element.checked : null, expanded: element.getAttribute("aria-expanded"), visible: box.width > 0 && box.height > 0 && getComputedStyle(element).visibility !== "hidden" });
+      const state = JSON.stringify({ text: element.textContent, value: "value" in element ? element.value : null, checked: "checked" in element ? element.checked : null, expanded: element.getAttribute("aria-expanded"), visible: box.width > 0 && box.height > 0 && getComputedStyle(element).visibility === "visible" });
       return { timestampMs, state, rect: { x: box.x, y: box.y, width: box.width, height: box.height } };
     }, selector);
   };
@@ -92,7 +95,7 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
     async change(caption, selector, before) {
       if (pendingChange) throw new Error("End the current cue after its readability hold before observing another change");
       const after = await snapshot(selector);
-      if (after.state === before.state || !after.rect || after.rect.width <= 0 || after.rect.height <= 0) throw new Error("Expected a visible, actually changed element after a readiness assertion");
+      if (after.state === before.state || !after.rect || after.rect.width <= 0 || after.rect.height <= 0 || JSON.parse(after.state).visible !== true) throw new Error("Expected a visible, actually changed element after a readiness assertion");
       pendingChange = { timestampMs: after.timestampMs, caption, selector, before, after };
     },
     async hold(milliseconds, reason) {
@@ -115,7 +118,6 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
         if (!window[id]) throw new Error("Page navigated; this adapter intentionally supports one document only");
         return window[id].clicks;
       }, key);
-      closed = true;
       const stoppedAtBoundsMs = [Date.now()];
       let result;
       try {
@@ -124,6 +126,7 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
         stoppedAtBoundsMs.push(Date.now());
         await cleanup();
       }
+      closed = true;
       if (clockError) throw clockError;
       if (result.frames !== frames.length || frames.length === 0) throw new Error("Observed frame count differs from the existing recorder; timing is not trustworthy");
       const receipt = {
@@ -154,8 +157,12 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
     },
     async abort() {
       if (closed) return;
+      try {
+        if ((await tab.recording()).active) await tab.recordStop();
+      } finally {
+        await cleanup();
+      }
       closed = true;
-      try { await tab.recordStop(); } finally { await cleanup(); }
     },
   };
 }
