@@ -127,7 +127,8 @@ export function registerTaskWorkflows(
         const view = preparation.persistence.preparation(input.taskId);
         if (!view || view.id !== input.preparationId) throw new Error("Prepare this task's workspace first");
         const draft = preparation.persistence.draft(input.taskId);
-        if (JSON.stringify(draft.selection) !== JSON.stringify(view.selection)) throw new Error("Draft differs from prepared choices; restore the prepared choices before Start");
+        const expectedSelection = JSON.stringify(draft.selection);
+        if (expectedSelection !== JSON.stringify(view.selection)) throw new Error("Draft differs from prepared choices; restore the prepared choices before Start");
         const ready = await preparation.advance(input.taskId);
         if (ready.state !== "ready" || !ready.threadId || !ready.environmentId) throw new Error(ready.error ?? ready.progress);
         await preparation.validate(input.taskId, ready.selection, ready.environmentId);
@@ -140,6 +141,12 @@ export function registerTaskWorkflows(
           smokeCommands: ready.selection.smokeCommands, uiRequired: ready.selection.uiRequired, feedback: "",
         };
         store.transaction(() => {
+          const currentDraft = preparation.persistence.draft(input.taskId);
+          if (
+            currentDraft.revision !== draft.revision ||
+            JSON.stringify(currentDraft.selection) !== expectedSelection ||
+            JSON.stringify(ready.selection) !== expectedSelection
+          ) throw new Error("Draft changed during preparation or readiness; reload the saved draft and confirm the prepared choices before Start");
           workflows.create(input.preparationId, task.id, request, JSON.stringify(input));
           store.tasks.updateTask(task.id, { status: "in_progress" });
         });
@@ -199,12 +206,14 @@ export function registerTaskWorkflows(
           latest.state === "failed" &&
           latest.native?.contextStarted === false
         ) {
-          const draft = preparation.persistence.draft(current.taskId);
-          const origin = await bb.sdk.threads.get({ threadId: workflows.request(id).originThreadId });
-          if (!origin.environmentId) throw new Error("Prepared workspace is unavailable");
-          await preparation.validate(current.taskId, draft.selection, origin.environmentId);
-          const roles = requireWorkflowSelection(draft.selection);
-          retryProfiles = { writer: roles.writer, reviewer: roles.reviewer };
+          const draft = preparation.persistence.savedDraft(current.taskId);
+          if (draft) {
+            const origin = await bb.sdk.threads.get({ threadId: workflows.request(id).originThreadId });
+            if (!origin.environmentId) throw new Error("Prepared workspace is unavailable");
+            await preparation.validate(current.taskId, draft.selection, origin.environmentId);
+            const roles = requireWorkflowSelection(draft.selection);
+            retryProfiles = { writer: roles.writer, reviewer: roles.reviewer };
+          }
         }
         workflows.return(id, revision, feedback, retryProfiles);
         publish(id);

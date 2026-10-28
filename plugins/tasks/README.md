@@ -179,11 +179,11 @@ Original source URLs must be HTTP(S); all source text is untrusted context.
 
 ## Multi-repository and reviewed execution
 
-The task card includes **Repository workspace** and **Build → review**.
+The task card includes **Repository workspace** and **Launch workflow**.
 The shipped Tasks skill documents the complete validated input and CLI/RPC
-surface: `repositories inspect|prepare|show|continue` and
-`workflow start|list|accept|return`. These are explicit operations; moving a
-board card does not start either flow.
+surface: `repositories inspect|prepare|show|continue`, workflow draft/settings
+commands, and `workflow prepare|preparation|start|list|accept|return`. These are
+explicit operations; moving a board card does not start either flow.
 
 Repository bindings name each code project, source environment/owner/HEAD,
 target path, isolated branch, role, instructions and permitted profile. The
@@ -191,26 +191,42 @@ first required root is primary. Preparation creates no executor; partial
 readiness blocks continuation. All roots use one selected host/profile and
 one native thread, not independent per-repository agents.
 
-Build/review starts from an idle prepared single-root workspace in the
-tracker's linked code project. It intentionally refuses a task already bound
-to the multi-repository execution path. Select distinct allowed writer and
-reviewer models/providers, and name the actual platform smoke commands.
-Native Workflows must be enabled. Its three phases are Plan, Build and
-platform smoke, Independent review. A published package is never acceptance.
+Build/review prepares an isolated single-root workspace in the tracker's linked
+code project through Core, without a donor origin thread, session import or
+initialization model turn. It intentionally refuses a task already bound to
+the multi-repository execution path. Native Workflows must be enabled. Choose
+the machine, context, model account and version for each role, and configure
+the actual platform smoke commands before preparation. Explicit Start is separate.
 
-Writer and reviewer presets retain their independent context/account overrides
-(`executionContextId`, `modelConnectionId`). A different CPA account alone does
-not make the same runtime/model an independent reviewer. Null selectors mean
-no explicit override; legacy requests that omit them remain implicit. Core
-admits workers against the selected binding without origin/default-account
-fallback. Once created, each worker's resolved context and connection remain
-frozen across plan/build and Return, despite preset/default/definition edits;
-revocation still blocks its next native admission.
+Writer and reviewer may use the same provider, model and account. Independence
+is a fresh separate reviewer conversation with review-only instructions and
+inspection of the actual committed change, not mandatory model diversity.
+`development-review` runs Plan, Build/platform smoke, Independent review;
+`bugfix` requires genuine failing-before reproduction, fix/regression and
+passing-after evidence before review. A published package is never acceptance.
+
+Role selections retain independent `executionContextId` and `modelConnectionId`
+snapshots. Legacy requests that omit overrides remain implicit; replay does
+not add bindings from current project settings. Core admits workers against
+their selected bindings. Once created, each worker's resolved context and
+connection remain frozen across plan/build and Return, despite later
+preset/default/definition edits; revocation still blocks its next native admission.
+
+Start compares the expected task draft revision and selections in the same
+SQLite transaction that reserves its first launch receipt. A successful draft
+save during preparation/readiness rejects that Start, even if the choices were
+subsequently restored. Retrying an already accepted identical receipt remains
+idempotent and does not create another workspace or run.
 
 Return preserves the established writer/session and workspace. An uncertain
 send is not blindly resent or replaced. Before the first writer is established,
 a definitive launch rejection permits repairing the originally selected
-profiles and retrying with explicit feedback. Generic Done cannot bypass
+profiles through an explicitly saved task draft and retrying with feedback.
+Legacy workflows without that draft retain their persisted launch/role choices,
+not current project/template settings. A failed reproduction without genuine
+nonzero evidence can retry on Return; once the reproduction gate advances to
+Fix, the original failing-before evidence is retained across all Returns and
+later unrelated replacement attempts are rejected. Generic Done cannot bypass
 pending workflow acceptance. Human Accept requires the exact latest revision
 and an unchanged clean reviewed commit.
 

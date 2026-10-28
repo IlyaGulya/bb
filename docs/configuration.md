@@ -1263,11 +1263,19 @@ Core prepares an isolated single-root git worktree and native internal contexts
 without a donor origin or model initialization turn. Preparation is observable,
 reuses its durable reservation after interruption, and never starts implementation.
 Explicit Start revalidates readiness and uses the same server-owned receipt.
+Its first launch receipt is reserved in the same SQLite transaction that checks
+the expected draft revision and selections; a concurrent successful draft save
+rejects Start even if the choices were later restored. Existing receipt retries
+remain idempotent.
 Both roles may select the same provider/model/account. Independence is a separate
 fresh native reviewer conversation, role-specific review-only instructions and
 inspection of the actual committed change/evidence, not mandatory model diversity.
 The writer is retained across Plan/Build/Return; the reviewer retains its own
 role identity. Uncertain delivery never creates a replacement writer.
+A legacy first-context rejection without a saved task draft retains the
+persisted launch choices on Return, not current project settings. A repair
+requires an explicitly saved task draft and is allowed only before a native
+context exists; Core admission still validates the selected worker bindings.
 Publication sets In Review, not Done. Human exact-revision Accept rechecks the
 clean reviewed checkout; neither review nor acceptance merges or deploys.
 Provider permission modes are not an OS read-only sandbox. See the Tasks and

@@ -152,9 +152,14 @@ The three sequential native calls are:
 The `bugfix` template replaces the first phase with genuine failing-before
 reproduction and requires both passing-after evidence for that exact command and
 an executed consumer regression before platform smoke/review. On human Return,
-the original durable failing-before evidence is retained rather than fabricating
-a new failure in the already-fixed checkout. Both templates keep the same three
-managed role calls and quiescent transitions; no second orchestration engine exists.
+the first validated failing-before evidence is retained rather than fabricating
+a new failure in the already-fixed checkout. Evidence must have a nonzero exit
+code and a durable Fix-call receipt proving the reproduction gate advanced;
+a succeeded reproduction agent call alone is not sufficient. An exit-zero
+attempt can retry reproduction after corrected human feedback. Later unrelated
+reproduction attempts are rejected and never replace the established original
+command, exit code or output on another Return. Both templates keep the same
+three managed role calls and quiescent transitions; no second orchestration engine exists.
 
 For these managed calls, `bb_workflow_result` acknowledges a validated,
 persisted result without stopping the native turn or waiting for it to finish.

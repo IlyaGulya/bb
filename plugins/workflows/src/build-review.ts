@@ -74,6 +74,12 @@ const reviewSchema = {
     summary: string,
   },
 };
+const reproductionEvidenceSchema = z.object({
+  summary: z.string().min(1),
+  command: z.string().min(1),
+  exitCode: z.number().int().refine(code => code !== 0),
+  output: z.string().min(1),
+}).strict();
 
 export function buildReviewSource(input: BuildReviewStart): string {
   const options = (role: "writer" | "reviewer", outputSchema: object) =>
@@ -197,10 +203,25 @@ export function registerBuildReview(
         if (!input.feedback.trim())
           throw new Error("Return requires explicit human feedback");
       }
-      const priorEvidence = input.template === "bugfix" && group ? db.prepare<[string], { result_json: string }>(
-        "SELECT c.result_json FROM workflow_calls c JOIN workflow_build_reviews r ON r.run_id = c.run_id JOIN workflow_runs w ON w.id = c.run_id WHERE r.group_key = ? AND c.call_index = 0 AND c.status = 'succeeded' AND c.result_json IS NOT NULL ORDER BY w.created_at DESC LIMIT 1",
-      ).get(input.group) : undefined;
-      const previousReproduction = priorEvidence ? z.object({ summary: z.string().min(1), command: z.string().min(1), exitCode: z.number().int().refine(code => code !== 0), output: z.string().min(1) }).strict().parse(JSON.parse(priorEvidence.result_json)) : null;
+      let previousReproduction: z.infer<typeof reproductionEvidenceSchema> | null = null;
+      if (input.template === "bugfix" && group) {
+        const candidates = db.prepare<[string], { result_json: string }>(`
+          SELECT c.result_json FROM workflow_calls c
+          JOIN workflow_build_reviews r ON r.run_id = c.run_id
+          JOIN workflow_runs w ON w.id = c.run_id
+          WHERE r.group_key = ? AND c.call_index = 0 AND c.status = 'succeeded'
+            AND c.result_json IS NOT NULL
+            AND EXISTS (SELECT 1 FROM workflow_calls f WHERE f.run_id = c.run_id AND f.call_index = 1)
+          ORDER BY w.created_at ASC, w.rowid ASC
+        `).iterate(input.group);
+        for (const candidate of candidates) {
+          const evidence = reproductionEvidenceSchema.safeParse(JSON.parse(candidate.result_json));
+          if (evidence.success) {
+            previousReproduction = evidence.data;
+            break;
+          }
+        }
+      }
       await service.start({
         projectId: input.projectId,
         originThreadId: input.originThreadId,

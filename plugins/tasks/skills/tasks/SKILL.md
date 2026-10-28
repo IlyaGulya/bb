@@ -419,8 +419,11 @@ the actual committed change/evidence; it never imports the writer conversation.
 Exactly two native templates ship: `development-review` runs plan → build/smoke
 → independent review → human review; `bugfix` requires real failing-before
 reproduction, fix/regression, passing-after and platform smoke before review.
-Bugfix Return preserves the original genuine failing-before evidence while
-continuing the same writer and rerunning the regression/smoke/review.
+Bugfix Return retries reproduction when no genuine nonzero evidence was
+established, including an exit-zero attempt. Once the reproduction gate advances
+to a durable Fix call, the first validated failing-before evidence is retained
+across all Returns. Unrelated later attempts are rejected, never promoted into
+the original evidence. The same writer reruns regression/smoke/review.
 
 ```sh
 bb tasks workflow draft set TASK --template development-review \
@@ -445,6 +448,10 @@ accepts complete typed selection JSON for SDK automation. Task changes never sav
 a global last preset. `workflow settings show/save/apply TASK` explicitly reads,
 saves or applies settings scoped to this tracker project **and template**.
 An existing task draft is not rewritten when project settings change.
+Start rechecks the expected draft revision and choices in the same SQLite
+transaction that first reserves the launch receipt. A successful draft save
+during preparation/readiness rejects that Start, even if the choices were then
+restored. Retrying an already accepted identical receipt remains idempotent.
 
 Drafts are persisted in this authenticated BB owner's Tasks database, keyed by
 task and revision, across close/Esc/reload/client sessions. Incomplete choices
@@ -500,8 +507,10 @@ Retry Start with the same prepared task; its launch identity is server-owned.
 Duplicate results cannot publish duplicate revision comments. Uncertain native delivery fails closed
 instead of spawning another writer or blindly resending; inspect the retained
 worker and request a deliberate Return. A definitively rejected first creation
-can retry with repaired original profiles only when there is no established
-or uncertain context. Existing/uncertain sessions cannot change profiles.
+can retry with profiles from an explicitly saved task repair draft only when
+there is no established or uncertain context. Legacy workflows with no saved
+draft use their persisted launch/role choices, not current project settings.
+Existing/uncertain sessions cannot change profiles.
 Inbox Needs input exposes launch/run errors, including failures before a worker
 exists; review keeps the writer's result as its source.
 

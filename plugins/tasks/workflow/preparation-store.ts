@@ -51,14 +51,20 @@ export class WorkflowPreparationStore {
       return { revision: revision + 1, selection: parsed };
     });
   }
-  draft(taskId: string): WorkflowDraft {
+  savedDraft(taskId: string): WorkflowDraft | null {
     this.project(taskId);
     const row = this.store.database.prepare<[string], { revision: number; selection_json: string; updated_at: string }>(
       "SELECT revision, selection_json, updated_at FROM task_workflow_drafts WHERE task_id = ?",
     ).get(taskId);
-    return workflowDraftSchema.parse({
-      taskId, revision: row?.revision ?? 0, updatedAt: row?.updated_at ?? "",
-      selection: row ? JSON.parse(row.selection_json) : this.settings(taskId, "development-review").selection ?? {
+    return row ? workflowDraftSchema.parse({
+      taskId, revision: row.revision, updatedAt: row.updated_at,
+      selection: JSON.parse(row.selection_json),
+    }) : null;
+  }
+  draft(taskId: string): WorkflowDraft {
+    return this.savedDraft(taskId) ?? workflowDraftSchema.parse({
+      taskId, revision: 0, updatedAt: "",
+      selection: this.settings(taskId, "development-review").selection ?? {
         template: "development-review", hostId: null, baseBranch: "", writer: null, reviewer: null, smokeCommands: [], uiRequired: false,
       },
     });

@@ -2,6 +2,10 @@
 
 ## AgentOS fork — unreleased
 
+- Fence Tasks Start against concurrent draft revision/selection changes in its
+  launch-receipt transaction. Retain the first validated bugfix reproduction
+  across Return, permit retry after an exit-zero attempt, and keep legacy
+  first-writer choices unless an explicit task-scoped repair was saved.
 - Replace the Tasks inline Build/Review form with the existing responsive BB
   Dialog, named searchable execution selections and server-persisted per-task
   drafts. Project/template settings are explicit saves, not global last presets.
