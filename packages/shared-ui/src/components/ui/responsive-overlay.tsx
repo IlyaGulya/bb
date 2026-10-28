@@ -273,6 +273,7 @@ interface DrawerDismissalHandlers {
 
 interface ResponsiveDrawerShellProps extends DrawerDismissalHandlers {
   open: boolean;
+  presentation?: "drawer" | "floating";
   onOpenChange: (open: boolean) => void;
   closeOnBackdropClick?: boolean;
   onAfterCloseAutoFocus?: () => void;
@@ -335,6 +336,7 @@ export function useResponsiveDrawerRealization({
 
 export function ResponsiveDrawerShell({
   open,
+  presentation = "drawer",
   onOpenChange,
   onAfterCloseAutoFocus,
   closeOnBackdropClick = true,
@@ -357,6 +359,7 @@ export function ResponsiveDrawerShell({
   return (
     <PersistentResponsiveDrawerShell
       open={open}
+      presentation={presentation}
       onOpenChange={onOpenChange}
       onAfterCloseAutoFocus={onAfterCloseAutoFocus}
       closeOnBackdropClick={closeOnBackdropClick}
@@ -384,6 +387,7 @@ export function ResponsiveDrawerShell({
 
 interface PersistentResponsiveDrawerShellProps extends DrawerDismissalHandlers {
   open: boolean;
+  presentation?: "drawer" | "floating";
   onOpenChange: (open: boolean) => void;
   closeOnBackdropClick?: boolean;
   onAfterCloseAutoFocus?: () => void;
@@ -599,11 +603,13 @@ export function usePersistentOverlayFocus({
     if (panel === null) return;
     const ownerDocument = panel.ownerDocument;
     const previousFocus = ownerDocument.activeElement;
-    returnFocusRef.current =
-      previousFocus instanceof HTMLElement &&
-      previousFocus !== ownerDocument.body
-        ? previousFocus
-        : null;
+    if (!panel.contains(previousFocus)) {
+      returnFocusRef.current =
+        previousFocus instanceof HTMLElement &&
+        previousFocus !== ownerDocument.body
+          ? previousFocus
+          : null;
+    }
     const unregister = registerOpenDrawer(ownerDocument, {
       panel: () => panelRef.current,
       dismissOnEscape: (event) => {
@@ -663,6 +669,7 @@ type PersistentDrawerDrag = {
 
 export function PersistentResponsiveDrawerShell({
   open,
+  presentation = "drawer",
   onOpenChange,
   onAfterCloseAutoFocus,
   closeOnBackdropClick = true,
@@ -725,7 +732,7 @@ export function PersistentResponsiveDrawerShell({
     requestClose();
   };
 
-  useDrawerKeyboardInset(panelRef, open);
+  useDrawerKeyboardInset(panelRef, open && presentation === "drawer");
 
   const reportSettled = React.useCallback(
     (settledOpen: boolean) => {
@@ -873,11 +880,15 @@ export function PersistentResponsiveDrawerShell({
         role="dialog"
         tabIndex={-1}
         className={cn(
-          "fixed inset-x-0 bottom-0 z-50 mt-24 flex max-h-[calc(92dvh-var(--bb-drawer-keyboard-inset,0px))] flex-col rounded-t-xl border bg-background pb-[var(--bb-safe-area-bottom,env(safe-area-inset-bottom))] outline-none",
+          presentation === "drawer"
+            ? "fixed inset-x-0 bottom-0 z-50 mt-24 flex max-h-[calc(92dvh-var(--bb-drawer-keyboard-inset,0px))] flex-col rounded-t-xl border bg-background pb-[var(--bb-safe-area-bottom,env(safe-area-inset-bottom))] outline-none"
+            : "fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100dvh-4rem)] w-[calc(100%-2rem)] max-w-lg flex-col rounded-xl border bg-background shadow-lg outline-none",
           contentClassName,
         )}
         style={{
-          transform: open ? "translate3d(0, 0, 0)" : "translate3d(0, 100%, 0)",
+          transform: presentation === "drawer"
+            ? open ? "translate3d(0, 0, 0)" : "translate3d(0, 100%, 0)"
+            : open ? "translate3d(-50%, -50%, 0)" : "translate3d(-50%, 100dvh, 0)",
           transition,
           willChange: open ? "transform" : undefined,
         }}
@@ -890,7 +901,7 @@ export function PersistentResponsiveDrawerShell({
           }
         }}
       >
-        <div
+        {presentation === "drawer" && <div
           data-persistent-drawer-handle=""
           className="mx-auto flex h-8 w-16 shrink-0 touch-none cursor-grab items-center justify-center active:cursor-grabbing"
           onPointerDown={handleDragStart}
@@ -899,7 +910,7 @@ export function PersistentResponsiveDrawerShell({
           onPointerCancel={(event) => finishDrag(event, true)}
         >
           <div className="h-1 w-10 rounded-full bg-muted-foreground/20" />
-        </div>
+        </div>}
         {srLabel === undefined ? null : (
           <h2 id={labelId} className="sr-only">
             {srLabel}

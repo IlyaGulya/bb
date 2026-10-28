@@ -33,11 +33,9 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 function hasOpenOverlay(): boolean {
-  return (
-    document.querySelector(
-      '[role="dialog"], [role="menu"], [role="listbox"]',
-    ) !== null
-  );
+  return Array.from(
+    document.querySelectorAll('[role="dialog"], [role="menu"], [role="listbox"]'),
+  ).some(overlay => overlay.closest('[aria-hidden="true"], [inert], [hidden], [data-state="closed"]') === null);
 }
 
 function RouteOutlet({ route }: { route: ResolvedTasksRoute }) {

@@ -9,6 +9,7 @@ import { useWorkflowDraft } from "./workflow-draft.js";
 import { WorkflowRoleFields } from "./workflow-fields.js";
 import { ExecutionPicker } from "../execution-picker.js";
 import { ResponsiveDrawerShell } from "@/components/ui/responsive-overlay";
+import { useIsCompactViewport } from "@/components/ui/hooks/use-compact-viewport";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -19,6 +20,7 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
   const navigate = useBbNavigate();
   const draft = useWorkflowDraft(taskId);
   const [open, setOpen] = useState(false);
+  const isCompactViewport = useIsCompactViewport();
   const [runs, setRuns] = useState<TaskWorkflow[]>([]);
   const [preparation, setPreparation] = useState<WorkflowPreparation | null>(null);
   const [busy, setBusy] = useState(false);
@@ -81,7 +83,7 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
     {draft.error && !open && <p role="alert" className="text-sm text-destructive">Draft not saved. Reopen workflow to retry; your choices are still held in this window.</p>}
     {connectionError && !open && <p role="alert" className="text-sm text-destructive">Workflow connection lost. Last observed state is retained.</p>}
     {preparation && !active && <p role="status" className="text-sm text-muted-foreground">{preparation.error ?? preparation.progress}</p>}
-    <ResponsiveDrawerShell open={open} onOpenChange={next => { setOpen(next); if (!next) void draft.flush(); }} srLabel="Launch workflow" contentClassName="max-w-2xl">
+    <ResponsiveDrawerShell open={open} presentation={isCompactViewport ? "drawer" : "floating"} onOpenChange={next => { setOpen(next); if (!next) void draft.flush(); }} srLabel="Launch workflow" contentClassName="max-w-2xl">
       <div className="min-h-0 flex-auto space-y-4 overflow-y-auto p-4">
         <header className="space-y-1"><h2 className="text-lg font-semibold">Launch workflow</h2><p className="text-sm text-muted-foreground">Choose the roles, prepare a private workspace, then start explicitly. Closing never starts or cancels an agent.</p></header>
         {!selection ? <div className="space-y-3" aria-label="Loading saved workflow draft"><Skeleton className="h-10 w-full" /><Skeleton className="h-40 w-full" /></div> : <div className="min-w-0 space-y-4">

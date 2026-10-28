@@ -188,10 +188,15 @@ surface: `repositories inspect|prepare|show|continue`, workflow draft/settings
 commands, and `workflow prepare|preparation|start|list|accept|return`. These are
 explicit operations; moving a board card does not start either flow.
 
-Workflow launch uses the shared persistent responsive drawer. Machine, code
-project, profile, context and model-account choices are named and searchable;
-the selected actual model/version remains explicit. Context never selects the
-payer. Routine execution summaries show names; internal IDs are available in
+Workflow launch uses the shared persistent overlay: a centered panel on desktop
+and a bottom drawer on compact screens. Opening starts the shell before its
+deferred body is realized; closing retains that body for reopening. Close,
+Escape and backdrop dismissal return focus to the launcher without making the
+app root inert or hidden. A retained closed overlay does not consume Tasks
+shortcuts. Detail refreshes keep the same workflow launcher and open panel.
+Machine, code project, profile, context and model-account choices are named and
+searchable; the selected actual model/version remains explicit. Context never
+selects the payer. Routine execution summaries show names; internal IDs are in
 collapsed copyable diagnostics. Core definition/account changes and reconnects
 refresh open selectors without resetting unsaved drafts or silently replacing
 an unavailable selection. Existing worker bindings remain frozen.

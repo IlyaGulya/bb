@@ -425,7 +425,7 @@ function TaskDetail({ task }: { task: Task }) {
           />
 
           <TaskWorkflowPanel
-            key={task.id}
+            key={`workflow:${task.id}`}
             taskId={task.id}
             profiles={presets.data ?? []}
           />
