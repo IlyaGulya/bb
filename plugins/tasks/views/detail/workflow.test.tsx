@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createFakePluginHost, makeHostResponse, makeThreadResponse } from "@get-bb/plugin-sdk/testing";
 import { renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { createStore } from "../../api/index.js";
@@ -14,10 +14,12 @@ import { workflowRpcContract } from "../../shared/workflow-contract.js";
 import { buildReviewStartSchema, type BuildReviewStart } from "../../workflow/remote-contract.js";
 import type { WorkflowSelection } from "../../shared/workflow-preparation.js";
 
+beforeEach(() => { vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 const hosts: Array<ReturnType<typeof createFakePluginHost>> = [];
 afterEach(async () => {
   cleanup();
   await Promise.all(hosts.splice(0).map(host => host.harness.dispose()));
+  vi.unstubAllGlobals();
 });
 
 function WorkflowHarness({ taskId }: { taskId: string }) {
