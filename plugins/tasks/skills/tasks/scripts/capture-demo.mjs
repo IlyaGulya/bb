@@ -23,6 +23,7 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
   let closed = false;
   let pendingChange;
   const createSession = page.createCDPSession;
+  const createSessionDescriptor = Object.getOwnPropertyDescriptor(page, "createCDPSession");
   let clockError;
   const onFrame = (event) => {
     if (typeof event.metadata.timestamp !== "number") clockError = new Error("Recorder frame has no genuine CDP timestamp");
@@ -55,7 +56,8 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
     await cleanup();
     throw error;
   } finally {
-    page.createCDPSession = createSession;
+    if (createSessionDescriptor) Object.defineProperty(page, "createCDPSession", createSessionDescriptor);
+    else delete page.createCDPSession;
   }
   startedAtBoundsMs.push(Date.now());
   try {
