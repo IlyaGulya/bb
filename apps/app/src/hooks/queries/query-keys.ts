@@ -1222,6 +1222,20 @@ export function systemProviderStatesQueryKey(
   return [SYSTEM_PROVIDER_STATES_QUERY_KEY, args.environmentId, args.hostId];
 }
 
+export function executionContextsQueryKey() {
+  return ["execution-contexts"] as const;
+}
+
+export function modelConnectionsQueryKey() {
+  return ["model-connections"] as const;
+}
+
+export function projectContextDefaultsQueryKey(projectId?: string) {
+  return projectId === undefined
+    ? (["project-context-defaults"] as const)
+    : (["project-context-defaults", projectId] as const);
+}
+
 interface SystemExecutionOptionsQueryKeyArgs {
   environmentId: string | null;
   hostId: string | null;

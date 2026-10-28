@@ -26,7 +26,10 @@ import {
   updateCachedThreadStatusState,
 } from "./query-cache";
 import { bumpDiffPatchFreshnessGeneration } from "./environment-diff-patch-cache-owner";
-import { invalidateSystemExecutionOptions } from "./system-cache-effects";
+import {
+  invalidateExecutionBindingDefinitions,
+  invalidateSystemExecutionOptions,
+} from "./system-cache-effects";
 import { markThreadTimelineUnseenEvents } from "./thread-timeline-unseen-events";
 import {
   getCachedThreadLists,
@@ -532,6 +535,21 @@ export const REALTIME_HOST_CHANGE_REGISTRY = {
 } satisfies HostChangeRegistry;
 
 export const REALTIME_SYSTEM_CHANGE_REGISTRY = {
+  "execution-contexts-changed": {
+    dirty: [({ queryClient, id }) => {
+      void invalidateExecutionBindingDefinitions({ queryClient, kind: "context", id });
+    }],
+  },
+  "model-connections-changed": {
+    dirty: [({ queryClient, id }) => {
+      void invalidateExecutionBindingDefinitions({ queryClient, kind: "connection", id });
+    }],
+  },
+  "project-context-defaults-changed": {
+    dirty: [({ queryClient, id }) => {
+      void invalidateExecutionBindingDefinitions({ queryClient, kind: "project-defaults", id });
+    }],
+  },
   "config-changed": {
     dirty: [
       dirtySystemConfigQueries,
@@ -663,8 +681,12 @@ interface HostChangeRule {
 
 type HostChangeRegistry = Record<HostChangeKind, HostChangeRule>;
 
+interface SystemRealtimeDirtyContext extends RealtimeDirtyContext {
+  id?: string;
+}
+
 interface SystemChangeRule {
-  dirty: readonly RealtimeDirtyHandler<RealtimeDirtyContext>[];
+  dirty: readonly RealtimeDirtyHandler<SystemRealtimeDirtyContext>[];
 }
 
 type SystemChangeRegistry = Partial<Record<SystemChangeKind, SystemChangeRule>>;

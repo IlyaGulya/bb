@@ -89,7 +89,7 @@ interface DeferredNonThreadChanges {
   environmentKindsById: Map<string, Set<EnvironmentChangeKind>>;
   hostKinds: Set<HostChangeKind>;
   projectKindsById: Map<string | undefined, Set<ProjectChangeKind>>;
-  systemKinds: Set<SystemChangeKind>;
+  systemKindsById: Map<string | undefined, Set<SystemChangeKind>>;
 }
 
 interface ThreadChangeState {
@@ -340,7 +340,7 @@ function createDeferredNonThreadChanges(): DeferredNonThreadChanges {
     environmentKindsById: new Map(),
     hostKinds: new Set(),
     projectKindsById: new Map(),
-    systemKinds: new Set(),
+    systemKindsById: new Map(),
   };
 }
 
@@ -370,7 +370,7 @@ function hasDeferredNonThreadChanges(
     deferred.environmentKindsById.size > 0 ||
     deferred.hostKinds.size > 0 ||
     deferred.projectKindsById.size > 0 ||
-    deferred.systemKinds.size > 0
+    deferred.systemKindsById.size > 0
   );
 }
 
@@ -446,6 +446,7 @@ export function createRealtimeCacheEffects({
   };
   const applySystemChanges = (
     changeKinds: Iterable<SystemChangeKind>,
+    id?: string,
   ): void => {
     for (const changeKind of changeKinds) {
       const rule = REALTIME_SYSTEM_CHANGE_REGISTRY[changeKind];
@@ -453,7 +454,7 @@ export function createRealtimeCacheEffects({
         continue;
       }
       executeRealtimeDirtyHandlers({
-        context: { queryClient },
+        context: { queryClient, id },
         handlers: rule.dirty,
       });
     }
@@ -461,7 +462,7 @@ export function createRealtimeCacheEffects({
 
   const flushDeferredChanges = (): void => {
     if (hasDeferredNonThreadChanges(deferredNonThreadChanges)) {
-      const { environmentKindsById, hostKinds, projectKindsById, systemKinds } =
+      const { environmentKindsById, hostKinds, projectKindsById, systemKindsById } =
         deferredNonThreadChanges;
       for (const [environmentId, changeKinds] of environmentKindsById) {
         environmentInvalidator.markChanged(
@@ -473,11 +474,13 @@ export function createRealtimeCacheEffects({
       for (const [projectId, changeKinds] of projectKindsById) {
         applyProjectChanges(projectId, changeKinds);
       }
-      applySystemChanges(systemKinds);
+      for (const [id, changeKinds] of systemKindsById) {
+        applySystemChanges(changeKinds, id);
+      }
       environmentKindsById.clear();
       hostKinds.clear();
       projectKindsById.clear();
-      systemKinds.clear();
+      systemKindsById.clear();
     }
     if (hasDeferredThreadChanges) {
       invalidationScheduler.flush();
@@ -573,10 +576,14 @@ export function createRealtimeCacheEffects({
           break;
         case "system":
           if (!documentVisible) {
-            addAll(deferredNonThreadChanges.systemKinds, message.changes);
+            mergeInto(
+              deferredNonThreadChanges.systemKindsById,
+              message.id,
+              message.changes,
+            );
             break;
           }
-          applySystemChanges(message.changes);
+          applySystemChanges(message.changes, message.id);
           break;
         default:
           assertNever(message);

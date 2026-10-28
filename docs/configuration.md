@@ -36,6 +36,25 @@ the same persisted records. See the
 [agent-configuration guide](../packages/templates/src/templates/bb-guide-agent-configuration.md)
 for exact fields and CLI commands.
 
+Changes made through any UI, CLI or SDK client refresh mounted Settings and
+new-thread selectors without reloading. Core publishes ID-only
+`system:changed` notifications using `execution-contexts-changed`,
+`model-connections-changed` and `project-context-defaults-changed`. The optional
+system event `id` identifies the changed context, connection or project,
+respectively; an absent ID means all definitions of that kind may have changed.
+No definition content, credential references or secret values are broadcast.
+Only the changed definition list or project's defaults is invalidated;
+connection changes also refresh catalogs explicitly keyed to that connection,
+not unrelated connections or native unselected-provider catalogs. Hidden views
+retain the affected IDs until visible. Initial connection and reconnect refresh
+definition caches that predate connection/disconnection, covering missed events.
+
+Independent SDK consumers can subscribe with `sdk.subscribe({ event:
+"system:changed", callback })`, then reread the corresponding definitions (and
+selected-connection catalogs when relevant). Subscribe to `realtime:connection`
+and reread after reconnect because change notifications are not durable replay.
+Existing SDK CRUD and CLI commands share the same notifying server routes.
+
 A context's `projectIds` is an explicit membership list; `[]` admits no project.
 Work/Personal names are not account ownership rules or ACLs. Native configuration
 paths belong to the execution host. Never place tokens, OAuth stores or Keychain

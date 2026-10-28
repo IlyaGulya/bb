@@ -19,7 +19,7 @@ export interface DbNotifier {
     changes: EnvironmentChangeKind[],
   ): void;
   notifyHost(hostId: string, changes: HostChangeKind[]): void;
-  notifySystem(changes: SystemChangeKind[]): void;
+  notifySystem(changes: SystemChangeKind[], id?: string): void;
 }
 
 export const noopNotifier: DbNotifier = {
