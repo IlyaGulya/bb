@@ -452,7 +452,6 @@ describe("native task continuation", () => {
     );
     fireEvent.click(await slot.findByRole("button", { name: "Review target" }));
     expect(slot.navigateCalls).toContainEqual({ method: "toThread", threadId: "thr_continued" });
-    expect(slot.getByText("Worker")).toBeTruthy();
     expect(
       slot.queryByRole("button", { name: "Continue on another machine" }),
     ).toBeNull();

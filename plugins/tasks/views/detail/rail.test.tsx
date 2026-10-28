@@ -148,13 +148,21 @@ describe("project rail control", () => {
 });
 
 describe("task execution rail control", () => {
-  it("keeps routing errors visible in the editor", async () => {
+  it("retains edited routing after a failed save and closes only after a successful retry", async () => {
+    let attempts = 0;
     const slot = renderSlot(
       { component: RailHarness },
       { ...railProps(null), presets: [PROFILE], execution: EXECUTION },
       {
         sdk: {
-          experimental_executionContexts: { list: async () => [] },
+          experimental_executionContexts: {
+            list: async () => [],
+            getProjectDefaults: async () => ({
+              projectId: BB_PROJECT_ID,
+              executionContextId: null,
+              modelConnectionId: null,
+            }),
+          },
           experimental_modelConnections: { list: async () => [] },
         },
         rpc: {
@@ -165,7 +173,9 @@ describe("task execution rail control", () => {
             machines: [{ id: "host_target", name: "Target machine" }],
           }),
           setTaskExecution: () => {
-            throw new Error("Target provider unavailable");
+            attempts += 1;
+            if (attempts === 1) throw new Error("Target provider unavailable");
+            return EXECUTION;
           },
         },
       },
@@ -173,14 +183,22 @@ describe("task execution rail control", () => {
     fireEvent.click(
       slot.getByRole("button", { name: "Configure task execution" }),
     );
-    fireEvent.click(
-      await slot.findByRole("button", { name: "Save execution target" }),
-    );
-    expect(await slot.findByRole("alert")).toHaveProperty(
-      "textContent",
-      "Target provider unavailable",
-    );
-    expect(slot.getByRole("combobox", { name: "Code project" })).toBeTruthy();
+    const workspace = await slot.findByRole("combobox", { name: "Workspace" });
+    fireEvent.change(workspace, { target: { value: "managed-worktree" } });
+    const branch = slot.getByRole("textbox", { name: "Base branch (optional)" });
+    fireEvent.change(branch, { target: { value: "feature/kept" } });
+    const save = slot.getByRole("button", { name: "Save execution target" });
+    await waitFor(() => expect(save).toHaveProperty("disabled", false));
+    fireEvent.click(save);
+    await slot.findByRole("alert");
+    expect(attempts).toBe(1);
+    expect(workspace).toHaveProperty("value", "managed-worktree");
+    expect(branch).toHaveProperty("value", "feature/kept");
+    expect(slot.getByRole("dialog")).toBeTruthy();
+    await waitFor(() => expect(save).toHaveProperty("disabled", false));
+    fireEvent.click(save);
+    await waitFor(() => expect(attempts).toBe(2));
+    await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
   });
 });
 
@@ -196,7 +214,14 @@ describe("task workspace execution modes", () => {
         { ...railProps(null), presets: [PROFILE], execution: EXECUTION },
         {
           sdk: {
-            experimental_executionContexts: { list: async () => [] },
+            experimental_executionContexts: {
+              list: async () => [],
+              getProjectDefaults: async () => ({
+                projectId: BB_PROJECT_ID,
+                executionContextId: null,
+                modelConnectionId: null,
+              }),
+            },
             experimental_modelConnections: { list: async () => [] },
           },
           rpc: {
