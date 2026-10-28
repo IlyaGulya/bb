@@ -192,6 +192,7 @@ describe("same-model independent native roles", () => {
     host.harness.sdk.stub("threads.defaultExecutionOptions", async () => ({ model: profile.model, reasoningLevel: profile.reasoningLevel, permissionMode: profile.permissionMode, serviceTier: "default", source: "client/thread/start" }));
     const handlers = registerBuildReview(host.bb, db, createWorkflowService(host.bb, db));
     const launched = await handlers.startBuildReview(shared);
+    db.prepare("UPDATE workflow_runs SET status = 'running' WHERE id = ?").run(launched.runId);
     const run = getRunRequired(db, launched.runId);
     const nextCall = (runId: string, callIndex: number) => startCall(db, {
       runId, callIndex, cacheKey: `${runId}:${callIndex}`, prompt: "Bounded role work", options: { selection: null, outputSchema: null, title: null, phase: null },
@@ -212,6 +213,7 @@ describe("same-model independent native roles", () => {
     expect(fresh).toHaveBeenCalledTimes(2);
     db.prepare("UPDATE workflow_runs SET status = 'failed' WHERE id = ?").run(run.id);
     const returned = await handlers.startBuildReview({ ...shared, key: "same-model:2", feedback: "Correct the observed consumer defect" });
+    db.prepare("UPDATE workflow_runs SET status = 'running' WHERE id = ?").run(returned.runId);
     const next = getRunRequired(db, returned.runId);
     expect(await managedWorker(host.bb, db, next, nextCall(next.id, 0), "Return feedback", fresh)).toEqual(writer);
     expect(await managedWorker(host.bb, db, next, nextCall(next.id, 2), "Review returned changes", fresh)).toEqual(reviewer);
