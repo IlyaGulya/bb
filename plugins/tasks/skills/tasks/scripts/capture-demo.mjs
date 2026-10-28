@@ -10,9 +10,60 @@ async function sha256(file) {
   return hash.digest("hex");
 }
 
-export async function beginCapture({ tab, page, directory, title, scenario, runId, applicationRevision, helperRevision, recorderVersion }) {
+export async function observeTarget(selector, id) {
+  const capture = window[id];
+  if (!capture || !capture.safeSelectors.includes(selector)) throw new Error("Observation target must be explicitly approved as nonsecret");
+  const timestampMs = performance.timeOrigin + performance.now();
+  const element = document.querySelector(selector);
+  if (!element) return { timestampMs, state: { present: false, visible: false, digest: null }, rect: null };
+  if (!(element instanceof HTMLElement)) throw new Error("Only approved HTML controls or leaf text can be observed");
+  const autocomplete = (element.getAttribute("autocomplete") ?? "").toLowerCase().split(/\s+/u);
+  const style = getComputedStyle(element);
+  const masking = style.getPropertyValue("-webkit-text-security");
+  if (autocomplete.some((token) => ["current-password", "new-password", "one-time-code", "cc-number", "cc-csc"].includes(token)) || (masking && masking !== "none")) throw new Error("Protected or masked fields cannot be observed");
+  let content;
+  if (element instanceof HTMLInputElement) {
+    if (!["text", "search", "number", "range", "checkbox", "radio", "button", "submit", "reset"].includes(element.type)) throw new Error("Protected or unsupported input fields cannot be observed");
+    content = [element.type, ["checkbox", "radio"].includes(element.type) ? element.checked : element.value];
+  } else if (element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+    content = [element.tagName, element.value];
+  } else {
+    if (element.childElementCount !== 0 || typeof element.innerText !== "string") throw new Error("Observe an approved leaf text element, never arbitrary container text");
+    content = [element.tagName, element.innerText];
+  }
+  const box = element.getBoundingClientRect();
+  const visible = box.width > 0 && box.height > 0 && style.visibility === "visible";
+  const payload = new TextEncoder().encode(JSON.stringify([content, element.getAttribute("aria-expanded")]));
+  const signature = await crypto.subtle.sign("HMAC", capture.observationKey, payload);
+  const digest = Array.from(new Uint8Array(signature), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return { timestampMs, state: { present: true, visible, digest }, rect: { x: box.x, y: box.y, width: box.width, height: box.height } };
+}
+
+export async function captureDemo({ browser, url, viewport, options, scenario, timeout = 90 }) {
+  const ownedTab = await browser.open({ name: `bb-demo-${randomUUID()}`, url, viewport });
+  try {
+    await ownedTab.emulate({ viewport: { width: viewport.width, height: viewport.height, scale: 1 } });
+    return await ownedTab.run(async ({ tab, page }, moduleUrl, options, scenario) => {
+      const { beginCapture } = await import(moduleUrl);
+      const capture = await beginCapture({ ...options, tab, page });
+      try {
+        await scenario({ tab, page, capture });
+        return await capture.finish();
+      } catch (error) {
+        await capture.abort();
+        throw error;
+      }
+    }, { args: [import.meta.url, options, scenario], timeout });
+  } finally {
+    await ownedTab.close();
+  }
+}
+
+export async function beginCapture({ tab, page, directory, title, scenario, runId, applicationRevision, helperRevision, recorderVersion, safeSelectors }) {
   if (![applicationRevision, helperRevision].every((revision) => /^[a-f0-9]{40}$/.test(revision))) throw new Error("Provide exact application and helper Git revisions");
   if (!recorderVersion) throw new Error("Provide the installed OMP version, not a guessed version");
+  if (!Array.isArray(safeSelectors) || safeSelectors.length === 0 || safeSelectors.some((selector) => typeof selector !== "string" || selector.trim().length === 0) || new Set(safeSelectors).size !== safeSelectors.length) throw new Error("Declare unique nonsecret observation selectors explicitly");
+  const approvedSelectors = [...safeSelectors];
   await fs.mkdir(directory);
   const original = path.resolve(directory, "original.mp4");
   const key = `__bbDemo_${randomUUID().replaceAll("-", "")}`;
@@ -30,14 +81,16 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
     else frames.push(event.metadata.timestamp * 1000);
   };
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
-  await page.evaluate((id) => {
+  await page.evaluate(async (id, safeSelectors) => {
+    if (!crypto.subtle) throw new Error("Digest-only observation requires a secure Web Crypto context");
+    const observationKey = await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
     const clicks = [];
     const listener = (event) => {
       if (event.isTrusted) clicks.push({ timestampMs: performance.timeOrigin + performance.now(), x: event.clientX, y: event.clientY, button: event.button, isTrusted: event.isTrusted });
     };
     window.addEventListener("mousedown", listener, true);
-    window[id] = { clicks, cleanup: () => window.removeEventListener("mousedown", listener, true) };
-  }, key);
+    window[id] = { clicks, safeSelectors, observationKey, cleanup: () => window.removeEventListener("mousedown", listener, true) };
+  }, key, approvedSelectors);
   const startedAtBoundsMs = [Date.now()];
   const cleanup = async () => {
     try {
@@ -72,14 +125,7 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
   }
   const snapshot = async (selector) => {
     if (closed) throw new Error("Capture is already closed");
-    return await page.evaluate((selector) => {
-      const element = document.querySelector(selector);
-      const timestampMs = performance.timeOrigin + performance.now();
-      if (!element) return { timestampMs, state: "absent", rect: null };
-      const box = element.getBoundingClientRect();
-      const state = JSON.stringify({ text: element.textContent, value: "value" in element ? element.value : null, checked: "checked" in element ? element.checked : null, expanded: element.getAttribute("aria-expanded"), visible: box.width > 0 && box.height > 0 && getComputedStyle(element).visibility === "visible" });
-      return { timestampMs, state, rect: { x: box.x, y: box.y, width: box.width, height: box.height } };
-    }, selector);
+    return await page.evaluate(observeTarget, selector, key);
   };
   return {
     async ready() {
@@ -95,7 +141,7 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
     async change(caption, selector, before) {
       if (pendingChange) throw new Error("End the current cue after its readability hold before observing another change");
       const after = await snapshot(selector);
-      if (after.state === before.state || !after.rect || after.rect.width <= 0 || after.rect.height <= 0 || JSON.parse(after.state).visible !== true) throw new Error("Expected a visible, actually changed element after a readiness assertion");
+      if (JSON.stringify(after.state) === JSON.stringify(before.state) || !after.rect || after.rect.width <= 0 || after.rect.height <= 0 || after.state.visible !== true) throw new Error("Expected a visible, actually changed element after a readiness assertion");
       pendingChange = { timestampMs: after.timestampMs, caption, selector, before, after };
     },
     async hold(milliseconds, reason) {
@@ -108,7 +154,7 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
     async endChange() {
       if (!pendingChange) throw new Error("No current change cue");
       const current = await snapshot(pendingChange.selector);
-      if (current.state !== pendingChange.after.state || JSON.stringify(current.rect) !== JSON.stringify(pendingChange.after.rect)) throw new Error("Accented element changed/moved during its hold; shorten the cue to a stable recorded interval");
+      if (JSON.stringify(current.state) !== JSON.stringify(pendingChange.after.state) || JSON.stringify(current.rect) !== JSON.stringify(pendingChange.after.rect)) throw new Error("Accented element changed/moved during its hold; shorten the cue to a stable recorded interval");
       changes.push({ ...pendingChange, untilTimestampMs: current.timestampMs });
       pendingChange = undefined;
     },
@@ -130,7 +176,7 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
       if (clockError) throw clockError;
       if (result.frames !== frames.length || frames.length === 0) throw new Error("Observed frame count differs from the existing recorder; timing is not trustworthy");
       const receipt = {
-        version: 1,
+        version: 2,
         original: "original.mp4",
         originalSha256: await sha256(original),
         title,
@@ -138,6 +184,7 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
         runId,
         applicationRevision,
         helperRevision,
+        safeSelectors: approvedSelectors,
         capture: {
           recorder: { name: "OMP browser.recordStart", version: recorderVersion, fps: 15, durationMs: result.durationMs, frames: result.frames, bytes: result.bytes, cursor: true },
           viewport,
@@ -146,6 +193,7 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
           stoppedAtBoundsMs,
           timingToleranceMs: 1000 / 15 + 40,
           adapterSha256: await sha256(fileURLToPath(import.meta.url)),
+          observation: "ephemeral-hmac-sha256",
         },
         clicks,
         changes,

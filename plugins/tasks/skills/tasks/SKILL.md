@@ -16,6 +16,10 @@ read [references/video-demo.md](references/video-demo.md). The Tasks skill ships
 the worker-side capture/timing adapter and caption/change-accent renderer;
 retain the original and run/app/helper provenance. No cloud upload or voiceover
 is enabled by default. Task attachment/viewer contracts remain separate.
+Use its `captureDemo` entry point outside `tab.run` so cancellation always closes
+the owned tab. Approve only nonsecret leaf/control targets: observations retain
+keyed digests, not text/values, and known protected fields are refused. Never
+claim automatic redaction of arbitrary DOM content or recording pixels.
 
 Task-specific routing is available through `bb tasks execution get|set|clear`
 and `execution environments`. Idle workspace continuation uses

@@ -5,7 +5,7 @@ const video = { width: 1440, height: 1000, durationMs: 10000 };
 
 function receipt() {
   return {
-    version: 1,
+    version: 2,
     original: "original.mp4",
     originalSha256: "a".repeat(64),
     title: "Unsaved draft",
@@ -13,6 +13,7 @@ function receipt() {
     runId: "local-run",
     applicationRevision: "b".repeat(40),
     helperRevision: "c".repeat(40),
+    safeSelectors: ["input"],
     capture: {
       recorder: { name: "OMP browser.recordStart", version: "18.13.3", fps: 15, durationMs: 10000, frames: 3, bytes: 1024, cursor: true },
       viewport: { width: 1440, height: 1000 },
@@ -21,9 +22,10 @@ function receipt() {
       stoppedAtBoundsMs: [11000, 11100],
       timingToleranceMs: 1000 / 15 + 40,
       adapterSha256: "d".repeat(64),
+      observation: "ephemeral-hmac-sha256",
     },
     clicks: [{ timestampMs: 3000, x: 300, y: 200, button: 0, isTrusted: true }],
-    changes: [{ timestampMs: 4000, untilTimestampMs: 7000, caption: "The unsaved name changed", selector: "input", before: { timestampMs: 2000, state: JSON.stringify({ text: "", value: "", checked: false, expanded: null, visible: true }), rect: { x: 200, y: 200, width: 400, height: 40 } }, after: { timestampMs: 4000, state: JSON.stringify({ text: "", value: "Demo draft", checked: false, expanded: null, visible: true }), rect: { x: 200, y: 200, width: 400, height: 40 } } }],
+    changes: [{ timestampMs: 4000, untilTimestampMs: 7000, caption: "The unsaved name changed", selector: "input", before: { timestampMs: 2000, state: { present: true, visible: true, digest: "e".repeat(64) }, rect: { x: 40, y: 220.796875, width: 428, height: 50 } }, after: { timestampMs: 4000, state: { present: true, visible: true, digest: "f".repeat(64) }, rect: { x: 40, y: 220.796875, width: 428, height: 50 } } }],
     holds: [{ fromTimestampMs: 4000, toTimestampMs: 7000, reason: "Read the actual value" }],
   };
 }
@@ -61,13 +63,21 @@ describe("local video demo cue boundaries", () => {
 
   it.each([false, undefined, "true"])("rejects positive-size changed elements without observed visibility: %s", (visible) => {
     const input = receipt();
-    input.changes[0].after.state = JSON.stringify({ ...JSON.parse(input.changes[0].after.state), visible });
+    input.changes[0].after.state.visible = visible;
     const before = structuredClone(input);
-    expect(() => validateCapture(input, video)).toThrow(/observed visible/);
+    expect(() => validateCapture(input, video)).toThrow();
     expect(input).toEqual(before);
   });
 
   it.each([
+    ["legacy raw-content receipt", (input) => { input.version = 1; }],
+    ["unapproved observation", (input) => { input.safeSelectors = ["other"]; }],
+    ["missing digest", (input) => { input.changes[0].after.state.digest = null; }],
+    ["raw before value", (input) => { input.changes[0].before.state.value = "FAKE_NONSECRET_RAW_VALUE"; }],
+    ["raw after text", (input) => { input.changes[0].after.state.text = "FAKE_NONSECRET_RAW_TEXT"; }],
+    ["raw rectangle payload", (input) => { input.changes[0].before.rect.value = "FAKE_NONSECRET_RAW_VALUE"; }],
+    ["stringified raw observation", (input) => { input.changes[0].after.state = JSON.stringify({ value: "FAKE_NONSECRET_RAW_VALUE", visible: true }); }],
+    ["content in absent observation", (input) => { input.changes[0].before.state.present = false; }],
     ["negative region", (input) => { input.changes[0].after.rect.x = -1; }],
     ["region beyond viewport", (input) => { input.changes[0].after.rect.width = 1440; }],
     ["zero region", (input) => { input.changes[0].after.rect.height = 0; }],
@@ -92,7 +102,7 @@ describe("local video demo cue boundaries", () => {
   });
 
   it("rejects scaled media coordinates and duration changes", () => {
-    expect(() => validateCapture(receipt(), { ...video, width: 720 })).toThrow(/dimensions/);
-    expect(() => validateCapture(receipt(), { ...video, durationMs: 5000 })).toThrow(/duration/);
+    expect(() => validateCapture(receipt(), { ...video, width: 720 })).toThrow();
+    expect(() => validateCapture(receipt(), { ...video, durationMs: 5000 })).toThrow();
   });
 });

@@ -41,40 +41,71 @@ new resources just because they exist in an author's private checkout.
 
 ## Capture a real scenario
 
-Read OMP's installed browser documentation first. Open your own named tab, never
-adopt another actor's page. Verify the target app revision independently. A
-helper commit is not the app revision and a preview is not a deployment claim.
+Read OMP's installed browser documentation first. Verify the target app revision
+independently; a helper commit is not the app revision or a deployment claim.
 Keep the scenario in one document; SPA state changes are supported, document
 navigation is not. Use a fresh, nonexistent owned capture directory.
 
-In `tab.run`, dynamically import `beginCapture` from the installed resource's
-absolute file URL. Pass the raw `page` and `tab` supplied by that run. The adapter
-briefly observes the CDP session created by **the existing recorder**; it does
-not start a second screencast, capture frames, replace ACKs, or draw a cursor.
-OMP's `{cursor:true, contactSheet:true, fps:15, quality:85}` owns the visible
-pointer and real mousedown ripples. The adapter restores `createCDPSession`
-after starting, and checks that its observed frame count matches recordStop.
+Import `captureDemo` from the installed capture resource **outside** `tab.run`.
+This programmatic entry point opens a uniquely named owned tab, runs the scenario,
+finishes its capture, and always closes that owned tab in an outer `finally`.
+The close is a fresh browser operation, not a saved run-scoped facade. A cancelled
+run cannot safely call its old `tab`, `page`, or CDP session again. Never adopt a
+parent/assessor/user tab or attempt to repair revoked facades with retries.
+
+The adapter observes the CDP session created by **the existing recorder**. It
+does not start another screencast, capture frames, replace ACKs, or draw a cursor.
+OMP's `{cursor:true, contactSheet:true, fps:15, quality:85}` owns the pointer and
+actual mousedown ripples. The adapter restores `createCDPSession` after starting
+and checks its observed frame count against recordStop.
+
+### Approve only nonsecret observation targets
+
+`options.safeSelectors` is required and is an explicit caller attestation that
+each exact selected target contains only owned, nonsecret demonstration data.
+Unlisted selectors are refused. Observe supported clear-text controls or a leaf
+text element, not forms, panels, body text, or arbitrary descendant content.
+Inputs support text/search/number/range/checkbox/radio/button/submit/reset;
+textarea and select values are also supported. Other input types are refused.
+
+Password and hidden inputs, CSS-masked fields, and standard credential/OTP/card
+autocomplete fields (`current-password`, `new-password`, `one-time-code`,
+`cc-number`, `cc-csc`) are refused even if explicitly selected. Never use real
+credentials to test this policy. Use only unmistakably fake standalone fixtures.
+Custom or unmarked secrets cannot be discovered reliably: this is a bounded
+contract, **not DLP or a claim of perfect redaction**. Do not approve such targets.
+Selectors, captions, titles, run IDs, paths, narration, and visible recording
+pixels must also be nonsecret; metadata safety does not sanitize a recording.
+
+The page computes a keyed digest before returning an observation. Each capture
+has a random nonextractable HMAC-SHA-256 key, held only in that owned page and
+discarded on cleanup/tab close. No raw selected text/value or key is returned
+or persisted. Equal content can be compared within a capture without creating
+reusable cross-capture content fingerprints. A secure Web Crypto context is
+required; there is no plaintext or unkeyed fallback.
 
 A safe example is opening an execution-context draft, entering a disposable name,
-then dismissing it without Save. Observe the actual page before using selectors.
-The following scenario function runs entirely within one `tab.run`. Supply
-`options` with `captureModuleUrl`, `directory`, `runId`, `applicationRevision`,
-`helperRevision`, the installed `recorderVersion`, and the owned preview `url`:
+and dismissing it without Save. Observe the actual page before choosing selectors.
+Supply the installed resource URL, approved preview URL, owned output directory,
+actual run/source/helper identifiers and installed recorder version:
 
 ```js
-async function captureScenario({ tab, page }, options) {
-  const { beginCapture } = await import(options.captureModuleUrl);
-  const capture = await beginCapture({
-    tab, page,
-    directory: options.directory,
+const { captureDemo } = await import(captureModuleUrl);
+const result = await captureDemo({
+  browser,
+  url: approvedPreviewUrl,
+  viewport: { width: 1440, height: 1000 },
+  options: {
+    directory: captureDirectory,
     title: "Unsaved draft; no settings saved",
     scenario: "execution-context-unsaved-name",
-    runId: options.runId,
-    applicationRevision: options.applicationRevision,
-    helperRevision: options.helperRevision,
-    recorderVersion: options.recorderVersion,
-  });
-  try {
+    runId,
+    applicationRevision,
+    helperRevision,
+    recorderVersion,
+    safeSelectors: ['form h2', 'input[placeholder="e.g. Work or Personal"]'],
+  },
+  scenario: async ({ tab, page, capture }) => {
     await tab.waitFor('role/button[name="New execution context" exact]');
     await page.mouse.move(720, 500, { steps: 20 });
     await capture.ready();
@@ -102,70 +133,37 @@ async function captureScenario({ tab, page }, options) {
     await tab.press("Escape");
     await tab.waitForSelector(name, { hidden: true });
     await capture.hold(2000, "Confirm the editor is dismissed");
-    return await capture.finish();
-  } catch (error) {
-    await capture.abort();
-    throw error;
-  }
-}
-```
-
-The caller must own and close the tab **outside** `tab.run`, including when the
-run times out or is cancelled. Run-scoped `tab`, `page`, and CDP session facades
-are revoked on cancellation, so an inner `catch` cannot guarantee teardown.
-Use the existing browser lifecycle; never inspect or reuse the page between a
-failed run and its outer close:
-
-```js
-const ownedTab = await browser.open({
-  name: `demo-${crypto.randomUUID()}`,
-  url: options.url,
-  viewport: { width: 1440, height: 1000 },
+  },
 });
-try {
-  await ownedTab.emulate({ viewport: { width: 1440, height: 1000, scale: 1 } });
-  const result = await ownedTab.run(captureScenario, { args: [options], timeout: 90 });
-  console.log(result);
-} finally {
-  await ownedTab.close();
-}
+console.log(result);
 ```
 
-The outer handle's close is a fresh browser operation, not a saved run facade.
-OMP's owned-tab teardown stops/discards an unfinished recording and closes the
-owned page even if recorder finalization fails. An aborted recording is not a
-successful demo and must not be attached as one. This requirement also covers
-errors during `beginCapture`, before the inner scenario's `try` is entered.
+The scenario must not call `finish()` itself; `captureDemo` owns that transition
+and the outer teardown. It also closes the tab if `beginCapture` fails before the
+scenario begins. Do not reuse the page after a failure. An aborted recording is
+not successful demo evidence. Even if OMP already makes the recorder inactive,
+an old page listener can remain until the owned page is closed.
 
-Wait for actual application readiness, **then** use explicit readability holds.
-A timeout is a failure deadline, not readiness. For slower pointer movement,
-use actual `tab.mouseMove` with intermediate real points before clicking. Do not
-postproduce fake pointer paths or click rings. The adapter saves only trusted
-mousedown events (page epoch time, viewport coordinates, button), real CDP frame
-timestamps, observed before/after element state and bounds, explicit hold times,
-recordStop statistics, exact declared app/helper revisions, and SHA-256 of the
-original and adapter. Captured text must itself be safe to retain.
+`beginCapture({tab,page,...options})` remains the low-level producer for callers
+that already own this same outer browser lifecycle. Its run-local `abort()`
+attempts stop/cleanup and marks closed only after cleanup completes. It cannot
+revive cancelled facades; every such caller must still close its owned tab in a
+fresh outer `finally`. Do not export a run-scoped capture object for later use.
 
-A static page may send no CDP screencast frames until an actual visual update.
-Move the real pointer after starting, then call `ready()` before taking snapshots
-or readability holds. Do not insert artificial animation or a second recorder.
-The example uses the center of a 1440×1000 owned viewport; adapt the real action
-to your viewport and check that original pixel dimensions match CSS coordinates.
+Wait for actual readiness, **then** use explicit readability holds. A timeout is
+a failure deadline, not readiness. Static pages may send no screencast frame
+until an actual visual update: move the real pointer, then call `ready()` before
+snapshots/holds. Do not insert synthetic animations, click rings, or pointer paths.
 
-Call `snapshot(selector)` before the action, wait for the actual new state, then
-`change(caption, selector, before)`. The after-element must be visible, changed,
-and within the viewport. Keep its state/bounds stable through `endChange()`;
-use a smaller element rather than a moving panel. Each cue needs at least 500ms.
-Both capture and rendering require the serialized after-state's `visible` field
-to be the boolean `true`. A positive rectangle alone is not visibility evidence:
-`visibility:hidden`/`collapse`, absent elements, or missing/unknown visibility
-must never become a captioned result.
-End the cue before another action. `hold(ms, reason)` supports 500–20000ms and
-records the real wait; it inserts no frames. While its run is still live,
-`abort()` attempts recorder stop and event cleanup, and marks the capture closed
-only after both complete. Failed cleanup may be retried in that live run; a
-cancelled run's facades cannot be revived. The caller's outer `finally` must
-always close only its owned tab, rather than relying on `abort()` after cancellation.
+Call `snapshot(selector)` before an action, wait for the actual new state, then
+`change(caption, selector, before)`. Each observation contains only `timestampMs`,
+`state: {present, visible, digest}`, and `rect`. Absence is explicit: `present:false`,
+`visible:false`, `digest:null`, `rect:null`. Present content has only its keyed
+digest, not a serialized value/text payload. Capture and rendering both require
+the after-state's `visible` to be boolean `true`; positive bounds do not prove
+visibility. Keep state/bounds stable until `endChange()`, ending before another
+action. Each cue needs at least 500ms. `hold(ms, reason)` supports 500–20000ms,
+records the actual wait after readiness, and inserts no frames.
 
 ## Render locally, or call programmatically
 
@@ -174,10 +172,15 @@ node "$resource_dir/render-demo.mjs" "$capture_dir/capture.json" "$new_output_di
 ```
 
 Equivalent: `await renderDemo(captureJsonPath, newOutputDirectory)` from
-`render-demo.mjs`. The JSON input is the adapter's version-1 receipt. It contains
+`render-demo.mjs`. The JSON input is the adapter's version-2 receipt. It contains
 `original`, `originalSha256`, `title` (up to 64 printable characters), `scenario`,
-`runId`, full 40-character `applicationRevision` and `helperRevision`, `capture`,
-`clicks`, `changes`, and `holds`. See the adapter for the exact producer shape.
+`runId`, full `applicationRevision`/`helperRevision`, `safeSelectors`, `capture`,
+`clicks`, `changes`, and `holds`. `capture.observation` is
+`ephemeral-hmac-sha256`; before/after state objects allow only presence,
+visibility and digest. Raw/extra observation fields and version-1 receipts are
+rejected, not converted. Existing version-1 artifacts remain historical under
+their original hashes and pinned helper; never rewrite them into fake v2 proof.
+This unshipped helper receipt/manifest cutover changes no Task evidence schema.
 No ignored options: unsupported fields, synthetic clicks, missing clocks,
 unchanged/out-of-bounds regions, overlapping cues and out-of-duration events
 are rejected. Labels are plain text (no ASS braces/backslashes or control codes).

@@ -10,6 +10,10 @@
   encoding API, task-video schema, or analytics transport.
   Reject hidden or unobserved change results even when their boxes have positive
   size, and require fresh outer owned-tab teardown after cancelled capture runs.
+  The owned `captureDemo` entry point enforces that outer lifecycle. Unshipped
+  receipt/manifest v2 uses explicit nonsecret targets and page-local ephemeral
+  keyed digests instead of raw DOM values/text, refuses known protected fields
+  and arbitrary container text, and rejects legacy raw-content receipts.
 
 - Fence Tasks Start against concurrent draft revision/selection changes in its
   launch-receipt transaction. Retain the first validated bugfix reproduction

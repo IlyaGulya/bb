@@ -55,14 +55,18 @@ export function mediaTime(timestampMs, capture, durationMs) {
 }
 
 export function validateCapture(input, video) {
-  object(input, ["version", "original", "originalSha256", "title", "scenario", "runId", "applicationRevision", "helperRevision", "capture", "clicks", "changes", "holds", "voiceover"], "input");
-  requireValue(input.version === 1, "Unsupported capture version");
+  object(input, ["version", "original", "originalSha256", "title", "scenario", "runId", "applicationRevision", "helperRevision", "safeSelectors", "capture", "clicks", "changes", "holds", "voiceover"], "input");
+  requireValue(input.version === 2, "Unsupported capture version; use digest-only receipt v2");
   for (const key of ["original", "scenario", "runId", "title"]) text(input[key], key, key === "original" ? 4096 : 160);
   text(input.title, "title", 64);
   requireValue(/^[a-f0-9]{64}$/.test(input.originalSha256), "originalSha256 is required");
   for (const key of ["applicationRevision", "helperRevision"]) requireValue(shaPattern.test(input[key]), `${key} must be a full Git SHA`);
+  requireValue(Array.isArray(input.safeSelectors) && input.safeSelectors.length > 0, "Explicit nonsecret observation selectors are required");
+  for (const selector of input.safeSelectors) text(selector, "approved selector", 1000);
+  requireValue(new Set(input.safeSelectors).size === input.safeSelectors.length, "Approved selectors must be unique");
   const capture = input.capture;
-  object(capture, ["recorder", "viewport", "frameTimestampsMs", "startedAtBoundsMs", "stoppedAtBoundsMs", "timingToleranceMs", "adapterSha256"], "capture");
+  object(capture, ["recorder", "viewport", "frameTimestampsMs", "startedAtBoundsMs", "stoppedAtBoundsMs", "timingToleranceMs", "adapterSha256", "observation"], "capture");
+  requireValue(capture.observation === "ephemeral-hmac-sha256", "Only ephemeral keyed-digest observations are accepted");
   object(capture.recorder, ["name", "version", "fps", "durationMs", "frames", "bytes", "cursor"], "recorder");
   text(capture.recorder.name, "recorder name");
   text(capture.recorder.version, "recorder version");
@@ -103,19 +107,26 @@ export function validateCapture(input, video) {
     object(change, ["timestampMs", "untilTimestampMs", "caption", "selector", "before", "after"], "change");
     text(change.caption, "caption", 80);
     text(change.selector, "selector", 1000);
+    requireValue(input.safeSelectors.includes(change.selector), "Change target was not explicitly approved as nonsecret");
     const start = mediaTime(change.timestampMs, capture, video.durationMs);
     const end = mediaTime(change.untilTimestampMs, capture, video.durationMs);
     requireValue(end - start >= 500, "Change cues need at least 500ms of actual readable recorded state");
     for (const state of [change.before, change.after]) {
       object(state, ["timestampMs", "state", "rect"], "observed state");
-      requireValue(typeof state.state === "string", "State must be observed serialized data");
+      object(state.state, ["present", "visible", "digest"], "observed content");
+      requireValue(typeof state.state.present === "boolean" && typeof state.state.visible === "boolean", "Observation presence and visibility must be boolean");
+      if (state.state.present) {
+        requireValue(typeof state.state.digest === "string" && /^[a-f0-9]{64}$/.test(state.state.digest), "Observed content requires a keyed digest, never raw text or values");
+        object(state.rect, ["x", "y", "width", "height"], "observed rectangle");
+        for (const key of ["x", "y", "width", "height"]) requireValue(Number.isFinite(state.rect[key]), "Observation bounds must be finite");
+      } else {
+        requireValue(state.state.digest === null && state.state.visible === false && state.rect === null, "Absent observations must contain no content or bounds");
+      }
       number(state.timestampMs, timestamps[0], change.timestampMs, "state timestamp");
     }
     requireValue(change.after.timestampMs === change.timestampMs && change.before.timestampMs <= change.after.timestampMs, "Change time must be its actual observation time");
-    requireValue(change.before.state !== change.after.state, "Cannot accent an unchanged state");
-    const afterState = JSON.parse(change.after.state);
-    object(afterState, ["text", "value", "checked", "expanded", "visible"], "change after-state");
-    requireValue(afterState.visible === true, "Change after-state must be observed visible");
+    requireValue(JSON.stringify(change.before.state) !== JSON.stringify(change.after.state), "Cannot accent an unchanged state");
+    requireValue(change.after.state.visible === true, "Change after-state must be observed visible");
     const rect = change.after.rect;
     object(rect, ["x", "y", "width", "height"], "change rectangle");
     for (const key of ["x", "y"]) number(rect[key], 0, key === "x" ? width : height, `region ${key}`);
@@ -212,7 +223,7 @@ export async function renderDemo(inputPath, outputDirectory) {
   requireValue(Math.abs(Number(resultVideo.duration) * 1000 - video.durationMs) <= input.capture.timingToleranceMs, "Postprocessing changed video duration");
   const artifact = async (name) => ({ path: name, sha256: await hashFile(path.join(out, name)), bytes: (await fs.stat(path.join(out, name))).size });
   const manifest = {
-    version: 1,
+    version: 2,
     scenario: input.scenario,
     runId: input.runId,
     applicationRevision: input.applicationRevision,
