@@ -11,6 +11,12 @@ and report the outcome where the work is tracked.
 For task dispatch and execution presets, read
 [references/delegation.md](references/delegation.md).
 
+For truthful UI video demos with the existing OMP recorder and local FFmpeg,
+read [references/video-demo.md](references/video-demo.md). The Tasks skill ships
+the worker-side capture/timing adapter and caption/change-accent renderer;
+retain the original and run/app/helper provenance. No cloud upload or voiceover
+is enabled by default. Task attachment/viewer contracts remain separate.
+
 Task-specific routing is available through `bb tasks execution get|set|clear`
 and `execution environments`. Idle workspace continuation uses
 `bb tasks continue preview|start|list`; use `continue start`, not a bare

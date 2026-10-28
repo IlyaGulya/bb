@@ -10,7 +10,7 @@ export default defineConfig({
   test: {
     silent: "passed-only",
     name: "bb-plugin-tasks",
-    include: ["**/*.test.{ts,tsx}"],
+    include: ["**/*.test.{ts,tsx,mjs}"],
     exclude: ["node_modules/**"],
     testTimeout: 20_000,
     setupFiles: ["./vitest.setup.ts"],

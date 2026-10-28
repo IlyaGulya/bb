@@ -2,6 +2,13 @@
 
 ## AgentOS fork — unreleased
 
+- Ship a Tasks skill recipe for truthful, readable UI demos using the existing
+  OMP cursor/click recorder and local FFmpeg. Retain real frame/action clocks,
+  observed change outlines, captions outside the viewport, unchanged originals
+  and app/helper/run/hash provenance in portable replay bundles. Optional local
+  approved narration stays separate; no new recorder, cloud upload, server
+  encoding API, task-video schema, or analytics transport.
+
 - Fence Tasks Start against concurrent draft revision/selection changes in its
   launch-receipt transaction. Retain the first validated bugfix reproduction
   across Return, permit retry after an exit-zero attempt, and keep legacy
