@@ -185,6 +185,38 @@ it("resolves a child's parent beyond the first page of roots while filtering by 
   await slot.findByRole("button", { name: `Open parent ${first.key} · First epic` });
 });
 
+it("resets Board sorting to manual order when switching projects", async () => {
+  const { store, project, other, open } = setup();
+  const firstLow = store.tasks.createTask({
+    projectId: project.id, title: "First project low", status: "todo", priority: "low",
+  });
+  const firstUrgent = store.tasks.createTask({
+    projectId: project.id, title: "First project urgent", status: "todo", priority: "urgent",
+  });
+  const secondLow = store.tasks.createTask({
+    projectId: other.id, title: "Second project low", status: "todo", priority: "low",
+  });
+  const secondUrgent = store.tasks.createTask({
+    projectId: other.id, title: "Second project urgent", status: "todo", priority: "urgent",
+  });
+  const slot = open(`${project.id}?view=board`);
+  const todoOrder = () => Array.from(
+    slot.container.querySelectorAll('[data-board-column="todo"] [data-task-key]'),
+    (card) => card.getAttribute("data-task-key"),
+  );
+  await waitFor(() => expect(todoOrder()).toEqual([firstLow.key, firstUrgent.key]));
+  await choose(slot, /^Sort/, "Priority");
+  await waitFor(() => expect(todoOrder()).toEqual([firstUrgent.key, firstLow.key]));
+
+  const Panel = app.navPanels[0]!.component;
+  slot.lifecycle.rerender(<Panel subPath={`${other.id}?view=board`} />);
+  await waitFor(() => expect(todoOrder()).toEqual([secondLow.key, secondUrgent.key]));
+  await choose(slot, /^Sort/, "Priority");
+  await waitFor(() => expect(todoOrder()).toEqual([secondUrgent.key, secondLow.key]));
+  slot.lifecycle.rerender(<Panel subPath={`${project.id}?view=board`} />);
+  await waitFor(() => expect(todoOrder()).toEqual([firstLow.key, firstUrgent.key]));
+});
+
 it("shows a working child in Active and reaches it through the project pager", async () => {
   const fixture = setup();
   const { store, review, project, second } = fixture;

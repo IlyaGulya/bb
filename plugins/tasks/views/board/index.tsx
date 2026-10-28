@@ -211,6 +211,7 @@ export function BoardView({ projectId }: BoardViewProps) {
   const [sort, setSort] = useState<TaskSort>("manual");
   useEffect(() => {
     setFilters(EMPTY_FILTERS);
+    setSort("manual");
   }, [projectId]);
   const parentsById = useMemo(
     () => new Map((board.data?.tasks ?? [])
@@ -505,42 +506,42 @@ export function BoardView({ projectId }: BoardViewProps) {
         parents={[...parentsById.values()]}
         taskCount={visibleTasks?.length}
       />
-    <div
-      ref={boardRef}
-      className={cn(
-        "flex min-h-0 flex-1 items-start gap-3 overflow-x-auto p-4",
-        drag !== null && "cursor-grabbing",
-      )}
-    >
-      {visibleBoardStatuses(columns).map(renderColumn)}
-      {drag && ghostTask ? (
-        <div
-          className="pointer-events-none fixed z-50"
-          style={{
-            left: drag.x - drag.offsetX,
-            top: drag.y - drag.offsetY,
-            width: drag.width,
+      <div
+        ref={boardRef}
+        className={cn(
+          "flex min-h-0 flex-1 items-start gap-3 overflow-x-auto p-4",
+          drag !== null && "cursor-grabbing",
+        )}
+      >
+        {visibleBoardStatuses(columns).map(renderColumn)}
+        {drag && ghostTask ? (
+          <div
+            className="pointer-events-none fixed z-50"
+            style={{
+              left: drag.x - drag.offsetX,
+              top: drag.y - drag.offsetY,
+              width: drag.width,
+            }}
+          >
+            <TaskCard
+              task={ghostTask}
+              parent={ghostTask.parentTaskId === null ? undefined : parentsById.get(ghostTask.parentTaskId)}
+              onOpenParent={(taskKey) => navigation.go({ kind: "task", taskKey })}
+              labelsById={labelsById}
+              meta={metaByTaskId.get(ghostTask.id) ?? EMPTY_META}
+              ghost
+            />
+          </div>
+        ) : null}
+        <NewTaskDialog
+          open={quickAddStatus !== null}
+          onOpenChange={(open) => {
+            if (!open) setQuickAddStatus(null);
           }}
-        >
-          <TaskCard
-            task={ghostTask}
-            parent={ghostTask.parentTaskId === null ? undefined : parentsById.get(ghostTask.parentTaskId)}
-            onOpenParent={(taskKey) => navigation.go({ kind: "task", taskKey })}
-            labelsById={labelsById}
-            meta={metaByTaskId.get(ghostTask.id) ?? EMPTY_META}
-            ghost
-          />
-        </div>
-      ) : null}
-      <NewTaskDialog
-        open={quickAddStatus !== null}
-        onOpenChange={(open) => {
-          if (!open) setQuickAddStatus(null);
-        }}
-        projectId={projectId}
-        defaultStatus={quickAddStatus ?? undefined}
-      />
-    </div>
+          projectId={projectId}
+          defaultStatus={quickAddStatus ?? undefined}
+        />
+      </div>
     </div>
   );
 }
