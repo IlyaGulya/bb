@@ -928,6 +928,13 @@ export function createWorkflowService(
       const cacheKey = resolvedIdentity.cacheKey;
       selection = resolvedIdentity.selection;
       const sameRunCall = getCall(db, run.id, callIndex);
+      if (
+        sameRunCall !== null &&
+        managedRequest(db, run.id) !== null &&
+        ["failed", "cancelled"].includes(sameRunCall.status)
+      ) {
+        throw new Error(sameRunCall.error ?? `Workflow call ${sameRunCall.status}`);
+      }
       if (replay.prefix) {
         if (sameRunCall !== null) {
           const sourceRun = getRunRequired(db, run.id);
@@ -1306,6 +1313,14 @@ export function createWorkflowService(
         error: "This thread is not an active workflow worker",
       };
     }
+    const managed = managedRequest(db, call.runId) !== null;
+    if (managed && !["running", "succeeded"].includes(call.status)) {
+      return {
+        ok: false,
+        terminal: true,
+        error: "This workflow call is no longer active",
+      };
+    }
     const options = parseStoredAgentOptions(JSON.parse(call.optionsJson));
     if (options.outputSchema === null) {
       return {
@@ -1318,6 +1333,10 @@ export function createWorkflowService(
     const validation = resolved.validation;
     if (validation.valid) {
       const stored = storeStructuredResult(db, call.id, resolved.value);
+      if (managed && (stored === "accepted" || stored === "idempotent")) {
+        publishRunProgress(call.runId);
+        return { ok: true };
+      }
       if (stored === "accepted") {
         settleCall(db, {
           id: call.id,

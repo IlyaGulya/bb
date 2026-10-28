@@ -19,12 +19,16 @@ import {
 } from "./data.js";
 import { managedContextStarted, managedWorker } from "./build-review-policy.js";
 import { DEFAULT_WORKFLOW_SETTINGS } from "./settings.js";
-import type { BuildReviewStart } from "./build-review-contract.js";
+import {
+  buildReviewInspectionSchema,
+  type BuildReviewStart,
+} from "./build-review-contract.js";
 import { executeWorkflowScript } from "./runtime.js";
 import { parseWorkflowSource } from "./parser.js";
 import { buildReviewSource, registerBuildReview } from "./build-review.js";
 import { createWorkflowService } from "./service.js";
 import { verifyBuildReviewWorkspace } from "./build-review-workspace.js";
+import plugin from "./server.js";
 
 const databases: Database.Database[] = [];
 const hosts: FakePluginHost[] = [];
@@ -760,4 +764,195 @@ describe("retained native build/review workers", () => {
     ).rejects.toThrow(/Missing required real smoke/);
     expect(agent).toHaveBeenCalledTimes(2);
   });
+});
+
+describe("managed structured-result native handoff", () => {
+  async function setupHandoff() {
+    const native: {
+      status: "active" | "stopping" | "idle" | "error";
+      spawns: number;
+      continuations: string[];
+    } = { status: "active", spawns: 0, continuations: [] };
+    let host = createFakePluginHost({
+      pluginId: "workflows",
+      agentSkillIds: ["workflows"],
+      sdk: {
+        threads: {
+          get: async ({ threadId }) => makeThreadResponse({
+            id: threadId,
+            providerId: request.writer.provider,
+            environmentId: "env_fixture",
+            status: threadId === request.originThreadId ? "idle" : native.status,
+          }),
+          list: async () => [],
+          defaultExecutionOptions: async () => ({
+            model: request.writer.model,
+            reasoningLevel: request.writer.reasoningLevel,
+            permissionMode: request.writer.permissionMode,
+            serviceTier: "default",
+            source: "client/thread/start",
+          }),
+          spawn: async () => makeThreadResponse({ id: `thr_handoff_${++native.spawns}` }),
+          queuedMessages: { list: async () => [] },
+          output: async () => ({ output: null }),
+          send: async ({ threadId }) => {
+            if (native.status !== "idle") throw new Error("Native worker is still busy");
+            native.continuations.push(threadId);
+            native.status = "active";
+            return { ok: true, delivery: "sent" };
+          },
+          stop: async () => {
+            native.status = "stopping";
+            return { ok: true };
+          },
+        },
+      },
+    });
+    hosts.push(host);
+    await plugin(host.bb);
+    let db = host.bb.storage.database();
+    const launch = buildReviewInspectionSchema.parse(
+      await host.harness.callRpc("startBuildReview", request),
+    );
+    let worker = host.harness.runService("workflow-worker");
+    const writerId = "thr_handoff_1";
+    await vi.waitFor(() => expect(getCall(db, launch.runId, 0)).toMatchObject({
+      status: "running",
+      childThreadId: writerId,
+    }), { timeout: 4000 });
+    return {
+      get db() { return db; },
+      native,
+      launch,
+      writerId,
+      submit: () => host.harness.callAgentTool(
+        "bb_workflow_result",
+        { value: "bounded plan" },
+        { threadId: writerId, projectId: request.projectId },
+      ),
+      async idle() {
+        native.status = "idle";
+        const event = {
+          thread: makeThreadResponse({ id: writerId, status: "idle" }),
+          lastAssistantText: null,
+        };
+        await Promise.all([
+          host.harness.emitThreadEvent("thread.idle", event),
+          host.harness.emitThreadEvent("thread.idle", event),
+        ]);
+      },
+      fail: () => host.harness.emitThreadEvent("thread.failed", {
+        thread: makeThreadResponse({ id: writerId, status: "error" }),
+        error: "Native writer failed before idle",
+      }),
+      cancel: () => host.harness.callRpc("workflowStopRun", {
+        threadId: request.originThreadId,
+        runId: launch.runId,
+      }),
+      async restart(status: "stopping" | "error") {
+        worker.controller.abort();
+        await worker.done;
+        expect(getCall(db, launch.runId, 0)).toMatchObject({
+          status: "running",
+          resultJson: '"bounded plan"',
+        });
+        native.status = status;
+        const replacement = await host.harness.reload(plugin);
+        hosts[hosts.indexOf(host)] = replacement;
+        host = replacement;
+        db = host.bb.storage.database();
+        worker = host.harness.runService("workflow-worker");
+      },
+      async dispose() {
+        worker.controller.abort();
+        await worker.done;
+      },
+    };
+  }
+
+  it("acknowledges a stored plan while native work continues, then delivers Build once after idle", async () => {
+    const test = await setupHandoff();
+    try {
+      await expect(test.submit()).resolves.toBe(JSON.stringify({ accepted: true }, null, 2));
+      await expect(test.submit()).resolves.toBe(JSON.stringify({ accepted: true }, null, 2));
+      expect(getCall(test.db, test.launch.runId, 0)).toMatchObject({
+        status: "running",
+        resultJson: '"bounded plan"',
+      });
+      expect(getCall(test.db, test.launch.runId, 1)).toBeNull();
+      expect(test.native.continuations).toEqual([]);
+      await test.idle();
+      await vi.waitFor(() => expect(getCall(test.db, test.launch.runId, 1)).toMatchObject({
+        status: "running",
+        childThreadId: test.writerId,
+      }), { timeout: 4000 });
+      expect(getCall(test.db, test.launch.runId, 0)?.status).toBe("succeeded");
+      expect(test.native.continuations).toEqual([test.writerId]);
+      expect(test.native.spawns).toBe(1);
+    } finally {
+      await test.dispose();
+    }
+  });
+
+  it.each(["failure", "cancellation"] as const)(
+    "%s after result acceptance cannot be converted into success by a late idle or duplicate result",
+    async (boundary) => {
+      const test = await setupHandoff();
+      try {
+        await test.submit();
+        if (boundary === "failure") await test.fail();
+        else await test.cancel();
+        const status = boundary === "failure" ? "failed" : "cancelled";
+        await vi.waitFor(() => expect(getRunRequired(test.db, test.launch.runId).status).toBe(status), { timeout: 4000 });
+        await test.idle();
+        await expect(test.submit()).resolves.toMatchObject({ isError: true });
+        expect(getCall(test.db, test.launch.runId, 0)).toMatchObject({
+          status,
+          resultJson: '"bounded plan"',
+        });
+        expect(getCall(test.db, test.launch.runId, 1)).toBeNull();
+        expect(test.native.continuations).toEqual([]);
+        expect(test.native.spawns).toBe(1);
+      } finally {
+        await test.dispose();
+      }
+    },
+  );
+
+  it.each(["stopping", "error"] as const)(
+    "reconciles a stored plan after restart with a native worker still %s without replaying an unconfirmed success",
+    async (status) => {
+      const test = await setupHandoff();
+      try {
+        await test.submit();
+        await test.restart(status);
+        if (status === "error") {
+          await vi.waitFor(() => expect(getRunRequired(test.db, test.launch.runId)).toMatchObject({
+            status: "failed",
+            error: "Workflow worker is in an error state",
+          }), { timeout: 4000 });
+          await test.idle();
+          expect(getCall(test.db, test.launch.runId, 0)).toMatchObject({
+            status: "failed",
+            resultJson: '"bounded plan"',
+          });
+          expect(getCall(test.db, test.launch.runId, 1)).toBeNull();
+          expect(test.native.continuations).toEqual([]);
+        } else {
+          await vi.waitFor(() => expect(getRunRequired(test.db, test.launch.runId).status).toBe("running"), { timeout: 4000 });
+          expect(getCall(test.db, test.launch.runId, 0)?.status).toBe("running");
+          expect(getCall(test.db, test.launch.runId, 1)).toBeNull();
+          await test.idle();
+          await vi.waitFor(() => expect(getCall(test.db, test.launch.runId, 1)).toMatchObject({
+            status: "running",
+            childThreadId: test.writerId,
+          }), { timeout: 4000 });
+          expect(test.native.continuations).toEqual([test.writerId]);
+        }
+        expect(test.native.spawns).toBe(1);
+      } finally {
+        await test.dispose();
+      }
+    },
+  );
 });

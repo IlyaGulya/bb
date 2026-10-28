@@ -463,7 +463,7 @@ export function recoverInterruptedRuns(db: Db): string[] {
       `UPDATE workflow_calls SET status = 'succeeded', error = NULL, finished_at = ?
        WHERE status = 'running' AND result_json IS NOT NULL AND run_id IN (
          SELECT id FROM workflow_runs WHERE status = 'running'
-       )`,
+       ) AND NOT EXISTS (SELECT 1 FROM workflow_build_reviews r WHERE r.run_id = workflow_calls.run_id)`,
     ).run(now);
     db.prepare(
       `UPDATE workflow_calls SET status = 'cancelled', error = 'Plugin restarted', finished_at = ?

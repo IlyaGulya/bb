@@ -147,6 +147,15 @@ The three sequential native calls are:
    changes, and executes the actual platform smoke commands.
 3. A separate reviewer inspects the change and evidence.
 
+For these managed calls, `bb_workflow_result` acknowledges a validated,
+persisted result without stopping the native turn or waiting for it to finish.
+Acceptance of that value is not successful call completion: only actual native
+idle, observed by an event or reconciliation, settles the call and releases the
+next phase. Plan therefore cannot deliver Build to a still-working/stopping
+writer. Restart preserves a stored-but-unconfirmed result as pending; native
+failure or workflow cancellation cannot turn it into success. Generic unmanaged
+workflows keep their existing structured-result completion behavior.
+
 The result package records the plan, branch, full commit, diff summary, command
 text/output/exit codes, UI evidence locations, limitations, independent review
 findings/verdict, and next decision. Every required smoke command must appear

@@ -422,6 +422,11 @@ and actual artifacts rather than trusting structured model claims. BB checks
 authoritative branch/commit identity and a clean working tree before/after
 review and on Accept.
 
+In this managed flow, a successful `bb_workflow_result` response means the
+value was persisted, not that the native turn finished. The next phase waits
+for actual worker idle (including reconciliation after restart). Failed or
+canceled work cannot be promoted merely because its result was already stored.
+
 Only after the human explicitly decides on the current result:
 
 ```sh
