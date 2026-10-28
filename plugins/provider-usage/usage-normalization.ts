@@ -1,4 +1,36 @@
 import type { UsageMeasurement } from "./usage-source-contract.js";
+import type { ProviderUsage } from "./usage-schema.js";
+
+export function normalizedUsage(
+  usage: UsageMeasurement["usage"] | undefined,
+): ProviderUsage | null {
+  if (usage === undefined) return null;
+  switch (usage.status) {
+    case "ok":
+      return {
+        status: "ok",
+        accountEmail: usage.accountEmail || null,
+        planLabel: usage.planLabel || null,
+        windows: usage.windows.map((window) => ({
+          label: window.label,
+          usedPercent: window.usedPercent,
+          resetsAt: window.resetsAt || null,
+          cost: window.cost ?? null,
+        })),
+      };
+    case "not_installed":
+      return { status: "not_installed" };
+    case "unauthenticated":
+      return { status: "unauthenticated" };
+    case "expired":
+      return { status: "expired" };
+    case "error":
+      return {
+        status: "error",
+        message: usage.message || "Usage could not be collected.",
+      };
+  }
+}
 
 export function normalizeUsageMeasurement(
   measurement: UsageMeasurement,

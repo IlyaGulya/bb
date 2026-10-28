@@ -3,6 +3,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type KeyboardEvent,
@@ -14,6 +15,9 @@ import {
   experimental_usePluginId,
   type ExperimentalSidebarFooterDisclosureProps,
   useBbContext,
+  useRpc,
+  useRealtime,
+  useRealtimeConnectionState,
 } from "@get-bb/plugin-sdk/app";
 import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
@@ -52,6 +56,9 @@ import {
 } from "./usage-feedback.js";
 
 import { UsageSettings } from "./settings.js";
+import { z } from "zod/mini";
+import type { providerUsageRpcContract } from "./server.js";
+import type { ThreadUsage } from "./thread-usage-schema.js";
 
 export interface UsageStoreSnapshot {
   data: UsageSnapshot | null;
@@ -914,6 +921,224 @@ export function ProviderUsageStatusContent({
   );
 }
 
+const usageChangeSchema = z.object({ changes: z.array(z.string()) });
+
+export function SelectedThreadUsage({
+  threadId,
+  pluginId,
+  snapshot,
+  threadMachineId,
+  dismiss,
+}: ExperimentalSidebarFooterDisclosureProps & {
+  threadId: string;
+  pluginId: string;
+  snapshot: UsageStoreSnapshot;
+  threadMachineId: string | null;
+}) {
+  const rpc = useRpc<typeof providerUsageRpcContract>();
+  const connectionState = useRealtimeConnectionState();
+  const [browseAll, setBrowseAll] = useState(false);
+  const [generation, setGeneration] = useState(0);
+  const [loaded, setLoaded] = useState<{
+    generation: number;
+    value: ThreadUsage;
+  } | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const sequence = useRef(0);
+  const forceNext = useRef(false);
+  const previousConnectionState = useRef(connectionState);
+  const invalidate = useCallback(() => {
+    sequence.current += 1;
+    setLoaded(null);
+    setFailed(false);
+    setGeneration((value) => value + 1);
+  }, []);
+  useRealtime("system:changed", (payload) => {
+    const parsed = usageChangeSchema.safeParse(payload);
+    if (parsed.success && parsed.data.changes.some((change) =>
+      change === "model-connections-changed" || change === "execution-contexts-changed",
+    )) invalidate();
+  });
+  useEffect(() => {
+    if (previousConnectionState.current !== connectionState) invalidate();
+    previousConnectionState.current = connectionState;
+  }, [connectionState, invalidate]);
+  useEffect(() => {
+    if (browseAll || connectionState !== "connected") return;
+    let disposed = false;
+    const load = async () => {
+      const request = ++sequence.current;
+      const force = forceNext.current;
+      forceNext.current = false;
+      try {
+        const value = await rpc.call("getThreadUsage", { threadId, force });
+        if (disposed || request !== sequence.current) return;
+        if (value.threadId !== threadId)
+          throw new Error("Usage response belongs to another thread");
+        setLoaded({ generation, value });
+        setFailed(false);
+      } catch {
+        if (disposed || request !== sequence.current) return;
+        setLoaded(null);
+        setFailed(true);
+      }
+    };
+    void load();
+    const refresh = () => {
+      if (document.visibilityState === "visible") invalidate();
+    };
+    const timer = window.setInterval(refresh, CARD_MAX_AGE_MS);
+    window.addEventListener("focus", refresh);
+    return () => {
+      disposed = true;
+      sequence.current += 1;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [rpc, threadId, generation, browseAll, connectionState, invalidate]);
+  const result = loaded?.generation === generation &&
+    loaded.value.threadId === threadId && connectionState === "connected"
+    ? loaded.value
+    : null;
+  if (browseAll) return (
+    <div data-provider-usage-scope="all-accounts">
+      <div className="flex items-center gap-2 border-b border-sidebar-border px-2.5 py-1.5">
+        <span className="min-w-0 flex-1 text-2xs text-subtle-foreground">
+          All accounts · maintenance, not the selected connection
+        </span>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 shrink-0 px-2 text-2xs"
+          onClick={() => { setBrowseAll(false); invalidate(); }}
+        >
+          Selected account
+        </Button>
+      </div>
+      <ProviderUsageStatusContent
+        pluginId={pluginId}
+        snapshot={snapshot}
+        threadMachineId={threadMachineId}
+        dismiss={dismiss}
+        machineSelectionStorageKey={`bb.${pluginId}.selected-machine.v1`}
+      />
+    </div>
+  );
+  const connection = result?.connection;
+  const account: UsageProvider | null = result?.usage && connection ? {
+    id: result.source?.resourceId ?? connection.id,
+    providerId: connection.providerId,
+    displayName: connection.providerName,
+    accountLabel: null,
+    logoUrl: null,
+    icon: null,
+    strings: { iconTint: null },
+    signInHint: "The selected source reports no authenticated login.",
+    expiredHint: "The selected source reports an expired login.",
+    usage: result.usage,
+  } : null;
+  const diagnostics = JSON.stringify({
+    threadId,
+    bindingCreatedAt: result?.bindingCreatedAt,
+    connection,
+    host: result?.host,
+    source: result?.source,
+    observedAt: result?.observedAt,
+    state: result?.state,
+  }, null, 2);
+  const copyDiagnostics = async () => {
+    try {
+      await navigator.clipboard.writeText(diagnostics);
+      setCopyStatus("Copied");
+    } catch {
+      setCopyStatus("Clipboard unavailable. Select the diagnostics to copy them.");
+    }
+  };
+  return (
+    <section
+      aria-label="Selected model connection usage"
+      data-provider-usage-scope="selected-connection"
+      className="flex max-h-80 flex-col"
+    >
+      <div className="flex min-h-9 items-center gap-1 border-b border-sidebar-border px-2.5">
+        <h2 className="min-w-0 flex-1 truncate text-2xs font-medium text-sidebar-foreground">
+          {connection?.name ?? "Selected account"}
+        </h2>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-2xs" onClick={() => setBrowseAll(true)}>
+          All accounts
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="size-7 p-0"
+          aria-label="Reload selected account usage"
+          onClick={() => { forceNext.current = true; invalidate(); }}
+        >
+          <Icon name="RotateCcw" className="size-3.5" />
+        </Button>
+        <Button size="sm" variant="ghost" className="size-7 p-0" aria-label="Collapse provider usage" onClick={dismiss}>
+          <Icon name="ChevronDown" className="size-4" />
+        </Button>
+      </div>
+      <div className="min-h-0 space-y-2 overflow-y-auto p-2.5 text-2xs">
+        {result === null ? failed ? (
+          <p role="alert" className="text-subtle-foreground">The selected connection could not be verified. No other account's usage is shown. Reload to retry.</p>
+        ) : connectionState !== "connected" ? (
+          <p role="status" className="text-subtle-foreground">Connection unavailable. Selected-account usage is unknown until BB reconnects.</p>
+        ) : <UsageSkeleton rows={2} /> : (
+          <>
+            {connection ? (
+              <p className="text-subtle-foreground">
+                {connection.providerName} · {connection.kind === "gateway" ? "Gateway" : "Native"}
+                {result.host ? ` · ${result.host.name}` : ""}
+              </p>
+            ) : null}
+            <p
+              role="status"
+              className={cn("font-medium", result.state === "exhausted" || result.state === "revoked" ? "text-destructive" : "text-sidebar-foreground")}
+            >
+              {result.state === "available" ? "Reported usage" : result.state === "not_installed" ? "Not installed" : result.state.charAt(0).toUpperCase() + result.state.slice(1)}
+            </p>
+            <p className="text-subtle-foreground">{result.reason}</p>
+            {connection?.definition === "changed" ? (
+              <p className="text-subtle-foreground">
+                The definition changed. This view retains the thread's frozen connection, not the edited selection.
+              </p>
+            ) : null}
+            {result.source ? (
+              <p className="text-subtle-foreground">
+                Source: {result.source.name}
+                {result.observedAt === null ? " · Never observed" : ` · Last observed ${new Date(result.observedAt).toLocaleString()}`}
+              </p>
+            ) : null}
+            {account ? (
+              <div className={cn(USAGE_GRID_CLASS_NAME, "gap-y-2")}>
+                <AccountUsage account={account} loading={false} unavailable={result.state === "stale"} showProvider={false} />
+              </div>
+            ) : null}
+            {result.usage?.status === "ok" && result.usage.planLabel !== null ? (
+              <p className="text-subtle-foreground">
+                Source-reported plan, not verified session account identity.
+              </p>
+            ) : null}
+          </>
+        )}
+        <details className="text-subtle-foreground">
+          <summary className="cursor-pointer rounded-sm py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+            Diagnostics
+          </summary>
+          <Button size="sm" variant="ghost" className="my-1 h-7 px-2 text-2xs" onClick={() => void copyDiagnostics()}>
+            Copy diagnostics
+          </Button>
+          {copyStatus ? <p role="status">{copyStatus}</p> : null}
+          <pre className="overflow-x-auto whitespace-pre-wrap break-all text-2xs">{diagnostics}</pre>
+        </details>
+      </div>
+    </section>
+  );
+}
+
 function ProviderUsageStatus(props: ExperimentalSidebarFooterDisclosureProps) {
   const pluginId = experimental_usePluginId();
   const snapshot = useSyncExternalStore(
@@ -929,13 +1154,25 @@ function ProviderUsageStatus(props: ExperimentalSidebarFooterDisclosureProps) {
         ?.id ?? null,
     [sidebarThreads.threads, threadId],
   );
-  return (
-    <ProviderUsageStatusContent
+  return threadId == null ? (
+    <div data-provider-usage-scope="all-accounts">
+      <p className="border-b border-sidebar-border px-2.5 py-1.5 text-2xs text-subtle-foreground">All accounts · host and pool maintenance observations</p>
+      <ProviderUsageStatusContent
+        {...props}
+        pluginId={pluginId}
+        snapshot={snapshot}
+        threadMachineId={threadMachineId}
+        machineSelectionStorageKey={`bb.${pluginId}.selected-machine.v1`}
+      />
+    </div>
+  ) : (
+    <SelectedThreadUsage
+      key={`${threadId}:${threadMachineId ?? "unknown"}`}
       {...props}
+      threadId={threadId}
       pluginId={pluginId}
       snapshot={snapshot}
       threadMachineId={threadMachineId}
-      machineSelectionStorageKey={`bb.${pluginId}.selected-machine.v1`}
     />
   );
 }

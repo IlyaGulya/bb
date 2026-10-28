@@ -416,11 +416,11 @@ export function UsageSettingsContent({
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-1.5">
             <h2 className="min-w-0 text-sm font-semibold text-foreground">
-              Usage limits
+              All accounts
             </h2>
           </div>
           <p className="mt-0.5 text-xs leading-snug text-subtle-foreground/75">
-            Your provider subscription usage.
+            Host and pool maintenance observations, separate from the thread's selected model connection.
           </p>
         </div>
         <div className="shrink-0 self-start">
