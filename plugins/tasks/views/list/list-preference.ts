@@ -100,6 +100,9 @@ export function sanitizeListPreference(raw: unknown): ListPreference {
         PRIORITY_SET,
       ),
       labelNames: uniqueLabelNames(filtersRaw.labelNames),
+      ...(typeof filtersRaw.parentTaskId === "string" && filtersRaw.parentTaskId.trim().length > 0
+        ? { parentTaskId: filtersRaw.parentTaskId.trim() }
+        : {}),
     },
     sort: sanitizeSort(record.sort),
   };

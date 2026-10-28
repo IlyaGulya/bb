@@ -2,7 +2,7 @@ Turn a plan into tracked tasks, hand each task to an agent, and see the worker's
 
 ## What you get
 
-- A **Tasks** panel with list and board views, filters, and a detail page for each task.
+- A **Tasks** panel with list and board views showing roots and subtasks in their own statuses, clickable parent badges, a **Parent/Epic** filter, and a detail page for each task. Counts, active-agent indicators, and previous/next navigation include subtasks; epic cards retain their child progress.
 - Projects with key prefixes such as `PROD-1`, nested folders, labels, priorities, due dates, subtasks, and file attachments.
 - Markdown comments with a **Notify last responding agent** switch. The comment goes to the worker thread and resumes it when idle.
 - A **Delegate** menu that starts a worker thread from a preset. A preset sets the provider, model, reasoning level, permission mode, and instructions.
@@ -20,6 +20,11 @@ Type `@` in the composer and choose **Tasks** to send a task as context. Agents 
 ## For agents
 
 The `bb tasks` CLI covers the full tracker: `create`, `list`, `show`, `update`, `move`, `comment`, `attachment`, `preset`, `delegate`, `attach`, `detach`, `threads`, `label`, `project`, and `folder`. Add `--json` for machine-readable output. The bundled `tasks` skill tells workers to read the task, comment at milestones, attach artifacts, and move finished work to `in_review`.
+
+`bb tasks list` includes subtasks by default. Use
+`bb tasks list --parent PROD-1 --status in_review --json` to find only that
+parent's direct children in review; parent filtering combines with the other
+list options. An explicit or inferred tracker project must match the parent.
 
 Use `bb tasks inbox --help` for intake, linking, resolution, snooze, source
 revisions, and history; `bb tasks working --json` reports current native work.

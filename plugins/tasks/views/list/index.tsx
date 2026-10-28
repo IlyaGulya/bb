@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useLabels, useListTasks, useTaskListMeta } from "./data.js";
+import { useLabels, useListTasks, useParentTasks, useTaskListMeta } from "./data.js";
 import {
   EMPTY_FILTERS,
   hasActiveFilters,
@@ -127,8 +127,16 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
     statuses: filters.statuses,
     priorities: filters.priorities,
     labelIds,
+    parentTaskId: filters.parentTaskId,
   });
   const meta = useTaskListMeta(projectId);
+  const parents = useParentTasks(projectId);
+  const parentsById = useMemo(
+    () => new Map((parents.data ?? [])
+      .filter((parent) => projectId === null || parent.projectId === projectId)
+      .map((parent) => [parent.id, parent])),
+    [parents.data, projectId],
+  );
   const edits = useListTaskEdits(tasksQuery.data, (message) => push(message));
 
   const labelsById = useMemo(
@@ -304,6 +312,7 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
             <TaskRow
               key={task.id}
               task={task}
+              parent={task.parentTaskId === null ? undefined : parentsById.get(task.parentTaskId)}
               meta={meta.data?.get(task.id)}
               project={projectsById.get(task.projectId)}
               showProject={showProject}
@@ -341,6 +350,7 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
         sort={sort}
         onSortChange={setSort}
         labelOptions={labelOptions}
+        parents={[...parentsById.values()]}
         taskCount={displayTasks?.length}
       />
       <div

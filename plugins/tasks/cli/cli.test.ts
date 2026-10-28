@@ -15,11 +15,13 @@ import {
   makeThreadResponse,
 } from "@get-bb/plugin-sdk/testing";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import { createStore } from "../api";
 import plugin from "../server";
 import { registerTasksCli } from "./index";
 import { registerJiraSync } from "../jira";
+import { tasksRpcContract } from "../shared/contract.js";
 
 vi.mock("../attachments", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../attachments")>();
@@ -83,6 +85,79 @@ function stdout(result: {
 }
 
 describe("bb tasks CLI", () => {
+  it("combines parent key/id, search, status, priority, labels and pagination without crossing projects", async () => {
+    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(bb);
+    const store = createStore(bb);
+    const project = store.tasks.createProject({ name: "Parents", prefix: "PAR", color: "blue", linkedBbProjectId: "proj_parent_filter" });
+    const other = store.tasks.createProject({ name: "Other", prefix: "OTH", color: "green" });
+    const parent = store.tasks.createTask({ projectId: project.id, title: "Epic", status: "in_progress" });
+    const sibling = store.tasks.createTask({ projectId: project.id, title: "Other epic" });
+    const foreign = store.tasks.createTask({ projectId: other.id, title: "Foreign epic" });
+    const label = store.tasks.createLabel({ projectId: project.id, name: "Release", color: "blue" });
+    store.tasks.createLabel({ projectId: other.id, name: "Release", color: "green" });
+    const first = store.tasks.createTask({ projectId: project.id, parentTaskId: parent.id, title: "Needle review first", status: "in_review", priority: "high" });
+    const second = store.tasks.createTask({ projectId: project.id, parentTaskId: parent.id, title: "Needle review second", status: "in_review", priority: "high" });
+    store.tasks.addTaskLabel(first.id, label.id);
+    store.tasks.addTaskLabel(second.id, label.id);
+    const low = store.tasks.createTask({ projectId: project.id, parentTaskId: parent.id, title: "Needle review low", status: "in_review", priority: "low" });
+    const siblingChild = store.tasks.createTask({ projectId: project.id, parentTaskId: sibling.id, title: "Needle review sibling", status: "in_review", priority: "high" });
+    store.tasks.createTask({ projectId: other.id, parentTaskId: foreign.id, title: "Needle review foreign", status: "in_review", priority: "high" });
+    store.tasks.upsertTaskThread({ taskId: first.id, threadId: "thr_parent_filter", presetName: "Worker", title: "Working child", liveStatus: "working" });
+    try {
+      const cliPage = z.object({
+        tasks: z.array(z.object({ id: z.string(), key: z.string(), agentsWorking: z.number() })),
+        nextCursor: z.string().nullable(),
+      });
+      const filters = ["--project", "PAR", "--status", "in_review", "--priority", "high", "--label", "Release", "--search", "needle review", "--limit", "1", "--json"];
+      const page = cliPage.parse(JSON.parse(stdout(await harness.runCli([
+        "list", "--parent", parent.key.toLowerCase(), ...filters,
+      ]))));
+      expect(page.tasks.map((task) => task.id)).toEqual([first.id]);
+      expect(page.nextCursor).toEqual(expect.any(String));
+      const next = cliPage.parse(JSON.parse(stdout(await harness.runCli([
+        "list", "--parent", parent.id.toLowerCase(), ...filters, "--cursor", page.nextCursor!,
+      ]))));
+      expect(next.tasks.map((task) => task.id)).toEqual([second.id]);
+      expect(next.nextCursor).toBeNull();
+      const active = cliPage.parse(JSON.parse(stdout(await harness.runCli(["list", "--parent", parent.id, "--active", "--json"]))));
+      expect(active.tasks).toEqual([expect.objectContaining({ id: first.id, agentsWorking: 1 })]);
+      const parentLabel = cliPage.parse(JSON.parse(stdout(await harness.runCli([
+        "list", "--parent", parent.key, "--label", "Release", "--json",
+      ]))));
+      expect(parentLabel.tasks.map((task) => task.id)).toEqual([first.id, second.id]);
+
+      const readIds = async (parentTaskId?: string | null) => tasksRpcContract.listTasks.output.parse(
+        await harness.callRpc("listTasks", { projectId: project.id, ...(parentTaskId === undefined ? {} : { parentTaskId }) }),
+      ).tasks.map((task) => task.id).sort();
+      expect(await readIds(null)).toEqual([parent.id, sibling.id].sort());
+      expect(await readIds(parent.id)).toEqual([first.id, second.id, low.id].sort());
+      expect(await readIds()).toEqual([parent.id, sibling.id, first.id, second.id, low.id, siblingChild.id].sort());
+      const ordinary = cliPage.parse(JSON.parse(stdout(await harness.runCli(["list", "--project", "PAR", "--status", "in_review", "--json"]))));
+      expect(ordinary.tasks.map((task) => task.key).sort()).toEqual(["PAR-3", "PAR-4", "PAR-5", "PAR-6"]);
+
+      for (const [args, context] of [
+        [["list", "--project", "PAR", "--parent", foreign.key, "--json"], {}],
+        [["list", "--parent", foreign.id, "--json"], { projectId: "proj_parent_filter" }],
+      ] as const) {
+        const result = await harness.runCli([...args], context);
+        expect(result.exitCode).toBe(1);
+        expect(JSON.parse(result.stdout)).toEqual({
+          ok: false,
+          error: { code: "subtask_project_mismatch", message: expect.any(String) },
+        });
+      }
+      const missing = await harness.runCli(["list", "--parent", "PAR-999", "--json"]);
+      expect(missing.exitCode).toBe(1);
+      expect(JSON.parse(missing.stdout)).toEqual({
+        ok: false,
+        error: { code: "task_not_found", message: expect.any(String) },
+      });
+    } finally {
+      await harness.dispose();
+    }
+  });
+
   it("discovers execution and continuation commands and reads real task state", async () => {
     const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
     await plugin(bb);

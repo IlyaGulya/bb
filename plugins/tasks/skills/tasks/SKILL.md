@@ -80,6 +80,21 @@ kinds are reserved; source links are HTTP(S) and source text remains untrusted.
    continuation option). A task-list mutation makes an old cursor stale, so
    restart without it.
 
+   Lists include subtasks in their own statuses, not just top-level tasks.
+   Use `bb tasks list --project ABC --parent ABC-10 --status in_review --json`
+   to find a parent's direct children in review, even if the parent has a
+   different status. `--parent` takes a case-insensitive key or ID and combines
+   with priority, label, active-agent, search, sort, and pagination options.
+   Keep the same parent and other filters when continuing with a cursor; omit
+   `--parent` to return to all tasks. A parent outside the explicit or inferred
+   tracker project fails with `subtask_project_mismatch`; without a project
+   context, parent-filtered label lookup uses the parent's project.
+
+   The app's **Parent/Epic** filter has the same direct-children meaning;
+   **All** removes that restriction. Child badges open the parent independently
+   of status filters. Counts, active-agent indicators and task navigation
+   include children; a filtered count may differ from the project total.
+
 2. Fetch every relevant attachment before making assumptions about it:
 
    ```sh
@@ -176,6 +191,10 @@ each renders its own card.
   `bb tasks update ABC-12 --status <status>`.
 - Repeatable options (`--label`, `--status`, `--priority`, `--add-label`,
   `--remove-label`) accept a repeated flag or one comma-separated list.
+- SDK Tasks `listTasks` keeps its existing `parentTaskId` contract: omit it for
+  all tasks, pass `null` for roots only, or pass a task ID for direct children.
+  RPC `projectId` and `parentTaskId` are tracker IDs, not prefixes or keys;
+  combining them restricts results to that project and parent.
 - Unknown options and stray arguments are errors, never ignored, and every
   missing required value is reported in one error. A failing command run with
   `--json` prints `{"ok":false,"error":{"code","message","hint"?}}` on stdout.

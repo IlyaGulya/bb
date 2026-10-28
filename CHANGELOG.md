@@ -12,6 +12,13 @@
   for both roles: independent review uses a fresh separate native conversation,
   not a mandatory model-diversity heuristic. Retain writer/reviewer identities
   through Return, quiescence, Core admission, delivery fencing and human Accept.
+- Show subtasks in Tasks List and Board under their own statuses, with clickable
+  parent key/title badges and a composable Parent/Epic filter. Include children
+  in project/sidebar totals, active-agent indicators and task navigation while
+  preserving epic progress and live updates. Add `bb tasks list --parent
+  <key-or-id>` with existing search/filter/pagination options and cross-project
+  validation; retain SDK `parentTaskId` omit/all, null/roots and ID/children
+  semantics.
 - Extend explicit CPA gateway model connections to native OMP, Claude Code and
   Codex with per-engine protocols, worker-local credential references, allowed
   hosts and exact account-prefixed models. Native sessions remain native;

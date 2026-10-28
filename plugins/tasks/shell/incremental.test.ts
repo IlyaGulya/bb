@@ -126,7 +126,7 @@ describe("patchTasks", () => {
 });
 
 describe("patchBoard", () => {
-  it("shows subtasks promoted by deleting their parent as cards", async () => {
+  it("keeps children visible when deleting their parent", async () => {
     const { harness, store, project, rpc, taskSignals } = setup();
     const parent = store.tasks.createTask({
       projectId: project.id,
@@ -138,13 +138,13 @@ describe("patchBoard", () => {
       parentTaskId: parent.id,
     });
     const current = await fetchBoard(rpc, project.id);
-    expect(current.tasks.map((task) => task.id)).toEqual([parent.id]);
+    expect(current.tasks.map((task) => task.id)).toEqual([parent.id, child.id]);
 
     await harness.callRpc("deleteTask", { taskId: parent.id });
     const next = await patchBoard(rpc, project.id, current, taskSignals());
 
     expect(next?.tasks.map((task) => task.id)).toEqual([child.id]);
-    expect(next?.subtasks).toEqual([]);
+    expect(next?.tasks[0]?.parentTaskId).toBeNull();
   });
 
   it("re-reads only the changed card", async () => {
@@ -195,8 +195,10 @@ describe("patchBoard", () => {
 describe("listTasksQuery", () => {
   it("finds a working task in Active without an explicit status filter", async () => {
     const { store, project, rpc } = setup();
+    const parent = store.tasks.createTask({ projectId: project.id, title: "Epic" });
     const task = store.tasks.createTask({
       projectId: project.id,
+      parentTaskId: parent.id,
       title: "Currently working",
       status: "todo",
     });

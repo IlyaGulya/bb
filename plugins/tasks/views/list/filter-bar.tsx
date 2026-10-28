@@ -4,6 +4,7 @@ import {
   TASK_STATUSES,
   type TaskPriority,
   type TaskStatus,
+  type Task,
 } from "../../shared/contract.js";
 import { TASK_SORTS, type TaskSort } from "../../shared/pagination.js";
 import {
@@ -61,7 +62,7 @@ function FilterChip({
           ) : null}
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-44">
+      <DropdownMenuContent align="start" className="min-w-44" mobileTitle={`Filter by ${label}`}>
         {children}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -112,6 +113,7 @@ export interface ListFilterState {
   statuses: TaskStatus[];
   priorities: TaskPriority[];
   labelNames: string[];
+  parentTaskId?: string;
 }
 
 export const EMPTY_FILTERS: ListFilterState = {
@@ -124,7 +126,8 @@ export function hasActiveFilters(filters: ListFilterState): boolean {
   return (
     filters.statuses.length > 0 ||
     filters.priorities.length > 0 ||
-    filters.labelNames.length > 0
+    filters.labelNames.length > 0 ||
+    filters.parentTaskId !== undefined
   );
 }
 
@@ -134,6 +137,7 @@ export function ListFilterBar({
   sort,
   onSortChange,
   labelOptions,
+  parents,
   taskCount,
 }: {
   filters: ListFilterState;
@@ -141,11 +145,13 @@ export function ListFilterBar({
   sort: TaskSort;
   onSortChange: (sort: TaskSort) => void;
   labelOptions: readonly LabelFilterOption[];
+  parents: readonly Task[];
   taskCount: number | undefined;
 }) {
   const keepOpen = (event: Event) => event.preventDefault();
   const showLabelChip =
     labelOptions.length > 0 || filters.labelNames.length > 0;
+  const selectedParent = parents.find((parent) => parent.id === filters.parentTaskId);
   return (
     <div className="flex shrink-0 items-center gap-1.5 border-b border-border-hairline px-3.5 py-1.5">
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
@@ -269,6 +275,31 @@ export function ListFilterBar({
               ))}
           </FilterChip>
         ) : null}
+        <FilterChip
+          icon="GitBranch"
+          label={filters.parentTaskId === undefined ? "Parent/Epic: All" : "Parent/Epic"}
+          selectedNames={filters.parentTaskId === undefined ? [] : [
+            selectedParent ? `${selectedParent.key} · ${selectedParent.title}` : "Unavailable parent",
+          ]}
+        >
+          <DropdownMenuCheckboxItem
+            checked={filters.parentTaskId === undefined}
+            onCheckedChange={() => onChange({ ...filters, parentTaskId: undefined })}
+          >
+            All
+          </DropdownMenuCheckboxItem>
+          {parents.map((parent) => (
+            <DropdownMenuCheckboxItem
+              key={parent.id}
+              checked={filters.parentTaskId === parent.id}
+              onCheckedChange={() => onChange({ ...filters, parentTaskId: parent.id })}
+            >
+              <span className="max-w-72 truncate" title={`${parent.key} · ${parent.title}`}>
+                {parent.key} · {parent.title}
+              </span>
+            </DropdownMenuCheckboxItem>
+          ))}
+        </FilterChip>
         {hasActiveFilters(filters) ? (
           <button
             type="button"

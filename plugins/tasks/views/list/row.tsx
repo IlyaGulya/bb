@@ -16,6 +16,7 @@ import {
   StatusEditor,
   TaskContextMenu,
 } from "./property-menus.js";
+import { ParentBadge } from "../../components/parent-badge.js";
 
 const RAIL_CHIP_CLASS =
   "flex items-center gap-1 rounded-md border border-border px-1.5 py-px text-xs text-muted-foreground";
@@ -91,6 +92,7 @@ function LabelChips({
 
 interface TaskRowProps {
   task: Task;
+  parent: Task | undefined;
   meta: TaskRowMeta | undefined;
   project: Project | undefined;
   showProject: boolean;
@@ -105,6 +107,7 @@ interface TaskRowProps {
 
 export const TaskRow = memo(function TaskRow({
   task,
+  parent,
   meta,
   project,
   showProject,
@@ -173,6 +176,7 @@ export const TaskRow = memo(function TaskRow({
           {task.title}
         </span>
         <span className="col-start-3 row-start-2 flex min-w-0 items-center gap-1.5 justify-self-end text-xs text-subtle-foreground @max-md:overflow-hidden @md:shrink-0">
+          {parent ? <ParentBadge parent={parent} onOpen={onOpen} /> : null}
           {meta ? <ActiveChip threads={meta.activeThreads} /> : null}
           <LabelChips task={task} labelsById={labelsById} />
           {task.dueDate !== null ? (

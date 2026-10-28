@@ -1478,6 +1478,11 @@ export function registerTasksCli(
               description:
                 "Keep only tasks carrying these label names; repeat or comma-separate",
             },
+            parent: {
+              type: "string",
+              placeholder: "key-or-id",
+              description: "Keep only direct children of this parent/epic task",
+            },
             active: {
               type: "boolean",
               description: "Keep only tasks with a live agent thread",
@@ -1517,7 +1522,16 @@ export function registerTasksCli(
                 input.options.project,
                 false,
               );
-              const projects = project ? [project] : await listProjects(domain);
+              const parent = input.options.parent === undefined
+                ? undefined
+                : await resolveTask(domain, input.options.parent);
+              if (parent && project && parent.projectId !== project.id) {
+                throw new CliError("parent task belongs to another project", {
+                  code: "subtask_project_mismatch",
+                });
+              }
+              const projects = project ? [project] : (await listProjects(domain))
+                .filter((candidate) => parent === undefined || candidate.id === parent.projectId);
               const labelById = await labelsForTaskList(domain, projects);
               const labelIds = input.options.label.map((name) => {
                 const matches = [...labelById.values()].filter(
@@ -1552,6 +1566,7 @@ export function registerTasksCli(
                         : undefined,
                     labelIds: labelIds.length > 0 ? labelIds : undefined,
                     activeOnly: input.options.active,
+                    parentTaskId: parent?.id,
                     search: input.options.search,
                     sort: input.options.sort,
                     limit,

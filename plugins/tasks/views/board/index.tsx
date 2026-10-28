@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -29,7 +30,12 @@ import {
   type BoardCardMeta,
   type BoardData,
 } from "./board-data.js";
-import { STATUS_LABELS } from "../list/lib.js";
+import { labelFilterOptions, selectedLabelIds, STATUS_LABELS } from "../list/lib.js";
+import { EMPTY_FILTERS, ListFilterBar, type ListFilterState } from "../list/filter-bar.js";
+import { matchesFilters } from "../list/optimistic.js";
+import { sortTasks } from "../../shared/sort.js";
+import type { TaskSort } from "../../shared/pagination.js";
+import { ParentBadge } from "../../components/parent-badge.js";
 import { Button } from "@/components/ui/button";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
 import { Icon } from "@/components/ui/icon";
@@ -83,6 +89,8 @@ function WorkingAgentsChip({ threads }: { threads: TaskThread[] }) {
 
 interface TaskCardProps {
   task: Task;
+  parent: Task | undefined;
+  onOpenParent: (taskKey: string) => void;
   labelsById: Map<string, Label>;
   meta: BoardCardMeta;
   ghost?: boolean;
@@ -94,6 +102,8 @@ interface TaskCardProps {
 
 function TaskCard({
   task,
+  parent,
+  onOpenParent,
   labelsById,
   meta,
   ghost = false,
@@ -126,6 +136,7 @@ function TaskCard({
       <div className="mt-1 line-clamp-2 text-sm leading-snug font-medium">
         {task.title}
       </div>
+      {parent ? <div className="mt-1.5"><ParentBadge parent={parent} onOpen={onOpenParent} /></div> : null}
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
         <PriorityIcon priority={task.priority} />
         {labels.map((label) => (
@@ -196,13 +207,40 @@ export function BoardView({ projectId }: BoardViewProps) {
     },
   );
 
+  const [filters, setFilters] = useState<ListFilterState>(EMPTY_FILTERS);
+  const [sort, setSort] = useState<TaskSort>("manual");
+  useEffect(() => {
+    setFilters(EMPTY_FILTERS);
+    setSort("manual");
+  }, [projectId]);
+  const parentsById = useMemo(
+    () => new Map((board.data?.tasks ?? [])
+      .filter((task) => task.projectId === projectId && task.parentTaskId === null)
+      .map((task) => [task.id, task])),
+    [board.data, projectId],
+  );
+  const labelOptions = useMemo(
+    () => labelFilterOptions([...(board.data?.labelsById.values() ?? [])]),
+    [board.data],
+  );
+  const visibleTasks = useMemo(() => {
+    if (board.data === undefined) return undefined;
+    const labelIds = selectedLabelIds(labelOptions, filters.labelNames);
+    return sortTasks(board.data.tasks.filter((task) =>
+      task.projectId === projectId &&
+      (filters.parentTaskId === undefined || task.parentTaskId === filters.parentTaskId) &&
+      (filters.labelNames.length === 0 || labelIds.length > 0) &&
+      matchesFilters(task, filters.statuses, filters.priorities, labelIds),
+    ), sort);
+  }, [board.data, projectId, filters, labelOptions, sort]);
+
   const [columns, setColumns] = useState<ColumnMap | undefined>(undefined);
   useEffect(() => {
     setColumns(undefined);
   }, [projectId]);
   useEffect(() => {
-    if (board.data) setColumns(groupColumns(board.data.tasks));
-  }, [board.data]);
+    if (visibleTasks) setColumns(groupColumns(visibleTasks));
+  }, [visibleTasks]);
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
 
@@ -405,6 +443,8 @@ export function BoardView({ projectId }: BoardViewProps) {
         <TaskCard
           key={task.id}
           task={task}
+          parent={task.parentTaskId === null ? undefined : parentsById.get(task.parentTaskId)}
+          onOpenParent={(taskKey) => navigation.go({ kind: "task", taskKey })}
           labelsById={labelsById}
           meta={metaByTaskId.get(task.id) ?? EMPTY_META}
           dragging={drag?.taskId === task.id}
@@ -456,39 +496,52 @@ export function BoardView({ projectId }: BoardViewProps) {
   };
 
   return (
-    <div
-      ref={boardRef}
-      className={cn(
-        "flex h-full items-start gap-3 overflow-x-auto p-4",
-        drag !== null && "cursor-grabbing",
-      )}
-    >
-      {visibleBoardStatuses(columns).map(renderColumn)}
-      {drag && ghostTask ? (
-        <div
-          className="pointer-events-none fixed z-50"
-          style={{
-            left: drag.x - drag.offsetX,
-            top: drag.y - drag.offsetY,
-            width: drag.width,
-          }}
-        >
-          <TaskCard
-            task={ghostTask}
-            labelsById={labelsById}
-            meta={metaByTaskId.get(ghostTask.id) ?? EMPTY_META}
-            ghost
-          />
-        </div>
-      ) : null}
-      <NewTaskDialog
-        open={quickAddStatus !== null}
-        onOpenChange={(open) => {
-          if (!open) setQuickAddStatus(null);
-        }}
-        projectId={projectId}
-        defaultStatus={quickAddStatus ?? undefined}
+    <div className="flex h-full min-h-0 flex-col">
+      <ListFilterBar
+        filters={filters}
+        onChange={setFilters}
+        sort={sort}
+        onSortChange={setSort}
+        labelOptions={labelOptions}
+        parents={[...parentsById.values()]}
+        taskCount={visibleTasks?.length}
       />
+      <div
+        ref={boardRef}
+        className={cn(
+          "flex min-h-0 flex-1 items-start gap-3 overflow-x-auto p-4",
+          drag !== null && "cursor-grabbing",
+        )}
+      >
+        {visibleBoardStatuses(columns).map(renderColumn)}
+        {drag && ghostTask ? (
+          <div
+            className="pointer-events-none fixed z-50"
+            style={{
+              left: drag.x - drag.offsetX,
+              top: drag.y - drag.offsetY,
+              width: drag.width,
+            }}
+          >
+            <TaskCard
+              task={ghostTask}
+              parent={ghostTask.parentTaskId === null ? undefined : parentsById.get(ghostTask.parentTaskId)}
+              onOpenParent={(taskKey) => navigation.go({ kind: "task", taskKey })}
+              labelsById={labelsById}
+              meta={metaByTaskId.get(ghostTask.id) ?? EMPTY_META}
+              ghost
+            />
+          </div>
+        ) : null}
+        <NewTaskDialog
+          open={quickAddStatus !== null}
+          onOpenChange={(open) => {
+            if (!open) setQuickAddStatus(null);
+          }}
+          projectId={projectId}
+          defaultStatus={quickAddStatus ?? undefined}
+        />
+      </div>
     </div>
   );
 }
