@@ -255,7 +255,6 @@ export function DispatchControl({
             primarySegment,
           )}
           aria-label={current ? `Run single agent with ${current.name}` : "Run single agent"}
-          title={current ? `Run single agent · ${current.name}` : "Run single agent"}
           onClick={() => {
             if (execution?.override) void dispatch();
             else if (current) pickPreset(current);
