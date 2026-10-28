@@ -137,7 +137,7 @@ it.each(["pending acknowledgement", "failed save"] as const)("first-writer retry
   try {
     fireEvent.click(await slot.findByRole("button", { name: "Workflow details" }));
     const dialog = await slot.findByRole("dialog", { name: "Launch workflow" });
-    const writer = within(dialog).getByRole("group", { name: "Writer" });
+    const writer = await within(dialog).findByRole("group", { name: "Writer" });
     fireEvent.click(writer.querySelector("summary")!);
     fireEvent.click(await within(writer).findByRole("combobox", { name: "Writer context" }));
     fireEvent.click(await slot.findByRole("option", { name: "Repaired context" }));

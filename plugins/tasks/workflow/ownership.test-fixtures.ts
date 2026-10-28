@@ -21,7 +21,7 @@ export function seedWorkflowOwnership(
   };
   const request: BuildReviewStart = {
     key: "owned-workflow:1", group: "owned-workflow", projectId,
-    originThreadId: "owned-prepared-context", task: task.title,
+    originThreadId: "thr_ownedpreparedcontext", task: task.title,
     template: "development-review", writer: profile,
     reviewer: { ...profile, instructions: "Independent fresh reviewer" },
     smokeCommands: ["owned-platform-smoke"], uiRequired: false, feedback: "",
@@ -38,8 +38,8 @@ export function seedWorkflowOwnership(
       runId: "owned-native-run", key: request.key, contextStarted: true,
       status: "succeeded", phase: "Independent review", error: null,
       workers: [
-        { role: "writer", threadId: "owned-retained-writer", callIndex: 1 },
-        { role: "reviewer", threadId: "owned-retained-reviewer", callIndex: 2 },
+        { role: "writer", threadId: "thr_ownedretainedwriter", callIndex: 1 },
+        { role: "reviewer", threadId: "thr_ownedretainedreviewer", callIndex: 2 },
       ],
       result: {
         plan: "Owned consumer change",
