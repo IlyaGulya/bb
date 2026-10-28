@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { makeTask } from "../test-fixtures.js";
 import type { Task } from "../shared/contract.js";
+import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createStore, registerTasksApi } from "../api/index.js";
+import { tasksRpcContract } from "../shared/contract.js";
+import { registerTaskWorkflows } from "../workflow/index.js";
+import { workflowRpcContract } from "../shared/workflow-contract.js";
+import { workflowSetupContract } from "../shared/workflow-preparation.js";
 
 const app = await loadPluginApp(() => import("../app"));
 const { parseTasksRoute, tasksRouteToSubPath } = await import("./routes.js");
@@ -18,11 +24,13 @@ const navigationRegistration = {
   ...tasksRegistration,
   component: navigationView.component,
 };
+const keyboardHosts: Array<ReturnType<typeof createFakePluginHost>> = [];
 
 beforeEach(() => window.localStorage.clear());
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.restoreAllMocks();
+  await Promise.all(keyboardHosts.splice(0).map(host => host.harness.dispose()));
 });
 
 const PROJECT_ID = "01HZZZZZZZZZZZZZZZZZZZZZP1";
@@ -981,6 +989,50 @@ describe("tasks app shell", () => {
     await slot.findByRole("dialog");
     fireEvent.keyDown(window, { key: "c" });
     expect(slot.getAllByRole("dialog")).toHaveLength(1);
+  });
+
+  it.each(["c", "Escape"] as const)("restores TasksShell %s after closing a realized workflow drawer", async key => {
+    const host = createFakePluginHost({ pluginId: "tasks" });
+    keyboardHosts.push(host);
+    const store = createStore(host.bb);
+    registerTasksApi(host.bb, store);
+    registerTaskWorkflows(host.bb, store, { background: false });
+    const project = store.tasks.createProject({ name: "Keyboard project", prefix: "KBD", color: "blue" });
+    const task = store.tasks.createTask({ projectId: project.id, title: "Owned keyboard task" });
+    const rpc = Object.fromEntries([...Object.keys(tasksRpcContract), ...Object.keys(workflowRpcContract), ...Object.keys(workflowSetupContract)].map(method => [method, (input: unknown) => host.harness.callRpc(method, input)]));
+    const slot = renderSlot(app.navPanels[0]!, { subPath: `task/${task.key}` }, {
+      sdk: {
+        experimental_executionContexts: { list: async () => [] },
+        experimental_modelConnections: { list: async () => [] },
+      },
+      rpc: {
+        ...rpc,
+        listMachines: () => ({ machines: [] }),
+        listBbProjects: () => ({ bbProjects: [] }),
+        getTaskRepositories: () => ({ checkpoints: [] }),
+        getTaskExecution: () => ({ override: null, resolved: null, inherited: true, summary: "No executor configured" }),
+      },
+    });
+    const trigger = await slot.findByRole("button", { name: "Launch workflow" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const drawer = await slot.findByRole("dialog", { name: "Launch workflow" });
+    await within(drawer).findByRole("button", { name: "Close", exact: true });
+    fireEvent.keyDown(window, { key: "c" });
+    expect(slot.queryByPlaceholderText("Task title")).toBeNull();
+    expect(slot.navigateCalls).toEqual([]);
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(slot.queryByRole("dialog", { name: "Launch workflow" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(slot.navigateCalls).toEqual([]);
+    fireEvent.keyDown(window, { key });
+    if (key === "c") {
+      const create = await slot.findByRole("dialog");
+      expect(within(create).getByRole("textbox", { name: "Task title" })).toBeDefined();
+    } else {
+      await waitFor(() => expect(slot.navigateCalls).toContainEqual({ method: "toPluginPanel", path: "tasks", options: { subPath: "all" } }));
+    }
+    expect(store.tasks.getTask(task.id)?.title).toBe("Owned keyboard task");
   });
 
   it("marks only new-worktree presets with the worktree hint", async () => {

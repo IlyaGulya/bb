@@ -9,6 +9,7 @@ import { JiraStore } from "../jira/store";
 import { handlers, registerDelegation } from ".";
 import { delegationRpcContract } from "./contract";
 import { ExecutionStore } from "./execution-store";
+import { HELD_WORKFLOW_STATES, seedWorkflowOwnership } from "../workflow/ownership.test-fixtures.js";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -647,5 +648,54 @@ describe("task native workspace continuation", () => {
     gate.emit("release");
     await continuation;
     expect(harness.sdk.callsTo("threads.spawn")).toHaveLength(1);
+  });
+});
+
+describe("durable workflow ownership across single-agent execution", () => {
+  it.each(HELD_WORKFLOW_STATES)("fences delegation into the workflow workspace while ownership is %s", async state => {
+    const fixture = setup();
+    const { harness, store, task, target } = fixture;
+    const owner = seedWorkflowOwnership(store, task.id, "proj_code", state);
+    const attached = store.tasks.listTaskThreads(task.id).map(thread => thread.threadId).sort();
+    const status = store.tasks.getTask(task.id)?.status;
+    const outcome = await harness.callRpc("delegate", {
+      taskId: task.id,
+      executionTarget: { ...target, workspace: { kind: "existing-environment", environmentId: "env_target" } },
+    }).then(value => ({ value, error: null }), (error: unknown) => ({ value: null, error }));
+    expect(fixture.state.spawned).toBe(false);
+    expect(store.tasks.listTaskThreads(task.id).map(thread => thread.threadId).sort()).toEqual(attached);
+    expect(store.tasks.getTask(task.id)?.status).toBe(status);
+    expect(owner.workflows.get(owner.request.group)).toEqual(owner.view);
+    expect(outcome).toMatchObject({ value: null, error: expect.any(Error) });
+  });
+
+  it.each(HELD_WORKFLOW_STATES)("permits continuation inspection but fences a continuation writer while ownership is %s", async state => {
+    const fixture = setup();
+    const { harness, store, task, input, attachSource } = fixture;
+    attachSource();
+    const owner = seedWorkflowOwnership(store, task.id, "proj_code", state);
+    const attached = store.tasks.listTaskThreads(task.id).map(thread => thread.threadId).sort();
+    expect(await harness.callRpc("previewTaskContinuation", { taskId: task.id, sourceThreadId: input.sourceThreadId, targetHostId: input.targetHostId })).toMatchObject({ sourceEnvironmentId: "env_source", sourceHostId: "host_source", activeThreadIds: [] });
+    expect(fixture.state.spawned).toBe(false);
+    const outcome = await harness.callRpc("continueTask", input).then(value => ({ value, error: null }), (error: unknown) => ({ value: null, error }));
+    expect(fixture.state.spawned).toBe(false);
+    expect(harness.sdk.callsTo("projects.transferWorkspace")).toEqual([]);
+    expect(store.tasks.listTaskThreads(task.id).map(thread => thread.threadId).sort()).toEqual(attached);
+    expect(owner.workflows.get(owner.request.group)).toEqual(owner.view);
+    expect(outcome).toMatchObject({ value: null, error: expect.any(Error) });
+  });
+
+  it.each(["delegate", "continueTask"] as const)("admits %s after human acceptance and release of workflow ownership", async method => {
+    const fixture = setup();
+    const { harness, store, task, target, input, attachSource } = fixture;
+    if (method === "continueTask") attachSource();
+    const owner = seedWorkflowOwnership(store, task.id, "proj_code", "released");
+    const result = method === "delegate"
+      ? await harness.callRpc(method, { taskId: task.id, executionTarget: target })
+      : await harness.callRpc(method, input);
+    expect(result).toMatchObject({ threadId: "thr_continued" });
+    expect(store.tasks.getTaskThreadByThreadId(task.id, "thr_continued")).toMatchObject({ threadId: "thr_continued" });
+    expect(owner.workflows.get(owner.request.group)).toMatchObject({ state: "accepted", revision: 1 });
+    expect(fixture.state.spawned).toBe(true);
   });
 });

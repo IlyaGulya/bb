@@ -12,6 +12,7 @@ import {
 } from "../shared/repositories";
 import { repositoryHandlers } from ".";
 import { RepositoryStore } from "./store";
+import { HELD_WORKFLOW_STATES, seedWorkflowOwnership } from "../workflow/ownership.test-fixtures.js";
 
 type TransferArgs = Parameters<
   BbPluginApi["sdk"]["projects"]["transferWorkspace"]
@@ -591,5 +592,34 @@ describe("coherent task repository workspaces", () => {
         f.bindings[1],
       ]).success,
     ).toBe(false);
+  });
+});
+
+describe("durable workflow ownership across aggregate repository execution", () => {
+  it.each(HELD_WORKFLOW_STATES)("permits isolated repository preparation but fences its aggregate writer while ownership is %s", async state => {
+    const fixture = setup();
+    const owner = seedWorkflowOwnership(fixture.store, fixture.task.id, "proj_android", state);
+    const checkpoint = await fixture.prepare({ taskId: fixture.task.id, bindings: fixture.bindings });
+    expect(checkpoint.state).toBe("ready");
+    expect(checkpoint.roots.every(root => root.state === "ready" && root.environmentId !== null)).toBe(true);
+    expect(fixture.state.spawned).toBeNull();
+    const attached = fixture.store.tasks.listTaskThreads(fixture.task.id).map(thread => thread.threadId).sort();
+    const outcome = await Promise.resolve(fixture.handlers.continueTaskRepositories({ taskId: fixture.task.id, checkpointId: checkpoint.id })).then(value => ({ value, error: null }), (error: unknown) => ({ value: null, error }));
+    expect(fixture.state.spawned).toBeNull();
+    expect(new RepositoryStore(fixture.store).get(checkpoint.id)).toEqual(checkpoint);
+    expect(fixture.store.tasks.listTaskThreads(fixture.task.id).map(thread => thread.threadId).sort()).toEqual(attached);
+    expect(owner.workflows.get(owner.request.group)).toEqual(owner.view);
+    expect(outcome).toMatchObject({ value: null, error: expect.any(Error) });
+  });
+
+  it("admits the aggregate repository writer after human acceptance and workflow ownership release", async () => {
+    const fixture = setup();
+    const owner = seedWorkflowOwnership(fixture.store, fixture.task.id, "proj_android", "released");
+    const checkpoint = await fixture.prepare({ taskId: fixture.task.id, bindings: fixture.bindings });
+    const continued = await fixture.handlers.continueTaskRepositories({ taskId: fixture.task.id, checkpointId: checkpoint.id });
+    expect(continued.roots.every(root => root.state === "started" && root.threadId === "thr_coherent")).toBe(true);
+    expect(fixture.store.tasks.getTaskThreadByThreadId(fixture.task.id, "thr_coherent")).toMatchObject({ threadId: "thr_coherent" });
+    expect(owner.workflows.get(owner.request.group)).toMatchObject({ state: "accepted", revision: 1 });
+    expect(fixture.state.spawned).toMatchObject({ projectId: "proj_android", environment: { type: "reuse", environmentId: checkpoint.roots[0]!.environmentId } });
   });
 });
