@@ -2,6 +2,10 @@
 
 ## AgentOS fork — unreleased
 
+- Admit the existing `capture.exchange` result in the successful host RPC
+  response union so the real Core consumer can receive artifacts and propagate
+  durable privacy dispositions. Keep all authored assertions and controls;
+  this narrow amendment remains unexecuted and unactivated pending parent proof.
 - Correct private-capture credential decoding, recognized pending-publication
   recovery, complete-spool readiness, independent expiry cleanup, persisted-ACK
   reconciliation and bounded CPA snapshot reads. Reject forbidden binary key

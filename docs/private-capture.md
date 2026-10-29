@@ -210,22 +210,33 @@ using the new required manifest fields. No old-host compatibility is claimed.
 
 ## Stopped verification and remaining parent proof
 
-This agent has run no build, typecheck, test, lint, formatter, install, runtime
-smoke, browser, network/model/auth/business probe or capture activation for the
-corrective source. No authored assertion or control from the tests-only
-checkpoint `50c5288` is changed. Parent's observed before results were Domain
-7 FAIL / 1 PASS, private FS 1 FAIL / 2 PASS, host 8 FAIL, and CPA growth 1 FAIL /
-2 PASS. Those observations are accepted without rerunning them here. New source
-corrections are unexecuted and have no passing/READY claim.
+Parent integrated corrective source `534a3d8` in Main `71033a2`, with the real
+source38 integration, both Drizzle 0146/0147 journal entries and protocol 245;
+no activation was reported. Parent's unchanged after results were Domain 8 PASS,
+private FS 3 PASS, host 8 PASS, and Core/CPA 7 PASS / 1 FAIL. Evidence:
+`/tmp/bbdev44-ui-qa-Qz0y2M/artifacts/capture33-534a3d8-after.log`.
+The failing consumer was `propagates a Core privacy rejection to the real host
+and permits the next artifact to commit`, ending with `Private capture
+artifact_not_found.` Both restarted ancestor/receipt fixture cases passed in
+that run; these are not power-loss or ancestor-fsync-ordering proofs.
 
-Missing source38 SDK/Core imports on the isolated branch are parent composition
-prerequisites, not defects patched by stubs or alternate implementations. Parent
-reports main `a95b925` contains the real source38/Memory/import integration and
-owns the ordered Drizzle 0146/0147 and protocol-245 composition. The Core
-ancestor/receipt audit has not yet executed. No ancestor-directory durability
-change is invented here, and neither the crash-layout fixtures nor these source
-changes prove power-loss safety or ancestor fsync ordering. Full Tasks acceptance
-and its runtime/privacy matrix remain unchanged.
+Static diagnosis: `capture.exchange` already has its command and result schemas
+in the online RPC registry, but was missing from the successful response union
+in `packages/host-daemon-contract/src/session.ts`. The authored real-host peer
+parses that union and converts parse failures into RPC failures, preventing Core
+from receiving the artifact. The narrow amendment adds only
+`onlineRpcResponseSuccessSchemaFor("capture.exchange")` to the existing union.
+It completes the unactivated protocol-245 contract without changing payload
+fields, assertions, fixtures, controls, committed ACKs or durable privacy
+disposition/cleanup. The amendment has not been executed or qualified here.
+
+This agent has run no build, typecheck, test, lint, formatter, install, runtime
+smoke, browser, network/model/auth/business probe or capture activation for this
+amendment. Parent's results are accepted without rerunning them. There is no
+after-pass, READY or full-acceptance claim for the amendment. Parent separately
+owns Drizzle 0147 snapshot composition, including 0146 analytics and `prevId`;
+that composition is not changed here. Full Tasks acceptance and its native,
+offline-ACK and privacy matrix remain unchanged.
 
 After ordered source38/source40 integration and source review, parent owns:
 
