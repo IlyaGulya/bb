@@ -32,6 +32,7 @@ import { DetailToasts, useDetailToasts } from "./toast.js";
 import { JiraSourcePanel } from "../jira/source-panel.js";
 import { TaskRepositoriesControl } from "./repositories.js";
 import { TaskWorkflowPanel } from "./workflow.js";
+import { TaskArtifactsSection } from "./artifacts.js";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -497,6 +498,12 @@ function TaskDetail({ task }: { task: Task }) {
               attachments.refresh();
             }}
             onError={(message) => push(message)}
+          />
+          <TaskArtifactsSection
+            key={task.id}
+            taskId={task.id}
+            bbProjectId={project?.linkedBbProjectId ?? null}
+            attachments={attachments.data ?? []}
           />
 
           <SubTasksSection

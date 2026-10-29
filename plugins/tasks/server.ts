@@ -14,6 +14,7 @@ import { repositoryHandlers } from "./repositories";
 import { repositoryRpcContract } from "./shared/repositories";
 import { registerTaskWorkflows } from "./workflow/index.js";
 
+import { registerTaskArtifacts } from "./artifacts/index.js";
 const TASKS_PLUGIN_NAME = "Tasks";
 const TASKS_PLUGIN_VERSION = manifest.version;
 
@@ -37,6 +38,7 @@ export default async function plugin(bb: BbPluginApi) {
   const store = createStore(bb);
   registerTasksApi(bb, store);
   registerAttachments(bb, store.tasks);
+  registerTaskArtifacts(bb, store);
   const jiraHandlers = registerJiraSync(bb, store);
   const inboxHandlers = registerInbox(bb, store);
   const repositories = repositoryHandlers(

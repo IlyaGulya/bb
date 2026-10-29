@@ -9,6 +9,7 @@ import {
 import { errorMessage } from "../shared/errors";
 import { attachmentMediaResponse, verifyVideoFile, videoMimeFromHeader } from "./media.js";
 import { isVideoMime } from "../shared/attachments.js";
+import { authorizeAttachmentForThread } from "../artifacts/access.js";
 
 const INLINE_RASTER_MIMES = new Set([
   "image/png",
@@ -33,6 +34,30 @@ const DELETE_PATH = "/attachments/delete";
 const MIME_PATTERN =
   /^(application|audio|font|image|message|model|multipart|text|video)\/[!#$&^_.+\-A-Za-z0-9]+$/;
 const storeRoots = new WeakMap<TasksStore, string>();
+const attachmentLocks = new WeakMap<TasksStore, Map<string, Promise<void>>>();
+
+export async function withAttachmentLock<T>(
+  store: TasksStore,
+  id: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  let locks = attachmentLocks.get(store);
+  if (!locks) {
+    locks = new Map();
+    attachmentLocks.set(store, locks);
+  }
+  const previous = locks.get(id) ?? Promise.resolve();
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  locks.set(id, pending);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+    if (locks.get(id) === pending) locks.delete(id);
+  }
+}
 
 export type AttachmentOwner =
   | { taskId: string; commentId?: never }
@@ -435,42 +460,52 @@ export async function deleteAttachmentById(
     removeDescriptionReferences?: boolean;
   } = {},
 ): Promise<Attachment | null> {
-  const attachment = store.getAttachment(attachmentId);
-  if (!attachment) return null;
-
-  const taskId =
-    attachment.taskId ??
-    (attachment.commentId
-      ? store.getComment(attachment.commentId)?.taskId
-      : undefined);
-  const ownerTask = taskId ? store.getTask(taskId) : undefined;
-  let nextDescription: string | undefined;
-  if (ownerTask?.description.includes(attachmentDownloadUrl(attachment.id))) {
-    if (!options.removeDescriptionReferences) {
-      throw new AttachmentReferencedError(attachment);
+  return withAttachmentLock(store, attachmentId, async () => {
+    const attachment = store.getAttachment(attachmentId);
+    if (!attachment) return null;
+    const retained = bb.storage.database().prepare<[string], { found: number }>(
+      "SELECT 1 AS found FROM task_artifacts WHERE image_attachment_id = ? LIMIT 1",
+    ).get(attachmentId);
+    if (retained) {
+      const error = new AttachmentReferencedError(attachment);
+      error.message = "This screenshot is retained by a task artifact. Remove the retained artifact before deleting its image.";
+      throw error;
     }
-    nextDescription = removeAttachmentDescriptionReferences(
-      ownerTask.description,
-      attachment.id,
-    );
-    if (nextDescription === ownerTask.description) {
-      throw new AttachmentReferencedError(attachment);
-    }
-  }
 
-  try {
-    await (options.removeBlobs ?? removeAttachmentBlobs)(bb, store, [
-      attachment,
-    ]);
-  } catch (error) {
-    throw new AttachmentCleanupError(attachment, error);
-  }
-  if (ownerTask && nextDescription !== undefined) {
-    store.updateTask(ownerTask.id, { description: nextDescription });
-  }
-  if (!store.deleteAttachment(attachment.id)) return null;
-  publishAttachmentChanged(bb, store, attachment);
-  return attachment;
+    const taskId =
+      attachment.taskId ??
+      (attachment.commentId
+        ? store.getComment(attachment.commentId)?.taskId
+        : undefined);
+    const ownerTask = taskId ? store.getTask(taskId) : undefined;
+    let nextDescription: string | undefined;
+    if (ownerTask?.description.includes(attachmentDownloadUrl(attachment.id))) {
+      if (!options.removeDescriptionReferences) {
+        throw new AttachmentReferencedError(attachment);
+      }
+      nextDescription = removeAttachmentDescriptionReferences(
+        ownerTask.description,
+        attachment.id,
+      );
+      if (nextDescription === ownerTask.description) {
+        throw new AttachmentReferencedError(attachment);
+      }
+    }
+
+    try {
+      await (options.removeBlobs ?? removeAttachmentBlobs)(bb, store, [
+        attachment,
+      ]);
+    } catch (error) {
+      throw new AttachmentCleanupError(attachment, error);
+    }
+    if (ownerTask && nextDescription !== undefined) {
+      store.updateTask(ownerTask.id, { description: nextDescription });
+    }
+    if (!store.deleteAttachment(attachment.id)) return null;
+    publishAttachmentChanged(bb, store, attachment);
+    return attachment;
+  });
 }
 
 export function publishAttachmentChanged(
@@ -538,6 +573,12 @@ export function registerAttachments(
     const attachmentId = context.req.query("attachmentId")?.trim();
     const attachment = attachmentId ? store.getAttachment(attachmentId) : undefined;
     if (!attachment) return context.req.raw.method === "HEAD" ? new Response(null, { status: 404 }) : context.json({ error: "attachment not found" }, 404);
+    try {
+      await authorizeAttachmentForThread(bb, attachment.id, null);
+    } catch {
+      return context.json({ error: "attachment not found" }, 404);
+    }
+
     const absolutePath = pathInside(root, attachment.blobPath);
     const forceDownload = context.req.query("download") === "1";
     const inline = !forceDownload && (isInlineRasterMime(attachment.mime) || isVideoMime(attachment.mime));

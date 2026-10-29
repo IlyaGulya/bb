@@ -136,6 +136,7 @@ const pluginRuntimeExternalUrls = new Map(
     [PLUGIN_SDK_SPECIFIER]: pluginSdkRuntimeEntry,
     [LEGACY_PLUGIN_SDK_SPECIFIER]: pluginSdkRuntimeEntry,
     "better-sqlite3": runtimeRequire.resolve("better-sqlite3"),
+    sharp: runtimeRequire.resolve("sharp"),
   }).map(([specifier, path]) => [specifier, pathToFileURL(path).href]),
 );
 
@@ -1171,6 +1172,10 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
             },
             "better-sqlite3": {
               path: runtimeRequire.resolve("better-sqlite3"),
+              external: true,
+            },
+            sharp: {
+              path: runtimeRequire.resolve("sharp"),
               external: true,
             },
           },

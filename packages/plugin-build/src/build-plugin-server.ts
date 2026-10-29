@@ -34,6 +34,7 @@ export const PLUGIN_SERVER_EXTERNALS: readonly string[] = [
   PLUGIN_SDK_PACKAGE_NAME,
   LEGACY_PLUGIN_SDK_SPECIFIER,
   "better-sqlite3",
+  "sharp",
 ];
 
 const PLUGIN_SDK_ROOT_FILTER = /^@get-bb\/plugin-sdk$|^@bb\/plugin-sdk$/;

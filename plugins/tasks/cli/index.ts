@@ -8,6 +8,7 @@ import {
   type PluginCliResult,
 } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { authorizeAttachmentForThread, filterReadableAttachments } from "../artifacts/access.js";
 
 import {
   createComment,
@@ -23,7 +24,6 @@ import {
 import { delegationRpcContract } from "../delegate/contract";
 import { handlers as delegationHandlers } from "../delegate";
 import {
-  presetReasoningLevelSchema,
   tasksRpcContract,
   PRESET_PERMISSION_MODES,
   TASK_PRIORITIES,
@@ -55,6 +55,7 @@ import type { RepositoryHandlers } from "../repositories";
 import type { TaskWorkflowHandlers } from "../workflow/index.js";
 import { repositoryCommands } from "./repositories";
 import { workflowCommands } from "./workflow.js";
+import { artifactCommands } from "./artifacts.js";
 
 const TASK_KEY_PATTERN = /^([A-Z][A-Z0-9]{0,9})-(\d+)$/;
 const BB_PROJECT_ID_PATTERN = /^proj_[A-Za-z0-9_-]+$/;
@@ -479,6 +480,8 @@ function resolvePreset(presets: readonly Preset[], address: string): Preset {
 
 async function listTaskAttachments(
   domain: TasksDomain,
+  bb: BbPluginApi,
+  threadId: string | null,
   taskId: string,
   comments: readonly { id: string }[],
 ): Promise<Attachment[]> {
@@ -500,7 +503,7 @@ async function listTaskAttachments(
       ).attachments,
     );
   }
-  return attachments;
+  return filterReadableAttachments(bb, attachments, threadId);
 }
 
 async function listPresets(domain: TasksDomain): Promise<Preset[]> {
@@ -705,6 +708,18 @@ export function registerTasksCli(
       description:
         "Tasks are addressed by key (ABC-12) or ULID. --project takes a tracker project prefix or id, never a bb project id (proj_...).",
       commands: {
+        artifact: groupCommand(
+          "artifact",
+          "Retain task decisions, source-message bookmarks and screenshot annotations",
+          [
+            ["list", "List retained task artifacts in the selected context"],
+            ["show", "Read text, coordinates, image references and source availability"],
+            ["image", "Inspect an existing task screenshot"],
+            ["create", "Explicitly retain a bounded source selection"],
+            ["remove", "Remove one retained artifact without dispatch or acceptance"],
+          ],
+        ),
+        ...artifactCommands(bb, store, (address) => resolveTask(domain, address), guard),
         ...(repositories
           ? {
               repositories: groupCommand(
@@ -1635,7 +1650,7 @@ export function registerTasksCli(
           suggestFor: ["view", "read", "info", "detail", "details", "describe"],
           positionals: [KEY_POSITIONAL],
           options: { json: JSON_OPTION },
-          run(input) {
+          run(input, ctx) {
             return guard(async () => {
               const task = await resolveTask(
                 domain,
@@ -1664,6 +1679,8 @@ export function registerTasksCli(
               ).comments;
               const attachments = await listTaskAttachments(
                 domain,
+                bb,
+                ctx.threadId ?? null,
                 task.id,
                 comments,
               );
@@ -2277,6 +2294,7 @@ export function registerTasksCli(
                 input.options.machine,
                 ctx,
               );
+              await authorizeAttachmentForThread(bb, input.positionals["attachment-id"], ctx.threadId ?? null);
               const { attachment, content } = await readAttachmentContent(
                 store.tasks,
                 input.positionals["attachment-id"],
@@ -2292,7 +2310,7 @@ export function registerTasksCli(
           summary: "List a task's attachments",
           positionals: [KEY_POSITIONAL],
           options: { json: JSON_OPTION },
-          run(input) {
+          run(input, ctx) {
             return guard(async () => {
               const task = await resolveTask(
                 domain,
@@ -2307,6 +2325,8 @@ export function registerTasksCli(
               ).comments;
               const attachments = await listTaskAttachments(
                 domain,
+                bb,
+                ctx.threadId ?? null,
                 task.id,
                 comments,
               );

@@ -24,6 +24,16 @@
   references. Keep host-default observation provenance visible across all source
   states and expire selected readings at their 60-second observed-time deadline,
   independently of refresh completion and obsolete thread timers.
+- Keep retained Tasks decisions and screenshots in their original context after
+  task moves or project relinks, with original-history recovery and retained
+  image checks on legacy attachment downloads. Verify selected display quotes
+  through shared Markdown parsing, and require a full strict static-image
+  decode rather than header-only dimensions. Animated or orientation-dependent
+  screenshots require an explicitly exported static image; originals stay intact.
+- Match retained Tasks quotes to the actual source message role: preserve user
+  literal HTML, use sanitized assistant HTML, and keep visible line/block
+  boundaries in action prefill, restored panels and server verification. Reject
+  fabricated joined phrases while retaining the original raw-source hash.
 - Give Tasks one header workflow action backed by the shared persistent drawer;
   retain single-agent dispatch as a secondary action. Keep draft selections and
   explicit unavailable choices while Core definition/account catalog events and

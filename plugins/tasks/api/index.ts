@@ -32,6 +32,7 @@ import {
   assertTaskWorkflowStatusTransition,
   releaseTaskWorkflowContexts,
 } from "../workflow/index.js";
+import { filterReadableAttachments } from "../artifacts/access.js";
 
 interface TaskLabelIdRow {
   task_id: string;
@@ -914,7 +915,7 @@ export function registerHandlers(
         }),
       };
     },
-    listAttachments(input) {
+    async listAttachments(input) {
       const attachments =
         "taskId" in input
           ? store.tasks.listAttachmentsForTask(input.taskId)
@@ -924,7 +925,7 @@ export function registerHandlers(
                 input.commentsOfTaskId,
               );
       return {
-        attachments: attachments.map(attachmentMetadata),
+        attachments: (await filterReadableAttachments(bb, attachments, null)).map(attachmentMetadata),
       };
     },
     async deleteAttachment(input) {
