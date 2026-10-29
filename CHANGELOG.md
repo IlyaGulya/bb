@@ -19,6 +19,9 @@
   form/source changes until its terminal reply is received. Treat incidental
   historical thread references as context before ownership resolution for an
   explicit separate task, including the same bounded local-away path.
+- Keep an uncertain preview's receipt retry available after its local-away grant
+  is exhausted, expired or revoked. Retrieving that existing operation does not
+  renew the grant, consume another attempt or admit a new preview.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact

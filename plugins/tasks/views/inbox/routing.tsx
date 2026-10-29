@@ -134,7 +134,7 @@ function RoutingBody({ item: entry, active, refresh, close }: { item: InboxEntry
       </div>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={newTask} disabled={busy} onChange={event => { setNewTask(event.target.checked); if (event.target.checked) setSemantic(false); }} /><span>Propose a separate new task · leave the exact-reference answer blank; no new thread</span></label>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={semantic} disabled={busy || grantId !== null || newTask} onChange={event => setSemantic(event.target.checked)} /><span>Request semantic advice from the explicitly configured Core helper. One callback, not a physical model-call limit. No router-owned service/account fallback; the selected service owns downstream model requests.</span></label>
-      <Button type="submit" disabled={busy || query.isLoading || !!query.error || grantUnavailable || grantId !== null && !selectedGrant?.actions.includes("preview")}>{busy ? "Working…" : "Preview route"}</Button>
+      <Button type="submit" disabled={busy || query.isLoading || !!query.error || !previewAttempt.current && (grantUnavailable || grantId !== null && !selectedGrant?.actions.includes("preview"))}>{busy ? "Working…" : "Preview route"}</Button>
     </form>
     {query.isLoading && !query.data && <div aria-label="Loading routing receipts"><Skeleton className="h-20 w-full" /></div>}
     {shown && <section className="space-y-3 rounded-lg border border-border p-3" aria-label="Routing advice">
