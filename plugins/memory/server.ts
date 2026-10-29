@@ -650,7 +650,7 @@ class MemoryStore {
            CASE WHEN m.scope = 'project' THEN 0 ELSE 1 END, m.updated_at DESC
          LIMIT 1`,
       )
-      .get(idOrName, exactId ? 1 : 0, idOrName, idOrName, ...scoped.params);
+      .get(idOrName, exactId ? 1 : 0, idOrName, ...scoped.params, idOrName);
     if (row === undefined) return null;
     const memory = parseMemoryRow(row);
     if (touch) {
@@ -784,13 +784,14 @@ class MemoryStore {
   }
 
   propose(selection: MemorySelection, changes: ReflectionChange[]): ReflectionProposal {
-    if (!selection.task || !selection.projectId) throw new CliError("Reflection requires explicit task/context scope");
+    const { projectId, task } = selection;
+    if (!task || !projectId) throw new CliError("Reflection requires explicit task/context scope");
     return this.db.transaction(() => {
       const seen = new Set<string>();
       const diffs = changes.map((change) => {
         const after = { ...change, summary: validateText("summary", change.summary, 400),
           details: validateText("details", change.details, 16000), reason: validateText("reason", change.reason, 500) };
-        const before = this.get(after.id, "project", selection.projectId ?? undefined, false, selection.task);
+        const before = this.get(after.id, "project", projectId, false, task);
         if (!before?.lineage || before.lineage.state === "replaced") throw new CliError("Reflection base is unavailable or replaced");
         if (seen.has(before.id)) throw new CliError("Reflection cannot change a record twice");
         seen.add(before.id);
@@ -802,7 +803,7 @@ class MemoryStore {
       });
       const proposal = reflectionProposalSchema.parse({ id: `reflection_${randomBytes(8).toString("hex")}`, selection, state: "pending", createdAt: Date.now(), decidedAt: null, diffs });
       this.db.prepare("INSERT INTO memory_reflections(id, project_id, task_id, context_name, proposal_json) VALUES (?, ?, ?, ?, ?)")
-        .run(proposal.id, selection.projectId, selection.task.taskId, selection.task.context, JSON.stringify(proposal));
+        .run(proposal.id, projectId, task.taskId, task.context, JSON.stringify(proposal));
       return proposal;
     })();
   }
