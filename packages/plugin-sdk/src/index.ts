@@ -23,5 +23,7 @@ export type {
   ExperimentalDesktopBrowserCreateInput,
   ExperimentalDesktopBrowserAcquireInput,
 } from "@bb/sdk";
+export { taskRouteDecisionSchema as experimental_taskRouteDecisionSchema } from "@bb/domain";
+export type { TaskRouteRequest as ExperimentalTaskRouteRequest, TaskRouteResponse as ExperimentalTaskRouteResponse } from "@bb/domain";
 
 export type * from "./machine-bootstrap.js";

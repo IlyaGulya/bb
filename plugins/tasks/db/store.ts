@@ -1839,6 +1839,11 @@ export function createTasksStore(db: PluginDatabase) {
       .map(presetFromRow);
   }
 
+  function firstPreset(): Preset | undefined {
+    const row = db.prepare<[], PresetRow>("SELECT * FROM presets ORDER BY builtin DESC, name COLLATE NOCASE, id LIMIT 1").get();
+    return row ? presetFromRow(row) : undefined;
+  }
+
   function updatePreset(id: string, input: UpdatePresetInput): Preset {
     const current = requirePreset(id);
     const environment = validatePresetEnvironment({
@@ -1966,6 +1971,7 @@ export function createTasksStore(db: PluginDatabase) {
     createPreset,
     getPreset,
     listPresets,
+    firstPreset,
     updatePreset,
     deletePreset,
   };

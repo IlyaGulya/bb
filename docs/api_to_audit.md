@@ -3071,3 +3071,30 @@ directories, linked worktrees, and submodules. Core callers: the setup guide
 Stabilize after deciding whether depth, recency window, and limit should be
 caller options, and after exercising slow or network-mounted home directories
 and Windows hosts.
+
+## `PluginBbSdk.system.experimental_classifyTaskRoute` and `experimental_taskRouteDecisionSchema`
+
+Core's task-route helper accepts bounded incoming text and at most 20 native
+task/project candidates. It returns a typed existing-task/new-task choice, one
+scope question, or unavailable; returned IDs must belong to the supplied set.
+Only exact native Tasks references can produce an `existing-thread` decision;
+the semantic helper cannot invent/select threads. Settings → AI services and
+`bb settings ai-services set task-route` share the existing server selection;
+the task defaults off and only an explicit service selection invokes it.
+
+Core caller: Tasks Inbox's routing drawer, CLI and plugin RPC share
+`registerRouting`, whose semantic preview calls this SDK method. There is no
+parallel plugin-only classifier path or new actor/orchestrator. Core admits one
+completion callback, forwards cancellation, times out after eight seconds and
+does not retry or substitute a service/account. This does not bound physical
+model requests or sandbox the selected full-trust service. Local-away grants
+exclude semantic callbacks and native execution; their budget counts admitted
+local action attempts, not model calls. Worker contexts/accounts remain native.
+
+Stabilize after exercising service removal/selection changes during admission,
+cancellation, malformed/out-of-set responses, UI/CLI/SDK parity, stale ownership
+and prepared-context transitions, and local-away expiry/revocation/restart
+fencing. Audit whether a future provider can enforce a physical call budget and
+native tool capabilities before admitting native execution. Incoming source
+text, organizational labels and manager prompts must never become authority.
+

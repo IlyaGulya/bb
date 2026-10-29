@@ -53,6 +53,13 @@ const AI_TASK_ROWS: readonly AiTaskRow[] = [
     offDescription: "Hides the microphone.",
     testTask: null,
   },
+  {
+    task: "task-route",
+    label: "Task routing",
+    hint: "Advisory only. One selected completion callback per request, not a physical model-call limit. Worker context and payer remain separate.",
+    offDescription: "Semantic advice is off; exact task references still resolve without a model call.",
+    testTask: null,
+  },
 ];
 
 function serviceKey(service: Pick<SystemAiService, "id" | "pluginId">): string {
@@ -94,14 +101,13 @@ export function aiTaskOptions(
 ): ChoiceDropdownOption[] {
   const automatic = automaticServiceFor(view, row.task);
   return [
-    {
+    ...(row.task === "task-route" ? [] : [{
       key: AUTOMATIC_KEY,
       title: "Automatic",
-      description:
-        automatic === null
-          ? "Nothing bb ships is ready right now."
-          : `Currently using ${automatic.displayName}.`,
-    },
+      description: automatic === null
+        ? "Nothing bb ships is ready right now."
+        : `Currently using ${automatic.displayName}.`,
+    }]),
     ...view.services
       .filter((service) => service.tasks.includes(row.task))
       .map((service) => ({
@@ -203,7 +209,7 @@ export function AiServicesSettingsSection() {
   return (
     <SettingsSection
       title="AI services"
-      description="Choose services for thread titles, commit messages, and voice input. Automatic prefers bb cloud, then other available services. A service you choose stays selected."
+      description="Choose helper services. Task routing is off by default and requires an explicit service; it never chooses a worker account. Other helpers can use Automatic."
     >
       <div className="space-y-5">
         {AI_TASK_ROWS.map((row) => {

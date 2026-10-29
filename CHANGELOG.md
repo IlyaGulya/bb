@@ -2,6 +2,14 @@
 
 ## AgentOS fork — unreleased
 
+- Add Tasks Inbox routing advice with exact task/thread reuse, retained writer
+  and prepared-workspace ownership, revision-CAS local actions and open-worker
+  links. Share UI/CLI/SDK policy without a second executor or runnable queue.
+  Add explicitly scoped local-away grants, server-reserved attempt/time limits,
+  receipts and Needs input parking; never admit semantic/native/external/Jira
+  execution or Accept through away. Core's task-route helper defaults off and
+  invokes only one explicitly selected completion callback without fallback;
+  this is not a physical model-request limit or a native-session sandbox.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact

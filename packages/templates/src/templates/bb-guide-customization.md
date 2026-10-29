@@ -59,7 +59,7 @@ Settings stored server-side apply to every window and survive restarts.
 
   bb settings show
   bb settings ai-services
-  bb settings ai-services set <thread-title|commit-message|voice> <automatic|off|service-id> [--plugin <plugin-id>]
+  bb settings ai-services set <thread-title|commit-message|voice|task-route> <automatic|off|service-id> [--plugin <plugin-id>]
   bb settings ai-services test <thread-title|commit-message>
   bb settings general <key> <value>
   bb settings replay-onboarding
@@ -82,6 +82,15 @@ message through the current choice. Settings → AI services has the same
 controls. Each plugin chooses its own model. The removed `BB_INFERENCE`,
 `BB_INFERENCE_FALLBACK`, and `BB_TRANSCRIPTION` variables are ignored with a
 warning in `~/.bb/config.json`, and `bb-app config set` refuses them.
+
+Task routing (`task-route`) defaults off and invokes only an explicitly picked
+completion service; `automatic` invokes none. Use `bb settings ai-services set
+task-route <service-id> --plugin <plugin-id>` or `set task-route off`. Semantic
+advice makes at most one completion callback with an eight-second timeout, no
+router retry or service/account substitution. The service owns downstream
+requests: this is not a physical model-call budget. Worker accounts and contexts
+are separate. Exact task references need no classifier. The Tasks skill documents
+`bb tasks route` and the explicitly scoped, local-action-only `bb tasks away`.
 
 General keys: `bb settings general` accepts any key from `generalSettings` in
 `bb settings show`; an unknown key or wrongly shaped value is rejected with the

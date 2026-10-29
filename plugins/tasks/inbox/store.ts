@@ -237,6 +237,17 @@ export class InboxStore {
       return this.decide(id, "resolve");
     })();
   }
+  linkThread(id: string, threadId: string): InboxEntry {
+    return this.db.transaction(() => {
+      const item = this.get(id);
+      if (item.taskId || item.threadId && item.threadId !== threadId) throw new Error("Incoming already has a different native owner; inspect it instead of replacing its route");
+      if (!item.threadId) {
+        this.db.prepare("UPDATE inbox_entries SET thread_id = ?, updated_at = ? WHERE id = ?").run(threadId, this.now(), id);
+        this.record(item, `linked_thread:${threadId}`);
+      }
+      return this.decide(id, "resolve");
+    })();
+  }
   wake(): string[] {
     return this.db.transaction(() => {
       const rows = this.db

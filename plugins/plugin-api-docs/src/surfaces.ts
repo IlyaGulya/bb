@@ -1387,6 +1387,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Write thread titles and commit messages with any model",
           "Transcribe voice input from the microphone button",
           "Appear as a choice in Settings → AI services",
+          "Serve the explicitly selected task-route helper without creating an actor; routing is off by default and worker accounts remain independent",
         ],
         apiSymbols: [
           "PluginAiServices",
@@ -1394,6 +1395,20 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginAiServiceStatus",
         ],
         firstParty: ["bb cloud AI", "Codex provider"],
+        experimental: true,
+      },
+      {
+        id: "task-routing",
+        title: "Task routing advice",
+        summary: "Request bounded, typed advice through Core's selected task-route helper rather than invoking an arbitrary completion service.",
+        bullets: [
+          "Supply bounded native task/project candidates; accept only their IDs or one scope question",
+          "Make one selected completion callback with cancellation and no router retry or service/account substitution",
+          "Keep callback invocations distinct from physical model requests; source text and advice never grant execution authority",
+          "Tasks uses this same path for semantic advice; its local-away grants never launch native or external work",
+        ],
+        apiSymbols: ["BbPluginApi.sdk.system.experimental_classifyTaskRoute", "experimental_taskRouteDecisionSchema", "ExperimentalTaskRouteRequest", "ExperimentalTaskRouteResponse"],
+        firstParty: ["Tasks"],
         experimental: true,
       },
       {

@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { publishTasksChanged, type TasksApiStore } from "../api/index.js";
+import type { TasksApiStore } from "../api/index.js";
 import { inboxRpcContract } from "../shared/inbox-contract.js";
 import { errorMessage } from "../shared/errors.js";
 import { InboxStore, type InboxSource } from "./store.js";
 import { buildReviewInspectionSchema } from "../workflow/remote-contract.js";
+import { linkTaskFromInbox, createTaskFromInbox } from "./actions.js";
 
 export type InboxHandlers = PluginRpcHandlers<typeof inboxRpcContract>;
 type WorkingItem = z.infer<
@@ -428,35 +429,11 @@ export function registerInbox(
     },
     linkInboxTask(raw) {
       const input = inboxRpcContract.linkInboxTask.input.parse(raw);
-      if (!store.tasks.getTask(input.taskId)) throw new Error("Task not found");
-      const before = inbox.get(input.id);
-      const item = inbox.link(input.id, input.taskId);
-      if (before.taskId !== item.taskId || before.state !== item.state)
-        publish(item.id);
-      return { item };
+      return linkTaskFromInbox(bb, store, inbox, input.id, input.taskId);
     },
     createInboxTask(raw) {
       const input = inboxRpcContract.createInboxTask.input.parse(raw);
-      let created = false;
-      const item = store.transaction(() => {
-        const current = inbox.get(input.id);
-        if (current.taskId) return current;
-        if (!store.tasks.getProject(input.projectId))
-          throw new Error("Project not found");
-        const task = store.tasks.createTask({
-          projectId: input.projectId,
-          title: current.title,
-          description: current.body,
-          status: "todo",
-        });
-        created = true;
-        return inbox.link(current.id, task.id);
-      });
-      if (created) {
-        publishTasksChanged(bb, item.taskId!, input.projectId);
-        publish(item.id);
-      }
-      return { item };
+      return createTaskFromInbox(bb, store, inbox, input.id, input.projectId);
     },
     inboxHistory(raw) {
       const input = inboxRpcContract.inboxHistory.input.parse(raw);

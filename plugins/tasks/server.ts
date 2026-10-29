@@ -13,6 +13,7 @@ import { registerInbox } from "./inbox/index.js";
 import { repositoryHandlers } from "./repositories";
 import { repositoryRpcContract } from "./shared/repositories";
 import { registerTaskWorkflows } from "./workflow/index.js";
+import { registerRouting } from "./routing/index.js";
 
 const TASKS_PLUGIN_NAME = "Tasks";
 const TASKS_PLUGIN_VERSION = manifest.version;
@@ -43,6 +44,7 @@ export default async function plugin(bb: BbPluginApi) {
   );
   bb.rpc.register(repositoryRpcContract, repositories);
   const workflows = registerTaskWorkflows(bb, store);
+  const routing = registerRouting(bb, store);
   registerTasksCli(
     bb,
     store,
@@ -51,6 +53,7 @@ export default async function plugin(bb: BbPluginApi) {
     inboxHandlers,
     repositories,
     workflows,
+    routing,
   );
   registerDelegation(bb, store);
   registerMentions(bb, store);

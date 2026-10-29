@@ -208,6 +208,9 @@ export const testAiServiceResponseSchema = z.discriminatedUnion("ok", [
 ]);
 export type TestAiServiceResponse = z.infer<typeof testAiServiceResponseSchema>;
 
+export { taskRouteRequestSchema, taskRouteClassificationSchema, taskRouteResponseSchema } from "@bb/domain";
+export type { TaskRouteRequest, TaskRouteResponse } from "@bb/domain";
+
 const onboardingStepTelemetrySchema = z.enum([
   "agent",
   "projects",

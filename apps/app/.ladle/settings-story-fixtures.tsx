@@ -73,6 +73,7 @@ const STORY_AI_SERVICES: SystemAiServicesResponse = {
     "thread-title": { mode: "automatic" },
     "commit-message": { mode: "automatic" },
     voice: { mode: "automatic" },
+    "task-route": { mode: "off" },
   },
   services: [
     {

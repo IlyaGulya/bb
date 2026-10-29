@@ -22,6 +22,9 @@ import {
   setAiServiceSelectionRequestSchema,
   systemProviderEnabledRequestSchema,
   testAiServiceRequestSchema,
+  taskRouteRequestSchema,
+  type TaskRouteRequest,
+  type TaskRouteResponse,
   type MachineEnvironmentReplace,
   type RecordTelemetryEventRequest,
   type SetAiServiceSelectionRequest,
@@ -2001,6 +2004,12 @@ export const publicApiRoutes = {
         testAiServiceRequestSchema,
       ),
       response: jsonResponse<TestAiServiceResponse>(),
+    }),
+    classifyTaskRoute: defineRoute({
+      path: "/system/task-route",
+      method: "post",
+      request: jsonRequest<EmptyInput, TaskRouteRequest>(taskRouteRequestSchema),
+      response: jsonResponse<TaskRouteResponse>(),
     }),
     recordTelemetryEvent: defineRoute({
       path: "/system/telemetry/events",

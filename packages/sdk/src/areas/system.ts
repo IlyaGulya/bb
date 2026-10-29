@@ -16,6 +16,8 @@ import type {
 import type { ProviderUsageResponse } from "@bb/host-daemon-contract";
 import type {
   SetAiServiceSelectionRequest,
+  TaskRouteRequest,
+  TaskRouteResponse,
   SystemAiServicesResponse,
   SystemAppUpdateAcknowledgeRequest,
   SystemAppUpdateApplyRequest,
@@ -169,6 +171,7 @@ export interface SystemArea {
     input: MachineEnvironmentReplace,
   ): Promise<MachineEnvironmentList>;
   aiServices(args?: SystemAiServicesArgs): Promise<SystemAiServicesResult>;
+  experimental_classifyTaskRoute(args: TaskRouteRequest & { signal?: AbortSignal }): Promise<TaskRouteResponse>;
   attention(args?: SystemAttentionArgs): Promise<SystemAttentionResult>;
   config(args?: SystemConfigArgs): Promise<SystemConfigResult>;
   executionOptions(
@@ -309,6 +312,9 @@ export function createSystemArea(args: CreateSdkAreaArgs): SystemArea {
           ...signalRequestArgs(input?.signal),
         ),
       );
+    },
+    async experimental_classifyTaskRoute({ signal, ...input }) {
+      return transport.readJson(transport.api.v1.system["task-route"].$post({ json: input }, ...signalRequestArgs(signal)));
     },
     async setAiServiceSelection(input) {
       return transport.readJson(

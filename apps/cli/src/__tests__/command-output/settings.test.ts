@@ -449,6 +449,7 @@ describe("bb settings commands", () => {
           serviceId: "helper",
         },
         voice: { mode: "off" },
+        "task-route": { mode: "off" },
       },
       services: [
         {

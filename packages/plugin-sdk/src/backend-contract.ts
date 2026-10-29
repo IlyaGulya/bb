@@ -1918,8 +1918,8 @@ export interface PluginServerApi {
 /** Options for one `complete` call. */
 export interface PluginAiCompleteOptions {
   /**
-   * Aborted when bb stops waiting: the task timed out (5 seconds for titles
-   * and commit messages) or the request was cancelled. Pass it to `fetch`.
+   * Aborted when bb stops waiting due to a helper timeout or request
+   * cancellation. Forward it to downstream requests.
    */
   readonly signal: AbortSignal;
 }
@@ -1945,15 +1945,15 @@ export type PluginAiServiceStatus =
   | { readonly ready: false; readonly message: string };
 
 /**
- * An AI service bb can use for its helper tasks: thread titles and commit
- * messages (`complete`) and voice input (`transcribe`). The user picks a
- * service per task in Settings → AI services or with
+ * An AI service bb can use for titles, commit messages and explicit typed
+ * task-routing advice (`complete`), or voice input (`transcribe`). The user
+ * picks a service per helper in Settings → AI services or with
  * `bb settings ai-services set`. The functions run in the plugin's server
  * process; a plugin that needs host-local state (a login file, a local model)
  * reaches its own `bb.host` entry through `bb.hosts.experimental_client`.
  *
- * bb owns the prompts and cleans up replies (think blocks, quotes, labels,
- * extra lines), so a service returns the model's text as-is. The plugin owns
+ * bb owns the prompts and validates or cleans replies for the specific helper,
+ * so a service returns the model's text as-is. The plugin owns
  * everything behind the function: which model, which API, any retries.
  * Failure is a rejected promise.
  */
@@ -1967,8 +1967,8 @@ export interface PluginAiServiceDeclaration {
   /** Shown in the picker; 1-64 characters. */
   readonly displayName: string;
   /**
-   * Answer one prompt with plain text. Offered for thread titles and commit
-   * messages. Declare `complete`, `transcribe`, or both.
+   * Answer one prompt with text. Titles and commit messages use a line;
+   * task-route requires the requested bounded JSON. Declare either callback or both.
    */
   readonly complete?: (
     prompt: string,

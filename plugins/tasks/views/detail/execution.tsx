@@ -39,7 +39,10 @@ export function ExecutionTargetControl({
   execution,
   executionError,
   onExecutionChange,
-}: ExecutionControlProps & { taskId: string; presets: Preset[] | undefined }) {
+  saveTarget,
+  disabled = false,
+  surfaceActive = true,
+}: ExecutionControlProps & { taskId: string; presets: Preset[] | undefined; saveTarget?: (target: ExecutionTarget | null) => Promise<void>; disabled?: boolean; surfaceActive?: boolean }) {
   const rpc = useRpc<DelegationRpcContract>();
   const sdk = useSdk();
   const [open, setOpen] = useState(false);
@@ -101,11 +104,12 @@ export function ExecutionTargetControl({
     setOpen(true);
   };
   const save = async (target: ExecutionTarget | null) => {
-    if (saving) return;
+    if (saving || disabled) return;
     setSaving(true);
     setError(null);
     try {
-      await rpc.call("setTaskExecution", { taskId, target });
+      if (saveTarget) await saveTarget(target);
+      else await rpc.call("setTaskExecution", { taskId, target });
       onExecutionChange?.();
       setOpen(false);
     } catch (cause) {
@@ -163,6 +167,7 @@ export function ExecutionTargetControl({
     <div className="min-w-0">
       <button
         type="button"
+        disabled={disabled}
         className="min-h-11 text-left text-xs underline underline-offset-2 sm:min-h-8"
         onClick={edit}
       >
@@ -196,7 +201,7 @@ export function ExecutionTargetControl({
         </p>
       ) : null}
       <ResponsiveDrawerShell
-        open={open}
+        open={open && surfaceActive}
         onOpenChange={(next) => {
           if (!saving) setOpen(next);
         }}
@@ -234,7 +239,7 @@ export function ExecutionTargetControl({
             Choose a code project independently of this task’s tracker project.
             Profiles retain provider, model, and permissions.
           </p>
-          <fieldset disabled={saving} className="space-y-3">
+          <fieldset disabled={saving || disabled} className="space-y-3">
             <div className={fieldClass}>
               <span>Code project</span>
               <ExecutionPicker label="Code project" value={projectId} dialogOpen={open} options={(projects.data ?? []).map(project => ({ value: project.id, label: project.name }))} onChange={id => { setProjectId(id); setEnvironmentId(""); }} />
@@ -335,7 +340,7 @@ export function ExecutionTargetControl({
             <Button
               type="button"
               variant="ghost"
-              disabled={saving || !execution?.override}
+              disabled={saving || disabled || !execution?.override}
               onClick={() => void save(null)}
             >
               Clear override · inherit defaults
@@ -348,7 +353,7 @@ export function ExecutionTargetControl({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={saving || !canSave}>
+            <Button type="submit" disabled={saving || disabled || !canSave}>
               {saving ? "Saving…" : "Save execution target"}
             </Button>
           </div>

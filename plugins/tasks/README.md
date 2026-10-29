@@ -145,8 +145,76 @@ the same revision are deliberately ignored. Send a new meaningful revision
 for a changed condition/new incident, never a polling timestamp. `active:false`
 resolves only this source's item, not its linked task. Reusing the same revision
 after recovery does not reopen it. Native source kinds `manual`,
-`native_interaction`, `native_failure`, and `task_review` are reserved.
+`native_interaction`, `native_failure`, `task_review`, and `task_route` are reserved.
 Original source URLs must be HTTP(S); all source text is untrusted context.
+
+## Advisory routing and local-action away
+
+Open **Routing & local away** on an incoming Inbox card. Exact native task
+keys/IDs and thread references resolve without a classifier. Conflicting scope
+asks one question; an explicit reference answers it. The proposal explains its
+reason, current owner, target and unavailable selections. Open the existing task
+and every retained worker directly. Managed workflows keep their writer even
+when the latest reply is a reviewer; prepared workspaces/continuations retain
+their native owner. Routing never sends, starts, prepares or replaces a worker.
+
+Semantic advice requires an explicit request and a registered service selected
+for Core's `task-route` AI task. This setting defaults off; automatic mode does
+not invoke a service. Core admits at most one completion callback with an
+eight-second timeout and no router retry or alternate service/account. That is
+not a physical model-request limit: the selected service owns downstream calls
+and retries. Semantic advice is unavailable under a local-away grant.
+
+```sh
+bb tasks route show <inbox-id> --json
+bb tasks route preview <inbox-id> --operation preview-1 --revision 0 --source-revision <source-revision> --project PROD --task PROD-1 --json
+bb tasks route apply <inbox-id> --operation link-1 --revision 1 --action '{"kind":"link"}' --json
+```
+
+Read the source revision from `inbox list` and the current proposal revision
+from `route show`. Preview takes `--new-task` to propose separate work or
+`--semantic` to request semantic advice. Apply accepts strict JSON for `link`,
+`create`, `target` (with `target`, nullable to clear), or `workflow-draft` (with
+`draftRevision` and `selection`). Target/draft saves reuse native execution and
+workflow schemas, require an idle task without a retained workflow/preparation/
+repository owner, and validate the real code
+project, host, context membership, model account and provider compatibility.
+Saving metadata never prepares a workspace or starts a workflow. Changed
+source, task, profile, draft or ownership makes advice stale. Refresh and preview
+again instead of replaying stale decisions.
+
+```sh
+bb tasks away enable --operation grant-1 --project PROD --inboxes <inbox-id> --tasks PROD-1 --actions preview,link --attempts 3 --seconds 300 --acknowledge-local-only --json
+bb tasks route apply <inbox-id> --operation away-link-1 --revision 1 --grant <grant-id> --action '{"kind":"link"}' --json
+bb tasks away revoke <grant-id> --json
+```
+
+Away is an explicit local-action allowlist, not an automatic runner. Select up
+to 20 incoming entries and 20 existing tasks in one tracker project, 1–100
+action attempts and 1–3600 seconds. Omitting `--tasks` admits no existing task;
+allowed actions are `preview,link,create,target,workflow-draft`. Every admitted
+attempt, including stale/failed attempts, consumes budget before the action.
+Revocation and absolute expiry fence pending effects; restart never renews a
+grant or replays uncertain delivery. Reuse an operation ID only with exactly
+the same input to retrieve its receipt. `route show` exposes scope, expiry,
+used/max attempts, stale state and the latest 50 journal entries.
+
+Native execution, external/Jira actions, production, irreversible operations,
+governance, Accept and unknown action shapes park in **Needs input**. Inspect
+the attention card's original source; it is not new intake and cannot create
+another task. Resolving its reminder never approves or executes the request.
+Incoming text, Work/Personal labels and classifier output grant no authority.
+Local-away grants govern these routing actions only; they do not sandbox
+existing native sessions, full-access tools or full-trust plugins.
+
+The UI and CLI share the authenticated Tasks RPCs `getInboxRoute`,
+`previewInboxRoute`, `applyInboxRoute`, `enableLocalAway`, and `revokeLocalAway`.
+SDK consumers call `bb.sdk.plugins.callRpc({pluginId:"tasks",method,input})`
+with native tracker/task IDs, explicit nullable `grantId`, source/proposal
+revisions, and the same typed inputs in `shared/routing.ts`. The local
+`createTaskRoutingClient` supplies output schemas for these calls. Core semantic
+advice uses `bb.sdk.system.experimental_classifyTaskRoute({text,candidates,projects})`;
+it cannot choose an arbitrary thread or worker account.
 
 ## Changelog
 

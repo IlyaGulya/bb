@@ -579,6 +579,18 @@ it fails, titles fall back to the start of the prompt and commits to
 `bb: automated commit`. `bb ai off|on` turns bb cloud off and on; see the
 `bb-cloud-ai` skill.
 
+Task routing adds the `task-route` AI task, off by default. Explicitly pick a
+registered completion service in Settings → AI services or with `bb settings
+ai-services set task-route <service-id> --plugin <plugin-id>`; use `off` to
+disable it. Automatic does not invoke a routing service. Semantic routing uses
+one completion callback with an eight-second timeout, no router retry and no
+service/account fallback, not a guaranteed single physical model request. The
+selected plugin owns its model and downstream requests. This selection never
+changes worker contexts or accounts. Exact Tasks references need no classifier.
+Tasks local-away scope is explicitly enabled per incoming/task/action with
+absolute expiry and an action-attempt budget; semantic/native execution is
+excluded. See the Tasks README and skill for the shared UI/CLI/SDK contract.
+
 The removed `BB_INFERENCE`, `BB_INFERENCE_FALLBACK`, and `BB_TRANSCRIPTION`
 keys are ignored with a warning in `~/.bb/config.json`, and `bb-app config set`
 refuses them.
