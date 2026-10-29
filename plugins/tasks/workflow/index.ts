@@ -31,6 +31,7 @@ export function registerTaskWorkflows(
   const pending = new Map<string, Promise<TaskWorkflow>>();
   async function validateEvidence(input: Parameters<PluginRpcHandlers<typeof taskBuildEvidenceContract>["validateTaskBuildEvidence"]>[0]) {
     assertBuildEvidencePolicy(input, input.build);
+    workflows.assertRecordingLineage(input.taskId, input.build);
     const verified = new Set<string>();
     for (const evidence of input.build.uiEvidence) {
       if (evidence.kind !== "video") continue;

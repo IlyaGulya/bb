@@ -245,9 +245,13 @@ First-class video evidence refers to an existing task/comment attachment, not
 an arbitrary URL or temporary path. It carries the exact commit, source run,
 scenario, original attachment and nullable editing disclosure. MP4 / H.264 and
 WebM reuse Tasks storage and its 25 MiB limit. Ownership, availability, container
-structure and commit/provenance are checked before review/publication/Accept;
-these checks do not prove decoder support or the truth of a recorded scenario.
-Only actual playback and independent inspection can do that.
+structure and reviewed-commit metadata are checked before review/publication/Accept.
+Published recording claims are retained separately from the current result through
+Return; a reused attachment cannot change its recorded commit/run or original/editing
+binding. Upgrade backfill covers only currently retained published results, not
+metadata already discarded by earlier Returns. These are consistency checks on
+claims, not authenticated capture provenance, decoder support or real-scenario
+proof. Actual playback and independent inspection remain required.
 
 The task attachment and result controls use one responsive in-task HTML video
 player, native controls, no autoplay, separate download, and explicit

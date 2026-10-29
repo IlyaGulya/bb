@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import type { PluginBrowserBbSdk } from "@get-bb/plugin-sdk/app";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VideoAttachment } from "./video-attachment.js";
 
@@ -16,8 +17,13 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const attachment = { id: "owned-video-fixture", fileName: "demo.mp4", mime: "video/mp4", sizeBytes: 4096 };
+const recordAnalytics: PluginBrowserBbSdk["experimental_productAnalytics"]["record"] = async ({ events }) => ({
+  receipts: events.map(({ operationId, featureId, action, stage, scope, mode }) => ({
+    operationId, featureId, action, stage, scope, mode, status: "accepted", code: "none",
+  })),
+});
 function fixture(file = attachment) {
-  return renderSlot({ component: () => <main aria-label="Existing task"><p>Task result stays here</p><VideoAttachment attachment={file} /></main> }, {}, { pluginId: "tasks" });
+  return renderSlot({ component: () => <main aria-label="Existing task"><p>Task result stays here</p><VideoAttachment attachment={file} /></main> }, {}, { pluginId: "tasks", sdk: { experimental_productAnalytics: { record: recordAnalytics } } });
 }
 
 function media(slot: ReturnType<typeof fixture>, fileName = attachment.fileName): HTMLVideoElement {

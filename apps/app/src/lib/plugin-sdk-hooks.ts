@@ -310,7 +310,13 @@ export function experimental_useProductAnalytics(): ExperimentalPluginProductAna
   const pluginId = usePluginId();
   const { projectId } = useBbContext();
   return useCallback<ExperimentalPluginProductAnalytics>((action, stage, options) => {
-    recordProductAnalytics(`plugin.${pluginId}`, action, stage, { ...options, scope: projectId === null ? { kind: "instance" } : { kind: "project", projectId } });
+    recordProductAnalytics(`plugin.${pluginId}`, action, stage, {
+      operationId: options?.operationId,
+      outcome: options?.outcome,
+      errorCode: options?.errorCode,
+      durationMs: options?.durationMs,
+      scope: projectId === null ? { kind: "instance" } : { kind: "project", projectId },
+    });
   }, [pluginId, projectId]);
 }
 

@@ -494,8 +494,11 @@ server attachment and disclose any editing or speed change. `uiEvidence` accepts
 sourceAttachmentId,transformation}}`; `transformation:null` means the attached
 file is its own unedited original. Video entries do not accept arbitrary URLs.
 Task ownership, accessible files, container structure, reviewed commit and
-editing provenance are gates; structural validation is not decoder or real-demo
-proof. Independently play and inspect the actual clip. The in-task player has
+consistency with previously published recording/original/editing claims are gates.
+Claims retained through Return are not authenticated capture provenance; metadata
+already discarded before the lineage upgrade cannot be reconstructed. Structural
+validation is not decoder or real-demo proof. Independently play and inspect the
+actual clip. The in-task player has
 native controls, no autoplay, and a separate file download. Close/Esc releases
 playback; a loading/unsupported/error state is not successful evidence.
 

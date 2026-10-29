@@ -7,7 +7,7 @@ import { registerAttachments, saveAttachmentFromBytes } from "../attachments/ind
 import { registerTaskWorkflows } from "./index.js";
 import { buildEvidenceSchema, taskBuildEvidenceContract, type BuildReviewResult, type BuildReviewStart } from "../../workflows/src/build-review-contract.js";
 import type { TaskWorkflow } from "../shared/workflow-contract.js";
-import { TaskWorkflowStore } from "./store.js";
+import { TaskWorkflowStore, taskWorkflowVideoLineageMigration } from "./store.js";
 
 const hosts: FakePluginHost[] = [];
 afterEach(async () => { for (const host of hosts.splice(0)) await host.harness.dispose(); });
@@ -122,6 +122,7 @@ describe("video-required task artifact admission", () => {
     const reopened = new TaskWorkflowStore(fixture.store);
     const returned = reopened.return(request.group, 1, "Show the corrected result on C2 without rewriting old recording lineage");
     reopened.save({ ...returned, state: "running", native: { ...native, runId: "wfr_c2_attempt", key: reopened.request(request.group).key, status: "running", result: null } });
+    expect(await fixture.validate(recorded)).toEqual({ verified: true });
     const evidence = recorded.uiEvidence[0]!;
     if (evidence.kind !== "video") throw new Error("Expected video fixture");
     const relabelled = buildEvidenceSchema.parse({
@@ -131,6 +132,27 @@ describe("video-required task artifact admission", () => {
     await expect(fixture.validate(relabelled)).rejects.toThrow();
     expect(workflows.get(request.group).revision).toBe(2);
     expect(workflows.get(request.group).state).toBe("running");
+    expect(fixture.store.tasks.getTask(fixture.task.id)?.status).toBe("in_progress");
+  });
+
+  it("preserves a retained published recording claim through a schema upgrade and Return", async () => {
+    const fixture = setup();
+    const attachment = await saveAttachmentFromBytes(fixture.store.tasks, await readFile(fixtureUrl), { taskId: fixture.task.id, fileName: "before-upgrade.mp4" });
+    const recorded = fixture.withVideo(attachment.id);
+    const { request } = publishRecordingLineage(fixture, recorded);
+    fixture.store.database.exec("ALTER TABLE task_workflow_runs DROP COLUMN video_lineage_json");
+    fixture.store.database.exec(taskWorkflowVideoLineageMigration);
+    const reopened = new TaskWorkflowStore(fixture.store);
+    reopened.return(request.group, 1, "Retain the published original across upgrade");
+    expect(await fixture.validate(recorded)).toEqual({ verified: true });
+    const evidence = recorded.uiEvidence[0]!;
+    if (evidence.kind !== "video") throw new Error("Expected video fixture");
+    const substituted = buildEvidenceSchema.parse({
+      ...recorded,
+      uiEvidence: [{ ...evidence, recording: { ...evidence.recording, runId: "unrelated-upgrade-run" } }],
+    });
+    await expect(fixture.validate(substituted)).rejects.toThrow();
+    expect(reopened.get(request.group).revision).toBe(2);
     expect(fixture.store.tasks.getTask(fixture.task.id)?.status).toBe("in_progress");
   });
 
@@ -147,6 +169,7 @@ describe("video-required task artifact admission", () => {
     evidence.recording.transformation = "Edited fixture; the original attachment is retained";
     expect(await fixture.validate(recording)).toEqual({ verified: true });
     publishRecordingLineage(fixture, recording);
+    expect(await fixture.validate(recording)).toEqual({ verified: true });
     const substituted = buildEvidenceSchema.parse({ ...recording, uiEvidence: [{ ...evidence, recording: { ...evidence.recording, sourceAttachmentId: unrelated.id } }] });
     await expect(fixture.validate(substituted)).rejects.toThrow();
     expect(fixture.store.tasks.getTask(fixture.task.id)?.status).toBe("in_review");
