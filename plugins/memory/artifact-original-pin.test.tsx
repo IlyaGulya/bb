@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { createArtifactMemoryFixture } from "./artifact-memory.test-fixtures.js";
 import { memoryRpcContract } from "./server.js";
+import { taskArtifactRpcContract } from "../tasks/shared/artifacts.js";
 
 type Fixture = Awaited<ReturnType<typeof createArtifactMemoryFixture>>;
 type Surface = "fact" | "history" | "proposal-before" | "proposal-after";
@@ -96,6 +97,67 @@ describe("stored original source pins", () => {
       const inspected = await slot.findByRole("region", { name: "Retained thread original" });
       expect(within(inspected).getByText(artifact.source.quote)).toBeTruthy();
       expect(within(inspected).getByText(`Raw source hash: ${source.revision}`)).toBeTruthy();
+    }
+    expect((await f.read(saved.id))?.lineage?.source).toEqual(source);
+    expect((await f.history(saved.id))[0]?.snapshot.lineage?.source).toEqual(source);
+  }, 60_000);
+});
+
+const selectionCases = (["fact", "history", "proposal-before", "proposal-after"] as const)
+  .flatMap((surface) => [false, true].map((changedSelection) => ({ surface, changedSelection })));
+
+describe("stored retained-selection pins", () => {
+  it.each(selectionCases)("preserves the stored excerpt in the $surface reader when the same-message selection changes = $changedSelection", async ({ surface, changedSelection }) => {
+    const f = await createArtifactMemoryFixture();
+    fixtures.push(f);
+    const storedExcerpt = "Use SQLite for the durable store.";
+    const firstSelection = `${storedExcerpt} Keep the original evidence available.`;
+    const secondSelection = "Retain a separate decision about the narrow layout.";
+    f.native.state.sourceText = `${firstSelection}\n\n${secondSelection}`;
+    const input = f.native.input(false);
+    const artifact = taskArtifactRpcContract.createTaskArtifact.output.parse(await f.native.harness.behavior.callRpc("createTaskArtifact", {
+      ...input, source: { ...input.source, quote: firstSelection },
+    }));
+    const inspected = await f.inspect(artifact.id);
+    const source = { ...inspected.source, quote: storedExcerpt };
+    const saved = await f.remember(memoryName, "A decision pinned to the first retained selection", source);
+    if (surface === "proposal-before" || surface === "proposal-after") {
+      await f.propose(saved, source, "A reviewed conclusion retaining the original selected excerpt");
+    }
+    const removed = taskArtifactRpcContract.deleteTaskArtifact.output.parse(await f.native.harness.behavior.callRpc("deleteTaskArtifact", {
+      ...f.native.scope, artifactId: artifact.id,
+    }));
+    expect(removed).toEqual({ deleted: true });
+    const selectedQuote = changedSelection ? secondSelection : firstSelection;
+    const recreated = taskArtifactRpcContract.createTaskArtifact.output.parse(await f.native.harness.behavior.callRpc("createTaskArtifact", {
+      ...input, artifactId: artifact.id, source: { ...input.source, quote: selectedQuote },
+    }));
+    expect(recreated).toMatchObject({
+      id: artifact.id, executionContextId: artifact.executionContextId,
+      source: { threadId: artifact.source.threadId, eventSeq: artifact.source.eventSeq, textSha256: source.revision, quote: selectedQuote },
+    });
+    const fresh = await f.inspect(artifact.id);
+    expect(fresh.view).toMatchObject({ sourceStatus: "available", artifact: {
+      id: artifact.id, source: { quote: selectedQuote, textSha256: source.revision },
+    } });
+    expect((await f.read(saved.id))?.lineage?.source).toEqual(source);
+    expect((await f.history(saved.id))[0]?.snapshot.lineage?.source).toEqual(source);
+    const slot = mount(f);
+    await openStoredOriginal(slot, surface);
+    if (changedSelection) {
+      await waitFor(() => {
+        const original = slot.queryByRole("region", { name: "Retained thread original" });
+        const rejected = slot.queryByRole("alert");
+        expect(original !== null || rejected !== null).toBe(true);
+      });
+      expect(slot.queryByText(secondSelection)).toBeNull();
+      expect(slot.queryByRole("region", { name: "Retained thread original" })).toBeNull();
+      expect(slot.getByRole("alert")).toBeTruthy();
+    } else {
+      const original = await slot.findByRole("region", { name: "Retained thread original" });
+      expect(within(original).getByText(firstSelection)).toBeTruthy();
+      expect(within(original).getByText(`Raw source hash: ${source.revision}`)).toBeTruthy();
+      expect(slot.queryByRole("alert")).toBeNull();
     }
     expect((await f.read(saved.id))?.lineage?.source).toEqual(source);
     expect((await f.history(saved.id))[0]?.snapshot.lineage?.source).toEqual(source);
