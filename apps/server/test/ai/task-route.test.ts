@@ -1,4 +1,5 @@
 import { setAiServiceSelection } from "@bb/db";
+import { createDeferredPromise } from "@bb/test-helpers";
 import { describe, expect, it } from "vitest";
 import { classifyTaskRoute } from "../../src/services/ai/task-route.js";
 import { updateAiServiceSelection } from "../../src/services/ai/ai-services-view.js";
@@ -62,8 +63,8 @@ describe("bounded task-route helper", () => {
   });
   it("does not call a selected or replacement service when registration changes while readiness is pending", async () => {
     await withTestHarness({}, async harness => {
-      const entered = Promise.withResolvers<void>();
-      const ready = Promise.withResolvers<void>();
+      const entered = createDeferredPromise<void>();
+      const ready = createDeferredPromise<void>();
       const selected = registerFakeAiService(harness.deps.aiServices, { id: "selected", status: async () => { entered.resolve(); await ready.promise; return { ready: true }; } });
       setAiServiceSelection(harness.db, "task-route", { mode: "service", pluginId: "fake-ai-plugin", serviceId: "selected" });
       const pending = classifyTaskRoute(harness.deps, request, signal());

@@ -1,3 +1,4 @@
+import { createDeferredPromise } from "@bb/test-helpers";
 import { createFakePluginHost, makeThreadResponse, type FakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -188,7 +189,7 @@ describe("server-reserved local-away lifecycle", () => {
     const { item } = await f.incoming(task.key);
     await preview(f, item.id);
     const grant = await enable(f, item.id, [task.id], ["link"]);
-    const gate = Promise.withResolvers<void>();
+    const gate = createDeferredPromise<void>();
     f.state.gate = gate.promise;
     const pending = f.routing.applyInboxRoute({ id: item.id, operationId: "reserved-link", grantId: grant.id, expectedRevision: 1, action: { kind: "link" } });
     if (transition === "revoked") await f.routing.revokeLocalAway({ id: grant.id });

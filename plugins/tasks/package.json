@@ -49,6 +49,7 @@
   },
   "devDependencies": {
     "@bb/plugin-build": "workspace:*",
+    "@bb/test-helpers": "workspace:*",
     "@get-bb/plugin-sdk": "workspace:*",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",

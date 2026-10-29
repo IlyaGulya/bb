@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
+import { createDeferredPromise } from "@bb/test-helpers";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost, type FakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { createStore, registerTasksApi } from "../../api/index.js";
 import { registerInbox } from "../../inbox/index.js";
@@ -14,7 +15,7 @@ import type { InboxEntry } from "../../shared/inbox-contract.js";
 import { TasksRefreshProvider } from "../../shell/refresh.js";
 import { InboxRoutingControl } from "./routing.js";
 
-const hosts: Array<ReturnType<typeof createFakePluginHost>> = [];
+const hosts: FakePluginHost[] = [];
 beforeEach(() => { vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(async () => { cleanup(); for (const host of hosts.splice(0)) await host.harness.dispose(); vi.unstubAllGlobals(); });
 function Harness({ item }: { item: InboxEntry }) { return <TasksRefreshProvider><InboxRoutingControl item={item} refresh={() => undefined} /></TasksRefreshProvider>; }
@@ -67,8 +68,8 @@ it("retains local reference edits across stale advice, Escape and reopen without
 });
 
 it("retains one pending local action across close/reopen and does not duplicate it on repeated activation", async () => {
-  const entered = Promise.withResolvers<void>();
-  const released = Promise.withResolvers<void>();
+  const entered = createDeferredPromise<void>();
+  const released = createDeferredPromise<void>();
   const f = await fixture({ entered: () => entered.resolve(), release: released.promise });
   const trigger = f.slot.getByRole("button", { name: "Routing & local away" });
   fireEvent.click(trigger);
