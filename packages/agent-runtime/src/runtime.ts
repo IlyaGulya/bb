@@ -277,6 +277,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     }
   }
   let nextRequestId = 1;
+  let closing = false;
   const threadIdentityRegistry = new RuntimeThreadIdentityRegistry();
   const threadRuntimeConfigs = new Map<string, ThreadRuntimeConfig>();
   const rateLimitedRetryDelaysMs =
@@ -412,7 +413,12 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     });
   }
 
+  function assertRuntimeOpen(): void {
+    if (closing) throw new Error("Runtime is shutting down and cannot accept new work.");
+  }
+
   function assertStartupAvailable(threadId: string): void {
+    assertRuntimeOpen();
     startup.assertAvailable(threadId);
     for (const [stagingThreadId, owner] of startupOwners) {
       if (owner !== threadId || !startup.isActive(stagingThreadId)) continue;
@@ -888,6 +894,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     args: RunThreadOperationArgs<TResult>,
   ): Promise<TResult> {
     return startup.track(args.threadId, async () => {
+      assertRuntimeOpen();
       beginThreadOperation(args.threadId);
       try {
         return await args.work();
@@ -1125,10 +1132,13 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       args.threadId,
     );
     try {
-      await providerProcesses.shutdownProvider({
-        processKey: proc.processKey,
-        providerId: proc.providerId,
-      });
+      startup.requireCleanup(args.threadId, "provider_startup_cancelled", "replacement");
+      if (!await startup.cancel(args.threadId)) {
+        await providerProcesses.shutdownProvider({
+          processKey: proc.processKey,
+          providerId: proc.providerId,
+        });
+      }
     } catch (error) {
       startup.requireCleanup(args.threadId);
       throw error;
@@ -1583,6 +1593,13 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
           prepared.providerThreadId,
         );
       } catch (error) {
+        if (startup.owns(prepared.stagingThreadId)) {
+          startup.requireCleanup(prepared.stagingThreadId, "provider_startup_cancelled");
+          await startup.cancel(prepared.stagingThreadId);
+          forgetThreadRuntimeStateForProviderState(proc.identity, prepared.stagingThreadId);
+          finishPreparedThreadRewindCleanup(leaseId, prepared);
+          return;
+        }
         schedulePreparedThreadRewindCleanup(
           leaseId,
           prepared,
@@ -1639,6 +1656,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       bridgeLaunch,
       skillRoots: sessionSkillRoots = skillRoots,
     }) {
+      assertRuntimeOpen();
       await providerProcesses.ensureProvider({
         processKey: resolveProviderProcessKey({
           bridgeLaunch,
@@ -2746,6 +2764,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     },
 
     async shutdown() {
+      closing = true;
       clearInterval(turnStartWatchdogTimer);
       const rewinds = await Promise.allSettled(
         [...stagedThreadRewinds.keys()].map((leaseId) =>

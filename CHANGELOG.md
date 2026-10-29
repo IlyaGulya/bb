@@ -2,6 +2,10 @@
 
 ## AgentOS fork — unreleased
 
+- Keep bounded startup cleanup ownership through expected bridge exit and persist
+  unverified-stop blockers across reopen. Confirm owned cleanup before
+  acknowledging failed prepared-rewind disposal, and refuse new work through
+  retiring runtimes, including previously obtained handles.
 - Give Tasks one header workflow action backed by the shared persistent drawer;
   retain single-agent dispatch as a secondary action. Keep draft selections and
   explicit unavailable choices while Core definition/account catalog events and

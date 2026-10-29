@@ -45,6 +45,28 @@ response is reconciled from native ownership metadata, never by creating a
 second worktree. Human Accept/Return remain separate from preparation and Start.
 
 
+## Provider runtime retirement and bounded cleanup
+
+Runtime retirement closes admission before taking its cleanup snapshot. New
+environment ensures and thread-command retention refuse an entry while it is
+retiring; an already-obtained runtime handle also refuses new execution. The
+entry remains reachable until shutdown succeeds. Failed cleanup does not reopen
+that runtime for another thread or another attempt.
+
+For bounded provider sessions, a deferred bridge replacement acquires cleanup
+ownership before teardown. An expected bridge exit is not proof that its owned
+descendants stopped: the startup receipt remains blocking until process-tree
+termination is confirmed. Replacement waits for that physical quiescence without
+waiting on the replacement control operation itself. Unverified cleanup records
+`provider_startup_stop_unverified`; Core retry remains blocked after a database
+reopen rather than trusting the earlier ready receipt.
+
+Stopping the parent of a completed bounded rewind lease also waits for confirmed
+owned-process cleanup. If native discard rejects or times out, the runtime stops
+the owned process tree before acknowledging stop. If that termination cannot be
+confirmed, it retains ownership and the retry blocker instead of reporting
+successful cancellation or treating a scheduled background retry as cleanup.
+
 ## Project preparation and transfer API
 
 The core SDK exposes these methods under `BbSdk.projects`. Each input also

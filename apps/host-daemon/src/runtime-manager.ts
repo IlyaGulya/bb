@@ -538,8 +538,10 @@ export class RuntimeManager {
   ): Promise<() => void> {
     return this.enqueueThreadControl(threadId, () => {
       const entry = this.entries.get(environmentId);
-      if (entry) this.assertWorkspaceNotCapturing(entry.path);
-      else if (this.workspaceCaptures.size)
+      if (entry) {
+        this.assertEntryNotRetiring(entry);
+        this.assertWorkspaceNotCapturing(entry.path);
+      } else if (this.workspaceCaptures.size)
         throw new Error(
           "Workspace capture is in progress; wait before starting local sessions.",
         );
@@ -778,10 +780,14 @@ export class RuntimeManager {
     }
   }
 
+  private assertEntryNotRetiring(entry: RuntimeEntry): void {
+    if (this.retiringEntries.has(entry)) throw new Error("Runtime retirement is in progress; retry after cleanup.");
+  }
+
   private async retireEntry(entry: RuntimeEntry): Promise<void> {
     const pending = this.retiringEntries.get(entry);
     if (pending) return pending;
-    const retirement = Promise.resolve().then(() => entry.runtime.shutdown()).then(() => {
+    const retirement = entry.runtime.shutdown().then(() => {
       if (this.entries.get(entry.environmentId) === entry) this.entries.delete(entry.environmentId);
     });
     this.retiringEntries.set(entry, retirement);
@@ -815,6 +821,7 @@ export class RuntimeManager {
   private async ensureCompatibleEntry(
     args: EnsureCompatibleEntryArgs,
   ): Promise<RuntimeEntry | null> {
+    this.assertEntryNotRetiring(args.entry);
     if (
       args.entry.shellEnvGeneration !== this.shellEnvGeneration &&
       !this.entryHasActiveRuntimeWork(args.entry) &&

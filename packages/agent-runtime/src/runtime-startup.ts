@@ -139,7 +139,7 @@ export class RuntimeStartup {
     this.retainedRuns.delete(threadId);
   }
 
-  requireCleanup(threadId: string, code: "provider_startup_failed" | "provider_startup_cancelled" = "provider_startup_failed"): void {
+  requireCleanup(threadId: string, code: "provider_startup_failed" | "provider_startup_cancelled" = "provider_startup_failed", work: "drain" | "replacement" = "drain"): void {
     const run = this.active.get(threadId) ?? this.retainedRuns.get(threadId);
     if (!run) return;
     this.forgetReadiness(threadId);
@@ -150,7 +150,7 @@ export class RuntimeStartup {
     run.ready = false;
     run.prepared = false;
     this.active.set(threadId, run);
-    void this.interrupt(threadId, run, code);
+    void this.interrupt(threadId, run, code, work);
   }
 
   async track<T>(threadId: string, work: () => Promise<T>): Promise<T> {
@@ -256,7 +256,7 @@ export class RuntimeStartup {
     return this.interrupt(threadId, run, code);
   }
 
-  private async interrupt(threadId: string, run: StartupRun, code: ProviderStartupError["code"]): Promise<void> {
+  private async interrupt(threadId: string, run: StartupRun, code: ProviderStartupError["code"], work: "drain" | "replacement" = "drain"): Promise<void> {
     if (run.ready) return;
     if (run.stopPromise) return run.stopPromise;
     run.prepared = false;
@@ -266,7 +266,7 @@ export class RuntimeStartup {
     run.stopPromise = Promise.resolve().then(async () => {
       try {
         await run.stop();
-        await Promise.allSettled([...run.work]);
+        if (work === "drain") await Promise.allSettled([...run.work]);
       } catch {
         this.blocked.add(threadId);
       }
