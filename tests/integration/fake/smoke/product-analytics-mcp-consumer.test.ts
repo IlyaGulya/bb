@@ -1,11 +1,10 @@
-import { Command } from "commander";
-import { createCliBbSdk } from "../client.js";
+import { createAnalyticsCliProgram } from "../../../../apps/cli/src/__tests__/helpers/product-analytics-cli.js";
+import { createCliBbSdk } from "../../../../apps/cli/src/client.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { registerProjectCommands } from "../commands/project.js";
 import { cliEnvironment, type CliRunner } from "../../../../plugins/mcp/src/cli-runner.js";
 import { parseCommandIndex } from "../../../../plugins/mcp/src/command-index.js";
 import { createBbMcpHttpHandler } from "../../../../plugins/mcp/src/mcp-handler.js";
-import { consumerReport, withAnalyticsConsumer } from "../../../server/test/helpers/product-analytics-consumer.js";
+import { consumerReport, withAnalyticsConsumer } from "../../../../apps/server/test/helpers/product-analytics-consumer.js";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
@@ -13,15 +12,14 @@ describe("analytics real MCP CLI admission", () => {
   it("preserves explicit smoke mode through MCP environment and actual CLI action on a production server", async () => {
     await withAnalyticsConsumer(async ({ harness, collector, work }) => {
       const serverUrl = "http://localhost";
-      vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => harness.app.request(new Request(input, init)));
+      vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => harness.app.request(new Request(input, init)));
       const runCli: CliRunner = async (argv) => {
         const env = cliEnvironment({ BB_PRODUCT_ANALYTICS_MODE: "smoke", BB_PROJECT_ID: work.id, BB_THREAD_ID: "thr_owner_context_must_be_stripped" }, serverUrl);
         for (const key of ["BB_PRODUCT_ANALYTICS_MODE", "BB_PRODUCT_ANALYTICS_SURFACE", "BB_PROJECT_ID", "BB_THREAD_ID"]) vi.stubEnv(key, env[key]);
         const lines: string[] = [];
         const log = vi.spyOn(console, "log").mockImplementation((...values: unknown[]) => { lines.push(values.map(String).join(" ")); });
         try {
-          const program = new Command().exitOverride();
-          registerProjectCommands(program, () => serverUrl);
+          const program = createAnalyticsCliProgram(serverUrl);
           await program.parseAsync([process.execPath, "bb", ...argv]);
           return { exitCode: 0, stdout: lines.join("\n"), stderr: "", timedOut: false, truncated: false };
         } finally {

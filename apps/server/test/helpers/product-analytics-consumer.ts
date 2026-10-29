@@ -9,7 +9,7 @@ import { createTestAppHarness, type TestAppHarness } from "./test-app.js";
 export function consumerSdk(harness: TestAppHarness, context: ExperimentalProductAnalyticsContext) {
   return createNodeBbSdk({
     baseUrl: "http://localhost",
-    fetch: experimental_createProductAnalyticsFetch(context, (input, init) => harness.app.request(new Request(input, init))),
+    fetch: experimental_createProductAnalyticsFetch(context, async (input, init) => harness.app.request(new Request(input, init))),
   });
 }
 

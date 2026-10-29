@@ -6,11 +6,11 @@ import { serve } from "@hono/node-server";
 import { describe, expect, it } from "vitest";
 import { productAnalyticsEvents } from "@bb/db";
 import { and, eq } from "drizzle-orm";
-import { writeHostFile } from "../../../host-daemon/src/command-handlers/file-write.js";
+import { writeHostFile } from "../../../../apps/host-daemon/src/command-handlers/file-write.js";
 import { rpcContract } from "../../../../plugins/monaco-editor/server.js";
-import { reportQueuedCommandSuccess, waitForQueuedCommand } from "../helpers/commands.js";
-import { consumerReport, consumerSdk, withAnalyticsConsumer } from "../helpers/product-analytics-consumer.js";
-import type { TestAppHarness } from "../helpers/test-app.js";
+import { reportQueuedCommandSuccess, waitForQueuedCommand } from "../../../../apps/server/test/helpers/commands.js";
+import { consumerReport, consumerSdk, withAnalyticsConsumer } from "../../../../apps/server/test/helpers/product-analytics-consumer.js";
+import type { TestAppHarness } from "../../../../apps/server/test/helpers/test-app.js";
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 

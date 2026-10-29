@@ -3,8 +3,19 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import type { TestProject } from "vitest/node";
 import { z } from "zod";
-import type { AnalyticsBrowserFixtureContext } from "../../../app/src/test/product-analytics-fixture.js";
 import { createAnalyticsConsumer, installConsumerPlugin } from "./product-analytics-consumer.js";
+
+declare module "vitest" {
+  export interface ProvidedContext {
+    analyticsConsumerServerUrl: string;
+  }
+}
+
+interface AnalyticsBrowserFixtureContext {
+  work: { id: string };
+  personal: { id: string };
+  pluginId: string | null;
+}
 
 export default async function setup(project: TestProject) {
   let active: Awaited<ReturnType<typeof createAnalyticsConsumer>> | null = null;
