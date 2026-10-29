@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { nativeArtifactReferences, parseNativeHistoryRecord, type NativeRecordObject } from "../src/native-session-record.js";
 
+const numericSpillRecord = (toolName: string, text: string): NativeRecordObject => ({ type: "message", message: { role: "toolResult", toolName, content: [{ type: "text", text }], details: { timeoutSeconds: 60, wallTimeMs: 5 } } });
+
 describe("native history records", () => {
   it("keeps OMP branches, reasoning, tool arguments and opaque checkpoint state", () => {
     const original = { type: "message", id: "branch-b", parentId: "branch-a", timestamp: "2026-01-02T03:04:05Z", checkpoint: { branch: "saved", statePath: "state.bin" }, message: { role: "assistant", content: [{ type: "thinking", thinking: "Private saved reasoning" }, { type: "toolCall", id: "call-a", name: "bash", arguments: { command: "do-not-execute" } }] } };
@@ -97,5 +99,35 @@ describe("native history records", () => {
     ], details: { images: [image] } }, payload: { content: [image] } }, 0);
     expect(parsed.artifacts).toEqual([]);
     expect(parseNativeHistoryRecord({ type: "future-state", content: [image], images: [image], preserveData: { snapcompact: { frames: [image] } } }, 0).artifacts).toEqual([]);
+  });
+
+  it.each([
+    { toolName: "bash", text: "[Raw output: artifact://25]", reference: "artifact://25" },
+    { toolName: "read", text: "[Raw output: artifact://25]", reference: "artifact://25" },
+    { toolName: "eval", text: "[Raw output: artifact://25]", reference: "artifact://25" },
+    { toolName: "bash", text: "[raw output: artifact://0]", reference: "artifact://0" },
+  ])("retains native numeric spill references in $toolName results: $reference", ({ toolName, text, reference }) => {
+    const parsed = parseNativeHistoryRecord(numericSpillRecord(toolName, text), 0);
+    expect(parsed.artifacts).toEqual([reference]);
+  });
+
+  it.each([
+    { name: "user message", record: { type: "message", message: { role: "user", content: [{ type: "text", text: "[Raw output: artifact://25]" }] } } },
+    { name: "assistant prose", record: { type: "message", message: { role: "assistant", content: [{ type: "text", text: "[Raw output: artifact://25]" }] } } },
+    { name: "tool arguments", record: { type: "message", message: { role: "assistant", content: [{ type: "toolCall", name: "bash", arguments: { text: "[Raw output: artifact://25]", entry: numericSpillRecord("bash", "[Raw output: artifact://25]") } }] } } },
+    { name: "unrelated result metadata", record: { type: "message", message: { role: "toolResult", toolName: "bash", content: [{ type: "text", text: "A short result" }], details: { text: "[Raw output: artifact://25]" } } } },
+    { name: "ordinary tool-output prose", record: numericSpillRecord("bash", "The command printed artifact://25 as ordinary text") },
+  ])("does not grant native numeric spill authority to $name", ({ record }) => {
+    expect(parseNativeHistoryRecord(record, 0).artifacts).toEqual([]);
+  });
+
+  it.each([
+    "artifact://../.credentials.json",
+    "artifact://25/../../.netrc",
+    "artifact://25/.mcp.json",
+    "artifact://25.bash-original.log",
+    "artifact://25 artifact://26",
+  ])("rejects nonnumeric or ambiguous native numeric spill footer references: %s", (reference) => {
+    expect(parseNativeHistoryRecord(numericSpillRecord("bash", `[Raw output: ${reference}]`), 0).artifacts).toEqual([]);
   });
 });
