@@ -30,6 +30,10 @@
 - Keep completed handoff and native-admitted imports ready when an unchanged
   source is reselected through an equivalent POSIX pathname; preserve the
   original continuation, committed provenance and writer without staging a retry.
+- Retain native OMP numeric tool-result spill outputs alongside image blobs.
+  Resolve unique result-specific original or older tool logs only in the selected
+  session stem under explicit artifact roots, with pinned descriptors, bounded
+  directory caching and unchanged proof, revision, auth and hardlink boundaries.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact

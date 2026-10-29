@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import { lstat, open, opendir, realpath, type FileHandle } from "node:fs/promises";
 import { basename, isAbsolute, parse, relative, resolve, sep } from "node:path";
-import { nativeOmpImageReferences, parseNativeHistoryRecord } from "@bb/domain";
+import { nativeOmpImageReferences, nativeOmpSpillReferences, parseNativeHistoryRecord } from "@bb/domain";
 import { NATIVE_SESSION_CHUNK_BYTES, type NativeChunk, type NativeDiscover, type NativeDiscovery, type NativeRead, type NativeSessionRoot, type NativeSessionSource } from "@bb/host-daemon-contract";
 
 const HEADER_BYTES = 1024 * 1024;
@@ -10,6 +10,9 @@ const MAX_RECORD_BYTES = 64 * 1024 * 1024;
 const MAX_DISCOVERY_ENTRIES = 20_000;
 const verifiedImages = new Map<string, Promise<void>>();
 const MAX_VERIFIED_IMAGES = 128;
+const spillDirectories = new Map<string, Map<string, string | null>>();
+const MAX_SPILL_DIRECTORIES = 16;
+const descriptorRoot = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
 const forbidden = /(?:^|[/\\])(?:\.?auth(?:\.db(?:-wal|-shm)?|\.json)?|\.?credentials?[^/\\]*|keychain[^/\\]*|\.env(?:\.[^/\\]*)?|\.?mcp(?:\.json)?|\.npmrc|\.netrc|\.pypirc|\.yarnrc(?:\.yml)?|settings\.json|config\.toml|\.ssh|\.aws|\.gnupg|\.docker|\.kube|\.git-credentials|id_rsa|id_ed25519|tokens?[^/\\]*|secrets?)(?:$|[/\\])/i;
 function contained(root: string, path: string): boolean {
   const suffix = relative(root, path);
@@ -25,28 +28,33 @@ async function safePath(root: string, path: string, imageHash: string | null = n
   if (!stat.isFile() || (stat.nlink !== 1 && imageHash === null)) throw new Error("Native sources must be regular, unshared files unless they are verified canonical OMP images.");
   return { path: canonical, stat, imageHash };
 }
-async function openConfined(source: ConfinedNativeFile): Promise<FileHandle> {
+async function openConfinedDirectory(path: string): Promise<FileHandle> {
   if (process.platform === "win32" || typeof constants.O_NOFOLLOW !== "number" || typeof constants.O_DIRECTORY !== "number") throw new Error("This host cannot provide confined native file reads.");
-  const root = parse(source.path).root;
-  const parts = relative(root, source.path).split(sep);
-  const name = parts.pop();
-  if (!name) throw new Error("Native source must identify a file.");
-  const descriptors = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
-  const directoryFlags = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
-  let directory = await open(root, directoryFlags);
+  const root = parse(path).root;
+  const flags = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+  let directory = await open(root, flags);
   try {
-    for (const part of parts) {
+    for (const part of relative(root, path).split(sep)) {
+      if (!part) continue;
       const previous = directory;
-      directory = await open(`${descriptors}/${previous.fd}/${part}`, directoryFlags);
+      directory = await open(`${descriptorRoot}/${previous.fd}/${part}`, flags);
       await previous.close();
     }
-    const file = await open(`${descriptors}/${directory.fd}/${name}`, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    return directory;
+  } catch (error) { await directory.close(); throw error; }
+}
+async function openConfined(source: ConfinedNativeFile, parent?: FileHandle): Promise<FileHandle> {
+  const parsed = parse(source.path);
+  if (!parsed.base) throw new Error("Native source must identify a file.");
+  const directory = parent ?? await openConfinedDirectory(parsed.dir);
+  try {
+    const file = await open(`${descriptorRoot}/${directory.fd}/${parsed.base}`, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       const opened = await file.stat();
       if (!opened.isFile() || (opened.nlink !== 1 && source.imageHash === null) || revision(opened) !== revision(source.stat)) throw new Error("Native source identity changed between validation and confined open.");
       return file;
     } catch (error) { await file.close(); throw error; }
-  } finally { await directory.close(); }
+  } finally { if (parent === undefined) await directory.close(); }
 }
 function revision(stat: Stats): string {
   return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
@@ -209,8 +217,8 @@ async function verifyNativeImage(file: FileHandle, stat: Stats, hash: string, si
   catch (error) { if (verifiedImages.get(key) === verification) verifiedImages.delete(key); throw error; }
   signal?.throwIfAborted();
 }
-async function readRange(source: ConfinedNativeFile, offset: number, length: number, expected: string | null, signal?: AbortSignal): Promise<{ bytes: Buffer; size: number; revision: string; modifiedAt: number }> {
-  const file = await openConfined(source);
+async function readRange(source: ConfinedNativeFile, offset: number, length: number, expected: string | null, signal?: AbortSignal, parent?: FileHandle): Promise<{ bytes: Buffer; size: number; revision: string; modifiedAt: number }> {
+  const file = await openConfined(source, parent);
   try {
     const before = await file.stat();
     if (!before.isFile() || (before.nlink !== 1 && source.imageHash === null)) throw new Error("Native source is not a private regular file or a verified canonical OMP image.");
@@ -317,6 +325,47 @@ export async function readNativeSessionIdentity(source: NativeSessionSource): Pr
   if (!described || described.sessionId !== source.sessionId || described.cwd !== source.cwd) throw new Error("Native session identity or authoritative recorded workspace changed.");
   return described;
 }
+async function readNativeSpill(source: ConfinedNativeFile, roots: string[], id: string, toolName: string, offset: number, length: number, expected: string | null, signal?: AbortSignal): Promise<Awaited<ReturnType<typeof readRange>>> {
+  const stem = source.path.slice(0, -".jsonl".length);
+  const authorized = roots.filter((root) => isAbsolute(root) && (resolve(root) === stem || contained(resolve(root), stem)));
+  if (!authorized.length || forbidden.test(stem)) throw new Error("Native spill directory is outside the explicitly selected artifact roots.");
+  const directory = await openConfinedDirectory(stem);
+  try {
+    const stamp = revision(await directory.stat());
+    const key = JSON.stringify([stem, stamp]);
+    let names = spillDirectories.get(key);
+    if (names === undefined) {
+      names = new Map<string, string | null>();
+      const entries = await opendir(`${descriptorRoot}/${directory.fd}`);
+      let visited = 0;
+      for await (const entry of entries) {
+        signal?.throwIfAborted();
+        if (++visited > MAX_DISCOVERY_ENTRIES) throw new Error("Native spill directory exceeds the bounded lookup limit.");
+        const match = /^(0|[1-9][0-9]*)\.[A-Za-z0-9_-]{1,64}\.log$/u.exec(entry.name);
+        const artifactId = match?.[1];
+        if (artifactId !== undefined && match?.[0] === entry.name) names.set(artifactId, names.has(artifactId) ? null : entry.name);
+      }
+      if (revision(await directory.stat()) !== stamp) throw new Error("Native spill directory changed during lookup.");
+      spillDirectories.set(key, names);
+      if (spillDirectories.size > MAX_SPILL_DIRECTORIES) {
+        const oldest = spillDirectories.keys().next().value;
+        if (oldest !== undefined) spillDirectories.delete(oldest);
+      }
+    }
+    const name = names.get(id);
+    if (name === null) throw new Error("Native spill ID is ambiguous in the selected session directory.");
+    if (name === undefined || (name !== `${id}.${toolName}-original.log` && name !== `${id}.${toolName}.log`)) throw new Error("No unique retained spill matches the selected native tool result.");
+    const path = resolve(stem, name);
+    let artifact: ConfinedNativeFile | null = null;
+    for (const root of authorized) {
+      try { artifact = await safePath(root, path); break; } catch { continue; }
+    }
+    if (artifact === null) throw new Error("Native spill is not a confined, unshared retained log.");
+    const result = await readRange(artifact, offset, length, expected, signal, directory);
+    if (revision(await directory.stat()) !== stamp) throw new Error("Native spill directory changed during read.");
+    return result;
+  } finally { await directory.close(); }
+}
 export async function readNativeSession(input: NativeRead, signal?: AbortSignal): Promise<NativeChunk> {
   signal?.throwIfAborted();
   const source = await safePath(input.source.rootPath, input.source.path);
@@ -328,6 +377,7 @@ export async function readNativeSession(input: NativeRead, signal?: AbortSignal)
   }
   let selected = source;
   let expected: string | null = input.source.revision;
+  let spillResult: Awaited<ReturnType<typeof readRange>> | null = null;
   if (input.artifact) {
     const proof = input.artifact;
     if (proof.recordLength > MAX_RECORD_BYTES) throw new Error("Artifact reference record exceeds the bounded native record limit.");
@@ -340,17 +390,24 @@ export async function readNativeSession(input: NativeRead, signal?: AbortSignal)
     if (proof.reference.endsWith(".jsonl") || forbidden.test(proof.reference)) throw new Error("Authentication/configuration files and neighboring sessions are not native artifacts.");
     const imageHash = input.source.engine === "omp" && nativeOmpImageReferences(parsed.state).includes(proof.reference) ? proof.reference : null;
     if (imageHash !== null) await readNativeSessionIdentity(input.source);
-    let artifact: ConfinedNativeFile | null = null;
-    for (const root of input.source.artifactRoots) {
-      const candidate = isAbsolute(proof.reference) ? proof.reference : resolve(root, proof.reference);
-      if (!contained(resolve(root), candidate)) continue;
-      try { artifact = await safePath(root, candidate, imageHash); break; } catch { continue; }
+    if (proof.reference.startsWith("artifact://")) {
+      const spill = input.source.engine === "omp" ? nativeOmpSpillReferences(parsed.state).find((entry) => entry.reference === proof.reference) : undefined;
+      if (spill === undefined) throw new Error("Numeric spill authority must belong to the selected native OMP tool result.");
+      await readNativeSessionIdentity(input.source);
+      spillResult = await readNativeSpill(source, input.source.artifactRoots, spill.id, spill.toolName, input.offset, input.length, proof.revision, signal);
+    } else {
+      let artifact: ConfinedNativeFile | null = null;
+      for (const root of input.source.artifactRoots) {
+        const candidate = isAbsolute(proof.reference) ? proof.reference : resolve(root, proof.reference);
+        if (!contained(resolve(root), candidate)) continue;
+        try { artifact = await safePath(root, candidate, imageHash); break; } catch { continue; }
+      }
+      if (artifact === null) throw new Error("Referenced artifact is missing or outside the explicitly selected artifact roots.");
+      selected = artifact;
     }
-    if (artifact === null) throw new Error("Referenced artifact is missing or outside the explicitly selected artifact roots.");
-    selected = artifact;
     expected = proof.revision;
   }
-  const result = await readRange(selected, input.offset, input.length, expected, signal);
+  const result = spillResult ?? await readRange(selected, input.offset, input.length, expected, signal);
   signal?.throwIfAborted();
   return { content: result.bytes.toString("base64"), offset: input.offset, sizeBytes: result.size, revision: result.revision, sha256: createHash("sha256").update(result.bytes).digest("hex") };
 }

@@ -96,8 +96,24 @@ export function nativeOmpImageReferences(record: NativeRecordObject): string[] {
   }
   return [...references];
 }
+export function nativeOmpSpillReferences(record: NativeRecordObject): { reference: string; id: string; toolName: string }[] {
+  const message = record.message;
+  if (record.type !== "message" || !message || typeof message !== "object" || Array.isArray(message) || message.role !== "toolResult" || !Array.isArray(message.content)) return [];
+  const toolName = message.toolName;
+  if (typeof toolName !== "string" || !toolName.length || toolName.length > 64 || /[^A-Za-z0-9_-]/u.test(toolName)) return [];
+  const ids = new Set<string>();
+  for (const block of message.content) {
+    if (!block || typeof block !== "object" || Array.isArray(block) || block.type !== "text" || typeof block.text !== "string") continue;
+    const id = /(?:^|\r?\n)\[[Rr]aw output: artifact:\/\/(0|[1-9][0-9]*)\][ \t\r\n]*$/u.exec(block.text)?.[1];
+    if (id !== undefined) ids.add(id);
+  }
+  if (ids.size !== 1) return [];
+  const id = ids.values().next().value;
+  return id === undefined ? [] : [{ reference: `artifact://${id}`, id, toolName }];
+}
 function structuredNativeArtifacts(record: NativeRecordObject, body: NativeRecordObject, type: string): string[] {
   const references = new Set(nativeOmpImageReferences(record));
+  for (const spill of nativeOmpSpillReferences(record)) references.add(spill.reference);
   const add = (value: JsonValue | undefined) => {
     if (typeof value === "string" && value.length) references.add(value.startsWith("blob://") ? value.slice(7) : value);
   };

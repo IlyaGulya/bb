@@ -39,6 +39,18 @@ descriptor traversal refuse rather than falling back to pathname reads.
 Every artifact proof requires exact length and whole native JSONL record
 boundaries before parsing grants authority. A checksummed object inside tool
 arguments is not an independent checkpoint record, including for generic artifacts.
+OMP tool-result text may also grant a numeric `artifact://N` reference through
+its terminal `[Raw output: artifact://N]` footer (including native lowercase
+`raw`). User/assistant prose, tool arguments and result metadata do not. The host
+requires one retained session-local ID matching that result's safe tool name:
+`N.<tool>-original.log` or the older `N.<tool>.log`, such as `N.eval.log`.
+Lookup is confined to the selected JSONL file's adjacent stem directory, which
+must be covered by an explicit artifact root; there is no cwd, neighbor-session
+or arbitrary-root fallback. Duplicate ID candidates, auth/configuration files,
+symlinks and non-image hardlinks refuse. A bounded directory-revision cache avoids
+rescanning unchanged directories for each chunk; descriptor-pinned lookup/read,
+whole-record checks and file/directory revision fences remain in force. Native
+headers, cwd and source bytes are never rewritten to make a spill resolvable.
 Canonical OMP image `data` references (`blob:sha256:` plus exactly 64 lowercase
 hex characters) address the extensionless hash file under an explicitly selected
 artifact root. Only native message/custom-message image content, saved execution,
