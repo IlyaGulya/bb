@@ -2,6 +2,9 @@
 
 ## AgentOS fork — unreleased
 
+- Preserve explicit workflow evidence choices when CLI boolean defaults are absent.
+  Keep exact-version memory inspection available beyond the recent-history window.
+  Exercise attachment HEAD handlers with the router's actual HEAD-to-GET dispatch.
 - Add Tasks Inbox routing advice with exact task/thread reuse, retained writer
   and prepared-workspace ownership, revision-CAS local actions and open-worker
   links. Share UI/CLI/SDK policy without a second executor or runnable queue.

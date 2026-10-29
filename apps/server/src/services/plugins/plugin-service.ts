@@ -9,6 +9,7 @@ import type {
   PluginRpcDiscoveryQuery,
   PublishedPluginRpcMethod,
 } from "@bb/server-contract";
+import { randomUUID } from "node:crypto";
 import { watch } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";

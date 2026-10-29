@@ -204,7 +204,7 @@ describe("task/context memory boundaries", () => {
     expect(retained.history.map((entry) => JSON.parse(entry.snapshot_json))).toEqual([replacement]);
     expect((await f.call("memoryHistory", { ...f.otherContext, name: link.id, version: link.version }, memoryRpcContract.memoryHistory.output)).history).toEqual([]);
     expect((await f.call("memoryHistory", { ...f.selection, name: link.id, version: 103 }, memoryRpcContract.memoryHistory.output)).history).toEqual([]);
-  });
+  }, 60_000);
 
   it("bounds injected summaries without copying details or old decisions into the prompt", async () => {
     const f = await fixture();

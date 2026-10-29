@@ -1,7 +1,6 @@
-import { defineConfig } from "vitest/config";
-import { sharedWorkerProjects } from "../../vitest.shared.js";
+import { defineWorkspaceTestConfig, sharedWorkerProjects } from "../../vitest.shared.js";
 
-export default defineConfig({
+export default defineWorkspaceTestConfig({
   resolve: { tsconfigPaths: true },
   test: {
     silent: "passed-only",

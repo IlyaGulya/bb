@@ -1869,7 +1869,7 @@ function createFakePluginHostInternal(
         );
       }
       const app = new Hono();
-      app.on(route.method, route.path, async (context) => {
+      app.on(route.method === "HEAD" ? "GET" : route.method, route.path, async (context) => {
         try {
           return adoptHttpRouteResponse(await route.handler(context));
         } catch (error) {
