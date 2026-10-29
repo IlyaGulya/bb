@@ -24,10 +24,18 @@ host/run/native-session/model labels are separate and unknown values stay null.
 Core callers: Thread Info's private capture drawer and `bb captures` use this
 same API. The Plugin Guide's **The bb SDK** documents these symbols.
 Before stabilization: integrate the immutable source38 native analytics API,
-compose migration 0147 after parent 0146 and wire protocol 245 after parent 244,
-and qualify the complete BBDEV-33 native/offline/ACK/privacy/transport matrix.
-Retained CPA/bridge files, normalized native events and owner imports do not
-certify independent MCP, bypass traffic, lossless streaming or full capture.
+compose migration 0147 after parent 0146 and host protocol 248, and qualify the
+complete BBDEV-33 acceptance contract. CPA is the sole network data path, through
+its existing frozen endpoint mapping/exact thread-header guard and finalized-file
+reader. No process policy, wrapper, runner or second network proxy is exposed.
+Existing optional native semantic evidence does not prove a CPA omission; review
+actual CPA artifacts/contracts before adding instrumentation or declaring gaps.
+Managed body chunks require scope/object/role-bound AES-256-GCM with protected
+Core and, when host data is enrolled, separate host key references. No adjacent
+disk key, plaintext fallback or encryption-attestation flag is accepted. Internal
+resident key providers are not a remote SDK surface. Prove key restore, source
+retention/protection, authenticated transport, plaintext hash/ACK/replay contracts,
+current-scope reads and the full owned CPA/native/offline/UI matrix.
 No capture activation, deployment or acceptance is implied by this source.
 
 ## Private request-log coverage and retained-file manifests

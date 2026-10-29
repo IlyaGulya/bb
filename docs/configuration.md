@@ -1556,5 +1556,39 @@ remain for a further 24 hours. Stop denies new Core intake immediately; an
 offline host stops collection by lease expiry. Existing provider logging and
 its source-file retention remain separate. No opening of a drawer or inspection
 command activates capture. The unactivated source is not full-capture/privacy
-certification or authorization to enable MITM, a CA or network probing.
+certification or authorization to change CPA, runtime, auth or account settings.
+
+CPA is the only network capture/data path. `cpaLogs` reads finalized native
+files using the frozen connection's `BB_CPA_LOG_DIRS` mapping and exact inbound
+thread-header guard. A CPA registration must name its actual thread. No process
+policy, runtime launch override, wrapper, Python dependency or second proxy is
+accepted. Existing native events/bridge lanes and reviewed exports are optional
+semantic/supplied evidence, not proof that CPA lacks a channel.
+
+Managed host/Core body files use scope/object/role-authenticated AES-256-GCM
+before private atomic disk writes. Key references are service-side, not policy:
+
+| Variable | Owner and meaning |
+| --- | --- |
+| `BB_PRIVATE_CAPTURE_CORE_KEY_REF` | Core-only protected key reference for receipt, replay, preview and download; required by CPA ingestion. |
+| `BB_PRIVATE_CAPTURE_HOST_KEY_REF` | Host-only protected key reference for separately enrolled host semantic/export outbox data; not required by CPA-only Core ingestion. |
+
+References are `keychain:<service>:<account>` on macOS, or
+`memory-file:/absolute/path` on Linux. The existing dedicated item/file must hold
+64 hex digits representing 32 random master-key bytes. Linux file ownership,
+mode, regular-file/single-link/canonical path and actual memory filesystem are
+checked; disk-backed/adjacent files are not a key-store fallback. The application
+creates no persistent key or Keychain item. Operator provisioning, OS approval,
+secure restoration and the same key across the complete pending/retention horizon
+are required. Missing key access fails closed; no attestation flag enables plain
+body files. The existing machine-environment adjacent key and secrets dotenv
+workflow are not used as capture master storage.
+
+Ciphertext is scope/object/role authenticated; plaintext SHA-256, redaction and
+committed ACK contracts are unchanged. Indexes/manifests remain private metadata.
+Existing source logs/event DB and intentional plaintext exports need their own
+proven protection. This source is not a claim that the unencrypted Linux volume,
+old sources, transport, OS key restore or the full native matrix is qualified.
+
+
 

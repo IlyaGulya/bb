@@ -19,7 +19,7 @@ import type { CaptureArtifactQuery, CaptureArtifactView, CaptureCreate, CaptureL
 import type { CaptureRejection } from "@bb/host-daemon-contract";
 import {
   CaptureStorageError, captureDecodeBase64, captureObjectDigest, capturePreparePayload,
-  capturePrivateDirectory, captureReadPrivate, captureSha256, captureWritePrivate,
+  capturePrivateDirectory, captureReadEncrypted, captureSha256, captureWriteEncrypted, captureCipherContext,
 } from "@bb/process-utils";
 import type { AppDeps, WorkSessionDeps } from "../types.js";
 import { ApiError } from "../errors.js";
@@ -96,6 +96,7 @@ export function createPrivateCapture(deps: CaptureDeps, input: CaptureCreate): C
   const { id, policy, ...subject } = input;
   authorizeCaptureScope(deps.db, subject);
   if (!getHost(deps.db, subject.hostId)) fail("host_not_found", 404);
+  if (policy.cpaLogs && subject.threadId === null) fail("cpa_thread_header_required");
   if ((subject.runId !== null || subject.nativeSessionId !== null) && (policy.cpaLogs || policy.bridgeRecorder)) fail("run_wire_correlation_unavailable");
   if (subject.threadId !== null) {
     const thread = getThread(deps.db, subject.threadId);
@@ -123,7 +124,7 @@ export function createPrivateCapture(deps: CaptureDeps, input: CaptureCreate): C
 export function getPrivateCapture(deps: CaptureDeps, id: string, scope: CaptureScope): CaptureView {
   const row = requireCapture(deps, id, scope);
   const expected = deps.db.select({ bytes: sql<number>`coalesce(sum(json_extract(${artifacts.manifest}, '$.storedBytes')), 0)`, chunks: sql<number>`coalesce(sum(json_array_length(${artifacts.manifest}, '$.chunks')), 0)` }).from(artifacts).where(and(eq(artifacts.captureId, id), sql`${artifacts.rejectedAt} is null`)).get()!;
-  const sources = deps.db.selectDistinct({ source: sql<CaptureManifest["source"]>`json_extract(${artifacts.manifest}, '$.source')` }).from(artifacts).where(and(eq(artifacts.captureId, id), sql`${artifacts.completedAt} is not null`)).all();
+  const sources = deps.db.selectDistinct({ source: sql<CaptureManifest["source"]>`json_extract(${artifacts.manifest}, '$.source')` }).from(artifacts).where(and(eq(artifacts.captureId, id), sql`${artifacts.completedAt} is not null`, sql`${artifacts.rejectedAt} is null`)).all();
   const totals = deps.db.select({ bytes: sql<number>`coalesce(sum(${chunks.bytes}), 0)`, count: count() }).from(chunks).where(eq(chunks.captureId, id)).get()!;
   const expectedBytes = expected.bytes;
   const expectedChunks = expected.chunks;
@@ -139,13 +140,13 @@ export function getPrivateCapture(deps: CaptureDeps, id: string, scope: CaptureS
     links: deps.db.select({ threadId: links.threadId, runId: links.runId, createdAt: links.createdAt }).from(links).where(eq(links.captureId, id)).orderBy(asc(links.linkId)).all().map(link => ({ ...link, provenance: "owner-association" as const })),
     outcome: !row.enabled ? "accepted" : effectiveGap !== "none" ? "failed" : row.lastSyncAt === null || totals.count === 0 || expectedChunks > totals.count || row.hostStatus?.pendingChunks ? "accepted" : "succeeded",
     coverage: [
-      { source: "cpa-request-log", state: has("cpa-request-log") ? "captured" : "uninstrumented", evidence: "Retained source-file evidence only; stream loss, bypass, pinning and unsupported transports are not certified." },
-      { source: "bridge-recorder", state: has("bridge-recorder") ? "captured" : "uninstrumented", evidence: "Only enrolled host/thread recorder lanes; existing recorder must already be explicitly enabled. Process-wide unknown-scope lanes are excluded. Oversized and unterminated lines are gaps." },
-      { source: "native-events", state: has("native-events") ? "metadata-only" : "uninstrumented", evidence: "Persisted actual Core normalized native events, including available tools/approvals/results; not provider HTTP or independent stdio MCP wire." },
-      { source: "native-transcript", state: "uninstrumented", evidence: "No provider auth home or native transcript discovery. Owner imports retain supplied-evidence provenance, not automatic native capture." },
-      { source: "stdio-mcp", state: "uninstrumented", evidence: "A schema or replayed tool result is not an independent MCP invocation capture." },
-      { source: "bypass-network", state: "uninstrumented", evidence: "No proxy, MITM, CA or all-traffic collector. HTTP/3, gRPC, WebSocket, encryption/pinning and unavailable provider reasoning require explicit qualification." },
-      { source: "standalone", state: row.session.subject.threadId === null && has("owner-import") ? "captured" : "uninstrumented", evidence: "Explicit capture identity and owner-supplied evidence only; automatic terminal/cmux/tmux process instrumentation is not claimed." },
+      { source: "cpa-request-log", state: has("cpa-request-log") ? "captured" : "uninstrumented", evidence: "Existing CPA is the only network capture owner. Completed artifacts retain every admitted settled native file byte after declared redaction, with source/stored hashes and committed chunk receipts. A finalized file and its ACK do not by themselves qualify live transport, retry or session completeness; no CPA capability is inferred absent." },
+      { source: "bridge-recorder", state: has("bridge-recorder") ? "captured" : "uninstrumented", evidence: "Optional already-enabled native semantic source; no recorder is enabled by capture. Existing host/thread lanes retain their actual process/sequence evidence, not a substitute network transport or proof that CPA omits the same content." },
+      { source: "native-events", state: has("native-events") ? "metadata-only" : "uninstrumented", evidence: "Optional actual Core normalized events and retained tool/approval/result provenance. Availability is observed from those events; it does not establish an omission from CPA. No new native hooks or wrappers are installed." },
+      { source: "native-transcript", state: "uninstrumented", evidence: "This reader performs no transcript discovery. Reviewed imports remain supplied evidence; no conclusion about CPA transcript or reasoning content follows." },
+      { source: "stdio-mcp", state: "uninstrumented", evidence: "No independent MCP instrumentation is added. Evaluate actual CPA request/response artifacts and native semantic provenance before claiming a missing tool channel." },
+      { source: "local-tools", state: has("native-events") ? "metadata-only" : "uninstrumented", evidence: "Existing normalized semantic provenance only. Tool schemas, arguments and returned results already present in CPA remain in the complete CPA file; no unverified missing-channel claim or extra capture mechanism." },
+      { source: "standalone", state: row.session.subject.threadId === null && has("owner-import") ? "captured" : "uninstrumented", evidence: "Reviewed standalone evidence may be explicitly associated without rewriting origin. Automatic CPA ingestion currently requires the exact inbound BB thread header and frozen endpoint; a separate native CPA correlation contract must be evidenced before extending that guard." },
     ],
   };
 }
@@ -263,7 +264,7 @@ async function acceptCaptureChunkOwned(deps: CaptureDeps, scope: CaptureScope, c
   const committed = deps.db.select().from(chunks).where(and(eq(chunks.captureId, chunk.captureId), eq(chunks.artifactId, chunk.artifactId), eq(chunks.sequence, chunk.sequence))).get();
   if (committed) {
     if (committed.sha256 !== chunk.sha256 || committed.receiptId !== receiptId) fail("identity_conflict");
-    const retained = await captureReadPrivate(await directory(deps, row.session, chunk.artifactId), `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES);
+    const retained = await captureReadEncrypted(await directory(deps, row.session, chunk.artifactId), `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES, captureCipherContext(deps.config.dataDir, "core", row.session, `${chunk.artifactId}/${chunk.sequence}.chunk`));
     if (retained.length !== expected.bytes || captureSha256(retained) !== chunk.sha256) fail("integrity");
     requireCapture(deps, chunk.captureId, scope, true);
     if (row.enabled) await completeCaptureArtifact(deps, row.session, chunk.artifactId, scope);
@@ -271,7 +272,7 @@ async function acceptCaptureChunkOwned(deps: CaptureDeps, scope: CaptureScope, c
   }
   if (!row.enabled) fail("stopped");
   try {
-    await captureWritePrivate(await directory(deps, row.session, chunk.artifactId), `${chunk.sequence}.chunk`, bytes);
+    await captureWriteEncrypted(await directory(deps, row.session, chunk.artifactId), `${chunk.sequence}.chunk`, bytes, captureCipherContext(deps.config.dataDir, "core", row.session, `${chunk.artifactId}/${chunk.sequence}.chunk`));
     let duplicate = false;
     const receipt = deps.db.transaction(() => {
       const current = requireCapture(deps, chunk.captureId, scope, true);
@@ -301,23 +302,21 @@ async function completeCaptureArtifact(deps: CaptureDeps, session: CaptureSessio
   if (artifact.completedAt !== null || artifact.committedSequences.length !== artifact.manifest.chunks.length) return;
   const hash = createHash("sha256");
   const root = await directory(deps, session, artifactId);
-  const audit = artifact.manifest.source === "owner-import" ? Buffer.allocUnsafe(artifact.manifest.storedBytes) : null;
+  const audit = Buffer.allocUnsafe(artifact.manifest.storedBytes);
   let offset = 0;
   for (const chunk of artifact.manifest.chunks) {
     requireCapture(deps, session.id, scope, true);
-    const bytes = await captureReadPrivate(root, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES);
+    const bytes = await captureReadEncrypted(root, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES, captureCipherContext(deps.config.dataDir, "core", session, `${artifactId}/${chunk.sequence}.chunk`));
     if (captureSha256(bytes) !== chunk.sha256) fail("integrity");
     if (bytes.length !== chunk.bytes) fail("integrity");
-    if (audit) audit.set(bytes, offset);
+    audit.set(bytes, offset);
     offset += bytes.length;
     hash.update(bytes);
   }
   if (hash.digest("hex") !== artifact.manifest.storedSha256) fail("integrity");
   let rejected = false;
-  if (audit) {
-    try { rejected = captureContainsPrivateKey(audit) || captureHasUnredactedAuth(audit, true) || (artifact.manifest.representation !== "binary" && captureSha256(redactCapturePayload(audit).bytes) !== artifact.manifest.storedSha256); }
-    catch { rejected = true; }
-  }
+  try { rejected = captureContainsPrivateKey(audit) || captureHasUnredactedAuth(audit, true) || (artifact.manifest.representation !== "binary" && captureSha256(redactCapturePayload(audit).bytes) !== artifact.manifest.storedSha256); }
+  catch { rejected = true; }
   if (rejected) {
     deps.db.update(artifacts).set({ rejectedAt: Date.now() }).where(and(eq(artifacts.captureId, session.id), eq(artifacts.artifactId, artifactId))).run();
     gap(deps, session.id, "privacy_rejected");
@@ -346,7 +345,7 @@ export async function previewCaptureArtifact(deps: CaptureDeps, id: string, arti
   for (const chunk of artifact.manifest.chunks) {
     if (offset >= limit) break;
     requireCapture(deps, id, query);
-    const bytes = await captureReadPrivate(await directory(deps, session, artifactId), `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES);
+    const bytes = await captureReadEncrypted(await directory(deps, session, artifactId), `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES, captureCipherContext(deps.config.dataDir, "core", session, `${artifactId}/${chunk.sequence}.chunk`));
     if (bytes.length !== chunk.bytes || captureSha256(bytes) !== chunk.sha256) fail("integrity");
     const length = Math.min(bytes.length, limit - offset);
     preview.set(bytes.subarray(0, length), offset);
@@ -367,7 +366,7 @@ export function downloadCaptureArtifact(deps: CaptureDeps, id: string, artifactI
         requireCapture(deps, id, scope);
         const chunk = artifact.manifest.chunks[sequence++];
         if (!chunk) { controller.close(); return; }
-        const bytes = await captureReadPrivate(await directory(deps, session, artifactId), `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES);
+        const bytes = await captureReadEncrypted(await directory(deps, session, artifactId), `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES, captureCipherContext(deps.config.dataDir, "core", session, `${artifactId}/${chunk.sequence}.chunk`));
         requireCapture(deps, id, scope);
         if (bytes.length !== chunk.bytes || captureSha256(bytes) !== chunk.sha256) fail("integrity");
         controller.enqueue(bytes);
@@ -455,6 +454,7 @@ export function syncPrivateCapture(deps: WorkSessionDeps, id: string, scope: Cap
 async function syncOne(deps: WorkSessionDeps, id: string, scope: CaptureScope): Promise<CaptureView> {
   let row = requireCapture(deps, id, scope, true);
   try {
+    if (row.enabled) deps.db.update(sessions).set({ gap: "none" }).where(eq(sessions.id, id)).run();
     await archiveCoreSources(deps, row);
     row = requireCapture(deps, id, scope, true);
     let ack: CaptureAck | null = null;
@@ -470,7 +470,7 @@ async function syncOne(deps: WorkSessionDeps, id: string, scope: CaptureScope): 
         if (result.status.gap !== "none") gap(deps, id, result.status.gap);
         if (!result.manifest || !result.chunk) break;
         if (result.manifest.captureId !== id || result.chunk.captureId !== id || result.chunk.artifactId !== result.manifest.artifactId ||
-            (result.manifest.source !== "bridge-recorder" && result.manifest.source !== "owner-import")) fail("integrity");
+            !["bridge-recorder", "owner-import"].includes(result.manifest.source)) fail("integrity");
         stageCaptureManifest(deps, scope, result.manifest, true);
         try { ack = await acceptCaptureChunk(deps, scope, result.chunk); }
         catch (error) {

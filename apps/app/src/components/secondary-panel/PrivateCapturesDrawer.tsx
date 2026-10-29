@@ -54,6 +54,9 @@ function PrivateCapturesContent({ threadId, open, onClose }: { threadId: string;
   const [interval, setInterval] = useState("30");
   const [lease, setLease] = useState("300");
   const [exportsJson, setExportsJson] = useState("[]");
+  const [standalone, setStandalone] = useState(false);
+  const [standaloneRuntime, setStandaloneRuntime] = useState("");
+  const [standaloneLinkOperation, setStandaloneLinkOperation] = useState(() => crypto.randomUUID());
   const [file, setFile] = useState<File | null>(null);
   const [fileKey, setFileKey] = useState(0);
   const [representation, setRepresentation] = useState<"raw" | "transcript" | "binary">("transcript");
@@ -79,9 +82,11 @@ function PrivateCapturesContent({ threadId, open, onClose }: { threadId: string;
   const create = useMutation({
     mutationFn: async (analytics: CaptureAnalytics) => {
       if (!scope || !subject?.host || !consent) throw new Error("capture_consent_and_scope_required");
+      if (standalone && !standaloneRuntime.trim()) throw new Error("capture_runtime_required");
       const policy = capturePolicySchema.parse({ consent: "private-full-content", payloadReview: "owner-approved-sensitive-application-data", retentionHours: Number(retention), maxBytes: Number(quota) * 1024 * 1024, maxArtifacts: 512, syncIntervalSeconds: Number(interval), offlineLeaseSeconds: Number(lease), bridgeRecorder: bridge, nativeEvents, cpaLogs: cpa, nativeExports: JSON.parse(exportsJson) });
-      const value = await api.create({ ...scope, id: draftId, hostId: subject.host.id, threadId, runId: null, nativeSessionId: null, runtimeId: subject.thread.providerId, runtimeVersion: null, modelConnectionId: subject.binding?.modelConnection?.id ?? null, model: null, policy, analytics });
-      setSelectedId(value.session.id); setDraftId(crypto.randomUUID()); setConsent(false); setAfter(undefined); await refresh();
+      const value = await api.create({ ...scope, id: draftId, hostId: subject.host.id, threadId: standalone ? null : threadId, runId: null, nativeSessionId: null, runtimeId: standalone ? standaloneRuntime.trim() : subject.thread.providerId, runtimeVersion: null, modelConnectionId: standalone ? null : subject.binding?.modelConnection?.id ?? null, model: null, policy, analytics });
+      if (standalone) await api.link({ ...scope, captureId: value.session.id, threadId, runId: null, operationId: standaloneLinkOperation, analytics });
+      setSelectedId(value.session.id); setDraftId(crypto.randomUUID()); setStandaloneLinkOperation(crypto.randomUUID()); setConsent(false); setAfter(undefined); await refresh();
     }, retry: false, gcTime: 0,
   });
   const control = useMutation({
@@ -134,7 +139,9 @@ function PrivateCapturesContent({ threadId, open, onClose }: { threadId: string;
           <summary className="cursor-pointer text-sm font-medium">Explicit opt-in and resource policy</summary>
           <div className="space-y-3 pt-3 text-sm">
             <p>Includes available retained evidence for this thread. Existing provider loggers are not enabled or reconfigured. Work exports require applicable owner permission; protected roots must be on encrypted storage. Review payloads for secrets; automatic redaction is not a guarantee.</p>
-            <div className="flex flex-wrap gap-4"><label><input type="checkbox" checked={nativeEvents} onChange={event => setNativeEvents(event.target.checked)} /> Existing normalized native events</label><label><input type="checkbox" checked={bridge} onChange={event => setBridge(event.target.checked)} /> Already-enabled private bridge recorder</label><label><input type="checkbox" checked={cpa} onChange={event => setCpa(event.target.checked)} disabled={!subject?.binding?.modelConnection?.gateway} /> Retained CPA files</label></div>
+            <label className="block"><input type="checkbox" checked={standalone} onChange={event => { setStandalone(event.target.checked); if (event.target.checked) { setNativeEvents(false); setBridge(false); setCpa(false); } }} /> Register standalone owned evidence on this host, with an explicit navigation link; this does not select a CPA endpoint or prove native execution.</label>
+            {standalone && <label className="block">Exact standalone runtime ID<input className={fieldClass} value={standaloneRuntime} onChange={event => setStandaloneRuntime(event.target.value)} /></label>}
+            <div className="flex flex-wrap gap-4"><label><input type="checkbox" checked={nativeEvents} onChange={event => setNativeEvents(event.target.checked)} disabled={standalone} /> Existing normalized native events</label><label><input type="checkbox" checked={bridge} onChange={event => setBridge(event.target.checked)} disabled={standalone} /> Already-enabled private bridge recorder</label><label><input type="checkbox" checked={cpa} onChange={event => setCpa(event.target.checked)} disabled={standalone || !subject?.binding?.modelConnection?.gateway} /> Retained CPA files</label></div>
             <div className="grid gap-2 md:grid-cols-4"><label>Retention hours<input className={fieldClass} type="number" min="1" max="720" value={retention} onChange={event => setRetention(event.target.value)} /></label><label>Capture quota MiB<input className={fieldClass} type="number" min="1" max="256" value={quota} onChange={event => setQuota(event.target.value)} /></label><label>Sync seconds<input className={fieldClass} type="number" min="30" max="3600" value={interval} onChange={event => setInterval(event.target.value)} /></label><label>Offline admission lease seconds<input className={fieldClass} type="number" min="30" max="3600" value={lease} onChange={event => setLease(event.target.value)} /></label></div>
             <label className="block">Explicit host-local native export registrations (JSON; empty means none)<textarea className={fieldClass} rows={3} value={exportsJson} onChange={event => setExportsJson(event.target.value)} /></label>
             <p className="text-xs text-muted-foreground">Only private files under this thread's host thread-storage root can be enrolled here. Standalone exports use their capture-specific input root via SDK/CLI. Native auth homes, arbitrary source roots and timestamp-based session association are not supported.</p>
@@ -163,6 +170,7 @@ function PrivateCapturesContent({ threadId, open, onClose }: { threadId: string;
             <Button type="button" size="sm" disabled={control.isPending || !selected.session.enabled} onClick={() => control.mutate({ operation: "sync", analytics: captureProductAnalyticsContext() })}>Sync now</Button>
             <Button type="button" size="sm" variant="outline" disabled={control.isPending || !selected.session.enabled} onClick={() => control.mutate({ operation: "stop", analytics: captureProductAnalyticsContext() })}>Stop new capture</Button>
           </div>
+          <p>CPA is the only network capture path. Managed host/Core body files require authenticated encryption with separate protected key references; 0600 is not encryption. Original CPA source storage and intentional downloads have separate protection requirements. No process, network proxy or runtime is launched by this drawer.</p>
           <details><summary className="cursor-pointer">Actual retained evidence and coverage gaps</summary><ul className="space-y-2 pt-2 text-xs">{selected.coverage.map(value => <li key={value.source}><strong>{value.source}: {value.state}</strong> — {value.evidence}</li>)}</ul></details>
           <details>
             <summary className="cursor-pointer">Import owned evidence</summary>

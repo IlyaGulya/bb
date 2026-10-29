@@ -1,7 +1,13 @@
-const credentialKey = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret|password|secret)$/iu;
+const credentialKey = /^(authorization|proxy-authorization|cookie|set-cookie|(?:[a-z0-9]+[-_])*(?:api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret|security[-_]?token|oauth[-_]?token|auth[-_]?token|session[-_]?token|password|secret)|(?:[a-z0-9]+[-_])+token)$/iu;
 const jsonField = /("(?:[^"\\]|\\.)*")(\s*:\s*)("(?:[^"\\]|\\.)*")/gu;
 export class CapturePayloadError extends Error {
   constructor(readonly code: "source_limit" | "privacy_rejected" | "invalid_utf8") { super(`capture_${code}`); }
+}
+function redactLooseSecrets(text: string): string {
+  return text.replace(/\b(Bearer|Basic)[ \t]+[A-Za-z0-9._~+/=-]+/giu, "$1 [REDACTED]")
+    .replace(/([?&](?:api[-_]?key|access[-_]?token|refresh[-_]?token|oauth[-_]?token|auth[-_]?token|session[-_]?token|token)=)[^&#\s"\\]+/giu, "$1[REDACTED]")
+    .replace(/(^|[\r\n;&?\s])((?:(?:[a-z0-9]+[-_])*(?:api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret|security[-_]?token|oauth[-_]?token|auth[-_]?token|session[-_]?token|password|secret)|(?:[a-z0-9]+[-_])+token)=)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^&;\s]*)/gimu, "$1$2[REDACTED]")
+    .replace(/(https?:\/\/)[^/\s@]+@/giu, "$1[REDACTED]@");
 }
 function redactJson(value: unknown, state: { changed: boolean }, depth = 0): unknown {
   if (depth > 64) throw new CapturePayloadError("source_limit");
@@ -14,9 +20,10 @@ function redactJson(value: unknown, state: { changed: boolean }, depth = 0): unk
         state.changed = true;
       } else Reflect.set(value, key, redactJson(entry, state, depth + 1));
     }
-  } else if (typeof value === "string" && /^[\s]*[\[{]/u.test(value)) {
-    const nested = redactJsonDocument(value, depth + 1);
-    if (nested?.changed) { state.changed = true; return nested.text; }
+  } else if (typeof value === "string") {
+    const nested = /^[\s]*[\[{]/u.test(value) ? redactJsonDocument(value, depth + 1) : null;
+    const text = redactLooseSecrets(nested?.text ?? value);
+    if (text !== value) { state.changed = true; return text; }
   }
   return value;
 }
@@ -38,17 +45,14 @@ export function redactCapturePayload(source: Uint8Array): { bytes: Uint8Array<Ar
   if (captureContainsPrivateKey(source)) throw new CapturePayloadError("privacy_rejected");
   let folded = false;
   const document = redactJsonDocument(raw);
-  const text = (document?.text ?? raw.split("\n").map(line => {
+  const text = redactLooseSecrets((document?.text ?? raw.split("\n").map(line => {
     if (folded && /^[ \t]/u.test(line)) return " [REDACTED]";
     folded = false;
     const header = /^([!#$%&'*+.^_`|~0-9A-Za-z-]+):[ \t]*(.*)$/u.exec(line);
     if (header && credentialKey.test(header[1]!)) { folded = true; return `${header[1]}: [REDACTED]`; }
     const prefix = line.startsWith("data: ") ? "data: " : "";
     return prefix + (redactJsonDocument(line.slice(prefix.length))?.text ?? line.slice(prefix.length));
-  }).join("\n")).replace(jsonField, (match: string, key: string, separator: string) => isCredentialJsonKey(key) ? `${key}${separator}"[REDACTED]"` : match)
-    .replace(/\b(Bearer|Basic)[ \t]+[A-Za-z0-9._~+/=-]+/giu, "$1 [REDACTED]")
-    .replace(/([?&](?:api[-_]?key|access[-_]?token|refresh[-_]?token)=)[^&#\s"\\]+/giu, "$1[REDACTED]")
-    .replace(/(https?:\/\/)[^/\s:@]+:[^/\s@]+@/giu, "$1[REDACTED]@");
+  }).join("\n")).replace(jsonField, (match: string, key: string, separator: string) => isCredentialJsonKey(key) ? `${key}${separator}"[REDACTED]"` : match));
   return { bytes: new TextEncoder().encode(text), redacted: text !== raw };
 }
 
@@ -64,6 +68,7 @@ export function captureContainsPrivateKey(source: Uint8Array): boolean {
 
 export function captureHasUnredactedAuth(source: Uint8Array, lastChunk: boolean): boolean {
   const text = new TextDecoder().decode(source);
+  if (redactLooseSecrets(text) !== text) return true;
   if (redactJsonDocument(text)?.changed) return true;
   const lines = text.split("\n");
   if (!lastChunk) lines.pop();

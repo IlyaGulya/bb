@@ -1,286 +1,252 @@
-# BBDEV-33 private capture source handoff
+# BBDEV-33 CPA-only source handoff
 
-This is unqualified, unactivated source for the authorized isolated worktree,
-not deployment, task completion, full-capture certification or human acceptance.
-The complete BBDEV-33 contract remains required. No runtime/model/account,
-installed SDK, auth, CA, global defaults, live source43 or service configuration
-was changed. No real raw log, credential, business payload or authentication
-home was copied. The previously verified Personal Sol6.1/high/full binding is
-not substituted by this work; capture data scope never follows the model payer.
+This is source-only, unactivated work in the original isolated checkout. The
+existing CLIProxyAPI/CPA is the only network capture/data path. No new proxy,
+network observer, CA/trust path, proxy environment override, Python dependency,
+standalone wrapper, native hook installer or process-launch override remains.
+No runtime/auth/model/provider/account/default/backups/Slack setting was changed.
+The exact bound Personal Sol6.1/high/full/context/account is not substituted;
+model payer never changes the immutable data scope.
 
-## Existing owners and new source contracts
+## Frozen discarded evidence and integration boundary
 
-The implementation stays inside the existing Core server, SQLite/private-file
-storage, host daemon and its authenticated `capture.exchange` RPC. The outbox
-contains capture data only, not runnable tasks. There is no new execution queue,
-supervisor, orchestrator, recording service, proxy or browser service.
+`bd53c00` is preserved at `refs/bb-evidence/bbdev33-bd53c00`, with its original
+stopped receipt. It is discarded-plan evidence, not an integration prerequisite.
+Do not cherry-pick it wholesale. The source handoff identifies a separate CPA-only
+integration commit based on `bd53c00^`, so parent can take applicable encryption
+and CPA changes without introducing the discarded implementation in Main.
 
-- `packages/domain/src/private-capture.ts` defines explicit consent/policy,
-  immutable subject, versioned manifest, chunk, committed ACK and gap schemas.
-- `packages/process-utils/src/private-capture-files.ts` confines POSIX private
-  roots, uses owner-only directories/files, rejects symlink/hardlink sources,
-  bounds file reads, checks stable snapshots, uses atomic writes and fsync, and
-  preserves a 64 MiB free-disk reserve before writes.
-- `apps/server/src/services/private-captures.ts` owns current context/project
-  authorization, actual frozen thread/account/runtime checks, manifest/index
-  reservations, chunk integrity and committed receipts, source ingestion,
-  retention, bounded flushes and expiry/shutdown IO fencing.
-- `apps/host-daemon/src/private-capture.ts` owns the host-local private data
-  outbox, source cursors, admission lease, persisted ACKs and periodic scanning.
-  Collection does not begin until an explicit registration is delivered. Existing
-  provider recorders are neither enabled nor reconfigured by registration.
-- `apps/server/src/routes/private-captures.ts` and the shared server contract
-  expose create/list/get/stop/sync, owner-association links, manifest staging,
-  chunk receipt, artifact listing/metadata, preview and full download.
-- `sdk.experimental_privateCaptures`, `bb captures` and the Thread Info private
-  capture drawer use those same routes. The shipped thread-inspection guide,
-  command index, JSON shapes, Plugin Guide and experimental API audit describe
-  the public surfaces. The drawer uses the existing persistent responsive shell.
+The removed additions are the process policy/evidence/status schemas, runner and
+Python dependency, process/MCP/hook CLI preparation, native launch substitutions,
+CA/trust/proxy configuration and their dedicated task/project/tests. The one
+interrupted-prefix cipher test was tied solely to the removed open process spool;
+managed body files now always require an authenticated terminal frame. Existing
+Core/host privacy, receipt/replay, retention and filesystem assertions remain.
 
-## Identity, permissions and provenance
+## Actual CPA contracts inspected
 
-A capture UUID is an explicit logical identity. Its project/context/host,
-thread/run/native-session, runtime/version, model-connection and configured-model
-subject is immutable. Thread captures must match the actual Core project and
-frozen execution context/account/runtime and delivery host. A supplied run/native
-session pair must exist together in actual Core events. CPA and bridge capture
-cannot be asserted to have per-run/native-session correlation when only thread
-ownership is available; such registration is refused rather than guessed.
+The source evidence read for this cutover is:
 
-Standalone registration has `threadId: null`, no asserted Core run or model
-connection, and its own UUID. Owner-reviewed evidence can later be associated
-with an actual same-project, same-context thread/run using `link`. This is a
-bounded, idempotent owner association for navigation; it does not rewrite origin
-or prove native execution provenance. Cross-context association is refused.
+- `apps/server/src/services/gateway-logs.ts`: native file list, bounded complete
+  `captureGatewayLogSource`, whole-file SHA-256 manifest and exact inbound header
+  parsing; no network transport is created here.
+- `apps/server/src/services/gateway-log-directory.ts`: `BB_CPA_LOG_DIRS` mapping
+  selected by the frozen connection endpoint, never by a different payer/root.
+- `apps/server/test/services/gateway-logs.test.ts`: existing synthetic CPA 8.0.44
+  format contains REQUEST INFO, HEADERS, REQUEST BODY, API REQUEST, API RESPONSE
+  and RESPONSE sections. Assertions cover exact case-insensitive header names,
+  duplicate/foreign/body-spoofed headers, endpoint isolation, symlinks, settling,
+  full bytes beyond preview limits and binary-tail whole-file hashing.
+- `apps/server/test/services/gateway-logs-capture-bounds.test.ts`: existing complete
+  source/budget/growth assertions; admitted source bytes are not a preview.
+- `tests/integration/private-capture/cpa.test.ts`: authored CPA file-to-Core cases
+  using those existing seams, a real migrated DB and encrypted files. This is a
+  synthetic retained-file fixture, not a replacement CPA service or live proof.
 
-Current context enablement/project membership and actual thread binding are
-checked at admission, reads and delivery. Preview/download recheck access around
-file IO; download also checks each chunk hash. Scope is not inferred from paths,
-timestamps, project labels, another account or a successful model request.
-These are guards on the existing owner-authenticated Core API, not a new
-per-agent/per-user ACL or a claim of regulatory authorization. Explicit Work
-export permission, encrypted disks and an approved encrypted transport remain
-operator prerequisites. A Personal model payer never converts Work data into
-Personal data. Owner imports are explicit owner assertions, not attested origin.
+These contracts justify preserving every admitted native file section, not
+assuming model-request-only logging. They do not establish that CPA lacks SSE,
+WebSocket, HTTP/3, gRPC, reasoning, tool/MCP or standalone coverage. Source
+coverage now distinguishes reader evidence from CPA capability: no new native
+semantic instrumentation is justified or added by this cutover. Existing optional
+Core events, already-enabled bridge lanes and reviewed imports remain separately
+labelled semantic/supplied evidence, not proof of an omission from CPA.
 
-Manifest source host/run/native-session IDs are separate from the selected
-capture subject and nullable when not observed. Native events preserve actual
-Core turn/provider-session IDs and a resolvable event-environment host. CPA
-retained files have no invented run/session/host association. Bridge/export
-host attribution identifies the enrolled machine that supplied the file, not
-an inferred original network endpoint. Model labels are parsed source-reported
-labels, not billing, routing or availability certification. The index contains
-at most 32 labels/destinations; a bound is exposed by `indexLimited`, never by
-truncating the stored source body.
+A live logger's completion/correlation/transport behavior is owned by the existing
+CPA deployment and its native logger version/artifacts. Its implementation and
+owned runtime receipts are not supplied in this checkout. Parent must use that
+owner's actual artifacts before claiming completeness or a gap. No substitute
+service, instrumentation plan or inferred protocol support is introduced.
 
-## Actual ingestion and remaining coverage gaps
+## CPA-only acceptance contract
 
-| Source | Real seam used | Boundary |
-| --- | --- | --- |
-| Retained CPA files | `services/gateway-logs.ts`, selected via the frozen endpoint and `BB_CPA_LOG_DIRS` | Existing confined read-only root and exact inbound BB thread-header ownership. Stable, settled whole-file snapshots are read and redacted. Source-file bytes are not proof of lossless network/SSE capture, retry accounting or per-run correlation. Original CPA source retention is not changed. |
-| Existing bridge recorder | `packages/provider-bridge-protocol/src/bridge-kit/bridge-recorder.ts`; host reader of runtime/provider direction NDJSON | Only an already-enabled owner-private host/thread recorder root. Process-wide unknown-scope lanes are excluded. Bounded complete-line snapshots retain original process run/sequence inside the evidence. Missing, oversized or unterminated lanes remain gaps; recorder append failures are not retroactively repaired. |
-| Actual Core native events | SQLite events plus the existing retained-output hydration functions | Available normalized messages, tools, approvals/results and retained outputs are archived. Oversized/unhydratable output and retained truncation are explicit gaps. This is normalized evidence, not an independent raw network or stdio-MCP tap. |
-| Explicit host exports | Existing thread-storage root, or standalone `private-capture-input/<captureId>`, with owner-registered relative paths | Stable owned private regular files only. Raw text/transcript/binary representation is explicit; no auth home, arbitrary-root discovery or timestamp matching. Supplied evidence retains `owner-import` provenance. |
-| Explicit SDK/CLI/UI import | Reviewed Blob/private invoking-machine file through shared redaction, manifest, chunk and ACK routes | No browser payload outbox. Retrying identical evidence resumes committed chunks; binary requires owner review. This does not instrument the originating terminal/process. |
+1. **Identity and authorization.** Explicit UUID, actual Core project, enabled
+   execution context, selected execution host and frozen thread/model-connection
+   binding. Current scope is rechecked at admission, delivery, preview/download
+   and around asynchronous IO. Work data stays Work with a Personal model payer.
+2. **CPA source selection.** `cpaLogs: true` requires the actual Core thread.
+   `listGatewayLogs`/`captureGatewayLogSource` use its frozen endpoint mapping and
+   exact inbound `x-bb-thread-id`; no path/time/account-based association or guard
+   weakening. Per-run/native-session CPA correlation is not invented. Standalone
+   automatic ingestion requires evidence of the existing CPA correlation contract;
+   an owner navigation link alone is not execution provenance.
+3. **Complete admitted bytes.** Read only canonical finalized/settled native files
+   through the existing Linux read-only CPA mount. Read exactly the inspected
+   size within 64 MiB, recheck stable file identity/size/times, and reject growth,
+   instability or oversize instead of truncating. Preserve the complete request,
+   upstream, response, tool/result and stream text actually present in the file.
+4. **Privacy and fidelity.** Redact known header/JSON/URL/credential forms,
+   including decoded credential keys; reject recognized private-key material.
+   Source and stored byte counts/SHA-256 are distinct. Fidelity explicitly says
+   source bytes, redacted source or normalized source. Secret absence remains
+   not-guaranteed; no private body goes to diagnostics, Git, CI or analytics.
+   Assembled artifact privacy audit applies to CPA as well as supplied evidence.
+5. **Durable delivery.** Deterministic immutable manifest and contiguous 262144-byte
+   chunks. Authenticate/encrypt and fsync body files before SQLite receipt commit.
+   ACK identity describes plaintext chunk size/hash and the committed receipt;
+   full artifact completion separately verifies its stored plaintext SHA-256.
+   Duplicate delivery verifies retained bytes and reuses the committed receipt.
+6. **Replay and failure.** CPA stamps are skipped only when the referenced artifact
+   completed. A partial write/lost stamp is re-admitted through the same manifest
+   and receipts, not silently skipped. Missing/corrupt bytes are failures. Recovered
+   sync clears the current error without erasing cumulative gap counts. No success
+   is inferred from an empty index, mapped root or absent activity.
+7. **Bounded storage and retention.** At most 64 MiB/artifact, 256 MiB/512 artifacts
+   per capture, 64 Core registrations and 2 GiB Core plaintext reservation plus
+   bounded ciphertext framing overhead. Existing host optional-data outbox has
+   a 512 MiB physical ceiling/32 registrations, leases and private retention.
+   Sync processes at most eight new CPA artifacts per call; existing periodic Core
+   sweep performs later batches. Disk pressure/source errors remain explicit.
+8. **Original CPA durability.** CPA owns original file retention, offline capture,
+   finalization and rotation. BB does not delete or reconfigure those files, nor
+   send an invented native CPA deletion ACK. Parent must prove original retention
+   exceeds outages and drain time; Core receipts certify only committed BB bytes.
+9. **Encryption and access.** Managed Node Core/optional-host body files are
+   authenticated ciphertext; no plaintext fallback or filesystem-attestation flag.
+   Existing authenticated owner routes plus per-scope checks are reused, not a
+   stronger invented per-agent ACL. Approved transport and Work export permission
+   remain prerequisites. Download authenticates/checks bounded chunks before
+   releasing plaintext and rechecks current authorization.
+10. **Surfaces and meaning.** Existing Core routes, `sdk.experimental_privateCaptures`,
+    `bb captures` and Thread Info drawer share creation/list/get/stop/sync, manifest,
+    chunk/ACK, metadata, verified download and reviewed import paths. Stop denies
+    new intake; it does not change CPA or another independent native recorder.
+    `captured` means completed retained evidence, not full live channel qualification.
 
-Native transcript discovery, terminal/cmux/tmux automatic capture, independent
-local-tool/MCP I/O, bypass HTTP/3/gRPC/WebSocket traffic, pinning/application
-encryption, provider-internal retries and unavailable provider reasoning remain
-uninstrumented or unsupported unless a real source supplies evidence. Tool
-schemas or replayed tool results in CPA requests do not prove independent tool
-execution. `captured` means retained evidence exists for that source, not that
-all its channels are complete. Empty indexes/unknown backlog are not zero
-activity or full coverage. Existing gateway coverage/manifest inspection remains
-separate and cannot certify the new delivery chain.
+No activation, deployment, full completion, Done/Accept or human acceptance is
+claimed. The full original acceptance remains required under the CPA-only design.
 
-## Bytes, privacy, ACKs and resource limits
+## Protected keys, applicable storage and unavailable prerequisites
 
-Core bytes live under `<dataDir>/private-capture/core/<scope-digest>/<captureId>/`
-and artifact directories. Host bytes/ACKs/cursors live under
-`<dataDir>/private-capture/host/<captureId>/`. SQLite stores private metadata,
-immutable manifests and committed receipts, not body blobs. These paths are
-application data and must be outside Git, CI artifacts, analytics and ordinary
-diagnostic logs. Existing provider source files have their own separate policy.
+`packages/process-utils/src/private-capture-crypto.ts` reuses Node AES-256-GCM and
+existing private atomic-write/fsync primitives. HKDF-SHA256 derives role/capture/
+immutable-subject keys; each bounded frame authenticates its role, scope, object,
+sequence and length, with a random 96-bit nonce and authenticated terminal frame.
+Moving/tampering/truncating ciphertext fails closed. Hashes, redaction, receipts
+and full download checksum remain plaintext contracts.
 
-Known HTTP/JSON credential forms, bearer/basic values and token query values are
-redacted; PEM private keys are rejected. Complete JSON documents and individual
-records are parsed before inspecting decoded keys, including Unicode-escaped
-credential names and nested JSON strings. A 64-level structured-redaction bound
-fails explicitly rather than bypassing the redactor. Invalid UTF-8 text is a
-source gap; opaque binary requires owner review and the host rejects recognized
-private-key markers before publishing any outbox payload. This is not universal
-secret detection: payload secret absence remains `not-guaranteed`.
+- `BB_PRIVATE_CAPTURE_CORE_KEY_REF`: Core owner must supply a dedicated protected
+  key reference for CPA ingestion/reads/replay. No host key is needed for CPA-only
+  Core ingestion.
+- `BB_PRIVATE_CAPTURE_HOST_KEY_REF`: separate enrolled host owner supplies this
+  only when optional host semantic/export data is actually collected.
+- Mac reference `keychain:<service>:<account>`: existing dedicated generic password
+  with 32 random bytes encoded as 64 hex digits. No browser/provider secret is
+  borrowed and no item is created. OS approval/restoration is operator-owned.
+- Linux reference `memory-file:/absolute/path`: existing canonical owner-only,
+  single-link regular key file on ramfs, or tmpfs with no active swap. Ordinary
+  ext4/LVM or adjacent disk keys are refused. Key provisioning/restoration from
+  the operator's protected store remains external; no key is auto-generated.
 
-Core audits owner-import completion across chunk boundaries. Privacy-denied
-artifacts retain a rejection record, deny body access and purge Core staged
-bytes. The existing authenticated `capture.exchange` command also accepts an
-optional terminal `rejection`, bound to capture ID, artifact ID, stored hash and
-the literal `privacy_rejected` reason. Absence means no rejection disposition.
-The host validates it against the immutable manifest, durably records a private
-rejection marker, and purges the artifact payload before continuing delivery.
-Replays and recovery repeat cleanup; a rejected artifact is not a successful
-ACK. A lost disposition is rediscovered from the still-pending host artifact and
-Core's persisted rejection decision. Core cleanup failures do not erase that
-decision; failed Core and host cleanup stays a visible failure/recovery gate.
-Rejected metadata still consumes its bounded reservation until expiry.
+The existing machine-environment adjacent key and secret-plugin dotenv files do
+not meet this requirement on an unencrypted disk and are not reused as capture
+masters. Internal data-dir/role-scoped resident key providers let isolated Node
+fixtures use actual random in-memory keys; they prove no OS-store restoration.
+Keys/references are separate from public capture policy and immutable data scope;
+key bytes never enter RPC/SQLite/manifests/analytics. Keep the same material across
+restart for every pending/retained ciphertext. No online rotation/lost-key fallback
+is implemented. Missing key access refuses body storage/read.
 
-Source and stored byte counts/SHA-256 are distinct. Redaction/normalization is
-explicit; only unchanged source bytes receive `source-bytes` fidelity. Each
-262144-byte chunk has sequence/size/hash and a deterministic receipt identity.
-Core verifies and fsyncs private bytes before committing its SQLite chunk receipt;
-ACK is returned only after that transaction boundary. Replays verify the retained
-bytes and return the same receipt. Full artifact completion separately verifies
-the assembled stored hash. The host persists matching committed ACKs before
-removing acknowledged local chunks. Exchange and daemon recovery reconcile
-already-persisted ACKs with leftover raw files before treating them as removed.
-Only a recognized same-directory UUID `.pending` hardlink to the same owned
-private inode may be normalized after interrupted publication; generic or
-foreign hardlinks remain integrity failures. Full host artifacts have a durable
-`ready` marker. Interrupted staging is validated/recovered, incomplete artifacts
-remain private with an explicit gap, and a later complete artifact can proceed.
-Missing/conflicting receipts do not permit raw deletion. These are source
-corrections, not runtime proof of every crash boundary or power-loss durability.
+Parent confirms Personal Mac FileVault is on. Linux Core/root ext4/LVM has no
+verified at-rest encryption; 0600 is not encryption. Applicable Node body storage
+is encrypted by this source, but existing original CPA logs/native events/index
+metadata and intentional downloads require their own proven protection. No CA,
+runner-specific key, ephemeral-runner directory or Python prerequisite remains.
 
-Each artifact is at most 64 MiB; a capture reserves at most 256 MiB/512 artifacts.
-Core has a 2 GiB/64-capture ceiling; the host has a 512 MiB retained-artifact-byte/
-32-registration ceiling. Host accounting includes physical staged files and
-metadata, including leftovers, rather than excluding ACKed-but-not-removed raw
-files. Resumed writes reserve their missing bytes before publication. The policy
-further bounds captures, source exports,
-retention (1–720 hours), sync (30–3600 seconds) and offline admission lease
-(30–3600 seconds, at least the sync interval). Disk pressure, source instability,
-quota or inaccessible files produce explicit gaps/backpressure, not hidden
-sampling, smaller-body success or a normal-log fallback.
+Exact unsupplied/unqualified values and owners:
 
-The existing Core periodic sweep performs bounded flushes and expiry cleanup;
-manual sync flushes one bounded batch, not an unbounded catch-up job. The host
-uses its existing daemon lifecycle for 30-second private-outbox ticks. A lease
-permits bounded local collection during disconnection; expiry stops collection
-without pretending an ACK occurred. Stop immediately denies new Core intake;
-a disconnected host stops by its lease, while unacknowledged local data remains
-subject to retention. Stop does not disable independent provider recorders.
-Host raw copies are removed at expiry without making deletion conditional on
-decoding artifact manifests/ACKs or successfully reading/writing mutable state.
-Each registration has an isolated sweep failure boundary, so corrupt metadata
-or a denied write in one does not starve another's retention. Unreadable immutable
-session grants cannot supply an invented expiry; they remain explicit failures.
-Bounded host metadata receipts may remain for a further 24 hours and count
-against registration capacity. Core expired records/bytes are pruned. Deletion
-by retention is not delivery. Dropped-byte figures are known counts only; corrupt
-metadata makes accounting incomplete rather than proving zero loss. Status is
-the last reported snapshot, not a live observation during outage. Clocks, leases,
-shutdown and recovery ordering still require parent qualification.
+| Value/evidence | Existing owner/value source |
+| --- | --- |
+| Core protected key reference and restored master | Core service operator's dedicated key store and `BB_PRIVATE_CAPTURE_CORE_KEY_REF`; no value was fetched or provisioned here. |
+| Optional host key | Only the separately enrolled semantic/export host's protected store and `BB_PRIVATE_CAPTURE_HOST_KEY_REF`. |
+| Endpoint-to-read-only-root mapping | Existing Core deployment `BB_CPA_LOG_DIRS`, selected by actual frozen `modelConnection.gateway.baseUrl`; never guessed or set globally here. |
+| Finalization, rotation, offline horizon, native transport and standalone correlation | Existing deployed CPA/native logger version/configuration and owned request artifacts; no replacement daemon/service or new header bypass. |
+| Test project/context/host/thread/model/account values | Parent's existing owned QA thread, its frozen Core binding and execution host; not the source writer's model login. |
+| Source38/migration/host composition | Parent's existing analytics contracts and ordered 0146/0147 Drizzle composition; protocol 248 removes discarded wire fields. No old-host/plaintext-store compatibility is claimed. |
 
-Preview is explicitly bounded and marked truncated/base64 as appropriate. Full
-SDK download verifies the whole stored checksum; CLI writes a new mode-0600 file
-and never defaults to body stdout. Explicit previews must not be run against
-real payloads in CI or agent/tool transcripts. CLI input errors are generic and
-do not forward private paths or malformed policy snippets to diagnostics.
+## Parent-only qualification commands — not executed here
 
-## Native source38 integration and ordered parent composition
-
-No alternative analytics service/schema/store is introduced. Consumers call the
-existing `experimental_productAnalyticsRequestInit` and forward the existing
-actor/surface/mode/QA/session/project context. Capture/create, import and link use
-opaque logical operation UUIDs retained on retry, never payload hashes. Automatic
-polls, intermediate chunk transport and upload reconciliation are observations,
-not new feature-use intents. Source38's existing catalog discovers declared
-public routes as `core.privateCaptures` actions; its existing server middleware
-is the admission/result authority. Create/stop/staging are bounded admissions,
-not claims of full-capture or downstream/client-save completion. Raw delivery
-ACKs and feature analytics are separate contracts.
-
-The isolated checkout intentionally does not copy the parent source38 analytics
-implementation. Ordered integration must provide its SDK helper, shared header
-contracts, UI provenance helper and native server/CLI metadata plumbing. The
-actual existing parent helper/catalog/result contracts were read; no new tracker
-or made-up feature ID is needed. Parent must prove native metadata admission,
-retry dedupe, completion authority, QA exclusion and that no payload, path,
-header, prompt, tool argument, credential or payload hash reaches analytics.
-
-Migration `0147_private_capture.sql` and its Drizzle-generated snapshot are
-reserved for these four private-capture tables. They were generated from this
-isolated checkout's 0145 schema. Parent owns 0146: after composing its immutable
-source38 schema/migration, regenerate/rebase the 0147 snapshot against the
-combined schema with Drizzle; never hand-edit snapshot JSON or lose parent
-analytics tables. The reserved journal index is 147, not an invented 0146 entry.
-Host protocol is 245, reserved after parent's source40 protocol 244; parent must
-compose the native host wire changes and qualify/update enrolled machines before
-using the new required manifest fields. No old-host compatibility is claimed.
-
-## Stopped verification and remaining parent proof
-
-Parent integrated corrective source `534a3d8` in Main `71033a2`, with the real
-source38 integration, both Drizzle 0146/0147 journal entries and protocol 245;
-no activation was reported. Parent's unchanged after results were Domain 8 PASS,
-private FS 3 PASS, host 8 PASS, and Core/CPA 7 PASS / 1 FAIL. Evidence:
-`/tmp/bbdev44-ui-qa-Qz0y2M/artifacts/capture33-534a3d8-after.log`.
-The failing consumer was `propagates a Core privacy rejection to the real host
-and permits the next artifact to commit`, ending with `Private capture
-artifact_not_found.` Both restarted ancestor/receipt fixture cases passed in
-that run; these are not power-loss or ancestor-fsync-ordering proofs.
-
-Static diagnosis: `capture.exchange` already has its command and result schemas
-in the online RPC registry, but was missing from the successful response union
-in `packages/host-daemon-contract/src/session.ts`. The authored real-host peer
-parses that union and converts parse failures into RPC failures, preventing Core
-from receiving the artifact. The narrow amendment adds only
-`onlineRpcResponseSuccessSchemaFor("capture.exchange")` to the existing union.
-It completes the unactivated protocol-245 contract without changing payload
-fields, assertions, fixtures, controls, committed ACKs or durable privacy
-disposition/cleanup. Parent subsequently reports Main `3631086` passed all five
-unchanged Core privacy/receipt cases with that wire fix (artifact6382).
-
-Parent's composed typecheck (artifact6397) reported 13 tasks PASS / 2 FAIL:
-CLI `readPrivateFile` needed an explicit error-path return, and the Core consumer
-suite imported host source/fixtures outside Server's existing compiler root.
-The bounded compiler amendment returns the existing `never` error helper and
-moves the complete suite, with only relative import changes, to
-`tests/integration/private-capture/private-captures.test.ts`. All five cases,
-assertions, controls and real host/Core paths are preserved. Host fixture code
-is unchanged. The existing integration package already has a repository-wide
-compiler root and the necessary cross-app dependencies; Server's `rootDir` and
-include list are unchanged. Its dedicated `@bb/integration-tests:private-capture`
-project uses `sharedWorkerProjects` without the fake suite's global cleanup.
-
-After parent composition, the relocated suite can be selected with this
-unexecuted command:
+Run after parent composition in its owned QA environment; all output files must
+be private, outside Git/ordinary CI logs. These commands select existing test
+projects through Turbo and install/launch no second proxy:
 
 ```sh
-pnpm exec turbo run test --filter=@bb/integration-tests -- --project=@bb/integration-tests:private-capture private-capture/private-captures.test.ts
+pnpm exec turbo run test --filter=@bb/process-utils -- test/private-capture-crypto.test.ts test/private-capture-files.test.ts
+pnpm exec turbo run test --filter=@bb/domain -- private-capture
+pnpm exec turbo run test --filter=@bb/host-daemon -- test/private-capture.test.ts
+pnpm exec turbo run test --filter=@bb/server -- test/services/gateway-logs.test.ts test/services/gateway-logs-capture-bounds.test.ts
+pnpm exec turbo run test --filter=@bb/integration-tests -- '--project=@bb/integration-tests:private-capture*' private-capture/
 ```
 
-This agent has run no checks, builds, installs or runtime execution for the
-compiler/placement amendment, and no network/model/auth/business probes or
-capture activation. Parent's reported results are accepted without rerunning
-them. Parent owns source38 composition and after-verification of this amendment;
-no new passing result, READY or full acceptance is claimed here. Drizzle 0147
-snapshot composition, including 0146 analytics and `prevId`, remains outside
-this amendment. Full Tasks acceptance and its native, offline-ACK and privacy
-matrix remain unchanged.
+The final command includes unchanged Core privacy/receipt cases and the authored
+isolated synthetic CPA-to-Core cases. The latter assert full multichunk files
+(including tool/SSE/upstream/tail text), correct endpoint/header ownership,
+redaction, actual ciphertext files, unchanged original CPA source, committed
+replay, unsettled-source recovery and current-scope denial of decrypted output.
+It uses a real migrated database, no database mock or provider/network substitute.
+Fixture resident keys do not qualify the real operator key store.
 
-After ordered source38/source40 integration and source review, parent owns:
+For real-owned-CPA qualification, parent supplies these values from the owners
+above, not defaults invented by this feature:
+`CPA_THREAD_ID`, `CPA_PROJECT_ID`, `CPA_CONTEXT_ID`, `CPA_CAPTURE_ID`,
+`CPA_POLICY_FILE` (reviewed CaptureCreate JSON using those exact frozen values),
+`CPA_QA_OUT` (approved encrypted private synthetic-only output directory),
+`CPA_LOG_ID` and `CPA_ARTIFACT_ID` (the exact entries emitted by list/index).
+The policy selects `cpaLogs: true`, no other collector, and explicit reviewed
+retention/quotas. The existing Core QA service must already have its read-only
+CPA mapping and protected Core key. Do not reconfigure global auth or route a
+different account/model. In the parent-owned CLI/session only:
 
-1. Native source gates and synthetic actual Core/CLI/SDK/UI execution, including
-   desktop/compact drawer realization, no app-root inertness, and iOS Safari.
-2. Real SQLite/file commit and lost-ACK/crash/restart/reconnect proof; duplicate,
-   conflict, reordered/chunk-boundary, corrupt-state, missing-file, interrupted
-   and large/binary behavior; no deletion before valid ACK except explicit
-   privacy rejection or retention.
-3. Actual context/project/account/host/run isolation, revoked permission between
-   read and delivery, Work data with a Personal payer, denied cross-context links,
-   owner export policy, encrypted storage/transport and absence of raw/credential
-   leakage into diagnostics, analytics, Git or CI.
-4. Offline leases, collector/daemon shutdown/restart, finite quotas, free-disk
-   pressure, late/expired registrations, retention and bounded tombstone cleanup,
-   plus measured CPU/RAM/disk/latency overhead without changing request streaming.
-5. The complete owned OMP/native Claude/Codex, macOS/Linux, BB and standalone
-   matrix with exact runtime/version/context/account/model identity, unrelated
-   process exclusion, raw request/response/SSE cancellation/retry facts and
-   independent tool/MCP/bypass coverage. Missing real source/machine/auth/export
-   prerequisites stay explicit; no timestamp, normalized event or CPA success
-   substitutes for them.
+```sh
+umask 077
+bb thread show "$CPA_THREAD_ID" --json
+bb gateway-logs coverage --thread "$CPA_THREAD_ID" --json
+bb captures create --file "$CPA_POLICY_FILE" --json
+bb thread tell "$CPA_THREAD_ID" 'Return exactly SYNTHETIC_CPA_BBDEV33_OK. Do not use tools.' --mode auto --json
+bb thread wait "$CPA_THREAD_ID" --status idle --timeout 2m
+sleep 3
+bb gateway-logs list --thread "$CPA_THREAD_ID" --json
+bb gateway-logs manifest "$CPA_LOG_ID" --thread "$CPA_THREAD_ID" --json
+bb captures sync "$CPA_CAPTURE_ID" --project "$CPA_PROJECT_ID" --context "$CPA_CONTEXT_ID" --json
+bb captures artifacts "$CPA_CAPTURE_ID" --project "$CPA_PROJECT_ID" --context "$CPA_CONTEXT_ID" --source cpa-request-log --json
+bb captures inspect "$CPA_CAPTURE_ID" "$CPA_ARTIFACT_ID" --project "$CPA_PROJECT_ID" --context "$CPA_CONTEXT_ID" --json
+bb captures download "$CPA_CAPTURE_ID" "$CPA_ARTIFACT_ID" --project "$CPA_PROJECT_ID" --context "$CPA_CONTEXT_ID" --output "$CPA_QA_OUT/stored-cpa.body" --json
+sha256sum "$CPA_QA_OUT/stored-cpa.body"
+bb captures sync "$CPA_CAPTURE_ID" --project "$CPA_PROJECT_ID" --context "$CPA_CONTEXT_ID" --json
+bb captures show "$CPA_CAPTURE_ID" --project "$CPA_PROJECT_ID" --context "$CPA_CONTEXT_ID" --json
+```
 
-Full raw-body/stream/tool/MCP/bypass/standalone/offline-ACK/privacy acceptance
-remains full. Unsupported/uninstrumented channels are visible gaps, not a reduced
-acceptance contract or permission to enable MITM/CA/capture or probe real data.
+Select the exact log/artifact IDs from the preceding metadata results before
+running their commands; never choose another thread/root to make the gate pass.
+Compare native manifest SHA/size with private manifest source SHA/size and the
+saved download hash with stored SHA. Replayed sync must not add duplicate
+committed chunks/artifacts or a new receipt for identical bytes. No raw preview
+or native full-log download is needed. The tell uses the already-bound model/
+reasoning/account with no override; it is a parent-only synthetic owned request,
+not permission for this source writer to make one.
+
+Parent additionally owns actual key-backed restart/restore, source/Core outage
+and drain, lost-ACK/crash/fsync boundaries, tamper/quotas/retention, revoked
+scope/Work-Personal isolation, secret absence in ordinary logs/analytics, existing
+Core/CLI/SDK/UI and desktop/compact/iOS proof. Apply the same existing CPA path to
+its full owned OMP/Claude/Codex × BB/standalone × Linux/Mac matrix. A transport/
+semantic omission may be declared only from actual CPA artifacts/contracts; a
+missing correlation value is not permission to add a wrapper or another proxy.
+No real business payload, raw credential or live source43 is used by this work.
+
+## Earlier parent evidence retained
+
+Parent reported Domain 8 PASS, private filesystem 3 PASS, host 8 PASS and Core/CPA
+7 PASS / 1 FAIL for earlier `534a3d8` in Main `71033a2`, with the real source38
+composition. The failing real-host privacy consumer was diagnosed at the host RPC
+success union; parent then reported Main `3631086` passed all five unchanged Core
+privacy/receipt cases. The later compiler/placement amendment moved that complete
+suite to the existing integration project without weakening assertions or changing
+Server's compiler root. These are historical parent reports, not after-results for
+this CPA-only/encryption source. They were not rerun or recharacterized as power-loss
+or ancestor-fsync-order proof.
+
+No check, build, test, formatter, runtime/browser/network/model/auth probe,
+activation, install or nested actor was invoked for this cutover. Static source/
+contract inspection and explicit Git evidence preservation/commits are the only
+non-edit operations. Parent owns all qualification and Main UI/import/runtime
+integration independently; this handoff does not mark the task Done or Accepted.

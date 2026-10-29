@@ -154,6 +154,13 @@ Opt-in private capture data (all but create require --project <Core-id> --contex
   maxBytes, maxArtifacts, syncIntervalSeconds, offlineLeaseSeconds,
   bridgeRecorder, nativeEvents, cpaLogs and nativeExports. Each export names a
   sourceId, relativePath, representation and binaryReview; none means [].
+  CPA is the only network capture path: cpaLogs selects existing finalized native
+  files through the frozen endpoint's BB_CPA_LOG_DIRS mapping and exact inbound
+  thread header. It enables no logger or runtime. A CPA registration requires
+  threadId; an owner association alone does not supply CPA execution provenance.
+  Existing nativeEvents/bridgeRecorder/exports remain optional semantic or supplied
+  evidence; none establishes that CPA omits a channel. Review actual CPA artifacts
+  before declaring a transport, tool, reasoning or standalone capability missing.
   Existing thread subject/account/runtime/host bindings are verified, not inferred
   from payer identity. Standalone means threadId=null and a distinct capture UUID;
   link is a same-context owner association, not native execution provenance.
@@ -166,8 +173,19 @@ Opt-in private capture data (all but create require --project <Core-id> --contex
   in CI or agent/tool transcripts; download full content to --output instead.
   Stop denies new Core intake; a disconnected host stops by its bounded lease.
   Existing provider loggers are not enabled, reconfigured or stopped by these
-  controls. Original provider source retention is separate. HTTP/3, bypass,
-  independent MCP and lossless streaming remain unqualified, not captured by fiat.
+  controls. Original CPA source retention is owned by CPA and must outlast any
+  outage/replay horizon; file integrity does not by itself prove live completeness.
+  Managed host/Core body chunks are AES-256-GCM ciphertext. Core uses
+  BB_PRIVATE_CAPTURE_CORE_KEY_REF; BB_PRIVATE_CAPTURE_HOST_KEY_REF is needed only
+  for separately enrolled host semantic/export data, not for CPA-only ingestion.
+  References select existing macOS keychain:<service>:<account> or Linux
+  memory-file:/absolute/path on ramfs/swap-excluded tmpfs with a 64-hex master key.
+  No adjacent disk key, auto-generation or plaintext fallback is accepted.
+  Keys remain separate from policy/RPC/analytics and must be restored across
+  restart for retained ciphertext. Hashes and ACKs describe application plaintext.
+  Existing source files, original event DB and intentional downloads need their
+  own proven protection. No Python, runner, process wrapper, CA/trust/proxy-env
+  setting or second network capture path is part of this feature.
 
 Opening threads and files in the app:
 

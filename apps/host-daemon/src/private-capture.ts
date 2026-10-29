@@ -14,6 +14,7 @@ import { captureRejectionSchema, type CaptureExchangeCommand, type CaptureExchan
 import {
   CaptureStorageError, captureObjectDigest, capturePreparePayload, capturePrivateDirectory,
   captureReadPrivate, captureSha256, captureSyncDirectory, captureWritePrivate,
+  captureReadEncrypted, captureWriteEncrypted, captureCipherContext, captureEncryptedSize,
 } from "@bb/process-utils";
 
 const stateSchema = z.object({
@@ -193,7 +194,7 @@ class HostCaptureOutbox {
           state.status.pendingBytes += chunk.bytes;
           state.status.pendingChunks += 1;
           if (next || !takeNext || !artifact.complete) continue;
-          const bytes = await captureReadPrivate(directory, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES);
+          const bytes = await captureReadEncrypted(directory, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES, captureCipherContext(this.dataDir, "host", session, `${artifactId}/${chunk.sequence}.chunk`));
           if (bytes.length !== chunk.bytes || captureSha256(bytes) !== chunk.sha256) throw new CaptureStorageError("integrity");
           next = { manifest: artifact.manifest, chunk: { captureId: session.id, artifactId, sequence: chunk.sequence, sha256: chunk.sha256, base64: bytes.toString("base64") } };
         }
@@ -219,6 +220,8 @@ class HostCaptureOutbox {
     await captureSyncDirectory(directory);
   }
   private async reconcileArtifact(directory: string, captureId: string, artifactId: string) {
+    const session = await this.readSession(await capturePrivateDirectory(this.dataDir, "host", captureId));
+    if (!session) throw new CaptureStorageError("integrity");
     const manifest = await this.readManifest(directory);
     if (manifest.captureId !== captureId || manifest.artifactId !== artifactId) throw new CaptureStorageError("integrity");
     if (await optionalStat(join(directory, "rejected.json"))) {
@@ -243,9 +246,9 @@ class HostCaptureOutbox {
       if (acknowledged.has(chunk.sequence)) continue;
       const stat = await optionalStat(join(directory, `${chunk.sequence}.chunk`));
       if (!stat) { complete = false; continue; }
-      if (!stat.isFile() || stat.size !== chunk.bytes || (stat.mode & 0o077) !== 0 || (process.getuid !== undefined && stat.uid !== process.getuid())) throw new CaptureStorageError("integrity");
+      if (!stat.isFile() || stat.size !== captureEncryptedSize(chunk.bytes) || (stat.mode & 0o077) !== 0 || (process.getuid !== undefined && stat.uid !== process.getuid())) throw new CaptureStorageError("integrity");
       if (!published || stat.nlink !== 1) {
-        const bytes = await captureReadPrivate(directory, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES);
+        const bytes = await captureReadEncrypted(directory, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES, captureCipherContext(this.dataDir, "host", session, `${artifactId}/${chunk.sequence}.chunk`));
         if (captureSha256(bytes) !== chunk.sha256) throw new CaptureStorageError("integrity");
         hash?.update(bytes);
       }
@@ -400,9 +403,9 @@ class HostCaptureOutbox {
         }
       }
     }
-    let additionalBytes = resumed ? 0 : bytes.length + manifestBytes.length + 66;
+    let additionalBytes = resumed ? 0 : manifest.chunks.reduce((sum, chunk) => sum + captureEncryptedSize(chunk.bytes), 0) + manifestBytes.length + 66;
     if (resumed) {
-      for (const chunk of manifest.chunks) if (!acknowledged.has(chunk.sequence) && !await optionalStat(join(directory, `${chunk.sequence}.chunk`))) additionalBytes += chunk.bytes;
+      for (const chunk of manifest.chunks) if (!acknowledged.has(chunk.sequence) && !await optionalStat(join(directory, `${chunk.sequence}.chunk`))) additionalBytes += captureEncryptedSize(chunk.bytes);
       if (!await optionalStat(join(directory, "manifest.json"))) additionalBytes += manifestBytes.length;
       if (!await optionalStat(join(directory, "acks.json"))) additionalBytes += 2;
       if (!await optionalStat(join(directory, "ready"))) additionalBytes += 64;
@@ -411,7 +414,7 @@ class HostCaptureOutbox {
     await capturePrivateDirectory(this.dataDir, "host", session.id, "outbox", manifest.artifactId);
     await captureWritePrivate(directory, "manifest.json", manifestBytes);
     for (const chunk of manifest.chunks) {
-      if (!acknowledged.has(chunk.sequence)) await captureWritePrivate(directory, `${chunk.sequence}.chunk`, bytes.subarray(chunk.sequence * CAPTURE_CHUNK_BYTES, chunk.sequence * CAPTURE_CHUNK_BYTES + chunk.bytes));
+      if (!acknowledged.has(chunk.sequence)) await captureWriteEncrypted(directory, `${chunk.sequence}.chunk`, bytes.subarray(chunk.sequence * CAPTURE_CHUNK_BYTES, chunk.sequence * CAPTURE_CHUNK_BYTES + chunk.bytes), captureCipherContext(this.dataDir, "host", session, `${manifest.artifactId}/${chunk.sequence}.chunk`));
     }
     if (!await optionalStat(join(directory, "acks.json"))) await captureWritePrivate(directory, "acks.json", Buffer.from("[]"));
     await captureWritePrivate(directory, "ready", Buffer.from(manifest.artifactId));

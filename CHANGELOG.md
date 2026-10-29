@@ -2,6 +2,17 @@
 
 ## AgentOS fork — unreleased
 
+- Keep BBDEV-33 network capture exclusively on the existing CPA finalized-file
+  path, frozen endpoint mapping and exact inbound thread-header ownership. Remove
+  the unintegrated second-proxy/process-launch implementation, its configuration,
+  dependencies and dedicated tests; preserve its frozen bd53c00 evidence.
+- Retain protected Node host/Core ciphertext storage, immutable scopes, redaction,
+  bounded complete file/chunk ingestion, committed ACK/replay and retention through
+  existing Core/CLI/SDK/drawer owners. Require a thread for automatic CPA intake,
+  audit every assembled plaintext artifact and clear recovered sync errors without
+  erasing their cumulative evidence. Coverage claims no CPA omission without actual
+  artifact/contract proof. Protocol 248 and synthetic CPA consumer cases are
+  source-only and unexecuted; parent owns composition and full qualification.
 - Make the private capture CLI error return explicit and place the unchanged
   five real-wire Core cases in a dedicated shared-worker integration project.
   Keep Server's compiler scope, all assertions and durable privacy behavior
