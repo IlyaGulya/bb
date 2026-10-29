@@ -261,7 +261,12 @@ export async function captureGatewayLogSource(
     const sourceId = `cpa:${logId}`;
     if (knownStamps.has(`${sourceId}:${stamp}`)) return null;
     if (stat.size > maxBytes) throw new ApiError(413, "capture_source_limit", "Private capture source exceeds its artifact limit.");
-    const bytes = await handle.readFile();
+    const bytes = Buffer.allocUnsafe(stat.size);
+    for (let offset = 0; offset < bytes.length;) {
+      const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (bytesRead === 0) throw notReady();
+      offset += bytesRead;
+    }
     if (bytes.length !== stat.size || !sameFile(stat, await handle.stat())) throw notReady();
     return { sourceId, stamp, bytes };
   } finally {

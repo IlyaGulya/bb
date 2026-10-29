@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, opendir, realpath, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -7,9 +8,9 @@ import {
   CAPTURE_MAX_ARTIFACT_BYTES,
   captureSessionSchema, type CaptureManifest, type CaptureSession, type CaptureOutboxStatus,
   redactCapturePayload,
-  captureReportedModels, CapturePayloadError,
+  captureReportedModels, captureContainsPrivateKey, CapturePayloadError,
 } from "@bb/domain";
-import type { CaptureExchangeCommand, CaptureExchangeResult } from "@bb/host-daemon-contract";
+import { captureRejectionSchema, type CaptureExchangeCommand, type CaptureExchangeResult } from "@bb/host-daemon-contract";
 import {
   CaptureStorageError, captureObjectDigest, capturePreparePayload, capturePrivateDirectory,
   captureReadPrivate, captureSha256, captureSyncDirectory, captureWritePrivate,
@@ -22,6 +23,8 @@ const stateSchema = z.object({
   status: captureOutboxStatusSchema,
 }).strict();
 const ackListSchema = z.array(captureAckSchema).max(256);
+type OutboxState = z.infer<typeof stateSchema>;
+type PendingChunk = { manifest: CaptureManifest; chunk: NonNullable<CaptureExchangeResult["chunk"]> };
 const lanes = ["runtime→bridge", "bridge→runtime", "provider→bridge", "bridge→provider"] as const;
 const instances = new Map<string, HostCaptureOutbox>();
 const stoppedDirectories = new Set<string>();
@@ -54,9 +57,16 @@ function sourceGap(error: unknown): CaptureOutboxStatus["gap"] {
   if (error instanceof CapturePayloadError) return error.code === "invalid_utf8" ? "partial_source" : error.code;
   return "source_unavailable";
 }
+function missing(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+async function optionalStat(path: string) {
+  return lstat(path).catch(error => { if (missing(error)) return null; throw error; });
+}
 
 class HostCaptureOutbox {
   private tail: Promise<unknown> = Promise.resolve();
+  private readonly failures = new Map<string, CaptureOutboxStatus["gap"]>();
   constructor(private readonly dataDir: string) {}
   exclusive<T>(run: () => Promise<T>): Promise<T> {
     const next = this.tail.then(run, run);
@@ -75,7 +85,18 @@ class HostCaptureOutbox {
     const state = await this.readState(directory);
     state.leaseUntil = Math.min(command.leaseUntil, session.expiresAt, Date.now() + session.policy.offlineLeaseSeconds * 1000);
     await this.saveState(directory, state);
+    if (this.failures.has(session.id)) state.status.gap = this.failures.get(session.id)!;
     const artifacts = await this.artifactNames(session.id);
+    if (command.rejection) {
+      const rejection = command.rejection;
+      if (rejection.captureId !== session.id || !artifacts.includes(rejection.artifactId)) throw new CaptureStorageError("integrity");
+      const artifactDir = await capturePrivateDirectory(this.dataDir, "host", session.id, "outbox", rejection.artifactId);
+      const manifest = await this.readManifest(artifactDir);
+      if (manifest.captureId !== rejection.captureId || manifest.artifactId !== rejection.artifactId || manifest.storedSha256 !== rejection.storedSha256) throw new CaptureStorageError("integrity");
+      await captureWritePrivate(artifactDir, "rejected.json", Buffer.from(JSON.stringify(rejection)));
+      await this.purgeRejectedPayload(artifactDir);
+      state.status.gap = "privacy_rejected";
+    }
     if (command.ack) {
       if (command.ack.captureId !== session.id || !artifacts.includes(command.ack.artifactId)) throw new CaptureStorageError("integrity");
       const artifactDir = await capturePrivateDirectory(this.dataDir, "host", session.id, "outbox", command.ack.artifactId);
@@ -91,71 +112,158 @@ class HostCaptureOutbox {
         acks.sort((a, b) => a.sequence - b.sequence);
         await captureWritePrivate(artifactDir, "acks.json", Buffer.from(JSON.stringify(acks)), true);
       }
-      await rm(join(artifactDir, `${chunk.sequence}.chunk`), { force: true });
-      await captureSyncDirectory(artifactDir);
       state.status.lastAckAt = Math.max(state.status.lastAckAt ?? 0, command.ack.committedAt);
+      await this.reconcileArtifact(artifactDir, session.id, manifest.artifactId);
     }
     if (command.poll) await this.scan(session, state);
     const enabled = session.enabled && Date.now() < session.expiresAt && Date.now() < state.leaseUntil;
     if (!enabled && state.status.gap === "none") state.status.gap = Date.now() >= session.expiresAt ? "expired" : session.enabled ? "lease_expired" : "stopped";
-    let next: { manifest: CaptureManifest; chunk: CaptureExchangeResult["chunk"] } | null = null;
-    state.status.pendingBytes = 0;
-    state.status.pendingChunks = 0;
-    const currentArtifacts = await this.artifactNames(session.id);
-    state.status.artifacts = currentArtifacts.length;
-    for (const artifactId of currentArtifacts) {
-      const artifactDir = await capturePrivateDirectory(this.dataDir, "host", session.id, "outbox", artifactId);
-      const manifest = await this.readManifest(artifactDir);
-      const receipts = await this.readAcks(artifactDir);
-      for (const receipt of receipts) state.status.lastAckAt = Math.max(state.status.lastAckAt ?? 0, receipt.committedAt);
-      const acknowledged = new Set(receipts.map(ack => ack.sequence));
-      for (const chunk of manifest.chunks) {
-        if (acknowledged.has(chunk.sequence)) continue;
-        state.status.pendingBytes += chunk.bytes;
-        state.status.pendingChunks += 1;
-        if (!next && enabled && command.poll) {
-          const bytes = await captureReadPrivate(artifactDir, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES);
-          if (bytes.length !== chunk.bytes || captureSha256(bytes) !== chunk.sha256) throw new CaptureStorageError("integrity");
-          next = { manifest, chunk: { captureId: session.id, artifactId, sequence: chunk.sequence, sha256: chunk.sha256, base64: bytes.toString("base64") } };
-        }
-      }
-    }
+    const next = await this.inspectArtifacts(session, state, enabled && command.poll);
     await this.saveState(directory, state);
     return { enabled, status: state.status, manifest: next?.manifest ?? null, chunk: next?.chunk ?? null };
   }
   async sweep(): Promise<void> {
-    if (!await lstat(join(this.dataDir, "private-capture", "host")).catch(() => null)) return;
+    if (!await optionalStat(join(this.dataDir, "private-capture", "host"))) return;
     const root = await capturePrivateDirectory(this.dataDir, "host");
     for (const id of await names(root, uuidPattern, MAX_HOST_SESSIONS)) {
-      const directory = await capturePrivateDirectory(this.dataDir, "host", id);
-      const session = await this.readSession(directory);
-      if (!session) continue;
-      if (Date.now() >= session.expiresAt + 86400000) { await rm(directory, { recursive: true }); continue; }
-      const state = await this.readState(directory);
       try {
-        if (Date.now() >= session.expiresAt) {
-          let discarded = 0;
-          for (const artifact of await this.artifactNames(id)) {
-            const artifactDir = await capturePrivateDirectory(this.dataDir, "host", id, "outbox", artifact);
-            const manifest = await this.readManifest(artifactDir);
-            const acknowledged = new Set((await this.readAcks(artifactDir)).map(ack => ack.sequence));
-            discarded += manifest.chunks.filter(chunk => !acknowledged.has(chunk.sequence)).reduce((sum, chunk) => sum + chunk.bytes, 0);
-            await rm(artifactDir, { recursive: true });
-          }
-          state.status.droppedBytes += discarded;
-          state.status.artifacts = 0;
-          state.status.pendingBytes = 0;
-          state.status.pendingChunks = 0;
-          state.status.gap = "expired";
-          state.cursors = {};
-        } else if (session.enabled && Date.now() < state.leaseUntil && Date.now() >= state.nextScanAt) {
-          await this.scan(session, state);
+        const directory = await capturePrivateDirectory(this.dataDir, "host", id);
+        const session = await this.readSession(directory);
+        if (!session || session.id !== id) { this.failures.set(id, "integrity"); continue; }
+        if (Date.now() >= session.expiresAt + 86400000) {
+          await rm(directory, { recursive: true });
+          await captureSyncDirectory(root);
+          this.failures.delete(id);
+          continue;
         }
-      } catch (error) {
-        state.status.gap = sourceGap(error);
-      }
-      await this.saveState(directory, state);
+        if (Date.now() >= session.expiresAt) {
+          await this.expireSession(directory, session);
+        } else {
+          const state = await this.readState(directory);
+          await this.inspectArtifacts(session, state, false);
+          if (session.enabled && Date.now() < state.leaseUntil && Date.now() >= state.nextScanAt) await this.scan(session, state);
+          await this.saveState(directory, state);
+        }
+        this.failures.delete(id);
+      } catch (error) { this.failures.set(id, sourceGap(error)); }
     }
+  }
+  private async expireSession(directory: string, session: CaptureSession): Promise<void> {
+    let discarded = 0;
+    let accountingGap = false;
+    const outbox = join(directory, "outbox");
+    try {
+      if (await optionalStat(outbox)) {
+        for (const artifactId of await this.artifactNames(session.id)) {
+          const artifactDir = await capturePrivateDirectory(this.dataDir, "host", session.id, "outbox", artifactId);
+          const manifest = await this.readManifest(artifactDir);
+          const acknowledged = this.validateAcks(manifest, await this.readAcks(artifactDir));
+          discarded += manifest.chunks.filter(chunk => !acknowledged.has(chunk.sequence)).reduce((sum, chunk) => sum + chunk.bytes, 0);
+        }
+      }
+    } catch { accountingGap = true; }
+    finally {
+      await rm(outbox, { recursive: true, force: true });
+      await captureSyncDirectory(directory);
+    }
+    const state = await this.readState(directory);
+    state.status.droppedBytes += discarded;
+    state.status.artifacts = 0;
+    state.status.pendingBytes = 0;
+    state.status.pendingChunks = 0;
+    state.status.gap = accountingGap ? "integrity" : "expired";
+    state.cursors = {};
+    await this.saveState(directory, state);
+  }
+  private async inspectArtifacts(session: CaptureSession, state: OutboxState, takeNext: boolean): Promise<PendingChunk | null> {
+    let next: PendingChunk | null = null;
+    state.status.pendingBytes = 0;
+    state.status.pendingChunks = 0;
+    const artifacts = await this.artifactNames(session.id);
+    state.status.artifacts = artifacts.length;
+    for (const artifactId of artifacts) {
+      try {
+        const directory = await capturePrivateDirectory(this.dataDir, "host", session.id, "outbox", artifactId);
+        const artifact = await this.reconcileArtifact(directory, session.id, artifactId);
+        for (const receipt of artifact.receipts) state.status.lastAckAt = Math.max(state.status.lastAckAt ?? 0, receipt.committedAt);
+        if (artifact.rejected) { state.status.gap = "privacy_rejected"; continue; }
+        if (!artifact.complete) state.status.gap = "partial_source";
+        for (const chunk of artifact.manifest.chunks) {
+          if (artifact.acknowledged.has(chunk.sequence)) continue;
+          state.status.pendingBytes += chunk.bytes;
+          state.status.pendingChunks += 1;
+          if (next || !takeNext || !artifact.complete) continue;
+          const bytes = await captureReadPrivate(directory, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES);
+          if (bytes.length !== chunk.bytes || captureSha256(bytes) !== chunk.sha256) throw new CaptureStorageError("integrity");
+          next = { manifest: artifact.manifest, chunk: { captureId: session.id, artifactId, sequence: chunk.sequence, sha256: chunk.sha256, base64: bytes.toString("base64") } };
+        }
+      } catch (error) { state.status.gap = sourceGap(error); }
+    }
+    return next;
+  }
+  private validateAcks(manifest: CaptureManifest, receipts: z.infer<typeof ackListSchema>): Set<number> {
+    const acknowledged = new Set<number>();
+    for (const receipt of receipts) {
+      const chunk = manifest.chunks[receipt.sequence];
+      const identity = { captureId: manifest.captureId, artifactId: manifest.artifactId, sequence: receipt.sequence, sha256: receipt.sha256 };
+      if (receipt.captureId !== manifest.captureId || receipt.artifactId !== manifest.artifactId || !chunk || chunk.sha256 !== receipt.sha256 || receipt.receiptId !== captureObjectDigest(identity) || acknowledged.has(receipt.sequence)) throw new CaptureStorageError("integrity");
+      acknowledged.add(receipt.sequence);
+    }
+    return acknowledged;
+  }
+  private async purgeRejectedPayload(directory: string): Promise<void> {
+    for await (const entry of await opendir(directory)) {
+      if (entry.name === "manifest.json" || entry.name === "acks.json" || entry.name === "rejected.json") continue;
+      await rm(join(directory, entry.name), { recursive: true, force: true });
+    }
+    await captureSyncDirectory(directory);
+  }
+  private async reconcileArtifact(directory: string, captureId: string, artifactId: string) {
+    const manifest = await this.readManifest(directory);
+    if (manifest.captureId !== captureId || manifest.artifactId !== artifactId) throw new CaptureStorageError("integrity");
+    if (await optionalStat(join(directory, "rejected.json"))) {
+      const rejection = captureRejectionSchema.parse(JSON.parse((await captureReadPrivate(directory, "rejected.json", 1024)).toString("utf8")));
+      if (rejection.captureId !== captureId || rejection.artifactId !== artifactId || rejection.storedSha256 !== manifest.storedSha256) throw new CaptureStorageError("integrity");
+      await this.purgeRejectedPayload(directory);
+      return { manifest, receipts: [], acknowledged: new Set<number>(), complete: false, rejected: true };
+    }
+    const receipts = await this.readAcks(directory);
+    const acknowledged = this.validateAcks(manifest, receipts);
+    let removed = false;
+    for (const sequence of acknowledged) {
+      const path = join(directory, `${sequence}.chunk`);
+      if (await optionalStat(path)) { await rm(path, { force: true }); removed = true; }
+    }
+    if (removed) await captureSyncDirectory(directory);
+    const published = await optionalStat(join(directory, "ready"));
+    if (published && (await captureReadPrivate(directory, "ready", 64)).toString("utf8") !== artifactId) throw new CaptureStorageError("integrity");
+    let complete = true;
+    const hash = !published && receipts.length === 0 ? createHash("sha256") : null;
+    for (const chunk of manifest.chunks) {
+      if (acknowledged.has(chunk.sequence)) continue;
+      const stat = await optionalStat(join(directory, `${chunk.sequence}.chunk`));
+      if (!stat) { complete = false; continue; }
+      if (!stat.isFile() || stat.size !== chunk.bytes || (stat.mode & 0o077) !== 0 || (process.getuid !== undefined && stat.uid !== process.getuid())) throw new CaptureStorageError("integrity");
+      if (!published || stat.nlink !== 1) {
+        const bytes = await captureReadPrivate(directory, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES);
+        if (captureSha256(bytes) !== chunk.sha256) throw new CaptureStorageError("integrity");
+        hash?.update(bytes);
+      }
+    }
+    if (complete && hash && hash.digest("hex") !== manifest.storedSha256) throw new CaptureStorageError("integrity");
+    if (complete && !published) await captureWritePrivate(directory, "ready", Buffer.from(artifactId));
+    return { manifest, receipts, acknowledged, complete, rejected: false };
+  }
+  private async retainedBytes(directory: string): Promise<number> {
+    let bytes = 0;
+    let entries = 0;
+    for await (const entry of await opendir(directory)) {
+      if (++entries > 1024) throw new CaptureStorageError("source_limit");
+      const stat = await lstat(join(directory, entry.name));
+      if (!stat.isFile() || (stat.mode & 0o077) !== 0 || (process.getuid !== undefined && stat.uid !== process.getuid())) throw new CaptureStorageError("integrity");
+      bytes += stat.size;
+    }
+    return bytes;
   }
   private async scan(session: CaptureSession, state: z.infer<typeof stateSchema>): Promise<void> {
     if (!session.enabled || Date.now() >= session.expiresAt || Date.now() >= state.leaseUntil) return;
@@ -267,44 +375,57 @@ class HostCaptureOutbox {
     }
   }
   private async spool(session: CaptureSession, manifest: CaptureManifest, bytes: Buffer): Promise<void> {
+    if (captureContainsPrivateKey(bytes)) throw new CapturePayloadError("privacy_rejected");
     const existing = await this.artifactNames(session.id);
     const resumed = existing.includes(manifest.artifactId);
     const root = await capturePrivateDirectory(this.dataDir, "host");
+    const directory = resumed
+      ? await capturePrivateDirectory(this.dataDir, "host", session.id, "outbox", manifest.artifactId)
+      : join(root, session.id, "outbox", manifest.artifactId);
+    if (!resumed && await optionalStat(directory)) throw new CaptureStorageError("integrity");
+    if (resumed && await optionalStat(join(directory, "rejected.json"))) { await this.reconcileArtifact(directory, session.id, manifest.artifactId); throw new CapturePayloadError("privacy_rejected"); }
+    const acknowledged = resumed ? this.validateAcks(manifest, await this.readAcks(directory)) : new Set<number>();
+    const manifestBytes = Buffer.from(JSON.stringify(manifest));
     let hostBytes = 0;
     let sessionBytes = 0;
     for (const id of await names(root, uuidPattern, MAX_HOST_SESSIONS)) {
       for (const artifact of await this.artifactNames(id)) {
-        const directory = await capturePrivateDirectory(this.dataDir, "host", id, "outbox", artifact);
-        const other = await this.readManifest(directory);
-        const acks = new Set((await this.readAcks(directory)).map(ack => ack.sequence));
-        hostBytes += other.chunks.filter(chunk => !acks.has(chunk.sequence)).reduce((sum, chunk) => sum + chunk.bytes, 0);
-        if (id === session.id) sessionBytes += other.storedBytes;
+        const artifactDir = await capturePrivateDirectory(this.dataDir, "host", id, "outbox", artifact);
+        const retained = await this.retainedBytes(artifactDir);
+        hostBytes += retained;
+        if (id === session.id) {
+          if (await optionalStat(join(artifactDir, "manifest.json"))) sessionBytes += (await this.readManifest(artifactDir)).storedBytes;
+          else if (artifact === manifest.artifactId) sessionBytes += manifest.storedBytes;
+          else if (retained > 0) sessionBytes += CAPTURE_MAX_ARTIFACT_BYTES;
+        }
       }
     }
-    if (!resumed && (existing.length >= session.policy.maxArtifacts || sessionBytes + bytes.length > session.policy.maxBytes || hostBytes + bytes.length > MAX_HOST_BYTES)) throw new CaptureStorageError("source_limit");
-    const directory = await capturePrivateDirectory(this.dataDir, "host", session.id, "outbox", manifest.artifactId);
-    await captureWritePrivate(directory, "manifest.json", Buffer.from(JSON.stringify(manifest)));
-    const acknowledged = new Set((await this.readAcks(directory)).map(ack => ack.sequence));
+    let additionalBytes = resumed ? 0 : bytes.length + manifestBytes.length + 66;
+    if (resumed) {
+      for (const chunk of manifest.chunks) if (!acknowledged.has(chunk.sequence) && !await optionalStat(join(directory, `${chunk.sequence}.chunk`))) additionalBytes += chunk.bytes;
+      if (!await optionalStat(join(directory, "manifest.json"))) additionalBytes += manifestBytes.length;
+      if (!await optionalStat(join(directory, "acks.json"))) additionalBytes += 2;
+      if (!await optionalStat(join(directory, "ready"))) additionalBytes += 64;
+    }
+    if ((!resumed && (existing.length >= session.policy.maxArtifacts || sessionBytes + bytes.length > session.policy.maxBytes)) || hostBytes + additionalBytes > MAX_HOST_BYTES) throw new CaptureStorageError("source_limit");
+    await capturePrivateDirectory(this.dataDir, "host", session.id, "outbox", manifest.artifactId);
+    await captureWritePrivate(directory, "manifest.json", manifestBytes);
     for (const chunk of manifest.chunks) {
       if (!acknowledged.has(chunk.sequence)) await captureWritePrivate(directory, `${chunk.sequence}.chunk`, bytes.subarray(chunk.sequence * CAPTURE_CHUNK_BYTES, chunk.sequence * CAPTURE_CHUNK_BYTES + chunk.bytes));
     }
-    if (!await lstat(join(directory, "acks.json")).catch(() => null)) await captureWritePrivate(directory, "acks.json", Buffer.from("[]"));
+    if (!await optionalStat(join(directory, "acks.json"))) await captureWritePrivate(directory, "acks.json", Buffer.from("[]"));
+    await captureWritePrivate(directory, "ready", Buffer.from(manifest.artifactId));
   }
   private async artifactNames(id: string): Promise<string[]> {
     const directory = await capturePrivateDirectory(this.dataDir, "host", id, "outbox");
-    const result = [];
-    for (const name of await names(directory, digestPattern, 512)) {
-      const artifact = await capturePrivateDirectory(this.dataDir, "host", id, "outbox", name);
-      if (await lstat(join(artifact, "manifest.json")).catch(() => null)) result.push(name);
-    }
-    return result;
+    return names(directory, digestPattern, 512);
   }
   private async readSession(directory: string): Promise<CaptureSession | null> {
-    if (!await lstat(join(directory, "session.json")).catch(() => null)) return null;
+    if (!await optionalStat(join(directory, "session.json"))) return null;
     return captureSessionSchema.parse(JSON.parse((await captureReadPrivate(directory, "session.json", 65536)).toString("utf8")));
   }
   private async readState(directory: string): Promise<z.infer<typeof stateSchema>> {
-    if (!await lstat(join(directory, "state.json")).catch(() => null)) return { leaseUntil: 0, nextScanAt: 0, cursors: {}, status: emptyStatus() };
+    if (!await optionalStat(join(directory, "state.json"))) return { leaseUntil: 0, nextScanAt: 0, cursors: {}, status: emptyStatus() };
     return stateSchema.parse(JSON.parse((await captureReadPrivate(directory, "state.json", 65536)).toString("utf8")));
   }
   private saveState(directory: string, state: z.infer<typeof stateSchema>): Promise<void> {
@@ -317,7 +438,7 @@ class HostCaptureOutbox {
     return manifest;
   }
   private async readAcks(directory: string) {
-    if (!await lstat(join(directory, "acks.json")).catch(() => null)) return [];
+    if (!await optionalStat(join(directory, "acks.json"))) return [];
     return ackListSchema.parse(JSON.parse((await captureReadPrivate(directory, "acks.json", 131072)).toString("utf8")));
   }
 }

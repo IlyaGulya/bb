@@ -103,16 +103,26 @@ application data and must be outside Git, CI artifacts, analytics and ordinary
 diagnostic logs. Existing provider source files have their own separate policy.
 
 Known HTTP/JSON credential forms, bearer/basic values and token query values are
-redacted; PEM private keys are rejected. Nested JSON strings are handled, and a
-64-level structured-redaction bound fails explicitly rather than bypassing the
-redactor. Invalid UTF-8 text is a source gap; opaque binary requires owner review.
-This is not universal secret detection: payload secret absence is explicitly
-`not-guaranteed`. Work/export review and encrypted storage/transport cannot be
-replaced by a redaction marker. Core audits owner-import completion across chunk
-boundaries. Privacy-denied artifacts retain a rejection receipt, deny body
-access and purge their staged bytes; failed cleanup is retried by existing
-sweeps. Invalid chunks never receive a successful final artifact-completion
-claim. Rejected metadata still consumes its bounded reservation until expiry.
+redacted; PEM private keys are rejected. Complete JSON documents and individual
+records are parsed before inspecting decoded keys, including Unicode-escaped
+credential names and nested JSON strings. A 64-level structured-redaction bound
+fails explicitly rather than bypassing the redactor. Invalid UTF-8 text is a
+source gap; opaque binary requires owner review and the host rejects recognized
+private-key markers before publishing any outbox payload. This is not universal
+secret detection: payload secret absence remains `not-guaranteed`.
+
+Core audits owner-import completion across chunk boundaries. Privacy-denied
+artifacts retain a rejection record, deny body access and purge Core staged
+bytes. The existing authenticated `capture.exchange` command also accepts an
+optional terminal `rejection`, bound to capture ID, artifact ID, stored hash and
+the literal `privacy_rejected` reason. Absence means no rejection disposition.
+The host validates it against the immutable manifest, durably records a private
+rejection marker, and purges the artifact payload before continuing delivery.
+Replays and recovery repeat cleanup; a rejected artifact is not a successful
+ACK. A lost disposition is rediscovered from the still-pending host artifact and
+Core's persisted rejection decision. Core cleanup failures do not erase that
+decision; failed Core and host cleanup stays a visible failure/recovery gate.
+Rejected metadata still consumes its bounded reservation until expiry.
 
 Source and stored byte counts/SHA-256 are distinct. Redaction/normalization is
 explicit; only unchanged source bytes receive `source-bytes` fidelity. Each
@@ -121,13 +131,22 @@ Core verifies and fsyncs private bytes before committing its SQLite chunk receip
 ACK is returned only after that transaction boundary. Replays verify the retained
 bytes and return the same receipt. Full artifact completion separately verifies
 the assembled stored hash. The host persists matching committed ACKs before
-removing acknowledged local chunks. Missing/conflicting receipts do not permit
-raw deletion. Interrupted writes/ACK loss are replayable by identity; runtime
-proof of crash boundaries is still a parent gate.
+removing acknowledged local chunks. Exchange and daemon recovery reconcile
+already-persisted ACKs with leftover raw files before treating them as removed.
+Only a recognized same-directory UUID `.pending` hardlink to the same owned
+private inode may be normalized after interrupted publication; generic or
+foreign hardlinks remain integrity failures. Full host artifacts have a durable
+`ready` marker. Interrupted staging is validated/recovered, incomplete artifacts
+remain private with an explicit gap, and a later complete artifact can proceed.
+Missing/conflicting receipts do not permit raw deletion. These are source
+corrections, not runtime proof of every crash boundary or power-loss durability.
 
 Each artifact is at most 64 MiB; a capture reserves at most 256 MiB/512 artifacts.
-Core has a 2 GiB/64-capture ceiling; the host has a 512 MiB pending-data/
-32-registration ceiling. The policy further bounds captures, source exports,
+Core has a 2 GiB/64-capture ceiling; the host has a 512 MiB retained-artifact-byte/
+32-registration ceiling. Host accounting includes physical staged files and
+metadata, including leftovers, rather than excluding ACKed-but-not-removed raw
+files. Resumed writes reserve their missing bytes before publication. The policy
+further bounds captures, source exports,
 retention (1–720 hours), sync (30–3600 seconds) and offline admission lease
 (30–3600 seconds, at least the sync interval). Disk pressure, source instability,
 quota or inaccessible files produce explicit gaps/backpressure, not hidden
@@ -140,12 +159,17 @@ permits bounded local collection during disconnection; expiry stops collection
 without pretending an ACK occurred. Stop immediately denies new Core intake;
 a disconnected host stops by its lease, while unacknowledged local data remains
 subject to retention. Stop does not disable independent provider recorders.
-Host raw copies expire at the capture deadline; bounded host metadata receipts
-can remain for up to a further 24 hours and count against registration capacity.
-Core expired records/bytes are pruned. Deletion by retention is not delivery.
-Status is the last reported snapshot, not a live observation during outage;
-gap/count history is not silently erased by reconnect. Clocks, lease behavior,
-shutdown and recovery ordering require parent qualification.
+Host raw copies are removed at expiry without making deletion conditional on
+decoding artifact manifests/ACKs or successfully reading/writing mutable state.
+Each registration has an isolated sweep failure boundary, so corrupt metadata
+or a denied write in one does not starve another's retention. Unreadable immutable
+session grants cannot supply an invented expiry; they remain explicit failures.
+Bounded host metadata receipts may remain for a further 24 hours and count
+against registration capacity. Core expired records/bytes are pruned. Deletion
+by retention is not delivery. Dropped-byte figures are known counts only; corrupt
+metadata makes accounting incomplete rather than proving zero loss. Status is
+the last reported snapshot, not a live observation during outage. Clocks, leases,
+shutdown and recovery ordering still require parent qualification.
 
 Preview is explicitly bounded and marked truncated/base64 as appropriate. Full
 SDK download verifies the whole stored checksum; CLI writes a new mode-0600 file
@@ -186,12 +210,22 @@ using the new required manifest fields. No old-host compatibility is claimed.
 
 ## Stopped verification and remaining parent proof
 
-No build, typecheck, test, lint, formatter, install, runtime smoke, browser,
-network/model/auth/business probe or capture activation was run for this source
-implementation. Drizzle was invoked only to generate required migration source;
-that is not a passing check. The existing synthetic retained-file test edits are
-authored source only. This handoff has no native runtime/coverage/latency/privacy
-passing claim and does not change the task's backlog/acceptance state.
+This agent has run no build, typecheck, test, lint, formatter, install, runtime
+smoke, browser, network/model/auth/business probe or capture activation for the
+corrective source. No authored assertion or control from the tests-only
+checkpoint `50c5288` is changed. Parent's observed before results were Domain
+7 FAIL / 1 PASS, private FS 1 FAIL / 2 PASS, host 8 FAIL, and CPA growth 1 FAIL /
+2 PASS. Those observations are accepted without rerunning them here. New source
+corrections are unexecuted and have no passing/READY claim.
+
+Missing source38 SDK/Core imports on the isolated branch are parent composition
+prerequisites, not defects patched by stubs or alternate implementations. Parent
+reports main `a95b925` contains the real source38/Memory/import integration and
+owns the ordered Drizzle 0146/0147 and protocol-245 composition. The Core
+ancestor/receipt audit has not yet executed. No ancestor-directory durability
+change is invented here, and neither the crash-layout fixtures nor these source
+changes prove power-loss safety or ancestor fsync ordering. Full Tasks acceptance
+and its runtime/privacy matrix remain unchanged.
 
 After ordered source38/source40 integration and source review, parent owns:
 

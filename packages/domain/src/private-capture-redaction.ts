@@ -1,19 +1,35 @@
 const credentialKey = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret|password|secret)$/iu;
+const jsonField = /("(?:[^"\\]|\\.)*")(\s*:\s*)("(?:[^"\\]|\\.)*")/gu;
 export class CapturePayloadError extends Error {
   constructor(readonly code: "source_limit" | "privacy_rejected" | "invalid_utf8") { super(`capture_${code}`); }
 }
-function redactJson(value: unknown, depth = 0): unknown {
+function redactJson(value: unknown, state: { changed: boolean }, depth = 0): unknown {
   if (depth > 64) throw new CapturePayloadError("source_limit");
-  if (Array.isArray(value)) return value.map(entry => redactJson(entry, depth + 1));
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, credentialKey.test(key) ? "[REDACTED]" : redactJson(entry, depth + 1)]));
-  }
-  if (typeof value === "string" && /^[\s]*[\[{]/u.test(value)) {
-    let parsed: unknown;
-    try { parsed = JSON.parse(value); } catch { return value; }
-    return JSON.stringify(redactJson(parsed, depth + 1));
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) value[index] = redactJson(value[index], state, depth + 1);
+  } else if (typeof value === "object" && value !== null) {
+    for (const [key, entry] of Object.entries(value)) {
+      if (credentialKey.test(key) && entry !== "[REDACTED]" && entry !== "") {
+        Reflect.set(value, key, "[REDACTED]");
+        state.changed = true;
+      } else Reflect.set(value, key, redactJson(entry, state, depth + 1));
+    }
+  } else if (typeof value === "string" && /^[\s]*[\[{]/u.test(value)) {
+    const nested = redactJsonDocument(value, depth + 1);
+    if (nested?.changed) { state.changed = true; return nested.text; }
   }
   return value;
+}
+function redactJsonDocument(source: string, depth = 0): { text: string; changed: boolean } | null {
+  let value: unknown;
+  try { value = JSON.parse(source); } catch { return null; }
+  const state = { changed: false };
+  const result = redactJson(value, state, depth);
+  return { text: state.changed ? JSON.stringify(result) : source, changed: state.changed };
+}
+function isCredentialJsonKey(key: string): boolean {
+  try { const value: unknown = JSON.parse(key); return typeof value === "string" && credentialKey.test(value); }
+  catch { return false; }
 }
 export function redactCapturePayload(source: Uint8Array): { bytes: Uint8Array<ArrayBuffer>; redacted: boolean } {
   let raw: string;
@@ -21,16 +37,15 @@ export function redactCapturePayload(source: Uint8Array): { bytes: Uint8Array<Ar
   catch { throw new CapturePayloadError("invalid_utf8"); }
   if (captureContainsPrivateKey(source)) throw new CapturePayloadError("privacy_rejected");
   let folded = false;
-  const text = raw.split("\n").map(line => {
+  const document = redactJsonDocument(raw);
+  const text = (document?.text ?? raw.split("\n").map(line => {
     if (folded && /^[ \t]/u.test(line)) return " [REDACTED]";
     folded = false;
     const header = /^([!#$%&'*+.^_`|~0-9A-Za-z-]+):[ \t]*(.*)$/u.exec(line);
     if (header && credentialKey.test(header[1]!)) { folded = true; return `${header[1]}: [REDACTED]`; }
     const prefix = line.startsWith("data: ") ? "data: " : "";
-    let parsed: unknown;
-    try { parsed = JSON.parse(line.slice(prefix.length)); } catch { return line; }
-    return prefix + JSON.stringify(redactJson(parsed));
-  }).join("\n").replace(/("(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret|password|secret)"\s*:\s*)"(?:[^"\\]|\\.)*"/giu, '$1"[REDACTED]"')
+    return prefix + (redactJsonDocument(line.slice(prefix.length))?.text ?? line.slice(prefix.length));
+  }).join("\n")).replace(jsonField, (match: string, key: string, separator: string) => isCredentialJsonKey(key) ? `${key}${separator}"[REDACTED]"` : match)
     .replace(/\b(Bearer|Basic)[ \t]+[A-Za-z0-9._~+/=-]+/giu, "$1 [REDACTED]")
     .replace(/([?&](?:api[-_]?key|access[-_]?token|refresh[-_]?token)=)[^&#\s"\\]+/giu, "$1[REDACTED]")
     .replace(/(https?:\/\/)[^/\s:@]+:[^/\s@]+@/giu, "$1[REDACTED]@");
@@ -49,14 +64,18 @@ export function captureContainsPrivateKey(source: Uint8Array): boolean {
 
 export function captureHasUnredactedAuth(source: Uint8Array, lastChunk: boolean): boolean {
   const text = new TextDecoder().decode(source);
+  if (redactJsonDocument(text)?.changed) return true;
   const lines = text.split("\n");
   if (!lastChunk) lines.pop();
   for (const line of lines) {
     const header = /^([!#$%&'*+.^_`|~0-9A-Za-z-]+):[ \t]*(.*)$/u.exec(line);
     if (header && credentialKey.test(header[1]!) && header[2]!.trim() !== "[REDACTED]" && header[2]!.trim() !== "") return true;
+    const record = line.startsWith("data: ") ? line.slice(6) : line;
+    if (redactJsonDocument(record)?.changed) return true;
   }
-  for (const match of text.matchAll(/"(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret|password|secret)"\s*:\s*("(?:[^"\\]|\\.)*")/giu)) {
-    try { const value: unknown = JSON.parse(match[2]!); if (value !== "[REDACTED]" && value !== "") return true; } catch { return true; }
+  for (const match of text.matchAll(jsonField)) {
+    if (!isCredentialJsonKey(match[1]!)) continue;
+    try { const value: unknown = JSON.parse(match[3]!); if (value !== "[REDACTED]" && value !== "") return true; } catch { return true; }
   }
   return false;
 }

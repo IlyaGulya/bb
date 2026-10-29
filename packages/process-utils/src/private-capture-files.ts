@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import { lstat, mkdir, open, realpath, rename, rm, statfs } from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
+import { lstat, mkdir, open, opendir, realpath, rename, rm, statfs, type FileHandle } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 export class CaptureStorageError extends Error {
@@ -58,11 +58,36 @@ export async function captureSyncDirectory(directory: string): Promise<void> {
   const handle = await open(directory, constants.O_RDONLY);
   try { await handle.sync(); } finally { await handle.close(); }
 }
+async function recoverPrivatePublication(directory: string, handle: FileHandle, before: Stats): Promise<void> {
+  if (!before.isFile() || before.nlink !== 2 || (before.mode & 0o077) !== 0 ||
+      (process.getuid !== undefined && before.uid !== process.getuid())) throw new CaptureStorageError("integrity");
+  const root = await lstat(directory);
+  if (!root.isDirectory() || root.isSymbolicLink() || (root.mode & 0o077) !== 0 ||
+      (process.getuid !== undefined && root.uid !== process.getuid()) || await realpath(directory) !== resolve(directory)) throw new CaptureStorageError("integrity");
+  let pending: string | null = null;
+  let entries = 0;
+  for await (const entry of await opendir(directory)) {
+    if (++entries > 1024) throw new CaptureStorageError("source_limit");
+    if (!entry.isFile() || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.pending$/u.test(entry.name)) continue;
+    const path = join(directory, entry.name);
+    const candidate = await lstat(path).catch(error => { if (hasCode(error, "ENOENT")) return null; throw error; });
+    if (!candidate || candidate.dev !== before.dev || candidate.ino !== before.ino) continue;
+    if (!candidate.isFile() || candidate.nlink !== 2 || (candidate.mode & 0o077) !== 0 || candidate.uid !== before.uid || pending !== null) throw new CaptureStorageError("integrity");
+    pending = path;
+  }
+  if (pending === null) return;
+  const current = await handle.stat();
+  if (current.nlink === 1) return;
+  if (current.nlink !== 2 || current.dev !== before.dev || current.ino !== before.ino) throw new CaptureStorageError("integrity");
+  await rm(pending, { force: true });
+  await captureSyncDirectory(directory);
+}
 export async function captureReadPrivate(directory: string, name: string, maxBytes: number): Promise<Buffer> {
   let handle;
   try {
     handle = await open(join(directory, segment(name)), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    const stat = await handle.stat();
+    let stat = await handle.stat();
+    if (stat.nlink === 2) { await recoverPrivatePublication(directory, handle, stat); stat = await handle.stat(); }
     if (!stat.isFile() || stat.nlink !== 1 || stat.size > maxBytes || (stat.mode & 0o077) !== 0 ||
         (process.getuid !== undefined && stat.uid !== process.getuid())) throw new CaptureStorageError("integrity");
     const bytes = Buffer.allocUnsafe(stat.size);
@@ -72,7 +97,7 @@ export async function captureReadPrivate(directory: string, name: string, maxByt
       offset += bytesRead;
     }
     const after = await handle.stat();
-    if (bytes.length !== stat.size || stat.size !== after.size || stat.mtimeMs !== after.mtimeMs || stat.ctimeMs !== after.ctimeMs) throw new CaptureStorageError("integrity");
+    if (after.nlink !== 1 || bytes.length !== stat.size || stat.size !== after.size || stat.mtimeMs !== after.mtimeMs || stat.ctimeMs !== after.ctimeMs) throw new CaptureStorageError("integrity");
     return bytes;
   } catch (error) {
     if (error instanceof CaptureStorageError) throw error;
@@ -106,7 +131,7 @@ export async function captureWritePrivate(directory: string, name: string, bytes
         const existing = await captureReadPrivate(directory, name, bytes.byteLength);
         if (captureSha256(existing) !== captureSha256(bytes)) throw new CaptureStorageError("integrity");
       }
-      await rm(temporary);
+      await rm(temporary, { force: true });
     }
     temporary = null;
     await captureSyncDirectory(directory);

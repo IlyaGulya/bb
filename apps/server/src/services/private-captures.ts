@@ -16,6 +16,7 @@ import {
   type CaptureGap, type CaptureManifest, type CaptureScope, type CaptureSession,
 } from "@bb/domain";
 import type { CaptureArtifactQuery, CaptureArtifactView, CaptureCreate, CaptureLinkRequest, CaptureListQuery, CaptureView, CapturePreview, CapturePreviewQuery } from "@bb/server-contract";
+import type { CaptureRejection } from "@bb/host-daemon-contract";
 import {
   CaptureStorageError, captureDecodeBase64, captureObjectDigest, capturePreparePayload,
   capturePrivateDirectory, captureReadPrivate, captureSha256, captureWritePrivate,
@@ -457,18 +458,28 @@ async function syncOne(deps: WorkSessionDeps, id: string, scope: CaptureScope): 
     await archiveCoreSources(deps, row);
     row = requireCapture(deps, id, scope, true);
     let ack: CaptureAck | null = null;
+    let rejection: CaptureRejection | undefined;
     if (row.session.policy.bridgeRecorder || row.session.policy.nativeExports.length > 0) {
       for (let index = 0; index <= 8; index += 1) {
         row = requireCapture(deps, id, scope, true);
-        const result = await callHostOnlineRpc(deps, { hostId: row.hostId, timeoutMs: 15000, command: { type: "capture.exchange", session: row.session, leaseUntil: Math.min(row.expiresAt, Date.now() + row.session.policy.offlineLeaseSeconds * 1000), ack, poll: row.enabled && index < 8 } });
+        const result = await callHostOnlineRpc(deps, { hostId: row.hostId, timeoutMs: 15000, command: { type: "capture.exchange", session: row.session, leaseUntil: Math.min(row.expiresAt, Date.now() + row.session.policy.offlineLeaseSeconds * 1000), ack, rejection, poll: row.enabled && index < 8 } });
         requireCapture(deps, id, scope, true);
+        ack = null;
+        rejection = undefined;
         deps.db.update(sessions).set({ hostStatus: result.status, hostEnabled: result.enabled }).where(eq(sessions.id, id)).run();
         if (result.status.gap !== "none") gap(deps, id, result.status.gap);
         if (!result.manifest || !result.chunk) break;
         if (result.manifest.captureId !== id || result.chunk.captureId !== id || result.chunk.artifactId !== result.manifest.artifactId ||
             (result.manifest.source !== "bridge-recorder" && result.manifest.source !== "owner-import")) fail("integrity");
         stageCaptureManifest(deps, scope, result.manifest, true);
-        ack = await acceptCaptureChunk(deps, scope, result.chunk);
+        try { ack = await acceptCaptureChunk(deps, scope, result.chunk); }
+        catch (error) {
+          requireCapture(deps, id, scope, true);
+          const artifact = captureArtifact(deps, id, result.manifest.artifactId, scope);
+          if (artifact.rejectedAt === null) throw error;
+          rejection = { captureId: id, artifactId: artifact.manifest.artifactId, storedSha256: artifact.manifest.storedSha256, reason: "privacy_rejected" };
+          gap(deps, id, "privacy_rejected");
+        }
       }
     }
     deps.db.update(sessions).set({ lastSyncAt: Date.now(), nextSyncAt: Date.now() + row.session.policy.syncIntervalSeconds * 1000 }).where(eq(sessions.id, id)).run();

@@ -2,6 +2,13 @@
 
 ## AgentOS fork — unreleased
 
+- Correct private-capture credential decoding, recognized pending-publication
+  recovery, complete-spool readiness, independent expiry cleanup, persisted-ACK
+  reconciliation and bounded CPA snapshot reads. Reject forbidden binary key
+  material before host publication and deliver scoped terminal privacy
+  dispositions through the existing capture RPC. Preserve the regression
+  assertions; corrective source remains unexecuted and unactivated pending
+  parent composition, native gates and full acceptance qualification.
 - Add explicit scoped private capture data contracts across Core, SDK, CLI and
   Thread Info: immutable manifests, confined private chunks, deterministic
   committed ACK/dedupe, bounded host data outbox, leases, retention, quotas,
