@@ -2,6 +2,8 @@
 
 ## AgentOS fork — unreleased
 
+- Keep retained decisions and annotations mounted across asynchronous task-detail
+  refreshes by separating their reconciliation key from the Jira source panel.
 - Preserve explicit workflow evidence choices when CLI boolean defaults are absent.
   Keep exact-version memory inspection available beyond the recent-history window.
   Exercise attachment HEAD handlers with the router's actual HEAD-to-GET dispatch.

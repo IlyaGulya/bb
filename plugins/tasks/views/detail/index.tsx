@@ -510,7 +510,7 @@ function TaskDetail({ task }: { task: Task }) {
             onError={(message) => push(message)}
           />
           <TaskArtifactsSection
-            key={task.id}
+            key={`artifacts:${task.id}`}
             taskId={task.id}
             bbProjectId={project?.linkedBbProjectId ?? null}
             attachments={attachments.data ?? []}
