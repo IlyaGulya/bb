@@ -36,11 +36,11 @@ export const splitLayoutAtom = atom(
     const next = typeof update === "function" ? update(previous) : update;
     if (previous === next) return;
     if (captureProductAnalyticsContext().intentional !== true) return set(persistedSplitLayoutAtom, next);
-    const before = previous === null ? 0 : listPanes(previous.root).length;
-    const after = next === null ? 0 : listPanes(next.root).length;
-    const action = after > before ? "open" : after < before ? "close" : next?.focusedPaneId !== previous?.focusedPaneId ? "focus" : "layout.change";
-    const focused = next === null ? previous === null ? null : findPane(previous.root, previous.focusedPaneId) : findPane(next.root, next.focusedPaneId);
-    const analytics = beginProductAnalyticsAction("ui.splits", action, focused?.content.kind === "thread" ? { kind: "project", projectId: focused.content.projectId } : undefined);
+    const before = previous === null ? [] : listPanes(previous.root);
+    const after = next === null ? [] : listPanes(next.root);
+    const action = after.length > before.length ? "open" : after.length < before.length ? "close" : next?.focusedPaneId !== previous?.focusedPaneId ? "focus" : "layout.change";
+    const target = action === "close" ? before.find((pane) => !after.some((candidate) => candidate.paneId === pane.paneId)) : next === null ? null : findPane(next.root, next.focusedPaneId);
+    const analytics = beginProductAnalyticsAction("ui.splits", action, target?.content.kind === "thread" ? { kind: "project", projectId: target.content.projectId } : undefined);
     try {
       set(persistedSplitLayoutAtom, next);
       void analytics.complete();

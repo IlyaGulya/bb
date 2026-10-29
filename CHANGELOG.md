@@ -2,6 +2,12 @@
 
 ## AgentOS fork — unreleased
 
+- Drain pending local CLI analytics independently of new-event admission when
+  reconnecting with a full spool. Keep returned thread actions and split-close
+  usage scoped to their actual targets, not the current or surviving view.
+  Carry validated per-request MCP QA modes into actual CLI subprocesses without
+  changing the server environment. Classify nonzero plugin-dev exits as failures
+  while retaining cancellation for normally stopped watchers.
 - Extend private analytics through actual workspace/split/navigation, palette and
   search, timeline/interaction, execution selection, attachment, voice,
   appearance and onboarding producers. Preserve initiating scope and QA metadata

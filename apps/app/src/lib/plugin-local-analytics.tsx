@@ -1,7 +1,7 @@
 import { useThread } from "@/hooks/queries/thread-queries";
 import { createElement, useEffect, type ComponentType, type ReactNode } from "react";
 import { beginProductAnalyticsAction, declareProductAnalyticsLocalActions, productAnalyticsOutbox, recordProductAnalytics, withProductAnalyticsOperation } from "./product-analytics";
-import type { ProductAnalyticsLocalActions } from "@bb/server-contract";
+import type { ProductAnalyticsLocalActions, ProductAnalyticsScope } from "@bb/server-contract";
 
 const declarations = new Map<string, Map<string, ProductAnalyticsLocalActions["actions"][number]>>();
 export function resetPluginLocalAnalytics(pluginId: string): void { declarations.delete(pluginId); }
@@ -28,7 +28,7 @@ function Consumption({ pluginId, action, children, sourceProps }: { pluginId: st
   }, [action, pluginId, projectId, thread.isError, threadId]);
   return children;
 }
-function instrumentObject<T extends object>(pluginId: string, prefix: string, registration: T): T {
+function instrumentObject<T extends object>(pluginId: string, prefix: string, registration: T, scope?: ProductAnalyticsScope): T {
   const wrapped = new Map<PropertyKey, unknown>();
   return new Proxy({ ...registration }, {
     get(target, property, receiver) {
@@ -47,10 +47,13 @@ function instrumentObject<T extends object>(pluginId: string, prefix: string, re
       const callback = new Proxy(value, {
         apply(fn, thisArg, args) {
           if (property === "item") {
+            const input: unknown = args[0];
+            const thread = typeof input === "object" && input !== null && "thread" in input ? input.thread : null;
+            const targetScope = typeof thread === "object" && thread !== null && "projectId" in thread && typeof thread.projectId === "string" && /^proj_[a-zA-Z0-9_-]+$/.test(thread.projectId) ? { kind: "project" as const, projectId: thread.projectId } : scope;
             const result: unknown = Reflect.apply(fn, thisArg, args);
-            return typeof result === "object" && result !== null ? instrumentObject(pluginId, prefix, result) : result;
+            return typeof result === "object" && result !== null ? instrumentObject(pluginId, prefix, result, targetScope) : result;
           }
-          const operation = beginProductAnalyticsAction(`ui.plugin.${pluginId}`, `${prefix}.run`);
+          const operation = beginProductAnalyticsAction(`ui.plugin.${pluginId}`, `${prefix}.run`, scope);
           try {
             const result: unknown = withProductAnalyticsOperation(operation, () => Reflect.apply(fn, thisArg, args));
             void Promise.resolve(result).then((value) => operation.complete(value === false ? "denied" : "succeeded", value === false ? "unavailable" : "none"), () => operation.complete("failed", "internal"));

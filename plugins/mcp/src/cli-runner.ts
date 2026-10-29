@@ -29,6 +29,7 @@ export interface CliRunOptions {
   stdin: string | null;
   timeoutMs: number;
   signal: AbortSignal;
+  analyticsMode?: "production" | "preview" | "smoke" | "test";
 }
 
 export type CliRunner = (
@@ -155,10 +156,12 @@ export function createCliRunner(options: {
         process.platform,
         process.execPath,
       );
+      const env = cliEnvironment(options.env, options.serverUrl());
+      if (runOptions.analyticsMode !== undefined) env.BB_PRODUCT_ANALYTICS_MODE = runOptions.analyticsMode;
       const child = spawn(launch.command, launch.args, {
         cwd: homedir(),
         detached: ownsProcessGroup,
-        env: cliEnvironment(options.env, options.serverUrl()),
+        env,
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
       });

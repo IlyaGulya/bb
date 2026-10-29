@@ -33,7 +33,7 @@ export function beginLocalProductAnalytics(command: string): ExperimentalProduct
     if (!exitBound) {
       exitBound = true;
       process.once("exit", (code) => {
-        for (const [pending, name] of active) void pending.complete(name === "plugin dev" ? "cancelled" : code === 0 ? "succeeded" : "failed", name === "plugin dev" ? "cancelled" : code === 0 ? "none" : "internal");
+        for (const [pending, name] of active) void pending.complete(code !== 0 ? "failed" : name === "plugin dev" ? "cancelled" : "succeeded", code !== 0 ? "internal" : name === "plugin dev" ? "cancelled" : "none");
       });
     }
     return operation;
@@ -47,6 +47,7 @@ export async function finishLocalProductAnalytics(operation: ExperimentalProduct
   const name = active.get(operation);
   active.delete(operation);
   await operation.complete(failed ? "failed" : name === "plugin dev" ? "cancelled" : "succeeded", failed ? "internal" : name === "plugin dev" ? "cancelled" : "none");
+  await outbox?.flush();
   const health = outbox?.getSnapshot();
   if (health && (health.gaps > 0 || health.failed > 0 || health.storage === "unavailable")) console.error(`Private analytics delivery: ${health.pending} pending, ${health.failed} retrying, ${health.gaps} gaps; storage ${health.storage}.`);
 }
