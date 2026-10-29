@@ -62,7 +62,7 @@ export interface ToolTextResult {
 
 export interface ToolDependencies {
   runCli: CliRunner;
-  loadCommandIndex: () => Promise<CommandIndex>;
+  loadCommandIndex: (runCli: CliRunner) => Promise<CommandIndex>;
   sandboxLimits?: Partial<SandboxLimits>;
   observeAnalytics?: (action: "search" | "read" | "run", run: () => Promise<ToolTextResult>, request?: Request) => Promise<ToolTextResult>;
 }
@@ -116,7 +116,7 @@ function createHostFunctions(
       const knownPaths =
         mode === "write"
           ? NO_KNOWN_PATHS
-          : (await dependencies.loadCommandIndex()).paths;
+          : (await dependencies.loadCommandIndex(dependencies.runCli)).paths;
       const decision = evaluateCliAccess(argv, mode, knownPaths);
       if (!decision.allowed) throw new Error(decision.reason);
       const result = await limiter.run(
@@ -211,7 +211,7 @@ export async function runSearchTool(
   dependencies: ToolDependencies,
 ): Promise<ToolTextResult> {
   try {
-    const index = await dependencies.loadCommandIndex();
+    const index = await dependencies.loadCommandIndex(dependencies.runCli);
     const commands = searchCommands(
       index,
       query,

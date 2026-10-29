@@ -122,6 +122,12 @@ project remain instance-scoped; the existing Core admission gate validates scope
 and the complete event. No request body, tool arguments or results are copied
 into analytics, and no shared mutable request context is introduced.
 
+Cold MCP search/read index loads use the same request-bound CLI runner as the
+requested command, so the `bb guide commands --json` child retains the initiating
+QA mode. The existing five-minute index cache and in-flight load remain shared;
+cache hits do not launch another CLI child, and an in-flight child keeps the
+runner of the request that initiated it. No server environment mutation is used.
+
 Authenticated native plugin tools bind deliberate agent intent, agent surface,
 and the owning thread's actual Core project. Their QA mode is read from the
 accepted root-turn start using the existing hashed operation identity and event
