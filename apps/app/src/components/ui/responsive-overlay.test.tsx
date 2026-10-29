@@ -159,6 +159,102 @@ describe("ResponsiveDrawerShell", () => {
   });
 });
 
+describe.each([
+  ["default drawer", undefined],
+  ["floating", "floating"],
+] as const)("ResponsiveDrawerShell deferred first-open (%s)", (_label, presentation) => {
+  function DeferredOverlayConsumer() {
+    const [open, setOpen] = useState(false);
+    const [otherOpen, setOtherOpen] = useState(false);
+    return (
+      <main data-testid="deferred-overlay-app">
+        <button type="button" onClick={() => setOpen(true)}>Open details</button>
+        <button type="button" onClick={() => setOtherOpen(true)}>Open other overlay</button>
+        <ResponsiveDrawerShell
+          open={open}
+          presentation={presentation}
+          onOpenChange={setOpen}
+          srLabel="Details"
+        >
+          <input aria-label="Deferred choice" />
+          <button type="button" onClick={() => setOpen(false)}>Close details</button>
+        </ResponsiveDrawerShell>
+        <PersistentResponsiveDrawerShell
+          open={otherOpen}
+          onOpenChange={setOtherOpen}
+          srLabel="Other overlay"
+        >
+          <button type="button">Other action</button>
+        </PersistentResponsiveDrawerShell>
+      </main>
+    );
+  }
+
+  it.each(["Escape", "backdrop"] as const)(
+    "restores the launcher and releases the stack after immediate %s",
+    dismissal => {
+      vi.useFakeTimers();
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+      render(<DeferredOverlayConsumer />);
+      const launcher = screen.getByRole("button", { name: "Open details" });
+      launcher.focus();
+      fireEvent.click(launcher);
+      const panel = screen.getByRole("dialog", { name: "Details" });
+      expect(document.activeElement).toBe(panel);
+      expect(screen.queryByRole("textbox", { name: "Deferred choice", hidden: true })).toBeNull();
+      const appTree = screen.getByTestId("deferred-overlay-app");
+      expect(appTree.hasAttribute("inert")).toBe(false);
+      expect(appTree.getAttribute("aria-hidden")).toBeNull();
+
+      if (dismissal === "Escape") {
+        fireEvent.keyDown(document, { key: "Escape" });
+      } else {
+        const backdrop = document.querySelector('[data-persistent-drawer-backdrop][data-state="open"]');
+        expect(backdrop).not.toBeNull();
+        fireEvent.pointerDown(backdrop!);
+        fireEvent.click(backdrop!);
+      }
+      act(() => vi.runOnlyPendingTimers());
+      expect(screen.queryByRole("dialog", { name: "Details" })).toBeNull();
+      expect(document.activeElement).toBe(launcher);
+      expect(screen.queryByRole("textbox", { name: "Deferred choice", hidden: true })).toBeNull();
+
+      const otherLauncher = screen.getByRole("button", { name: "Open other overlay" });
+      otherLauncher.focus();
+      fireEvent.click(otherLauncher);
+      expect(document.activeElement).toBe(screen.getByRole("dialog", { name: "Other overlay" }));
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(screen.queryByRole("dialog", { name: "Other overlay" })).toBeNull();
+      expect(document.activeElement).toBe(otherLauncher);
+      const unhandledEscape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+      document.dispatchEvent(unhandledEscape);
+      expect(unhandledEscape.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(otherLauncher);
+    },
+  );
+
+  it("retains the realized body and its input through normal close and reopen", () => {
+    vi.useFakeTimers();
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    render(<DeferredOverlayConsumer />);
+    const launcher = screen.getByRole("button", { name: "Open details" });
+    launcher.focus();
+    fireEvent.click(launcher);
+    expect(screen.queryByRole("textbox", { name: "Deferred choice", hidden: true })).toBeNull();
+    act(() => vi.runOnlyPendingTimers());
+    const input = screen.getByRole("textbox", { name: "Deferred choice" });
+    fireEvent.change(input, { target: { value: "Retained choice" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close details" }));
+    expect(screen.queryByRole("dialog", { name: "Details" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Deferred choice", hidden: true })).toBe(input);
+    expect(input.isConnected).toBe(true);
+    expect(document.activeElement).toBe(launcher);
+    fireEvent.click(launcher);
+    expect(screen.getByRole("textbox", { name: "Deferred choice" })).toBe(input);
+    expect(screen.getByDisplayValue("Retained choice")).toBe(input);
+  });
+});
+
 describe("responsive Popover", () => {
   it.each([
     ["compact viewports", true, false, false],
