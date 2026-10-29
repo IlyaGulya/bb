@@ -31,6 +31,7 @@ export function registerRouting(bb: BbPluginApi, store: TasksApiStore, options: 
     return fingerprint({ item, task,
       project: task ? store.tasks.getProject(task.projectId) ?? null : null,
       threads: task ? store.tasks.listTaskThreads(task.id) : [],
+      latestAgentThreadId: task ? store.tasks.getLatestAgentComment(task.id, "")?.threadId ?? null : null,
       target,
       profile: task ? target ? store.tasks.getPreset(target.presetId) ?? null : store.tasks.firstPreset() ?? null : null,
       workflows: task ? store.database.prepare("SELECT view_json, request_json, released FROM task_workflow_runs WHERE task_id = ? ORDER BY id").all(task.id) : [],
@@ -53,7 +54,7 @@ export function registerRouting(bb: BbPluginApi, store: TasksApiStore, options: 
     const prior = persistence.journal(row.inbox_id).find(entry => entry.operationId === row.operation_id);
     if (prior) park(row.inbox_id, row.operation_id, prior.reason, persistence.proposal(row.inbox_id));
   }
-  async function owner(task: Task): Promise<Pick<RouteProposal, "owner" | "ownerReason" | "threadId" | "workerThreadIds"> & { question: string | null }> {
+  async function owner(task: Task, selectedThreadId: string | null): Promise<Pick<RouteProposal, "owner" | "ownerReason" | "threadId" | "workerThreadIds"> & { question: string | null }> {
     const attached = store.tasks.listTaskThreads(task.id);
     const workerThreadIds = attached.map(link => link.threadId);
     const managed = store.database.prepare<[string], { id: string }>("SELECT id FROM task_workflow_runs WHERE task_id = ? AND (state <> 'accepted' OR released <> 1) ORDER BY rowid DESC LIMIT 1").get(task.id);
@@ -80,7 +81,9 @@ export function registerRouting(bb: BbPluginApi, store: TasksApiStore, options: 
       const running = current.filter(thread => !["idle", "error"].includes(thread.status));
       if (running.length > 1) return { owner: "unavailable", question: `Which attached executor should retain write ownership for ${task.key} once the other active threads are stopped or reconciled?`, ownerReason: "Several native threads are active. Inspect their ownership before continuing; no duplicate writer will be started.", threadId: null, workerThreadIds };
       const latestReply = store.tasks.getLatestAgentComment(task.id, "");
-      const selected = running[0] ?? current.find(thread => thread.id === latestReply?.threadId) ?? (current.length === 1 ? current[0] : undefined);
+      const chosen = selectedThreadId ? current.find(thread => thread.id === selectedThreadId) : undefined;
+      if (selectedThreadId && (!chosen || running[0] && running[0].id !== selectedThreadId)) return { owner: "unavailable", question: null, ownerReason: "The selected executor is no longer an available current attachment, is a retired continuation source, or conflicts with an active writer. Preview again; no replacement was selected.", threadId: null, workerThreadIds };
+      const selected = chosen ?? running[0] ?? current.find(thread => thread.id === latestReply?.threadId) ?? (current.length === 1 ? current[0] : undefined);
       if (!selected && current.length > 1) return { owner: "unavailable", question: `Which attached native thread is the intended executor for ${task.key}, given that no current agent responder identifies its writer?`, ownerReason: "Several idle sessions are attached without an authoritative current responder. No writer was selected or replaced.", threadId: null, workerThreadIds };
       return { owner: selected ? "ordinary" : "none", question: null, ownerReason: selected ? "Continue the attached ordinary executor through its native thread controls or existing task notification. Advice never sends a message or starts another writer." : "No available attached executor. Any future launch remains an explicit native Tasks operation, not a routing fallback.", threadId: selected?.id ?? null, workerThreadIds };
     } catch {
@@ -90,6 +93,7 @@ export function registerRouting(bb: BbPluginApi, store: TasksApiStore, options: 
   async function validateTarget(target: ExecutionTarget, inspectCatalog: boolean) {
     const preset = store.tasks.getPreset(target.presetId);
     if (!preset) throw new Error("Selected execution profile is unavailable");
+    const profileSnapshot = fingerprint(preset);
     const executionContextId = target.executionContextId ?? preset.executionContextId;
     const modelConnectionId = target.modelConnectionId ?? preset.modelConnectionId;
     if (!executionContextId || !modelConnectionId) throw new Error("Explicitly select a real execution context and model account; routing never infers a payer.");
@@ -98,7 +102,7 @@ export function registerRouting(bb: BbPluginApi, store: TasksApiStore, options: 
       const environment = await bb.sdk.environments.get({ environmentId: target.workspace.environmentId });
       if (environment.projectId !== target.bbProjectId || environment.hostId !== target.hostId || environment.status !== "ready" || environment.lifecycle.phase !== "active" || environment.hostLifecycle !== "active") throw new Error("Selected workspace no longer belongs to this project/machine or is unavailable");
     }
-    return summary;
+    return { summary, presetId: preset.id, profileSnapshot };
   }
   function assertCurrent(id: string, proposal: RouteProposal, revision: number) {
     if (persistence.proposal(id)?.revision !== revision || proposal.revision !== revision || proposal.snapshot !== snapshot(id, proposal.taskId)) throw new Error("Routing advice is stale: source, task, target, draft or ownership changed. Refresh and preview again; no action was applied.");
@@ -162,7 +166,10 @@ export function registerRouting(bb: BbPluginApi, store: TasksApiStore, options: 
         let callbackInvocations: 0 | 1 = 0;
         let classifierService: string | null = null;
         let limitation = "Exact references resolve without a classifier. Semantic advice uses at most 20 candidate tasks and projects. No commands or worker messages are sent.";
-        if (exact.size + references.threads.length > 1 || missing.length) {
+        if (input.newTask && !input.taskRef && !source.taskId && !source.threadId) {
+          if (!input.projectId) throw new Error("Explicitly choose a tracker project before proposing a new task");
+          decision = { kind: "new", projectId: input.projectId, reason: "You explicitly chose a separate new task in this tracker project; incoming task/thread references are context. Creating it will not start or replace an executor." };
+        } else if (exact.size + references.threads.length > 1 || missing.length) {
           decision = { kind: "clarify", reason: missing.length ? `Unresolved explicit native references: ${missing.join(", ")}.` : "The incoming context names several different native task/thread owners.", question: `Which single existing task or native thread should own this request${exact.size ? `: ${[...exact.values()].map(task => task.key).join(", ")}` : ""}, or is this separate new work in a selected project?` };
         } else if (exact.size === 1) {
           const task = [...exact.values()][0]!;
@@ -170,9 +177,6 @@ export function registerRouting(bb: BbPluginApi, store: TasksApiStore, options: 
         } else if (directThread) {
           if (input.projectId && store.tasks.getProject(input.projectId)?.linkedBbProjectId !== directThread.projectId) throw new Error("The exact native thread belongs to another code project. Choose its actual tracker project; no context or payer was switched.");
           decision = { kind: "existing-thread", threadId: directThread.id, reason: `The exact native thread ${directThread.title ?? "reference"} already exists. Open and continue that thread with its frozen binding; do not create a duplicate writer.` };
-        } else if (input.newTask) {
-          if (!input.projectId) throw new Error("Explicitly choose a tracker project before proposing a new task");
-          decision = { kind: "new", projectId: input.projectId, reason: "You explicitly chose a separate new task in this tracker project; no exact existing task reference resolved. Creating it will not start a worker." };
         } else if (input.semantic) {
           persistence.callback(input.operationId, "requested");
           const result = await bb.sdk.system.experimental_classifyTaskRoute({ text: `${source.title}\n\n${source.body}`.slice(0, 16000), candidates: candidateViews, projects });
@@ -190,7 +194,8 @@ export function registerRouting(bb: BbPluginApi, store: TasksApiStore, options: 
         if (task && input.projectId && task.projectId !== input.projectId) throw new Error("The explicit task belongs to a different tracker project. Choose its actual project; no cross-project route was applied.");
         const taskId = task?.id ?? null;
         const taskSnapshot = snapshot(input.id, taskId);
-        const ownership = task ? await owner(task) : directThread ? { owner: "ordinary" as const, question: null, ownerReason: "Existing native thread binding is retained. Open native thread controls; routing does not resume it or change its context/account.", threadId: directThread.id, workerThreadIds: [directThread.id] } : { owner: "none" as const, question: null, ownerReason: "New task advice never creates an executor.", threadId: null, workerThreadIds: [] };
+        const selectedThreadId = task && references.explicitThreadId && !executions.hasStartedSource(task.id, references.explicitThreadId) ? references.explicitThreadId : null;
+        const ownership = task ? await owner(task, selectedThreadId) : decision.kind === "existing-thread" && directThread ? { owner: "ordinary" as const, question: null, ownerReason: "Existing native thread binding is retained. Open native thread controls; routing does not resume it or change its context/account.", threadId: directThread.id, workerThreadIds: [directThread.id] } : { owner: "none" as const, question: null, ownerReason: "New task advice never creates an executor.", threadId: null, workerThreadIds: [] };
         if (ownership.question) decision = { kind: "clarify", question: ownership.question, reason: ownership.ownerReason };
         else if (ownership.owner === "unavailable") decision = { kind: "unavailable", reason: ownership.ownerReason };
         let target: ExecutionTarget | null = null;
@@ -203,7 +208,7 @@ export function registerRouting(bb: BbPluginApi, store: TasksApiStore, options: 
           target = execution.resolved;
           targetSummary = execution.summary;
           if (target) {
-            try { targetSummary = await validateTarget(target, false); } catch (error) { targetIssue = errorMessage(error); }
+            try { targetSummary = (await validateTarget(target, false)).summary; } catch (error) { targetIssue = errorMessage(error); }
           }
         }
         return store.transaction(() => {
@@ -228,9 +233,11 @@ export function registerRouting(bb: BbPluginApi, store: TasksApiStore, options: 
         if (proposal.decision.kind === "clarify" || proposal.decision.kind === "unavailable") throw new Error("Resolve the routing question and preview again before applying");
         const selectedTask = task;
         const apply = async (): Promise<RouteOutcome> => {
+          let validatedTarget: Awaited<ReturnType<typeof validateTarget>> | null = null;
           if (selectedTask) {
-            const currentOwner = await owner(selectedTask);
+            const currentOwner = await owner(selectedTask, proposal.threadId);
             if (currentOwner.owner === "unavailable") throw new Error(currentOwner.ownerReason);
+            if (currentOwner.owner !== proposal.owner || currentOwner.threadId !== proposal.threadId) throw new Error("Retained executor ownership changed after preview. Refresh and preview again; no action was applied.");
             if (action.kind === "target" || action.kind === "workflow-draft") {
               assertTaskWorkflowExecutionAvailable(store, selectedTask.id);
               new RepositoryStore(store).assertSingleRootAllowed(selectedTask.id);
@@ -243,7 +250,7 @@ export function registerRouting(bb: BbPluginApi, store: TasksApiStore, options: 
             const tracker = store.tasks.getProject(selectedTask.projectId);
             if (action.target) {
               if (tracker?.linkedBbProjectId !== action.target.bbProjectId) throw new Error("Target must use this task's linked code project");
-              await validateTarget(action.target, !input.grantId);
+              validatedTarget = await validateTarget(action.target, !input.grantId);
             }
           }
           if (action.kind === "workflow-draft") {
@@ -263,6 +270,10 @@ export function registerRouting(bb: BbPluginApi, store: TasksApiStore, options: 
           }
           return store.transaction(() => {
             assertCurrent(input.id, proposal, input.expectedRevision);
+            if (validatedTarget) {
+              const currentProfile = store.tasks.getPreset(validatedTarget.presetId);
+              if (!currentProfile || fingerprint(currentProfile) !== validatedTarget.profileSnapshot) throw new Error("The selected execution profile changed during validation. Preview and validate its current model/account binding before saving; no target was changed.");
+            }
             if (input.grantId) persistence.assertGrant(input.grantId, input.id, action.kind, projectId, selectedTask?.id ?? null, true);
             let item = inbox.get(input.id);
             if (action.kind === "link") {

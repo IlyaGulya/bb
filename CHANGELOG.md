@@ -10,6 +10,11 @@
   execution or Accept through away. Core's task-route helper defaults off and
   invokes only one explicitly selected completion callback without fallback;
   this is not a physical model-request limit or a native-session sandbox.
+- Preserve exact attached-thread routing answers and fence responder ownership
+  and newly selected profile meaning through apply. Allow an explicit separate
+  new-task decision for contextual references without starting a thread. Retry
+  definitively parked drawer previews with a fresh operation while preserving
+  uncertain reservations and their receipt identity.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact

@@ -122,6 +122,7 @@ function RoutingBody({ item: entry, active, refresh, close }: { item: InboxEntry
       void run(async () => {
         const input = { id: item.id, sourceRevision: item.revision, expectedRevision: query.data?.proposal?.revision ?? 0, projectId: projectId || null, taskRef, newTask, semantic, grantId };
         const result = await rpc.call("previewInboxRoute", { ...input, operationId: operation(previewAttempt, input) });
+        if (result.state === "parked") previewAttempt.current = null;
         setOutcome(result);
         if (result.proposal?.revision === input.expectedRevision + 1) { setShown(result.proposal); setBindingStale(false); setDraft(current => current?.taskId === result.proposal?.taskId ? current : null); }
       });
@@ -130,7 +131,7 @@ function RoutingBody({ item: entry, active, refresh, close }: { item: InboxEntry
         <label className="min-w-0 space-y-1 text-sm"><span>Tracker project</span><ExecutionPicker label="Routing tracker project" value={projectId} options={[{ value: "", label: "Choose scope" }, ...(projects.data ?? []).map(project => ({ value: project.id, label: `${project.prefix} · ${project.name}` }))]} dialogOpen={active} disabled={busy} onChange={setProjectId} /></label>
         <label className="flex min-w-0 flex-col gap-1 text-sm"><span>Exact task or thread reference</span><input className={field} value={taskRef} disabled={busy} placeholder="Task key, native ID or task link" onChange={event => setTaskRef(event.target.value)} /></label>
       </div>
-      <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={newTask} disabled={busy} onChange={event => { setNewTask(event.target.checked); if (event.target.checked) setSemantic(false); }} /><span>Propose a new task if no exact existing reference resolves</span></label>
+      <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={newTask} disabled={busy} onChange={event => { setNewTask(event.target.checked); if (event.target.checked) setSemantic(false); }} /><span>Propose a separate new task · leave the exact-reference answer blank; no new thread</span></label>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={semantic} disabled={busy || grantId !== null || newTask} onChange={event => setSemantic(event.target.checked)} /><span>Request semantic advice from the explicitly configured Core helper. One callback, not a physical model-call limit. No router-owned service/account fallback; the selected service owns downstream model requests.</span></label>
       <Button type="submit" disabled={busy || query.isLoading || !!query.error || grantUnavailable || grantId !== null && !selectedGrant?.actions.includes("preview")}>{busy ? "Working…" : "Preview route"}</Button>
     </form>

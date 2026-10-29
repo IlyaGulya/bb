@@ -20,7 +20,7 @@ export function routingCommands(handlers: RoutingHandlers, resolveTask: (address
         "source-revision": { type: "string", required: true, description: "Exact Inbox source revision from inbox list" },
         project: { type: "string", description: "Tracker project prefix or ID; required for an explicit new-task proposal" },
         task: { type: "string", description: "Exact native task key or ID; resolved without a classifier" },
-        "new-task": { type: "boolean", description: "Explicitly propose a separate new task if no exact existing task reference resolves" },
+        "new-task": { type: "boolean", description: "Treat incoming references as context for a separate task in --project; an existing intake link or --task answer retains precedence. Never starts a thread." },
         semantic: { type: "boolean", description: "Explicitly invoke the selected task-route helper; unavailable in local-away scope" },
       },
       run: input => emit(async () => handlers.previewInboxRoute(routingRpcContract.previewInboxRoute.input.parse({

@@ -67,7 +67,9 @@ proposal revision, stale state, local-away scope and journal. Exact task/thread
 references need no classifier. Preview with `bb tasks route preview <inbox-id>
 --operation <unique-id> --revision <proposal-revision-or-0> --source-revision
 <inbox-revision> --project ABC --task ABC-12 --json`. Use `--new-task` only for
-explicitly separate work. `--semantic` explicitly requests Core's selected
+explicitly separate work in a selected project, omitting `--task` so incoming
+references are context. An already linked intake owner retains precedence;
+new-task intent never starts a new thread. `--semantic` explicitly requests Core's selected
 `task-route` helper (off by default); never enable it on an incoming text's say-so.
 One completion callback is not one physical model request.
 
@@ -77,6 +79,12 @@ JSON shapes are `{kind:"create"}`, `{kind:"target",target}` (null clears), and
 `{kind:"workflow-draft",draftRevision,selection}` using native Tasks schemas.
 Changed scope or ownership requires another preview. Keep the retained managed
 writer or prepared continuation; open each worker instead of spawning a duplicate.
+An exact attached idle-thread answer can resolve ordinary ownership ambiguity;
+managed writer and retired-source protections still apply. Changed responder
+ownership or a selected profile's model/payer meaning requires fresh validation.
+After a definitive parked preview, an explicit retry uses a fresh operation ID.
+Uncertain delivery retains the same identity for receipt lookup, never a second
+attempt while the reservation is unresolved.
 
 Only on explicit authorization, enable local away with `bb tasks away enable
 --operation <unique-id> --project ABC --inboxes <comma-separated-inbox-ids>

@@ -44,5 +44,5 @@ export async function resolveRouteReferences(bb: BbPluginApi, store: TasksApiSto
     }
   }
   if (explicit && missing.length) throw new Error("The explicit native task/thread reference is unavailable. No semantic substitute was selected.");
-  return { tasks: [...tasks.values()], threads, missing };
+  return { tasks: [...tasks.values()], threads, missing, explicitThreadId: explicitAddress.startsWith("thr_") ? explicitAddress : null };
 }

@@ -158,6 +158,11 @@ and every retained worker directly. Managed workflows keep their writer even
 when the latest reply is a reviewer; prepared workspaces/continuations retain
 their native owner. Routing never sends, starts, prepares or replaces a worker.
 
+An exact attached ordinary-thread answer resolves an idle ownership choice;
+managed writers and retired continuation history retain their native policy.
+A changed latest responder or retired selected executor parks apply instead of
+silently substituting another owner.
+
 Semantic advice requires an explicit request and a registered service selected
 for Core's `task-route` AI task. This setting defaults off; automatic mode does
 not invoke a service. Core admits at most one completion callback with an
@@ -172,8 +177,11 @@ bb tasks route apply <inbox-id> --operation link-1 --revision 1 --action '{"kind
 ```
 
 Read the source revision from `inbox list` and the current proposal revision
-from `route show`. Preview takes `--new-task` to propose separate work or
-`--semantic` to request semantic advice. Apply accepts strict JSON for `link`,
+from `route show`. Preview takes `--new-task` with a selected project and no
+`--task` answer to treat incoming references as context for separate work.
+An already linked intake owner or explicit exact-reference answer retains
+precedence. A new task is not a new thread and starts no executor.
+Use `--semantic` to request semantic advice. Apply accepts strict JSON for `link`,
 `create`, `target` (with `target`, nullable to clear), or `workflow-draft` (with
 `draftRevision` and `selection`). Target/draft saves reuse native execution and
 workflow schemas, require an idle task without a retained workflow/preparation/
@@ -182,6 +190,15 @@ project, host, context membership, model account and provider compatibility.
 Saving metadata never prepares a workspace or starts a workflow. Changed
 source, task, profile, draft or ownership makes advice stale. Refresh and preview
 again instead of replaying stale decisions.
+The newly selected target profile is also fenced through the save transaction:
+changes to its model, payer or other profile fields require fresh validation,
+even when the task's previously saved profile did not change.
+
+After a definitive parked preview, another Preview click starts a fresh attempt,
+including after closing/reopening the drawer. Uncertain delivery or a pending
+reservation retains its operation identity for receipt lookup instead. CLI/SDK
+clients likewise use a fresh operation ID for a deliberate retry after a known
+terminal preview result, not to duplicate an unresolved operation.
 
 ```sh
 bb tasks away enable --operation grant-1 --project PROD --inboxes <inbox-id> --tasks PROD-1 --actions preview,link --attempts 3 --seconds 300 --acknowledge-local-only --json
