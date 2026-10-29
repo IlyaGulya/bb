@@ -258,6 +258,10 @@ player, native controls, no autoplay, separate download, and explicit
 loading/error/unsupported states. Closing releases playback and restores the
 trigger without navigating the task. Delivery uses the existing authenticated
 attachment path with bounded streaming, HEAD and single-byte Range support.
+Unknown or unbounded initial duration is displayed as unknown, not treated as
+corruption or playback readiness. Metadata/duration changes can supply a real
+finite duration later; can-play/playing and actual media errors still govern
+readiness and playback failure.
 Core's shared acknowledged analytics outbox records local video outcomes without
 video content, filenames, URLs, task/attachment IDs or raw errors.
 

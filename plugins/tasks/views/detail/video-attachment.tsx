@@ -1,5 +1,5 @@
 import { experimental_saveFile, experimental_useProductAnalytics } from "@get-bb/plugin-sdk/app";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from "react";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -102,6 +102,11 @@ export function VideoAttachment({ attachment, children }: { attachment: VideoFil
     }
   }, [begin, finish, stop]);
 
+  const updateDuration = useCallback((event: SyntheticEvent<HTMLVideoElement>) => {
+    const seconds = event.currentTarget.duration;
+    setDuration(Number.isFinite(seconds) && seconds > 0 ? seconds : null);
+  }, []);
+
   const downloadUrl = attachmentFileDownloadUrl(attachment.id);
   return <Dialog open={open} onOpenChange={changeOpen} modal={false}>
     <DialogTrigger asChild>
@@ -113,17 +118,14 @@ export function VideoAttachment({ attachment, children }: { attachment: VideoFil
     <DialogContent className="max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-4xl overflow-y-auto" compactContentClassName="max-w-full" hideCloseButton onAfterCloseAutoFocus={() => trigger.current?.focus({ preventScroll: true })}>
       <DialogHeader className="pr-12">
         <DialogTitle className="break-words">{attachment.fileName}</DialogTitle>
-        <DialogDescription>{formatFileSize(attachment.sizeBytes)} · {duration === null ? "Duration available after loading" : durationLabel(duration)} · {attachment.mime === "video/mp4" ? "MP4" : "WebM"}</DialogDescription>
+        <DialogDescription>{formatFileSize(attachment.sizeBytes)} · {duration === null ? "Duration unknown" : durationLabel(duration)} · {attachment.mime === "video/mp4" ? "MP4" : "WebM"}</DialogDescription>
       </DialogHeader>
       <DialogClose asChild><Button variant="ghost" size="icon" className="absolute right-3 top-3" aria-label="Close video"><Icon name="X" className="size-4" /></Button></DialogClose>
       <div className="min-w-0 space-y-3">
         <div className="relative overflow-hidden rounded-md border border-border bg-secondary">
           {open && <video key={attempt} ref={attachVideo} src={error ? undefined : attachmentDownloadUrl(attachment.id)} controls playsInline preload="metadata" aria-label={`Video: ${attachment.fileName}`} className="block max-h-[65dvh] w-full object-contain"
-            onLoadedMetadata={event => {
-              const seconds = event.currentTarget.duration;
-              if (!Number.isFinite(seconds) || seconds <= 0) { fail("This recording has no usable duration. Download it to inspect it or ask for a new recording.", "invalid"); return; }
-              setDuration(seconds);
-            }}
+            onLoadedMetadata={updateDuration}
+            onDurationChange={updateDuration}
             onCanPlay={() => { if (active.current) setState("ready"); }}
             onWaiting={() => { if (active.current && !error) setState("buffering"); }}
             onPlay={event => { if (!active.current) { event.currentTarget.pause(); return; } begin("video.play"); }}
