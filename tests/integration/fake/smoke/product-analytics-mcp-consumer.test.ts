@@ -232,3 +232,67 @@ describe("analytics MCP request to actual CLI subprocess", () => {
     });
   });
 });
+
+describe("analytics cold MCP command-index subprocess", () => {
+  it.each([
+    { tool: "search", mode: "smoke" },
+    { tool: "search", mode: "test" },
+    { tool: "read", mode: "smoke" },
+    { tool: "read", mode: "test" },
+  ] as const)("keeps a cold $tool index child in $mode during a concurrent production request", async ({ tool, mode }) => {
+    await withAnalyticsConsumer(async ({ harness, collector, work, personal }) => {
+      const environmentDuringChildRequests: (string | null)[] = [];
+      await withListeningAnalyticsCli(harness, async () => {
+        const launcher = await writeAnalyticsCliLauncher(join(harness.config.dataDir, "owned-cold-index-launcher"));
+        vi.stubEnv("BB_CLI", launcher);
+        vi.stubEnv("BB_CLI_REEXEC", "1");
+        vi.stubEnv("BB_DATA_DIR", join(harness.config.dataDir, "owned-cold-index-cli-data"));
+        vi.stubEnv("BB_PRODUCT_ANALYTICS_MODE", "production");
+        const plugin = await harness.pluginService.install("builtin:mcp", { kind: "root" });
+        if (plugin.status !== "running") throw new Error(`Actual MCP plugin did not load: ${plugin.statusDetail}`);
+        const path = `/api/v1/plugins/${plugin.id}/http/mcp`;
+        const invoke = async (requestMode: "production" | "smoke" | "test", projectId: string, name: "search" | "read" | "run", args: { query: string; limit: number } | { code: string }) => {
+          const headers = new Headers({ "content-type": "application/json", accept: "application/json, text/event-stream" });
+          headers.set(analyticsHeaders.mode, requestMode);
+          headers.set(analyticsHeaders.actor, "agent");
+          headers.set(analyticsHeaders.surface, "mcp");
+          headers.set(analyticsHeaders.intent, "use");
+          headers.set(analyticsHeaders.project, projectId);
+          headers.set(analyticsHeaders.operation, randomUUID());
+          const initialized = await harness.app.request(path, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "owned-cold-index-consumer", version: "1" } } }) });
+          expect(initialized.status).toBe(200);
+          await initialized.text();
+          const sessionId = initialized.headers.get("mcp-session-id");
+          if (sessionId !== null) headers.set("mcp-session-id", sessionId);
+          headers.set("mcp-protocol-version", "2025-11-25");
+          headers.set(analyticsHeaders.operation, randomUUID());
+          const called = await harness.app.request(path, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: args } }) });
+          expect(called.status).toBe(200);
+          return called.text();
+        };
+        const productionName = `Owned ${tool} ${mode} concurrent production control`;
+        const [coldResult, productionResult] = await Promise.all([
+          invoke(mode, work.id, tool, tool === "search" ? { query: "project show", limit: 5 } : { code: `return await bb.json(["project", "show", ${JSON.stringify(work.id)}]);` }),
+          invoke("production", personal.id, "run", { code: `return await bb.json(["project", "update", ${JSON.stringify(personal.id)}, "--name", ${JSON.stringify(productionName)}]);` }),
+        ]);
+        expect(coldResult).toContain(tool === "search" ? "bb project show" : work.id);
+        expect(productionResult).toContain(productionName);
+        expect(getProject(harness.db, personal.id)).toMatchObject({ name: productionName });
+        const guideEvents = harness.db.select({ mode: productAnalyticsEvents.mode, stage: productAnalyticsEvents.stage, outcome: productAnalyticsEvents.outcome, surface: productAnalyticsEvents.surface, actorKind: productAnalyticsEvents.actorKind }).from(productAnalyticsEvents).where(and(eq(productAnalyticsEvents.featureId, "cli.local"), eq(productAnalyticsEvents.action, "guide"))).orderBy(productAnalyticsEvents.stage).all();
+        expect(guideEvents).toEqual([
+          { mode, stage: "completed", outcome: "succeeded", surface: "mcp", actorKind: "unknown" },
+          { mode, stage: "started", outcome: "none", surface: "mcp", actorKind: "unknown" },
+        ]);
+        expect(consumerReport(collector, work.id, mode).rows.find((row) => row.featureId === `plugin.${plugin.id}` && row.action === `mcp.${tool}`)).toMatchObject({ attempts: 1, successes: 1, failures: 0, agent: 1 });
+        const production = consumerReport(collector, personal.id, "production");
+        expect(production.rows.find((row) => row.featureId === `plugin.${plugin.id}` && row.action === "mcp.run")).toMatchObject({ attempts: 1, successes: 1, failures: 0, agent: 1 });
+        expect(production.rows.find((row) => row.featureId === "core.projects" && row.action === "update")).toMatchObject({ attempts: 1, successes: 1, failures: 0, human: 0 });
+        expect(new Set(environmentDuringChildRequests)).toEqual(new Set(["production"]));
+        expect(process.env.BB_PRODUCT_ANALYTICS_MODE).toBe("production");
+      }, (request) => {
+        const pathname = new URL(request.url).pathname;
+        if (pathname === "/api/v1/system/product-analytics/events" || (request.method === "PATCH" && /^\/api\/v1\/projects\/[^/]+$/.test(pathname))) environmentDuringChildRequests.push(process.env.BB_PRODUCT_ANALYTICS_MODE ?? null);
+      });
+    });
+  });
+});
