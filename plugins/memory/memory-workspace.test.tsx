@@ -192,7 +192,10 @@ describe("rendered version-pinned replacement retrieval", () => {
     await f.decide(proposal.id, "apply");
     expect(await f.read(first.id)).toMatchObject({ version: 101, summary: "Reviewed replacement revision 101" });
     fireEvent.click(slot.getByRole("button", { name: "Refresh evidence" }));
-    await slot.findByText("Reviewed replacement revision 101");
+    const currentHeading = await slot.findByRole("heading", { name: /^replacement-decision · v101 ·/ });
+    const currentRecord = currentHeading.closest("li");
+    if (!(currentRecord instanceof HTMLLIElement)) throw new Error("Expected the current replacement record");
+    expect(within(currentRecord).getByText("Reviewed replacement revision 101")).toBeTruthy();
     await finishRefresh(slot);
     fireEvent.click(slot.getByRole("button", { name: "Inspect replacement v1" }));
     const pinned = await slot.findByRole("region", { name: "Memory version history" });

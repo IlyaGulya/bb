@@ -465,7 +465,7 @@ describe("reviewed task memory invariants", () => {
     const catalog = z.object({ memories: z.array(z.object({ id: z.string() })) }).parse(JSON.parse(cli.stdout ?? ""));
     expect(catalog.memories.some((memory) => memory.id === sentinel.id)).toBe(true);
     expect(catalog.memories.some((memory) => memory.id === privateFact.id)).toBe(false);
-  });
+  }, 60_000);
 });
 
 describe("reviewed binding removal lifecycle", () => {

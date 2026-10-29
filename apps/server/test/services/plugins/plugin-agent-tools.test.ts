@@ -83,6 +83,10 @@ describe("bb.agents.registerTool", () => {
       dataDir: join(workDir, "data"),
       appVersion: "0.9.0",
       loadTimeoutMs: 2000,
+      bundledPlugins: [{
+        name: "memory", pluginId: "memory", autoInstall: false, defaultEnabled: true,
+        rootDir: fileURLToPath(new URL("../../../../../plugins/memory", import.meta.url)),
+      }],
     });
   });
 
@@ -91,7 +95,7 @@ describe("bb.agents.registerTool", () => {
     await rm(workDir, { recursive: true, force: true });
   });
 
-  it("loads native Memory through the path-plugin source boundary and preserves CLI writes", async () => {
+  it("loads native Memory through builtin source admission and compiled reload while preserving CLI writes", async () => {
     const control = await writePlugin(workDir, {
       name: "bb-plugin-memory-source-control",
       serverSource: `export default function plugin(bb) {
@@ -101,8 +105,7 @@ describe("bb.agents.registerTool", () => {
     const controlEntry = await service.installPath(control);
     expect(controlEntry.status, controlEntry.statusDetail ?? "").toBe("running");
     expect(service.listAgentTools().map((tool) => tool.tool.name)).toContain("source_control");
-    const memoryRoot = fileURLToPath(new URL("../../../../../plugins/memory", import.meta.url));
-    const entry = await service.installPath(memoryRoot);
+    const entry = await service.install("builtin:memory", { kind: "root" });
     expect(entry.status, entry.statusDetail ?? "").toBe("running");
     const saved = await service.runCliCommand("memory", [
       "add", "--general", "--scope", "global", "--name", "source-loaded-note",
@@ -110,6 +113,9 @@ describe("bb.agents.registerTool", () => {
       "--details", "Owned source-development consumer evidence", "--reason", "Verify the documented source loader",
     ], {});
     expect(saved.exitCode, saved.stderr).toBe(0);
+    const reloaded = await service.reload("memory");
+    expect(reloaded.ok, reloaded.ok ? "" : reloaded.error).toBe(true);
+    expect(reloaded.plugins.find((plugin) => plugin.id === "memory")).toMatchObject({ source: "builtin:memory", status: "running" });
     const read = await service.runCliCommand("memory", ["get", "source-loaded-note", "--general", "--scope", "global", "--json"], {});
     expect(read.exitCode, read.stderr).toBe(0);
     expect(z.object({ memory: z.object({ name: z.string(), summary: z.string(), version: z.number() }) }).parse(JSON.parse(read.stdout ?? "")).memory).toEqual({
