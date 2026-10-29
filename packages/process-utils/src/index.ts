@@ -13,3 +13,4 @@ export * from "./socket-type-of-service.js";
 export * from "./process-info.js";
 export * from "./performance-diagnostics.js";
 export * from "./private-capture-files.js";
+export * from "./private-capture-crypto.js";

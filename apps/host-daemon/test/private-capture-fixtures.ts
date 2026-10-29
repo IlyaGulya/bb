@@ -1,12 +1,27 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import {
   CAPTURE_CHUNK_BYTES, captureManifestSchema, captureSessionSchema,
   type CaptureAck, type CaptureManifest, type CaptureSession, type CaptureOutboxStatus,
 } from "@bb/domain";
-import { captureObjectDigest, capturePreparePayload, capturePrivateDirectory } from "@bb/process-utils";
+import { captureObjectDigest, capturePreparePayload, capturePrivateDirectory, captureCipherContext, captureReadEncrypted, captureWriteEncrypted, registerCaptureKeyProvider } from "@bb/process-utils";
 
 export const captureFixtureId = "00000000-0000-4000-8000-000000000001";
+
+export function captureFixtureKeys(...directories: string[]): () => void {
+  const keys: Buffer[] = [];
+  const release: Array<() => void> = [];
+  for (const directory of directories) for (const role of ["host", "core"] as const) {
+    const key = randomBytes(32);
+    keys.push(key);
+    release.push(registerCaptureKeyProvider(directory, role, async () => key));
+  }
+  return () => { for (const dispose of release) dispose(); for (const key of keys) key.fill(0); };
+}
+export function readCaptureFixtureBody(dataDir: string, session: CaptureSession, manifest: CaptureManifest, sequence: number): Promise<Buffer> {
+  return captureReadEncrypted(join(dataDir, "private-capture", "host", session.id, "outbox", manifest.artifactId), `${sequence}.chunk`, CAPTURE_CHUNK_BYTES, captureCipherContext(dataDir, "host", session, `${manifest.artifactId}/${sequence}.chunk`));
+}
 
 export function captureSessionFixture(
   id = captureFixtureId,
@@ -80,10 +95,11 @@ export async function writeCaptureArtifactFixture(
   acknowledgements: CaptureAck[] = [],
 ): Promise<string> {
   const directory = await capturePrivateDirectory(dataDir, "host", artifact.manifest.captureId, "outbox", artifact.manifest.artifactId);
+  const session = captureSessionSchema.parse(JSON.parse(await readFile(join(dataDir, "private-capture", "host", artifact.manifest.captureId, "session.json"), "utf8")));
   await writeFile(join(directory, "manifest.json"), JSON.stringify(artifact.manifest), { mode: 0o600 });
   for (const sequence of sequences) {
     const chunk = artifact.manifest.chunks[sequence]!;
-    await writeFile(join(directory, `${sequence}.chunk`), artifact.bytes.subarray(sequence * CAPTURE_CHUNK_BYTES, sequence * CAPTURE_CHUNK_BYTES + chunk.bytes), { mode: 0o600 });
+    await captureWriteEncrypted(directory, `${sequence}.chunk`, artifact.bytes.subarray(sequence * CAPTURE_CHUNK_BYTES, sequence * CAPTURE_CHUNK_BYTES + chunk.bytes), captureCipherContext(dataDir, "host", session, `${artifact.manifest.artifactId}/${sequence}.chunk`));
   }
   await writeFile(join(directory, "acks.json"), JSON.stringify(acknowledgements), { mode: 0o600 });
   return directory;

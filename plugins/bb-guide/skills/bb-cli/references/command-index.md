@@ -16,8 +16,9 @@ This index lists every command path that the core CLI registers, including alias
 - `bb captures import`
 - `bb captures download`
 
-Read the thread-inspection guide for explicit project/context consent,
-private capture data, source gaps, offline ACKs and reviewed evidence imports.
+Read the thread-inspection guide for CPA-only network capture, explicit scoped
+consent, encrypted body storage/key references, committed ACK/replay and reviewed
+semantic evidence. There is no separate network runner or activation command.
 
 ## gateway-logs
 
