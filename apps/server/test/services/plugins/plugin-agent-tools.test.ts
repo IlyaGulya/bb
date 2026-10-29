@@ -100,7 +100,7 @@ describe("bb.agents.registerTool", () => {
     });
     const controlEntry = await service.installPath(control);
     expect(controlEntry.status, controlEntry.statusDetail ?? "").toBe("running");
-    expect(service.listAgentTools().map((tool) => tool.name)).toContain("source_control");
+    expect(service.listAgentTools().map((tool) => tool.tool.name)).toContain("source_control");
     const memoryRoot = fileURLToPath(new URL("../../../../../plugins/memory", import.meta.url));
     const entry = await service.installPath(memoryRoot);
     expect(entry.status, entry.statusDetail ?? "").toBe("running");

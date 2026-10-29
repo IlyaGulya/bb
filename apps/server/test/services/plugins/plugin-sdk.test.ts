@@ -236,7 +236,7 @@ describe("plugin bb.sdk bind gate", () => {
       skillIdsByPlugin: new Map([[earlierId, ["bound-memory", "replacement-memory"]], [laterId, ["live-memory"]]]),
     });
     const control = await resolve();
-    expect(control.tools.map((tool) => tool.name)).toEqual(["retired_scope_lookup", "live_scope_lookup"]);
+    expect(control.tools.map((tool) => tool.tool.name)).toEqual(["retired_scope_lookup", "live_scope_lookup"]);
     expect([...(control.selectedSkillIdsByPlugin.get(earlierId) ?? [])]).toEqual(["bound-memory"]);
     expect(control.dynamicInstructions).toEqual([
       { pluginId: earlierId, text: "Earlier bound task summary" }, { pluginId: laterId, text: "Live later summary" },
@@ -253,12 +253,12 @@ describe("plugin bb.sdk bind gate", () => {
       }
       release();
       const result = await pending;
-      expect(result.tools.map((tool) => tool.name)).toEqual(["live_scope_lookup"]);
+      expect(result.tools.map((tool) => tool.tool.name)).toEqual(["live_scope_lookup"]);
       expect([...(result.selectedSkillIdsByPlugin.get(earlierId) ?? [])]).toEqual([]);
       expect([...(result.selectedSkillIdsByPlugin.get(laterId) ?? [])]).toEqual(["live-memory"]);
       expect(result.dynamicInstructions).toEqual([{ pluginId: laterId, text: "Live later summary" }]);
       const next = await resolve();
-      expect(next.tools.map((tool) => tool.name)).toEqual(["live_scope_lookup"]);
+      expect(next.tools.map((tool) => tool.tool.name)).toEqual(["live_scope_lookup"]);
       expect([...(next.selectedSkillIdsByPlugin.get(earlierId) ?? [])]).toEqual(retirement === "reload" ? ["replacement-memory"] : []);
       expect(next.dynamicInstructions).toEqual(retirement === "reload" ? [
         { pluginId: earlierId, text: "Replacement generation summary" }, { pluginId: laterId, text: "Live later summary" },

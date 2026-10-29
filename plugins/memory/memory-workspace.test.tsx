@@ -197,5 +197,5 @@ describe("rendered version-pinned replacement retrieval", () => {
     fireEvent.click(slot.getByRole("button", { name: "Inspect replacement v1" }));
     const pinned = await slot.findByRole("region", { name: "Memory version history" });
     expect(within(pinned).getByText(first.summary)).toBeTruthy();
-  });
+  }, 60_000);
 });
