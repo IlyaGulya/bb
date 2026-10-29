@@ -70,7 +70,12 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("
       ...scope, hostId, threadId: thread.id, runtimeId: thread.providerId,
     }, { nativeEvents: true });
     const session = createPrivateCapture(deps, { id: fixture.id, ...fixture.subject, policy: fixture.policy }).session;
-    const historical = [];
+    const historical: {
+      manifest: ReturnType<typeof captureManifestSchema.parse>;
+      bytes: Buffer;
+      directory: string;
+      ciphertext: Buffer;
+    }[] = [];
     for (const event of sourceEvents) {
       const original = Buffer.from(JSON.stringify(event));
       const bytes = Buffer.from(JSON.stringify({ ...event, data: JSON.stringify({ message: "[REDACTED]" }) }));
