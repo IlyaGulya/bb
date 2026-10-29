@@ -51,6 +51,15 @@ symlinks and non-image hardlinks refuse. A bounded directory-revision cache avoi
 rescanning unchanged directories for each chunk; descriptor-pinned lookup/read,
 whole-record checks and file/directory revision fences remain in force. Native
 headers, cwd and source bytes are never rewritten to make a spill resolvable.
+Record queries also search ready retained numeric OMP spill logs owned by the
+checksum-verified native tool-result record. Search re-derives footer authority
+from that record, requires matching retained reference/owner/canonical filename,
+and verifies the complete spill length and SHA-256 before returning a match.
+UTF-8 decoding spans read boundaries and query overlap spans text chunks; memory
+is bounded by the transfer chunk and query, not the spill size. The existing
+1,000-record query window, cursor and single-result-per-record behavior remain.
+Images, generic checkpoint artifacts, unavailable spill copies and unproven
+metadata references are not searched as spill text; no source-host reads occur.
 Canonical OMP image `data` references (`blob:sha256:` plus exactly 64 lowercase
 hex characters) address the extensionless hash file under an explicitly selected
 artifact root. Only native message/custom-message image content, saved execution,

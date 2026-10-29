@@ -1,8 +1,9 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { classifyStoredProviderThreadClaim, createProject, getLastStoredProviderThreadId, getLatestThreadSequence, getThreadExecutionBinding, getThreadPluginMetadata, insertEvents, noopNotifier } from "@bb/db";
 import { NATIVE_HISTORY_OWNER, type JsonValue } from "@bb/domain";
+import { NATIVE_SESSION_CHUNK_BYTES } from "@bb/host-daemon-contract";
 import { createNativeArchiveFixture, disposeNativeArchiveFixtures, nativeChecksum, nativeHeader, nativeUser } from "./helpers/native-session-import.js";
 import { completeNativeAdmission, createNativeContinuationFixture, disposeNativeContinuationFixtures } from "./helpers/native-session-continuation.js";
 import { createNativeSessionHandoff } from "../../../apps/server/src/services/threads/native-session-continuation.js";
@@ -161,5 +162,99 @@ describe("reviewed native archive boundaries", () => {
     expect(failed.source).toEqual(ready.source);
     expect(getThreadPluginMetadata(saved.db, ready.threadId!, NATIVE_HISTORY_OWNER).metadata.source).toEqual(originalMetadata);
     expect(failed.boundarySha256).toBe(ready.boundarySha256);
+  });
+});
+
+describe("retained numeric spill search", () => {
+  async function retainedSpill(output: Buffer) {
+    const saved = await createNativeArchiveFixture({ records: (id, cwd) => [
+      nativeHeader("omp", id, cwd),
+      nativeUser("omp", id, "Original saved request"),
+      { type: "message", id: "call-spill", message: { role: "assistant", content: [{ type: "toolCall", id: "call-spill", name: "bash", arguments: { command: "never-execute-imported-command" } }] } },
+      { type: "message", id: "result-spill", message: { role: "toolResult", toolCallId: "call-spill", toolName: "bash", content: [{ type: "text", text: "Bounded native preview\n[Raw output: artifact://17]" }] } },
+      { type: "branch_checkpoint", id: "after-spill", state: { branch: "saved" } },
+    ] });
+    const stem = join(saved.leafRoot, "source");
+    await mkdir(stem);
+    await writeFile(join(stem, "17.bash-original.log"), output);
+    const selection = { ...saved.selection, source: { ...saved.source, artifactRoots: [...saved.source.artifactRoots, stem] } };
+    const ready = await saved.imports.settle((await saved.imports.start(selection)).id);
+    expect(ready).toMatchObject({ status: "ready", mode: "archive", continuationThreadId: null });
+    const artifact = ready.artifacts.find((entry) => entry.reference === "artifact://17");
+    if (!artifact || artifact.status !== "ready") throw new Error("Synthetic numeric spill was not retained.");
+    expect(artifact).toMatchObject({ recordOrdinal: 4, bytes: output.length, sha256: nativeChecksum(output) });
+    return { ...saved, ready, artifact };
+  }
+
+  it.each([
+    { boundary: "marker", split: 6 },
+    { boundary: "UTF-8 code point", split: Buffer.byteLength("OWNED_SPILL_") + 1 },
+  ])("finds a sidecar-only tail across a $boundary boundary without duplicate records or cursor drift", async ({ split }) => {
+    const marker = "OWNED_SPILL_É🧭_TAIL";
+    const output = Buffer.from(`${"x".repeat(NATIVE_SESSION_CHUNK_BYTES - split)}${marker}\n${"y".repeat(NATIVE_SESSION_CHUNK_BYTES)}\nBounded native preview`);
+    const saved = await retainedSpill(output);
+    const query = marker.toLocaleLowerCase();
+    const page = await saved.imports.records({ importId: saved.ready.id, after: 0, limit: 1, query });
+    expect(page.records.map((record) => record.nativeId)).toEqual(["result-spill"]);
+    expect(page.nextAfter).toBe(4);
+    expect(await saved.imports.records({ importId: saved.ready.id, after: page.nextAfter!, limit: 1, query })).toEqual({ records: [], nextAfter: null });
+    const both = await saved.imports.records({ importId: saved.ready.id, after: 0, limit: 100, query: "bounded native preview" });
+    expect(both.records.map((record) => record.nativeId)).toEqual(["result-spill"]);
+    await expectOriginalArchive(saved, saved.ready.id);
+    expect(Buffer.from(await (await saved.imports.download(saved.ready.id, saved.artifact.file)).arrayBuffer())).toEqual(output);
+    expect(await saved.imports.get(saved.ready.id)).toEqual(saved.ready);
+  });
+
+  it("rejects a changed retained spill even when its early prefix already matches", async () => {
+    const query = "SPILL_CHECKSUM_NEEDLE";
+    const output = Buffer.from(`${query}\n${"z".repeat(2 * NATIVE_SESSION_CHUNK_BYTES)}.`);
+    const saved = await retainedSpill(output);
+    const changed = Buffer.from(output);
+    changed[changed.length - 1] = 0x21;
+    await writeFile(join(saved.imports.directory(saved.ready.id), saved.artifact.file), changed);
+    await expect(saved.imports.records({ importId: saved.ready.id, after: 0, limit: 100, query })).rejects.toThrow("Retained native spill checksum mismatch.");
+    await expectOriginalArchive(saved, saved.ready.id);
+  });
+
+  it("requires checksum-proven tool-result authority rather than mutable record and artifact metadata", async () => {
+    const saved = await retainedSpill(Buffer.from("Ordinary retained tool output"));
+    const reference = "artifact://18";
+    const file = `artifact-${nativeChecksum(reference)}`;
+    const output = Buffer.from("UNPROVEN_SPILL_MUST_NOT_MATCH");
+    const directory = saved.imports.directory(saved.ready.id);
+    await writeFile(join(directory, file), output);
+    const path = join(directory, "records", "2.json");
+    const user = (await saved.imports.records({ importId: saved.ready.id, after: 1, limit: 1, query: "" })).records[0]!;
+    await writeFile(path, JSON.stringify({ ...user, artifactReferences: [reference] }));
+    await writeFile(join(directory, "manifest.json"), JSON.stringify({ ...saved.ready, artifacts: [...saved.ready.artifacts, {
+      reference, recordOrdinal: 2, file, bytes: output.length, sha256: nativeChecksum(output), status: "ready", reason: null,
+    }] }));
+    expect(await saved.imports.records({ importId: saved.ready.id, after: 0, limit: 100, query: output.toString("utf8") })).toEqual({ records: [], nextAfter: null });
+  });
+
+  it("does not search retained images or arbitrary checkpoint artifacts as spill text", async () => {
+    const query = "NON_SPILL_ARTIFACT_MUST_NOT_MATCH";
+    const image = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg"><text>${query}</text></svg>`);
+    const reference = `blob:sha256:${nativeChecksum(image)}`;
+    const saved = await createNativeArchiveFixture({ records: (id, cwd) => [
+      nativeHeader("omp", id, cwd),
+      { type: "message", id: "image-a", message: { role: "user", content: [{ type: "image", data: reference, mimeType: "image/svg+xml" }] } },
+      { type: "branch_checkpoint", id: "checkpoint-a", artifactPath: "result.bin" },
+    ] });
+    await writeFile(join(saved.artifactRoot, nativeChecksum(image)), image);
+    await writeFile(join(saved.artifactRoot, "result.bin"), query);
+    const ready = await saved.imports.settle((await saved.imports.start(saved.selection)).id);
+    expect(ready.status).toBe("ready");
+    expect(ready.artifacts.map((entry) => ({ reference: entry.reference, status: entry.status }))).toEqual([
+      { reference, status: "ready" }, { reference: "result.bin", status: "ready" },
+    ]);
+    expect(await saved.imports.records({ importId: ready.id, after: 0, limit: 100, query })).toEqual({ records: [], nextAfter: null });
+  });
+
+  it("refuses sidecar search when its native record checksum no longer proves the footer", async () => {
+    const query = "NATIVE_RECORD_PROOF_NEEDLE";
+    const saved = await retainedSpill(Buffer.from(query));
+    await writeFile(join(saved.imports.directory(saved.ready.id), "native.jsonl"), saved.original.replace("Bounded", "B0unded"));
+    await expect(saved.imports.records({ importId: saved.ready.id, after: 0, limit: 100, query })).rejects.toThrow("Native archive record checksum mismatch.");
   });
 });

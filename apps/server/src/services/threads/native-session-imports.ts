@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import { mkdir, open, readFile, rename, type FileHandle } from "node:fs/promises";
 import { join, posix } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   createThread, events as storedEvents, getLatestThreadSequence, getThread, insertEvents, noopNotifier, patchThreadPluginMetadata, threadPluginMetadata,
   upsertThreadSearchSegments, type DbConnection, type DbNotifier,
 } from "@bb/db";
-import { parseNativeHistoryRecord, threadEventItemSchema, type NativeHistoryRecord } from "@bb/domain";
+import { nativeOmpSpillReferences, parseNativeHistoryRecord, threadEventItemSchema, type NativeHistoryRecord } from "@bb/domain";
 import { NATIVE_SESSION_CHUNK_BYTES, type NativeChunk, type NativeRead } from "@bb/host-daemon-contract";
 import {
   nativeImportManifestSchema, nativeImportRecordSchema, type NativeImportBytes,
@@ -318,13 +319,50 @@ export class NativeSessionImports {
       const record = nativeImportRecordSchema.parse(JSON.parse(await readFile(join(this.directory(input.importId), "records", `${ordinal}.json`), "utf8")));
       if (query) {
         const bytes = await this.recordBytes(input.importId, record);
-        if (!bytes.toString("utf8").trim()) continue;
-        const parsed = parseNativeHistoryRecord(JSON.parse(bytes.toString("utf8")), ordinal);
-        if (![bytes.toString("utf8"), ...parsed.parts.map((part) => part.text)].some((text) => text.toLocaleLowerCase().includes(query))) continue;
+        const text = bytes.toString("utf8");
+        if (!text.trim()) continue;
+        const parsed = parseNativeHistoryRecord(JSON.parse(text), ordinal);
+        if (![text, ...parsed.parts.map((part) => part.text)].some((value) => value.toLocaleLowerCase().includes(query)) && !(await this.spillMatches(manifest, record, parsed, query))) continue;
       }
       records.push(record);
     }
     return { records, nextAfter: ordinal <= manifest.records ? ordinal - 1 : null };
+  }
+  private async spillMatches(manifest: NativeImportManifest, record: NativeImportRecord, parsed: NativeHistoryRecord, query: string): Promise<boolean> {
+    if (manifest.source.engine !== "omp") return false;
+    for (const { reference } of nativeOmpSpillReferences(parsed.state)) {
+      if (!record.artifactReferences.includes(reference)) continue;
+      const name = `artifact-${hash(reference)}`;
+      const artifact = manifest.artifacts.find((entry) => entry.reference === reference && entry.recordOrdinal === record.ordinal && entry.file === name && entry.status === "ready");
+      if (!artifact || artifact.sha256 === null) continue;
+      const file = await open(join(this.directory(manifest.id), name), "r");
+      try {
+        const stat = await file.stat();
+        if (!stat.isFile() || stat.size !== artifact.bytes) throw new Error("Retained native spill size mismatch.");
+        const buffer = Buffer.allocUnsafe(Math.min(NATIVE_SESSION_CHUNK_BYTES, artifact.bytes));
+        const decoder = new StringDecoder("utf8");
+        const digest = createHash("sha256");
+        let offset = 0;
+        let tail = "";
+        let matched = false;
+        while (offset < artifact.bytes) {
+          const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, artifact.bytes - offset), offset);
+          if (!bytesRead) throw new Error("Retained native spill is incomplete.");
+          const bytes = buffer.subarray(0, bytesRead);
+          digest.update(bytes);
+          offset += bytesRead;
+          if (!matched) {
+            const text = tail + decoder.write(bytes).toLocaleLowerCase();
+            matched = text.includes(query);
+            tail = query.length > 1 ? text.slice(1 - query.length) : "";
+          }
+        }
+        if (!matched) matched = (tail + decoder.end().toLocaleLowerCase()).includes(query);
+        if ((await file.stat()).size !== artifact.bytes || digest.digest("hex") !== artifact.sha256) throw new Error("Retained native spill checksum mismatch.");
+        if (matched) return true;
+      } finally { await file.close(); }
+    }
+    return false;
   }
   private async recordBytes(id: string, record: NativeImportRecord): Promise<Buffer> {
     const file = await open(join(this.directory(id), "native.jsonl"), "r");

@@ -34,6 +34,10 @@
   Resolve unique result-specific original or older tool logs only in the selected
   session stem under explicit artifact roots, with pinned descriptors, bounded
   directory caching and unchanged proof, revision, auth and hardlink boundaries.
+- Search retained numeric OMP tool spill text as well as native JSONL records
+  through the shared UI/SDK/CLI archive path. Decode UTF-8 incrementally across
+  chunk boundaries, verify complete spill checksums and native-record authority,
+  and preserve query windows/cursors without searching images or arbitrary files.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact
