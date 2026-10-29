@@ -33,7 +33,7 @@ function setup() {
   const childFile = join(root, "child");
   const events: ThreadEvent[] = [];
   const diagnostics: string[] = [];
-  const runtime = createAgentRuntime({ workspacePath: root, onEvent: (event) => events.push(event), onStderr: (message) => diagnostics.push(message) });
+  const runtime = createAgentRuntime({ workspacePath: root, onEvent: (event) => events.push(event), onStderr: (message) => diagnostics.push(message), onToolCall: async () => { throw new Error("The startup fixture must not invoke tools"); } });
   runtimes.push(runtime);
   const bridgeLaunch: AgentRuntimeBridgeLaunch = {
     pluginId: "owned-startup-fixture", dataDir,
@@ -51,6 +51,7 @@ function setup() {
   });
   const start = (mode: string, modelDelayMs = 1) => runtime.startThread({
     threadId: "retained-thread", environmentId: "owned-environment", providerId: "fixture",
+    projectId: "owned-project",
     bridgeLaunch, options: options(mode, modelDelayMs),
   });
   return { runtime, start, options, startsFile, childFile, events, diagnostics, bridgeLaunch, dataDir };
@@ -115,6 +116,7 @@ describe.skipIf(process.platform === "win32")("bounded owned provider startup", 
     writeFileSync(join(f.dataDir, "generic-readiness"), "fixture-only");
     const start = (optional: boolean) => f.runtime.startThread({
       threadId: optional ? "optional-thread" : "required-thread", environmentId: "owned-environment", providerId: "fixture", bridgeLaunch: f.bridgeLaunch,
+      projectId: "owned-project",
       options: { ...f.options("success"), providerOptions: {
         startupFixture: { mode: "success" },
         executionContext: executionContextSnapshotSchema.parse({ id: optional ? "optional-context" : "required-context", name: "Fixture", createdAt: 1, updatedAt: 1,

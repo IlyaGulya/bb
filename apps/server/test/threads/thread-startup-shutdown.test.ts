@@ -8,9 +8,8 @@ import { clientTurnRequestIdSchema, executionContextSnapshotSchema } from "@bb/d
 import type { AgentRuntimeBridgeLaunch } from "@bb/agent-runtime";
 import { spawnManagedProcess } from "@bb/process-utils";
 import { createDeferredPromise } from "@bb/test-helpers";
-import { RuntimeManager } from "../../../host-daemon/src/runtime-manager.js";
-import { createFakeWorkspace } from "../../../host-daemon/src/test/runtime-manager-workspace.js";
-import { MemoryBridge } from "../../../../packages/agent-runtime/src/test/memory-startup-bridge.js";
+import { RuntimeManager, createFakeWorkspace } from "@bb/host-daemon/test";
+import { MemoryBridge } from "@bb/agent-runtime/test";
 import { applyLoggedThreadLifecycleEvent } from "../../src/services/threads/lifecycle-outcome.js";
 import { retryFailedTurn } from "../../src/services/threads/turn-retry.js";
 import { toThreadQueuedMessage } from "../../src/services/threads/thread-queued-messages.js";

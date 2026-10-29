@@ -1199,6 +1199,9 @@ importers:
       '@bb/client-core':
         specifier: workspace:*
         version: link:../../packages/client-core
+      '@bb/host-daemon':
+        specifier: workspace:*
+        version: link:../host-daemon
       '@bb/scripts':
         specifier: workspace:*
         version: link:../../packages/scripts
@@ -2468,6 +2471,9 @@ importers:
         specifier: 0.1.0
         version: 0.1.0
     devDependencies:
+      '@bb/test-helpers':
+        specifier: workspace:*
+        version: link:../test-helpers
       '@bb/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig

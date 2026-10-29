@@ -49,7 +49,16 @@ export function ThreadStartupBanner({ threadId }: { threadId: string }) {
   const thread = useThread(threadId);
   const timeline = useThreadTimeline(threadId, { enabled: thread.data?.status === "error" && thread.data.archivedAt === null });
   if (thread.data?.status !== "error" || thread.data.archivedAt !== null) return null;
-  const latest = timeline.data?.rows.findLast((row) => row.kind === "system" && row.systemKind === "operation" && row.operationKind !== "parent-change" && row.providerStartup !== undefined);
+  const rows = timeline.data?.rows;
+  if (!rows) return null;
+  let latest: (typeof rows)[number] | undefined;
+  for (let index = rows.length - 1; index >= 0; index--) {
+    const row = rows[index];
+    if (row?.kind === "system" && row.systemKind === "operation" && row.operationKind !== "parent-change" && row.providerStartup !== undefined) {
+      latest = row;
+      break;
+    }
+  }
   if (!latest || latest.kind !== "system" || latest.systemKind !== "operation" || latest.operationKind === "parent-change" || latest.status !== "error" || !latest.providerStartup) return null;
   return <StartupFailureBanner key={latest.id} threadId={threadId} diagnostic={latest.providerStartup} detail={latest.detail} />;
 }

@@ -1,9 +1,22 @@
-import { execFile as execFileCallback } from "node:child_process";
+import { execFile as execFileCallback, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
+
+export function trackChildProcessFixtureExit(child: ChildProcess): void {
+  let exitCode = child.exitCode;
+  let signalCode = child.signalCode;
+  Object.defineProperties(child, {
+    exitCode: { get: () => exitCode },
+    signalCode: { get: () => signalCode },
+  });
+  child.on("exit", (code, signal) => {
+    exitCode = code;
+    signalCode = signal;
+  });
+}
 
 function readErrorCode(error: unknown): unknown {
   return error instanceof Error && "code" in error ? error.code : undefined;

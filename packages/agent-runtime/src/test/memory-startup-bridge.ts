@@ -1,6 +1,7 @@
 import { ChildProcess } from "node:child_process";
 import { PassThrough } from "node:stream";
 import type { ManagedProcess } from "@bb/process-utils";
+import { trackChildProcessFixtureExit } from "@bb/test-helpers";
 import { vi } from "vitest";
 import { z } from "zod";
 
@@ -45,7 +46,9 @@ export class MemoryBridge extends ChildProcess {
 
   constructor() {
     super();
-    vi.spyOn(this, "kill").mockImplementation(() => {
+    trackChildProcessFixtureExit(this);
+    const child: ChildProcess = this;
+    vi.spyOn(child, "kill").mockImplementation(() => {
       throw new Error("An in-memory bridge must never signal a process");
     });
     this.stdin.on("data", (chunk: Buffer) => {
@@ -60,17 +63,17 @@ export class MemoryBridge extends ChildProcess {
     });
   }
 
-  private send(value: object): void {
+  private writeRpcMessage(value: object): void {
     if (!this.stdout.destroyed) this.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...value })}\n`);
   }
 
   reply(request: FixtureRequest, result: object = {}): void {
     if (request.id === undefined) throw new Error("Fixture reply requires a request id");
-    this.send({ id: request.id, result });
+    this.writeRpcMessage({ id: request.id, result });
   }
 
   phase(threadId: string, phase: "hook" | "ready"): void {
-    this.send({ method: "thread/startup", params: {
+    this.writeRpcMessage({ method: "thread/startup", params: {
       threadId, phase,
       hookEvent: phase === "hook" ? "SessionStart" : null,
       hookId: phase === "hook" ? "0123456789abcdef" : null,
@@ -84,7 +87,7 @@ export class MemoryBridge extends ChildProcess {
     const providerTurnId = `turn-${++this.turn}`;
     this.activeTurns.set(threadId, providerTurnId);
     this.phase(threadId, "ready");
-    this.send({ method: "thread/delta", params: { threadId, deltas: [
+    this.writeRpcMessage({ method: "thread/delta", params: { threadId, deltas: [
       { kind: "input.accepted", clientRequestId: request.params?.clientRequestId, providerTurnId },
       { kind: "turn.open", providerTurnId },
     ] } });
@@ -95,14 +98,14 @@ export class MemoryBridge extends ChildProcess {
   completeTurn(threadId: string): void {
     const providerTurnId = this.activeTurns.get(threadId);
     if (!providerTurnId) throw new Error("Fixture has no active turn to complete");
-    this.send({ method: "thread/delta", params: { threadId, deltas: [
+    this.writeRpcMessage({ method: "thread/delta", params: { threadId, deltas: [
       { kind: "turn.boundary", providerTurnId, status: "completed", providerCheckpointId: `checkpoint-${providerTurnId}` },
     ] } });
     this.activeTurns.delete(threadId);
   }
 
   recommendRestart(threadId: string): void {
-    this.send({ method: "provider/recovery", params: {
+    this.writeRpcMessage({ method: "provider/recovery", params: {
       threadId, kind: "restartRecommended", retryable: true, message: "Synthetic bridge refresh",
     } });
   }
@@ -129,7 +132,7 @@ export class MemoryBridge extends ChildProcess {
       if (!threadId) throw new Error("Fixture turn requires a thread id");
       if (this.rateLimitedTurns > 0) {
         this.rateLimitedTurns -= 1;
-        this.send({ id: request.id, error: { code: -32000, message: "Synthetic rate limit", data: {
+        this.writeRpcMessage({ id: request.id, error: { code: -32000, message: "Synthetic rate limit", data: {
           recovery: { kind: "rateLimited", retryable: true, message: "Synthetic rate limit" },
         } } });
         return;
@@ -151,7 +154,6 @@ export class MemoryBridge extends ChildProcess {
 
   finish(): void {
     if (this.exitCode !== null) return;
-    this.exitCode = 0;
     this.emit("exit", 0, null);
     this.stdout.end();
     this.stderr.end();

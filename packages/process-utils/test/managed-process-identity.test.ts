@@ -1,5 +1,6 @@
 import { ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { trackChildProcessFixtureExit } from "@bb/test-helpers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createProcessStop } from "../src/managed-process.js";
 
@@ -32,7 +33,8 @@ describe.skipIf(process.platform !== "linux")("managed process identity fences w
     const pid = 9_000_001;
     const child = new ChildProcess();
     Object.defineProperty(child, "pid", { value: pid });
-    child.exitCode = 0;
+    trackChildProcessFixtureExit(child);
+    child.emit("exit", 0, null);
     const childSignal = vi.spyOn(child, "kill").mockReturnValue(true);
     const groupSignal = vi.spyOn(process, "kill").mockReturnValue(true);
     vi.mocked(readFileSync).mockImplementationOnce(() => stat(pid, 100));

@@ -16,6 +16,7 @@ export {
   listOpenFilePids,
   readPositivePidFile,
   resolveProjectEnvCandidates,
+  trackChildProcessFixtureExit,
 } from "./process-fixtures.js";
 export {
   corpusAvailable,

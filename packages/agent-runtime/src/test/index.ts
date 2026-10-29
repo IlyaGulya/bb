@@ -8,3 +8,4 @@ export {
   type ScriptedEchoLaunchScript,
   type ScriptedEchoRequestRecord,
 } from "./runtime-test-harness.js";
+export { MemoryBridge } from "./memory-startup-bridge.js";

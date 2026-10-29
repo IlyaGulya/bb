@@ -36,11 +36,13 @@ function setup() {
   vi.mocked(spawnManagedProcess).mockReturnValue({ child: first, stop: first.stop });
   const runtime = createAgentRuntime({
     workspacePath: "/memory-fixture", bridgeBundleDir: "/memory-fixture",
+    onToolCall: async () => { throw new Error("The startup fixture must not invoke tools"); },
     rateLimitRetry: { delaysMs: [2_000] }, onEvent: (event) => events.push(event),
   });
   runtimes.push(runtime);
   const start = (withInput = false) => runtime.startThread({
     threadId: "same-thread", environmentId: "fixture-env", providerId: "fixture", bridgeLaunch: launch, options,
+    projectId: "fixture-project",
     ...(withInput ? { input, clientRequestId: clientTurnRequestIdSchema.parse("creq_2222222222") } : {}),
   });
   return { first, runtime, events, start };
@@ -49,6 +51,7 @@ function setup() {
 function prepareRewind(runtime: AgentRuntime, leaseId: string) {
   return runtime.prepareThreadRewind({
     environmentId: "fixture-env", threadId: "same-thread", leaseId,
+    projectId: "fixture-project",
     providerId: "fixture", bridgeLaunch: launch, options,
     sourceProviderThreadId: "source-before-edit", retainThroughProviderCheckpoint: "checkpoint-before-edit",
   });
@@ -105,6 +108,7 @@ describe("bounded startup consumer boundaries without subprocesses", () => {
     vi.mocked(spawnManagedProcess).mockReturnValue({ child: replacement, stop: replacement.stop });
     const retried = observe(f.runtime.startThread({
       threadId: "same-thread", environmentId: "fixture-env", providerId: "fixture", bridgeLaunch: launch, options,
+      projectId: "fixture-project",
       input, clientRequestId: clientTurnRequestIdSchema.parse("creq_3333333333"),
     }));
     await vi.advanceTimersByTimeAsync(0);
@@ -122,6 +126,7 @@ describe("bounded startup consumer boundaries without subprocesses", () => {
     f.first.readyOnConstruction = false;
     const construction = observe(method === "start" ? f.start() : f.runtime.resumeThread({
       threadId: "same-thread", environmentId: "fixture-env", providerId: "fixture", bridgeLaunch: launch, options,
+      projectId: "fixture-project",
       providerThreadId: "native-same-thread",
     }));
     await vi.advanceTimersByTimeAsync(0);
@@ -204,6 +209,7 @@ describe("bounded startup consumer boundaries without subprocesses", () => {
     sibling.readyOnConstruction = false;
     const siblingStarted = observe(f.runtime.startThread({
       environmentId: "fixture-env", threadId: "unrelated-thread", providerId: "fixture", bridgeLaunch: launch, options, input,
+      projectId: "fixture-project",
       clientRequestId: clientTurnRequestIdSchema.parse("creq_6666666666"),
     }));
     await vi.advanceTimersByTimeAsync(0);
@@ -296,6 +302,7 @@ describe("bounded startup consumer boundaries without subprocesses", () => {
     };
     const first = observe(f.runtime.startThread({
       environmentId: "fixture-env", threadId: "same-thread", providerId: "fixture", bridgeLaunch: launch,
+      projectId: "fixture-project",
       options: execOpts, input, clientRequestId: clientTurnRequestIdSchema.parse("creq_6666666666"),
     }));
     await vi.advanceTimersByTimeAsync(0);

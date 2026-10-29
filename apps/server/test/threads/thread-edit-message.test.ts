@@ -1,6 +1,6 @@
 import { createAgentRuntime } from "@bb/agent-runtime";
 import { spawnManagedProcess } from "@bb/process-utils";
-import { MemoryBridge } from "../../../../packages/agent-runtime/src/test/memory-startup-bridge.js";
+import { MemoryBridge } from "@bb/agent-runtime/test";
 import {
   claimQueuedThreadMessageGroup,
   createQueuedThreadMessage,
@@ -657,6 +657,7 @@ describe("editThreadMessage", () => {
       });
       const runtime = createAgentRuntime({
         workspacePath: "/memory-fixture", bridgeBundleDir: "/memory-fixture",
+        onToolCall: async () => { throw new Error("The staged rewind fixture must not invoke tools"); },
         onEvent: (event) => {
           if (event.threadId !== thread.id || event.type !== "system/operation") return;
           seedStoredEvent(harness.deps, {
