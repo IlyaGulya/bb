@@ -74,19 +74,25 @@ service, instrumentation plan or inferred protocol support is introduced.
    size within 64 MiB, recheck stable file identity/size/times, and reject growth,
    instability or oversize instead of truncating. Preserve the complete request,
    upstream, response, tool/result and stream text actually present in the file.
-4. **Privacy and fidelity.** Redact known header/JSON/URL/credential forms,
-   including decoded credential keys; reject recognized private-key material.
-   Source and stored byte counts/SHA-256 are distinct. Fidelity explicitly says
-   source bytes, redacted source or normalized source. Secret absence remains
-   not-guaranteed; no private body goes to diagnostics, Git, CI or analytics.
-   Assembled artifact privacy audit applies to CPA as well as supplied evidence.
+4. **Private content and fidelity.** Preserve exact approved source bytes, including
+   header credentials, nested JSON, binary bytes and private-key content. No
+   automatic redaction, secret-based rejection, cleaning toggle or assembled-body
+   secret audit remains. Fresh manifests are version 2 / `source-preserved-v2`,
+   with equal source/stored sizes and SHA-256. Native normalized events remain
+   honestly normalized. Bodies never enter diagnostics, Git, CI or analytics.
+   Historical version-1 artifacts retain their original bytes, labels and IDs;
+   they are read-only, are not relabelled as original, and do not qualify fresh
+   coverage. Their old CPA completion stamps cannot skip a fresh raw capture.
 5. **Durable delivery.** Deterministic immutable manifest and contiguous 262144-byte
-   chunks. Authenticate/encrypt and fsync body files before SQLite receipt commit.
+   chunks. Authenticate/encrypt and fsync body files plus every ancestor-directory
+   entry through the canonical data root before SQLite receipt commit; retry also
+   syncs retained file entries. This is not an executed power-loss qualification.
    ACK identity describes plaintext chunk size/hash and the committed receipt;
    full artifact completion separately verifies its stored plaintext SHA-256.
    Duplicate delivery verifies retained bytes and reuses the committed receipt.
 6. **Replay and failure.** CPA stamps are skipped only when the referenced artifact
-   completed. A partial write/lost stamp is re-admitted through the same manifest
+   completed under manifest version 2. A partial write/lost stamp is re-admitted
+   through the same manifest
    and receipts, not silently skipped. Missing/corrupt bytes are failures. Recovered
    sync clears the current error without erasing cumulative gap counts. No success
    is inferred from an empty index, mapped root or absent activity.
@@ -94,6 +100,9 @@ service, instrumentation plan or inferred protocol support is introduced.
    per capture, 64 Core registrations and 2 GiB Core plaintext reservation plus
    bounded ciphertext framing overhead. Existing host optional-data outbox has
    a 512 MiB physical ceiling/32 registrations, leases and private retention.
+   Admission reserves growing ACK metadata plus its atomic replacement alongside
+   ciphertext; ACK publication also checks actual retained outbox bytes before
+   writing. Quota failure retains the unacknowledged ciphertext for safe retry.
    Sync processes at most eight new CPA artifacts per call; existing periodic Core
    sweep performs later batches. Disk pressure/source errors remain explicit.
 8. **Original CPA durability.** CPA owns original file retention, offline capture,
@@ -106,6 +115,11 @@ service, instrumentation plan or inferred protocol support is introduced.
    stronger invented per-agent ACL. Approved transport and Work export permission
    remain prerequisites. Download authenticates/checks bounded chunks before
    releasing plaintext and rechecks current authorization.
+   Download authenticates its first bounded chunk before constructing binary
+   headers, so missing key access returns generic JSON `503
+   capture_storage_unavailable`. Later chunks remain authenticated and scoped;
+   failure after streaming starts terminates the stream, never emits plaintext
+   fallback or buffers a whole artifact.
 10. **Surfaces and meaning.** Existing Core routes, `sdk.experimental_privateCaptures`,
     `bb captures` and Thread Info drawer share creation/list/get/stop/sync, manifest,
     chunk/ACK, metadata, verified download and reviewed import paths. Stop denies
@@ -121,8 +135,8 @@ claimed. The full original acceptance remains required under the CPA-only design
 existing private atomic-write/fsync primitives. HKDF-SHA256 derives role/capture/
 immutable-subject keys; each bounded frame authenticates its role, scope, object,
 sequence and length, with a random 96-bit nonce and authenticated terminal frame.
-Moving/tampering/truncating ciphertext fails closed. Hashes, redaction, receipts
-and full download checksum remain plaintext contracts.
+Moving/tampering/truncating ciphertext fails closed. Hashes, exact source-byte
+fidelity, receipts and full download checksum remain plaintext contracts.
 
 - `BB_PRIVATE_CAPTURE_CORE_KEY_REF`: Core owner must supply a dedicated protected
   key reference for CPA ingestion/reads/replay. No host key is needed for CPA-only
@@ -161,7 +175,7 @@ Exact unsupplied/unqualified values and owners:
 | Endpoint-to-read-only-root mapping | Existing Core deployment `BB_CPA_LOG_DIRS`, selected by actual frozen `modelConnection.gateway.baseUrl`; never guessed or set globally here. |
 | Finalization, rotation, offline horizon, native transport and standalone correlation | Existing deployed CPA/native logger version/configuration and owned request artifacts; no replacement daemon/service or new header bypass. |
 | Test project/context/host/thread/model/account values | Parent's existing owned QA thread, its frozen Core binding and execution host; not the source writer's model login. |
-| Source38/migration/host composition | Parent's existing analytics contracts and ordered 0146/0147 Drizzle composition; protocol 248 removes discarded wire fields. No old-host/plaintext-store compatibility is claimed. |
+| Source38/migration/host composition | Parent's existing analytics contracts and ordered 0146/0147 Drizzle composition; protocol 249 admits version-2 exact-byte manifests and removes the old remote privacy-rejection command. No old-host/plaintext-store compatibility is claimed. |
 
 ## Parent-only qualification commands — not executed here
 
@@ -177,11 +191,11 @@ pnpm exec turbo run test --filter=@bb/server -- test/services/gateway-logs.test.
 pnpm exec turbo run test --filter=@bb/integration-tests -- '--project=@bb/integration-tests:private-capture*' private-capture/
 ```
 
-The final command includes unchanged Core privacy/receipt cases and the authored
-isolated synthetic CPA-to-Core cases. The latter assert full multichunk files
-(including tool/SSE/upstream/tail text), correct endpoint/header ownership,
-redaction, actual ciphertext files, unchanged original CPA source, committed
-replay, unsettled-source recovery and current-scope denial of decrypted output.
+The final command includes real Core/SDK/host consumer cases, focused storage
+failure boundaries and synthetic CPA-to-Core cases. They assert exact multichunk
+bytes (including credentials/tool/SSE/upstream/tail text), correct endpoint/header
+ownership, ciphertext storage, unchanged CPA source, committed replay, historical
+stamp separation, unsettled-source recovery and current-scope denial of output.
 It uses a real migrated database, no database mock or provider/network substitute.
 Fixture resident keys do not qualify the real operator key store.
 
@@ -250,3 +264,68 @@ activation, install or nested actor was invoked for this cutover. Static source/
 contract inspection and explicit Git evidence preservation/commits are the only
 non-edit operations. Parent owns all qualification and Main UI/import/runtime
 integration independently; this handoff does not mark the task Done or Accepted.
+
+## Raw-preserving frozen candidate and focused BEFORE/AFTER gates
+
+The source baseline before this amendment is
+`bc03b043a4c27f59c54766cab6d22a26f92f1b68`. The final handoff supplies the AFTER
+commit. This checkout authors source and regressions only: none of the commands
+below was executed here. No prior PASS result qualifies this candidate.
+
+For focused BEFORE proof, parent supplies a separate disposable checkout already
+at that exact baseline as `RAW_BEFORE_ROOT`, and the integrated final candidate
+checkout as `RAW_AFTER_ROOT`. Keep the baseline's production code and capture
+fixtures unchanged: only transplant these two regression files from the final
+candidate. The final fixture helper uses v2 and must not be copied into BEFORE.
+The regex restricts BEFORE to the independent storage failures; it does not run
+the new raw-import cases against the old policy.
+
+```sh
+RAW_AFTER_COMMIT=$(git -C "$RAW_AFTER_ROOT" rev-parse HEAD)
+git -C "$RAW_AFTER_ROOT" show "$RAW_AFTER_COMMIT:apps/host-daemon/test/private-capture.test.ts" > "$RAW_BEFORE_ROOT/apps/host-daemon/test/private-capture.test.ts"
+git -C "$RAW_AFTER_ROOT" show "$RAW_AFTER_COMMIT:tests/integration/private-capture/storage-boundaries.test.ts" > "$RAW_BEFORE_ROOT/tests/integration/private-capture/storage-boundaries.test.ts"
+```
+
+Run from `RAW_BEFORE_ROOT`, keeping output in private parent-owned files:
+
+```sh
+pnpm exec turbo run test --filter=@bb/host-daemon -- test/private-capture.test.ts -t 'does not exceed physical quota'
+pnpm exec turbo run test --filter=@bb/integration-tests -- '--project=@bb/integration-tests:private-capture*' private-capture/storage-boundaries.test.ts
+```
+
+Expected source-based BEFORE failures, not executed observations: the quota case
+publishes a growing ACK file beyond the limit; ancestor-fsync fault cases can
+commit receipts; the unavailable-key download returns binary headers before the
+stream fails. Parent already reported the latter real-route socket reset; this
+writer does not repeat the incident as a probe. The regressions require generic
+503 without payload/key/path leakage, retained metadata and bounded streaming.
+
+Run AFTER from the fully composed `RAW_AFTER_ROOT` with all final source and
+fixtures, then perform the actual owned runtime/UI gates separately:
+
+```sh
+pnpm exec turbo run test --filter=@bb/domain -- private-capture
+pnpm exec turbo run test --filter=@bb/process-utils -- test/private-capture-crypto.test.ts test/private-capture-files.test.ts
+pnpm exec turbo run test --filter=@bb/host-daemon -- test/private-capture.test.ts
+pnpm exec turbo run test --filter=@bb/integration-tests -- '--project=@bb/integration-tests:private-capture*' private-capture/
+pnpm exec turbo run typecheck --filter=@bb/domain --filter=@bb/process-utils --filter=@bb/host-daemon-contract --filter=@bb/server-contract --filter=@bb/sdk --filter=@bb/host-daemon --filter=@bb/server --filter=@bb/cli --filter=@bb/app --filter=@bb/integration-tests
+pnpm exec turbo run build:types --filter=@get-bb/plugin-sdk
+```
+
+Parent owns both the 390-width compact CSS correction (44px hit areas and
+artifact-action wrapping) and actual built UI smoke. This checkout changes only
+semantic capture copy, not `fieldClass`, root button sizing or action-group layout.
+The two original rendered audits covered the old e4 layout/accessibility only;
+their review is not final approval of this raw-preserving semantic candidate.
+
+Parent also reported an original Codex native session with a null execution
+context refused capture admission. This is a scope prerequisite, not evidence of
+a CPA/model capability failure. The original session was not rebound, modified
+or rerun here. A separate explicitly scoped owned QA session is parent-owned;
+there is no default context, payer/account substitution or historical-scope repair.
+
+Final review and full raw body/stream/tool/MCP/bypass/standalone/Work-Personal/
+offline-ACK/privacy acceptance remain open. Use fresh actual native CPA artifacts
+with byte-equal source/stored hashes, not old redacted artifacts or their stamps.
+No activation, deployment, Done/Accept or live source43 action is authorized by
+this handoff.

@@ -9,14 +9,11 @@ import {
 } from "@bb/db";
 import {
   CAPTURE_CHUNK_BYTES, CAPTURE_MAX_ARTIFACT_BYTES, captureAckSchema, captureManifestSchema,
-  captureContainsPrivateKey, captureHasUnredactedAuth, captureReportedModels,
-  CapturePayloadError,
-  captureGapSchema,
-  captureSessionSchema, redactCapturePayload, type CaptureAck, type CaptureChunk,
+  captureReportedModels, captureGapSchema,
+  captureSessionSchema, type CaptureAck, type CaptureChunk,
   type CaptureGap, type CaptureManifest, type CaptureScope, type CaptureSession,
 } from "@bb/domain";
 import type { CaptureArtifactQuery, CaptureArtifactView, CaptureCreate, CaptureLinkRequest, CaptureListQuery, CaptureView, CapturePreview, CapturePreviewQuery } from "@bb/server-contract";
-import type { CaptureRejection } from "@bb/host-daemon-contract";
 import {
   CaptureStorageError, captureDecodeBase64, captureObjectDigest, capturePreparePayload,
   capturePrivateDirectory, captureReadEncrypted, captureSha256, captureWriteEncrypted, captureCipherContext,
@@ -75,7 +72,6 @@ function gap(deps: CaptureDeps, id: string, code: CaptureGap): void {
 }
 function storageCode(error: unknown): CaptureGap {
   if (error instanceof CaptureStorageError) return error.code;
-  if (error instanceof CapturePayloadError) return error.code === "invalid_utf8" ? "partial_source" : error.code;
   if (error instanceof ApiError) {
     const parsed = captureGapSchema.safeParse(error.body.code.replace(/^capture_/u, ""));
     if (parsed.success) return parsed.data;
@@ -96,6 +92,7 @@ export function createPrivateCapture(deps: CaptureDeps, input: CaptureCreate): C
   const { id, policy, ...subject } = input;
   authorizeCaptureScope(deps.db, subject);
   if (!getHost(deps.db, subject.hostId)) fail("host_not_found", 404);
+  if (policy.nativeExports.some(source => source.binaryReview !== undefined)) fail("historical_policy_read_only");
   if (policy.cpaLogs && subject.threadId === null) fail("cpa_thread_header_required");
   if ((subject.runId !== null || subject.nativeSessionId !== null) && (policy.cpaLogs || policy.bridgeRecorder)) fail("run_wire_correlation_unavailable");
   if (subject.threadId !== null) {
@@ -124,7 +121,7 @@ export function createPrivateCapture(deps: CaptureDeps, input: CaptureCreate): C
 export function getPrivateCapture(deps: CaptureDeps, id: string, scope: CaptureScope): CaptureView {
   const row = requireCapture(deps, id, scope);
   const expected = deps.db.select({ bytes: sql<number>`coalesce(sum(json_extract(${artifacts.manifest}, '$.storedBytes')), 0)`, chunks: sql<number>`coalesce(sum(json_array_length(${artifacts.manifest}, '$.chunks')), 0)` }).from(artifacts).where(and(eq(artifacts.captureId, id), sql`${artifacts.rejectedAt} is null`)).get()!;
-  const sources = deps.db.selectDistinct({ source: sql<CaptureManifest["source"]>`json_extract(${artifacts.manifest}, '$.source')` }).from(artifacts).where(and(eq(artifacts.captureId, id), sql`${artifacts.completedAt} is not null`, sql`${artifacts.rejectedAt} is null`)).all();
+  const sources = deps.db.selectDistinct({ source: sql<CaptureManifest["source"]>`json_extract(${artifacts.manifest}, '$.source')` }).from(artifacts).where(and(eq(artifacts.captureId, id), sql`${artifacts.completedAt} is not null`, sql`${artifacts.rejectedAt} is null`, sql`json_extract(${artifacts.manifest}, '$.version') = 2`)).all();
   const totals = deps.db.select({ bytes: sql<number>`coalesce(sum(${chunks.bytes}), 0)`, count: count() }).from(chunks).where(eq(chunks.captureId, id)).get()!;
   const expectedBytes = expected.bytes;
   const expectedChunks = expected.chunks;
@@ -138,9 +135,9 @@ export function getPrivateCapture(deps: CaptureDeps, id: string, scope: CaptureS
     host: row.hostStatus,
     hostEnabled: row.hostEnabled,
     links: deps.db.select({ threadId: links.threadId, runId: links.runId, createdAt: links.createdAt }).from(links).where(eq(links.captureId, id)).orderBy(asc(links.linkId)).all().map(link => ({ ...link, provenance: "owner-association" as const })),
-    outcome: !row.enabled ? "accepted" : effectiveGap !== "none" ? "failed" : row.lastSyncAt === null || totals.count === 0 || expectedChunks > totals.count || row.hostStatus?.pendingChunks ? "accepted" : "succeeded",
+    outcome: !row.enabled ? "accepted" : effectiveGap !== "none" ? "failed" : row.lastSyncAt === null || sources.length === 0 || expectedChunks > totals.count || row.hostStatus?.pendingChunks ? "accepted" : "succeeded",
     coverage: [
-      { source: "cpa-request-log", state: has("cpa-request-log") ? "captured" : "uninstrumented", evidence: "Existing CPA is the only network capture owner. Completed artifacts retain every admitted settled native file byte after declared redaction, with source/stored hashes and committed chunk receipts. A finalized file and its ACK do not by themselves qualify live transport, retry or session completeness; no CPA capability is inferred absent." },
+      { source: "cpa-request-log", state: has("cpa-request-log") ? "captured" : "uninstrumented", evidence: "Existing CPA is the only network capture owner. Completed version-2 artifacts retain every admitted settled native file byte unchanged, including embedded credentials, with identical source/stored hashes and committed receipts. Historical version-1 artifacts remain labelled and do not establish fresh byte-preserving capture. A finalized file and its ACK do not by themselves qualify live transport, retry or session completeness." },
       { source: "bridge-recorder", state: has("bridge-recorder") ? "captured" : "uninstrumented", evidence: "Optional already-enabled native semantic source; no recorder is enabled by capture. Existing host/thread lanes retain their actual process/sequence evidence, not a substitute network transport or proof that CPA omits the same content." },
       { source: "native-events", state: has("native-events") ? "metadata-only" : "uninstrumented", evidence: "Optional actual Core normalized events and retained tool/approval/result provenance. Availability is observed from those events; it does not establish an omission from CPA. No new native hooks or wrappers are installed." },
       { source: "native-transcript", state: "uninstrumented", evidence: "This reader performs no transcript discovery. Reviewed imports remain supplied evidence; no conclusion about CPA transcript or reasoning content follows." },
@@ -203,6 +200,7 @@ export function stageCaptureManifest(deps: CaptureDeps, scope: CaptureScope, man
       if (captureObjectDigest(existing.manifest) !== captureObjectDigest(manifest)) fail("identity_conflict");
       return;
     }
+    if (manifest.version !== 2) fail("historical_artifact_read_only");
     if (!current.enabled) fail("stopped");
     const reserved = deps.db.select({ bytes: sql<number>`coalesce(sum(json_extract(${artifacts.manifest}, '$.storedBytes')), 0)`, count: count() }).from(artifacts).where(eq(artifacts.captureId, manifest.captureId)).get()!;
     const global = deps.db.select({ bytes: sql<number>`coalesce(sum(json_extract(${artifacts.manifest}, '$.storedBytes')), 0)` }).from(artifacts).get()!;
@@ -253,12 +251,7 @@ async function acceptCaptureChunkOwned(deps: CaptureDeps, scope: CaptureScope, c
   const expected = artifact.manifest.chunks[chunk.sequence];
   const bytes = captureDecodeBase64(chunk.base64, CAPTURE_CHUNK_BYTES);
   if (!expected || expected.bytes !== bytes.length || expected.sha256 !== chunk.sha256 || captureSha256(bytes) !== chunk.sha256) fail("integrity");
-  if (captureContainsPrivateKey(bytes) || captureHasUnredactedAuth(bytes, chunk.sequence === artifact.manifest.chunks.length - 1)) {
-    deps.db.update(artifacts).set({ rejectedAt: Date.now() }).where(and(eq(artifacts.captureId, chunk.captureId), eq(artifacts.artifactId, chunk.artifactId))).run();
-    gap(deps, chunk.captureId, "privacy_rejected");
-    await purgeRejectedArtifact(deps, row.session, chunk.artifactId);
-    fail("privacy_rejected", 403);
-  }
+  if (artifact.manifest.version !== 2) fail("historical_artifact_read_only");
   const identity = { captureId: chunk.captureId, artifactId: chunk.artifactId, sequence: chunk.sequence, sha256: chunk.sha256 };
   const receiptId = captureObjectDigest(identity);
   const committed = deps.db.select().from(chunks).where(and(eq(chunks.captureId, chunk.captureId), eq(chunks.artifactId, chunk.artifactId), eq(chunks.sequence, chunk.sequence))).get();
@@ -302,37 +295,17 @@ async function completeCaptureArtifact(deps: CaptureDeps, session: CaptureSessio
   if (artifact.completedAt !== null || artifact.committedSequences.length !== artifact.manifest.chunks.length) return;
   const hash = createHash("sha256");
   const root = await directory(deps, session, artifactId);
-  const audit = Buffer.allocUnsafe(artifact.manifest.storedBytes);
-  let offset = 0;
   for (const chunk of artifact.manifest.chunks) {
     requireCapture(deps, session.id, scope, true);
     const bytes = await captureReadEncrypted(root, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES, captureCipherContext(deps.config.dataDir, "core", session, `${artifactId}/${chunk.sequence}.chunk`));
     if (captureSha256(bytes) !== chunk.sha256) fail("integrity");
     if (bytes.length !== chunk.bytes) fail("integrity");
-    audit.set(bytes, offset);
-    offset += bytes.length;
     hash.update(bytes);
   }
   if (hash.digest("hex") !== artifact.manifest.storedSha256) fail("integrity");
-  let rejected = false;
-  try { rejected = captureContainsPrivateKey(audit) || captureHasUnredactedAuth(audit, true) || (artifact.manifest.representation !== "binary" && captureSha256(redactCapturePayload(audit).bytes) !== artifact.manifest.storedSha256); }
-  catch { rejected = true; }
-  if (rejected) {
-    deps.db.update(artifacts).set({ rejectedAt: Date.now() }).where(and(eq(artifacts.captureId, session.id), eq(artifacts.artifactId, artifactId))).run();
-    gap(deps, session.id, "privacy_rejected");
-    await purgeRejectedArtifact(deps, session, artifactId);
-    fail("privacy_rejected", 403);
-  }
   deps.db.transaction(() => {
     requireCapture(deps, session.id, scope, true);
     deps.db.update(artifacts).set({ completedAt: Date.now() }).where(and(eq(artifacts.captureId, session.id), eq(artifacts.artifactId, artifactId))).run();
-  }, { behavior: "immediate" });
-}
-async function purgeRejectedArtifact(deps: CaptureDeps, session: CaptureSession, artifactId: string): Promise<void> {
-  await rm(await directory(deps, session, artifactId), { recursive: true, force: true });
-  deps.db.transaction(() => {
-    deps.db.delete(chunks).where(and(eq(chunks.captureId, session.id), eq(chunks.artifactId, artifactId))).run();
-    deps.db.update(artifacts).set({ purgedAt: Date.now() }).where(and(eq(artifacts.captureId, session.id), eq(artifacts.artifactId, artifactId))).run();
   }, { behavior: "immediate" });
 }
 export async function previewCaptureArtifact(deps: CaptureDeps, id: string, artifactId: string, query: CapturePreviewQuery): Promise<CapturePreview> {
@@ -355,34 +328,45 @@ export async function previewCaptureArtifact(deps: CaptureDeps, id: string, arti
   const encoding = artifact.manifest.representation === "binary" ? "base64" as const : "utf8" as const;
   return { artifactId, raw: preview.toString(encoding === "base64" ? "base64" : "utf8"), encoding, truncated: limit < artifact.manifest.storedBytes, previewBytes: limit, sizeBytes: artifact.manifest.storedBytes, storedSha256: artifact.manifest.storedSha256 };
 }
-export function downloadCaptureArtifact(deps: CaptureDeps, id: string, artifactId: string, scope: CaptureScope): Response {
+export async function downloadCaptureArtifact(deps: CaptureDeps, id: string, artifactId: string, scope: CaptureScope): Promise<Response> {
   const session = requireCapture(deps, id, scope).session;
   const artifact = captureArtifact(deps, id, artifactId, scope);
   if (artifact.completedAt === null) fail("artifact_incomplete");
+  const root = await directory(deps, session, artifactId);
+  async function read(sequence: number): Promise<Buffer> {
+    requireCapture(deps, id, scope);
+    const chunk = artifact.manifest.chunks[sequence]!;
+    const bytes = await captureReadEncrypted(root, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES, captureCipherContext(deps.config.dataDir, "core", session, `${artifactId}/${chunk.sequence}.chunk`));
+    requireCapture(deps, id, scope);
+    if (bytes.length !== chunk.bytes || captureSha256(bytes) !== chunk.sha256) fail("integrity");
+    return bytes;
+  }
+  let first: Buffer | null = await read(0);
   let sequence = 0;
   const stream = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         requireCapture(deps, id, scope);
-        const chunk = artifact.manifest.chunks[sequence++];
-        if (!chunk) { controller.close(); return; }
-        const bytes = await captureReadEncrypted(await directory(deps, session, artifactId), `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES, captureCipherContext(deps.config.dataDir, "core", session, `${artifactId}/${chunk.sequence}.chunk`));
+        if (sequence === artifact.manifest.chunks.length) { controller.close(); return; }
+        const bytes = sequence === 0 ? first! : await read(sequence);
+        first = null;
+        sequence += 1;
         requireCapture(deps, id, scope);
-        if (bytes.length !== chunk.bytes || captureSha256(bytes) !== chunk.sha256) fail("integrity");
         controller.enqueue(bytes);
-      } catch { controller.error(new Error("capture_download_unavailable")); }
+      } catch { first = null; controller.error(new Error("capture_download_unavailable")); }
     },
-  });
+    cancel() { first = null; },
+  }, { highWaterMark: 0 });
   return new Response(stream, { headers: { "cache-control": "private, no-store", "content-type": "application/octet-stream", "content-disposition": 'attachment; filename="private-capture.bin"', "content-length": String(artifact.manifest.storedBytes), "x-content-type-options": "nosniff", "x-bb-capture-sha256": artifact.manifest.storedSha256 } });
 }
 async function archiveBytes(deps: CaptureDeps, session: CaptureSession, source: Buffer, fields: Pick<CaptureManifest, "source" | "sourceId" | "sourceOffset" | "representation" | "streamState" | "transport" | "destinations" | "requestId" | "observedAt" | "hostId" | "runId" | "nativeSessionId" | "indexLimited">): Promise<string> {
   if (source.length > CAPTURE_MAX_ARTIFACT_BYTES) fail("source_limit", 413);
-  const prepared = capturePreparePayload(source, redactCapturePayload(source), CAPTURE_CHUNK_BYTES);
+  const prepared = capturePreparePayload(source, CAPTURE_CHUNK_BYTES);
   const reported = captureReportedModels(prepared.bytes);
-  const content = { version: 1 as const, captureId: session.id, ...fields, ...prepared.fields,
+  const content = { version: 2 as const, captureId: session.id, ...fields, ...prepared.fields,
     models: reported.models, indexLimited: fields.indexLimited || reported.indexLimited,
-    fidelity: fields.representation === "normalized" ? "normalized-source" as const : prepared.fields.redacted ? "redacted-source" as const : "source-bytes" as const,
-    redactionPolicy: "headers-json-credentials-v1" as const, payloadSecrets: "not-guaranteed" as const };
+    fidelity: fields.representation === "normalized" ? "normalized-source" as const : "source-bytes" as const,
+    redactionPolicy: "source-preserved-v2" as const, payloadSecrets: "not-guaranteed" as const };
   const manifest = captureManifestSchema.parse({ ...content, artifactId: captureObjectDigest(content) });
   stageCaptureManifest(deps, session.subject, manifest, true);
   for (const chunk of manifest.chunks) await acceptCaptureChunk(deps, session.subject, { captureId: session.id, artifactId: manifest.artifactId, sequence: chunk.sequence, sha256: chunk.sha256, base64: prepared.bytes.subarray(chunk.sequence * CAPTURE_CHUNK_BYTES, chunk.sequence * CAPTURE_CHUNK_BYTES + chunk.bytes).toString("base64") });
@@ -392,7 +376,13 @@ async function archiveCoreSources(deps: CaptureDeps, row: SessionRow): Promise<v
   const session = row.session;
   if (!row.enabled || session.subject.threadId === null) return;
   if (session.policy.nativeEvents) {
-    const actual = deps.db.select({ id: events.id, sequence: events.sequence, dataBytes: sql<number>`octet_length(${events.data})` }).from(events).where(and(eq(events.threadId, session.subject.threadId), gt(events.sequence, row.eventCursor), session.subject.runId === null ? undefined : eq(events.turnId, session.subject.runId), session.subject.nativeSessionId === null ? undefined : eq(events.providerThreadId, session.subject.nativeSessionId))).orderBy(asc(events.sequence)).limit(32).all();
+    let cursor = row.eventCursor;
+    if (cursor > 0) {
+      const historical = deps.db.select({ id: artifacts.artifactId }).from(artifacts).where(and(eq(artifacts.captureId, session.id), sql`json_extract(${artifacts.manifest}, '$.source') = 'native-events'`, sql`json_extract(${artifacts.manifest}, '$.version') = 1`)).limit(1).get();
+      const current = historical && deps.db.select({ id: artifacts.artifactId }).from(artifacts).where(and(eq(artifacts.captureId, session.id), sql`json_extract(${artifacts.manifest}, '$.source') = 'native-events'`, sql`json_extract(${artifacts.manifest}, '$.version') = 2`, sql`${artifacts.completedAt} is not null`)).limit(1).get();
+      if (historical && !current) cursor = 0;
+    }
+    const actual = deps.db.select({ id: events.id, sequence: events.sequence, dataBytes: sql<number>`octet_length(${events.data})` }).from(events).where(and(eq(events.threadId, session.subject.threadId), gt(events.sequence, cursor), session.subject.runId === null ? undefined : eq(events.turnId, session.subject.runId), session.subject.nativeSessionId === null ? undefined : eq(events.providerThreadId, session.subject.nativeSessionId))).orderBy(asc(events.sequence)).limit(32).all();
     for (const entry of actual) {
       requireCapture(deps, session.id, session.subject, true);
       if (entry.dataBytes > CAPTURE_MAX_ARTIFACT_BYTES - 65536) { gap(deps, session.id, "source_limit"); break; }
@@ -415,7 +405,7 @@ async function archiveCoreSources(deps: CaptureDeps, row: SessionRow): Promise<v
     const list = await listGatewayLogs(root, session.subject.threadId);
     if (list.scanTruncated || list.unavailableFiles) gap(deps, session.id, "partial_source");
     const observations = { ...row.cpaStamps };
-    const completed = new Set(deps.db.select({ id: artifacts.artifactId }).from(artifacts).where(and(eq(artifacts.captureId, session.id), sql`${artifacts.completedAt} is not null`)).all().map(item => item.id));
+    const completed = new Set(deps.db.select({ id: artifacts.artifactId }).from(artifacts).where(and(eq(artifacts.captureId, session.id), sql`${artifacts.completedAt} is not null`, sql`json_extract(${artifacts.manifest}, '$.version') = 2`)).all().map(item => item.id));
     const known = new Set(Object.entries(observations).filter(([, value]) => completed.has(value.artifactId)).map(([id, value]) => `${id}:${value.stamp}`));
     let captured = 0;
     for (const entry of list.entries) {
@@ -458,28 +448,19 @@ async function syncOne(deps: WorkSessionDeps, id: string, scope: CaptureScope): 
     await archiveCoreSources(deps, row);
     row = requireCapture(deps, id, scope, true);
     let ack: CaptureAck | null = null;
-    let rejection: CaptureRejection | undefined;
     if (row.session.policy.bridgeRecorder || row.session.policy.nativeExports.length > 0) {
       for (let index = 0; index <= 8; index += 1) {
         row = requireCapture(deps, id, scope, true);
-        const result = await callHostOnlineRpc(deps, { hostId: row.hostId, timeoutMs: 15000, command: { type: "capture.exchange", session: row.session, leaseUntil: Math.min(row.expiresAt, Date.now() + row.session.policy.offlineLeaseSeconds * 1000), ack, rejection, poll: row.enabled && index < 8 } });
+        const result = await callHostOnlineRpc(deps, { hostId: row.hostId, timeoutMs: 15000, command: { type: "capture.exchange", session: row.session, leaseUntil: Math.min(row.expiresAt, Date.now() + row.session.policy.offlineLeaseSeconds * 1000), ack, poll: row.enabled && index < 8 } });
         requireCapture(deps, id, scope, true);
         ack = null;
-        rejection = undefined;
         deps.db.update(sessions).set({ hostStatus: result.status, hostEnabled: result.enabled }).where(eq(sessions.id, id)).run();
         if (result.status.gap !== "none") gap(deps, id, result.status.gap);
         if (!result.manifest || !result.chunk) break;
         if (result.manifest.captureId !== id || result.chunk.captureId !== id || result.chunk.artifactId !== result.manifest.artifactId ||
             !["bridge-recorder", "owner-import"].includes(result.manifest.source)) fail("integrity");
         stageCaptureManifest(deps, scope, result.manifest, true);
-        try { ack = await acceptCaptureChunk(deps, scope, result.chunk); }
-        catch (error) {
-          requireCapture(deps, id, scope, true);
-          const artifact = captureArtifact(deps, id, result.manifest.artifactId, scope);
-          if (artifact.rejectedAt === null) throw error;
-          rejection = { captureId: id, artifactId: artifact.manifest.artifactId, storedSha256: artifact.manifest.storedSha256, reason: "privacy_rejected" };
-          gap(deps, id, "privacy_rejected");
-        }
+        ack = await acceptCaptureChunk(deps, scope, result.chunk);
       }
     }
     deps.db.update(sessions).set({ lastSyncAt: Date.now(), nextSyncAt: Date.now() + row.session.policy.syncIntervalSeconds * 1000 }).where(eq(sessions.id, id)).run();
@@ -512,11 +493,6 @@ export async function pruneExpiredPrivateCaptures(deps: CaptureDeps, now = Date.
 }
 export async function sweepPrivateCaptures(deps: WorkSessionDeps, now = Date.now()): Promise<void> {
   await pruneExpiredPrivateCaptures(deps, now);
-  for (const row of deps.db.select({ captureId: artifacts.captureId, artifactId: artifacts.artifactId, session: sessions.session }).from(artifacts).innerJoin(sessions, eq(sessions.id, artifacts.captureId)).where(and(sql`${artifacts.rejectedAt} is not null`, sql`${artifacts.purgedAt} is null`)).limit(8).all()) {
-    if (writeRuns.get(deps.db)?.has(row.captureId)) continue;
-    try { await purgeRejectedArtifact(deps, row.session, row.artifactId); }
-    catch { gap(deps, row.captureId, "storage_unavailable"); }
-  }
   const due = deps.db.select().from(sessions).where(and(gt(sessions.expiresAt, now), lte(sessions.nextSyncAt, now))).orderBy(asc(sessions.nextSyncAt)).limit(8).all();
   for (const row of due) {
     try { await syncPrivateCapture(deps, row.id, row.session.subject); }

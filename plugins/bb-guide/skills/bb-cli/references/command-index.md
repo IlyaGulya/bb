@@ -17,8 +17,9 @@ This index lists every command path that the core CLI registers, including alias
 - `bb captures download`
 
 Read the thread-inspection guide for CPA-only network capture, explicit scoped
-consent, encrypted body storage/key references, committed ACK/replay and reviewed
-semantic evidence. There is no separate network runner or activation command.
+consent, exact-byte approved imports (including embedded credentials), encrypted
+body storage/key references and committed ACK/replay. There is no cleaning mode,
+separate network runner or activation command.
 
 ## gateway-logs
 

@@ -153,7 +153,8 @@ Opt-in private capture data (all but create require --project <Core-id> --contex
   payloadReview=owner-approved-sensitive-application-data, retentionHours,
   maxBytes, maxArtifacts, syncIntervalSeconds, offlineLeaseSeconds,
   bridgeRecorder, nativeEvents, cpaLogs and nativeExports. Each export names a
-  sourceId, relativePath, representation and binaryReview; none means [].
+  sourceId, relativePath and representation; none means []. Legacy binaryReview
+  is read-only historical metadata, not a new registration or upload argument.
   CPA is the only network capture path: cpaLogs selects existing finalized native
   files through the frozen endpoint's BB_CPA_LOG_DIRS mapping and exact inbound
   thread header. It enables no logger or runtime. A CPA registration requires
@@ -169,6 +170,12 @@ Opt-in private capture data (all but create require --project <Core-id> --contex
   Create input is limited to 65536 bytes; each artifact to 64 MiB. No raw source
   file is silently truncated to fit a quota. Limits and unavailable sources are gaps.
   Raw files stay in private application storage, not analytics or normal logs.
+  New captures preserve every approved byte, including embedded credentials and
+  private-key content; no automatic redaction or secret-based rejection occurs.
+  --reviewed authorizes all file bytes in this private scope, not secret absence.
+  Version-2 manifests have equal source/stored size and SHA-256; normalized native
+  events are still normalized. Historical version-1 artifacts keep their original
+  labels/bytes and do not count as fresh byte-preserving capture.
   Inspect prints only metadata unless preview is explicit. Never put real previews
   in CI or agent/tool transcripts; download full content to --output instead.
   Stop denies new Core intake; a disconnected host stops by its bounded lease.

@@ -118,7 +118,7 @@ function PrivateCapturesContent({ threadId, open, onClose }: { threadId: string;
   const upload = useMutation({
     mutationFn: async (analytics: CaptureAnalytics) => {
       if (!scope || !captureId || !file || !reviewed) throw new Error("capture_review_required");
-      await api.upload({ ...scope, captureId, operationId: importId, sourceId: file.name, file, representation, streamState: "unknown", binaryReview: "owner-reviewed-no-auth-material", analytics });
+      await api.upload({ ...scope, captureId, operationId: importId, sourceId: file.name, file, representation, streamState: "unknown", analytics });
       setFile(null); setImportId(crypto.randomUUID()); setReviewed(false); setFileKey(value => value + 1); await refresh();
     }, retry: false, gcTime: 0,
   });
@@ -138,7 +138,7 @@ function PrivateCapturesContent({ threadId, open, onClose }: { threadId: string;
         <details className="rounded-md border p-3">
           <summary className="cursor-pointer text-sm font-medium">Explicit opt-in and resource policy</summary>
           <div className="space-y-3 pt-3 text-sm">
-            <p>Includes available retained evidence for this thread. Existing provider loggers are not enabled or reconfigured. Work exports require applicable owner permission; protected roots must be on encrypted storage. Review payloads for secrets; automatic redaction is not a guarantee.</p>
+            <p>Includes available retained evidence for this thread. Existing provider loggers are not enabled or reconfigured. Work exports require applicable owner permission; protected roots must be on encrypted storage. New capture preserves every source byte, including embedded credentials and private-key content, without redaction or secret-based rejection.</p>
             <label className="block"><input type="checkbox" checked={standalone} onChange={event => { setStandalone(event.target.checked); if (event.target.checked) { setNativeEvents(false); setBridge(false); setCpa(false); } }} /> Register standalone owned evidence on this host, with an explicit navigation link; this does not select a CPA endpoint or prove native execution.</label>
             {standalone && <label className="block">Exact standalone runtime ID<input className={fieldClass} value={standaloneRuntime} onChange={event => setStandaloneRuntime(event.target.value)} /></label>}
             <div className="flex flex-wrap gap-4"><label><input type="checkbox" checked={nativeEvents} onChange={event => setNativeEvents(event.target.checked)} disabled={standalone} /> Existing normalized native events</label><label><input type="checkbox" checked={bridge} onChange={event => setBridge(event.target.checked)} disabled={standalone} /> Already-enabled private bridge recorder</label><label><input type="checkbox" checked={cpa} onChange={event => setCpa(event.target.checked)} disabled={standalone || !subject?.binding?.modelConnection?.gateway} /> Retained CPA files</label></div>
@@ -177,7 +177,7 @@ function PrivateCapturesContent({ threadId, open, onClose }: { threadId: string;
             <div className="space-y-2 pt-2">
               <input key={fileKey} type="file" onChange={event => { setFile(event.target.files?.[0] ?? null); setImportId(crypto.randomUUID()); setReviewed(false); }} />
               <label className="block">Representation<select className={fieldClass} value={representation} onChange={event => { setRepresentation(event.target.value === "binary" ? "binary" : event.target.value === "raw" ? "raw" : "transcript"); setImportId(crypto.randomUUID()); }}><option value="transcript">Transcript</option><option value="raw">Raw text</option><option value="binary">Reviewed binary</option></select></label>
-              <label className="block"><input type="checkbox" checked={reviewed} onChange={event => setReviewed(event.target.checked)} /> This owned file is approved for this context; no auth material is included.</label>
+              <label className="block"><input type="checkbox" checked={reviewed} onChange={event => setReviewed(event.target.checked)} /> I authorize every byte of this owned file, including any embedded credentials, for this exact private context.</label>
               <Button type="button" size="sm" disabled={!reviewed || !file || upload.isPending || !selected.session.enabled} onClick={() => upload.mutate(captureProductAnalyticsContext())}>{upload.isPending ? "Importing…" : "Import with resumable ACK"}</Button>
               <p className="text-xs text-muted-foreground">Stream state is unknown, not inferred. Retry the same file to resume; no browser raw-payload outbox is created. Payload checksums never become analytics operation IDs.</p>
             </div>
@@ -191,7 +191,7 @@ function PrivateCapturesContent({ threadId, open, onClose }: { threadId: string;
           {selectedArtifact && <div className="space-y-2 break-all text-xs">
             <p>Source SHA-256: {selectedArtifact.manifest.sourceSha256}</p>
             <p>Stored SHA-256: {selectedArtifact.manifest.storedSha256}</p>
-            <p>{selectedArtifact.manifest.fidelity} · {selectedArtifact.manifest.redactionPolicy} · stream {selectedArtifact.manifest.streamState}; payload secret absence is not guaranteed.</p>
+            <p>Manifest v{selectedArtifact.manifest.version} · {selectedArtifact.manifest.fidelity} · {selectedArtifact.manifest.redactionPolicy} · stream {selectedArtifact.manifest.streamState}. {selectedArtifact.manifest.version === 1 ? "Historical artifact: original labels and bytes are unchanged; not fresh byte-preserving capture." : "Exact admitted source bytes are retained, including credentials. Normalized events remain normalized, not original wire bytes."}</p>
             <p>Known source machine: {selectedArtifact.manifest.hostId ?? "unknown"} · Run: {selectedArtifact.manifest.runId ?? "unknown"} · Native session: {selectedArtifact.manifest.nativeSessionId ?? "unknown"} · Reported model labels: {selectedArtifact.manifest.models.join(", ") || "unknown"}. {selectedArtifact.manifest.indexLimited ? "Index bounded; inspect the full stored source for remaining labels/destinations." : "Reported labels are not payer or upstream-routing certification."}</p>
             <div className="flex gap-2">
               <Button type="button" size="sm" variant="outline" disabled={selectedArtifact.completedAt === null || preview.isPending} onClick={() => preview.mutate(captureProductAnalyticsContext())}>Inspect bounded body</Button>

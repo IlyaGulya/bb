@@ -1,4 +1,4 @@
-export * from "./private-capture-redaction.js";
+export * from "./private-capture-index.js";
 export * from "./private-capture.js";
 export * from "./execution-contexts.js";
 export * from "./mcp-descriptors.js";

@@ -7,7 +7,9 @@ import {
 export const captureCreateSchema = captureSubjectSchema.extend({
   id: z.string().uuid(),
   policy: capturePolicySchema,
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (value.policy.nativeExports.some(source => source.binaryReview !== undefined)) ctx.addIssue({ code: "custom", message: "Historical export review metadata is read-only" });
+});
 export const captureListQuerySchema = captureScopeSchema.extend({
   threadId: z.string().min(1).max(256).optional(),
   hostId: z.string().min(1).max(256).optional(),

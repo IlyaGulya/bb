@@ -1,6 +1,6 @@
 import {
   CAPTURE_CHUNK_BYTES, CAPTURE_MAX_ARTIFACT_BYTES, captureAckSchema, captureManifestSchema,
-  redactCapturePayload, type CaptureScope, type CaptureManifest, type CaptureChunk, type CaptureAck,
+  type CaptureScope, type CaptureManifest, type CaptureChunk, type CaptureAck,
   captureReportedModels,
 } from "@bb/domain";
 import {
@@ -26,7 +26,6 @@ export interface CaptureImportArgs extends CaptureIdArgs {
   file: Blob;
   representation: "raw" | "transcript" | "binary";
   streamState: CaptureManifest["streamState"];
-  binaryReview: "owner-reviewed-no-auth-material";
 }
 export interface ExperimentalPrivateCapturesArea {
   create(input: CaptureCreate & Provenance): Promise<CaptureView>;
@@ -109,24 +108,23 @@ export function createPrivateCapturesArea({ transport }: CreateSdkAreaArgs): Exp
     },
     async upload(input) {
       captureCreateSchema.shape.id.parse(input.operationId);
-      if (input.file.size < 1 || input.file.size > CAPTURE_MAX_ARTIFACT_BYTES || input.binaryReview !== "owner-reviewed-no-auth-material") throw new Error("capture_source_limit_or_review_missing");
-      const original = new Uint8Array(await input.file.arrayBuffer());
-      const transformed = input.representation === "binary" ? { bytes: original, redacted: false } : redactCapturePayload(original);
-      const prepared = transformed.bytes;
+      if (input.file.size < 1 || input.file.size > CAPTURE_MAX_ARTIFACT_BYTES) throw new Error("capture_source_limit");
+      const prepared = new Uint8Array(await input.file.arrayBuffer());
+      const sha256 = await digest(prepared);
       const chunks = [];
       for (let offset = 0; offset < prepared.length; offset += CAPTURE_CHUNK_BYTES) {
         const bytes = prepared.subarray(offset, offset + CAPTURE_CHUNK_BYTES);
         chunks.push({ sequence: chunks.length, bytes: bytes.length, sha256: await digest(bytes) });
       }
       const fields = {
-        version: 1 as const, captureId: input.captureId, source: "owner-import" as const, sourceId: input.sourceId,
+        version: 2 as const, captureId: input.captureId, source: "owner-import" as const, sourceId: input.sourceId,
         hostId: null, runId: null, nativeSessionId: null, ...(input.representation === "binary" ? { models: [], indexLimited: false } : captureReportedModels(prepared)),
         destinations: [], transport: "file" as const, requestId: null, observedAt: null, sourceOffset: 0,
-        sourceBytes: original.length, sourceSha256: await digest(original), storedBytes: prepared.length,
-        storedSha256: await digest(prepared), representation: input.representation, streamState: input.streamState,
-        fidelity: transformed.redacted ? "redacted-source" as const : "source-bytes" as const,
-        redactionPolicy: input.representation === "binary" ? "owner-reviewed-binary-v1" as const : "headers-json-credentials-v1" as const,
-        redacted: transformed.redacted, payloadSecrets: "not-guaranteed" as const, chunks,
+        sourceBytes: prepared.length, sourceSha256: sha256, storedBytes: prepared.length,
+        storedSha256: sha256, representation: input.representation, streamState: input.streamState,
+        fidelity: "source-bytes" as const,
+        redactionPolicy: "source-preserved-v2" as const,
+        redacted: false, payloadSecrets: "not-guaranteed" as const, chunks,
       };
       const manifest = captureManifestSchema.parse({ ...fields, artifactId: await identity(fields) });
       const initial = await area.stageManifest({ ...input, manifest });
