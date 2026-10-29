@@ -16,7 +16,7 @@ export function nativeHistoryEvents(args: {
     const previous = part.kind === "tool-result" ? args.toolContext(id) : null;
     const argumentText = part.arguments === null ? null : JSON.stringify(part.arguments);
     const argumentsValue = argumentText !== null && argumentText.length > INLINE_CHARS ? { nativeArgumentsPreview: bounded(argumentText) } : part.arguments ?? previous?.arguments;
-    if (part.kind === "user") item = { type: "userMessage", id, content: [{ type: "text", text: bounded(part.text) }] };
+    if (part.kind === "user") item = { type: "userMessage", id, content: [{ type: "text", text: bounded(part.text), mentions: [] }] };
     else if (part.kind === "assistant") item = { type: "agentMessage", id, text: bounded(part.text) };
     else if (part.kind === "reasoning") item = { type: "reasoning", id, summary: [], content: [bounded(part.text)] };
     else item = {

@@ -108,6 +108,7 @@ export {
   listThreadAncestors,
   listThreadDescendants,
   searchThreadsWithPendingInteractionState,
+  upsertThreadSearchSegments,
   THREAD_SEARCH_LIMIT_PER_GROUP_DEFAULT,
   THREAD_SEARCH_LIMIT_PER_GROUP_MAX,
 } from "./threads.js";
@@ -362,6 +363,7 @@ export {
   listThreadTurnInterruptionEventStates,
   MissingStoredTurnStartedError,
 } from "./events.js";
+export type { InsertEventInput } from "./events.js";
 export {
   getDatabaseDataVersion,
   getThreadEventRewriteGeneration,

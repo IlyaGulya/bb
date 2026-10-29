@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nativeArtifactReferences, parseNativeHistoryRecord } from "./native-session-record.js";
+import { nativeArtifactReferences, parseNativeHistoryRecord, type NativeRecordObject } from "../src/native-session-record.js";
 
 describe("native history records", () => {
   it("keeps OMP branches, reasoning, tool arguments and opaque checkpoint state", () => {
@@ -30,7 +30,7 @@ describe("native history records", () => {
   });
 
   it("finds deeply nested artifact references without overflowing spread argument limits", () => {
-    const value = { blocks: Array.from({ length: 150_000 }, () => null), payload: { images: [{ artifactPath: "image.bin" }, { attachment: { filePath: "image.bin" } }, { checkpointPath: "checkpoint.bin" }, { reference: "blob://result.bin" }] } };
+    const value: NativeRecordObject = { blocks: Array.from({ length: 150_000 }, () => null), payload: { images: [{ artifactPath: "image.bin" }, { attachment: { filePath: "image.bin" } }, { checkpointPath: "checkpoint.bin" }, { reference: "blob://result.bin" }] } };
     expect(nativeArtifactReferences(value)).toEqual(["image.bin", "checkpoint.bin", "result.bin"]);
   });
 });

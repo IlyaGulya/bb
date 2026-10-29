@@ -211,7 +211,7 @@ function toRuntimeExecutionOptions(
     input: args.input,
     providerId: args.providerId,
   });
-  const providerOptions =
+  let providerOptions =
     args.deps.providerRegistry.get(args.providerId)?.deriveProviderOptions({
       threadId: args.threadId,
       projectId: args.projectId,
@@ -222,7 +222,7 @@ function toRuntimeExecutionOptions(
   const nativeMetadata = nativeHistoryMetadata(args.deps.db, args.threadId);
   if (nativeMetadata !== null) {
     const source = nativeSessionSourceSchema.parse(nativeMetadata.source);
-    providerOptions.nativeSessionImport = { path: source.path, rootPath: source.rootPath, sessionId: source.sessionId, cwd: source.cwd };
+    providerOptions = { ...providerOptions, nativeSessionImport: { path: source.path, rootPath: source.rootPath, sessionId: source.sessionId, cwd: source.cwd } };
   }
   const binding = getThreadExecutionBinding(args.deps.db, args.threadId);
   assertThreadExecutionBindingAvailable(

@@ -100,7 +100,7 @@ export async function createNativeSessionHandoff(deps: AppDeps, imports: NativeS
       title: `Handoff · ${manifest.source.title}`, providerId: manifest.source.engine === "omp" ? "acp-omp" : manifest.source.engine === "claude" ? "claude-code" : "codex",
       ...(input.executionContextId === null ? {} : { executionContextId: input.executionContextId }), modelConnectionId: input.modelConnectionId,
       model: input.model, permissionMode: input.permissionMode, startedOnBehalfOf: null,
-      input: [{ type: "text", text: `This is a NEW dialogue with a handoff, not native resume. [Open the original retained archive](/native-session-imports?importId=${manifest.id}). Original BB thread: ${manifest.threadId}; native session: ${manifest.source.sessionId}; retained boundary: ${manifest.bytes} bytes / ${manifest.sha256}. Native history and state are retained separately, not injected as the next-turn context.\n\n${input.input}` }],
+      input: [{ type: "text", mentions: [], text: `This is a NEW dialogue with a handoff, not native resume. [Open the original retained archive](/native-session-imports?importId=${manifest.id}). Original BB thread: ${manifest.threadId}; native session: ${manifest.source.sessionId}; retained boundary: ${manifest.bytes} bytes / ${manifest.sha256}. Native history and state are retained separately, not injected as the next-turn context.\n\n${input.input}` }],
     });
     manifest.mode = "new-handoff";
     manifest.continuationThreadId = thread.id;

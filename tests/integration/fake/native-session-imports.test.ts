@@ -4,13 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-import { createProject, events, noopNotifier } from "@bb/db";
+import { createProject, events, noopNotifier, upsertHost } from "@bb/db";
 import { createMigratedConnection } from "@bb/db/testing";
 import { threadEventItemSchema, type JsonValue } from "@bb/domain";
 import type { NativeEngine, NativeRead } from "@bb/host-daemon-contract";
-import { discoverNativeSessions, readNativeSession } from "../../../../host-daemon/src/command-handlers/native-sessions.js";
-import { NativeSessionImports } from "../../../src/services/threads/native-session-imports.js";
-import { seedHost } from "../../helpers/seed.js";
+import { discoverNativeSessions, readNativeSession } from "../../../apps/host-daemon/src/command-handlers/native-sessions.js";
+import { NativeSessionImports } from "../../../apps/server/src/services/threads/native-session-imports.js";
 
 const checksum = (bytes: string | Buffer) => createHash("sha256").update(bytes).digest("hex");
 const fixtures: { dispose(): Promise<void> }[] = [];
@@ -62,7 +61,7 @@ async function fixture(engine: NativeEngine, output = "Saved tool result", befor
     return source;
   }
   const db = createMigratedConnection();
-  const host = seedHost({ db, hub: noopNotifier });
+  const host = upsertHost(db, noopNotifier, { name: "Test Host" });
   const { project } = createProject(db, noopNotifier, { name: "Native archive fixture", source: { type: "local_path", hostId: host.id, path: "/fixture/workspace" } });
   const services: NativeSessionImports[] = [];
   function service() {
