@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { runWithProductAnalytics } from "../services/system/product-analytics.js";
+import { analyticsTurnMode } from "../services/system/product-analytics-turns.js";
 import {
   hostDaemonToolCallRequestSchema,
   typedRoutes,
@@ -99,14 +102,23 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
             roundTrip.signal,
           ]),
           invoke: (signal) =>
-            invokePluginAgentTool(pluginTool, {
+            runWithProductAnalytics({
+              operationId: randomUUID(),
+              scope: { kind: "project", projectId: thread.projectId },
+              scopeKnown: true,
+              actorKind: "agent",
+              actorSessionId: null,
+              surface: "agent",
+              mode: analyticsTurnMode(deps.db, thread.id, payload.turnId, thread.projectId),
+              intent: true,
+            }, () => invokePluginAgentTool(pluginTool, {
               input: payload.arguments,
               ctx: {
                 threadId: thread.id,
                 projectId: thread.projectId,
                 signal,
               },
-            }),
+            })),
           onDetachedResult: (result) =>
             deliverDetachedToolResult(deps, {
               threadId: thread.id,

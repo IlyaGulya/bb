@@ -37,6 +37,14 @@ does not become an attempt merely because the request uses POST or plugin RPC.
 Queued delivery is accepted admission, and a stale-hash write conflict is a
 failed conflict outcome rather than successful completion.
 
+Shared browser RPC calls use the same app-surface request wrapper as the SDK.
+The central TanStack mutation cache captures bounded provenance when a mutation
+is built, before asynchronous `onMutate` preparation. Each mutation-function
+attempt reuses that capture, including retries and observer option updates, so
+a later view change cannot replace the originating project or operation UUID.
+The binding is restored as soon as the mutation function returns its promise;
+it is not left ambient while asynchronous work settles.
+
 ## Collection and delivery
 
 The server appends validated events in an independent committed SQLite
@@ -71,7 +79,7 @@ Bounds:
 - Server: 30-day event retention, 100,000 events, 10,000 pending; project at most
   500 pending records per sweep. Instance identity and cumulative delivery
   counters are diagnostic state, not a retained payload/event history.
-- Native dispatch retains only a validated QA mode under a hashed pending-thread
+- Immediate native dispatch retains only a validated QA mode under a hashed pending-thread
   key in existing Core key-value storage: one marker per pending thread, at most
   10,000 markers, with 30-day expiry in the existing collector sweep. An admitted
   native start consumes the marker; paired completion uses the existing durable
@@ -91,6 +99,14 @@ environment, including MCP's inherited CLI environment. A non-production server
 does not accept client production tags as production popularity. Reports keep
 those planes separate. A test suite or replayed workload is not production demand.
 
+Authenticated native plugin tools bind deliberate agent intent, agent surface,
+and the owning thread's actual Core project. Their QA mode is read from the
+accepted root-turn start using the existing hashed operation identity and event
+primary key; it is not selected from tool arguments, model accounts or an
+unrelated process environment. The tool and its Core SDK child requests share
+that operation context. Unrecorded/legacy turns use the instance plane; storage
+lookup failure records a diagnostic gap without failing the primary tool.
+
 ## Coverage inventory
 
 The report is the runtime matrix; labels, coverage, availability, limitations,
@@ -103,7 +119,7 @@ from a nonzero counter or the mere existence of an endpoint.
 | Unmapped runtime Core routes | Actual Hono registration inventory | A coverage gap with unknown availability, never fabricated zero popularity. |
 | Bundled/installed/custom plugin RPC and HTTP | Live registered handlers, including unpublished RPC | Shared server outcome observation, not request payloads. Calls require an actual Core project context when scoped. |
 | Plugin CLI | Declared command paths, not argv values | One logical invocation, stable action selection before positional arguments; source CLI/MCP/SDK provenance remains distinct. |
-| Native plugin tools | Actual native tool execution | Semantic result and bounded duration; external business effects require their own completion declaration. |
+| Native plugin tools | Actual authenticated native tool execution | Deliberate agent result and bounded duration; Core SDK children share provenance and QA follows the recorded root turn. External business effects require their own completion declaration. |
 | Plugin services and schedules | Shared service lifecycle and claimed schedule execution | System/background activity, separate from intentional human use and separately scoped Core child actions. |
 | Native execution/provider | Accepted root-turn start/completion effects | Actual execution result; runtime system attribution is not inferred human/provider choice. Observed admission-to-completion time can include delivery delay. |
 | Core UI | Visible route entry, meaningful navigation, shared command dispatch | Exposed/opened/started/terminal navigation; accepted command dispatch is not downstream completion. Trusted input/automation provenance is separate from background exposure and unknown opens. |

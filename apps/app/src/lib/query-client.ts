@@ -2,6 +2,8 @@ import {
   focusManager,
   MutationCache,
   QueryClient,
+  type MutationOptions,
+  type MutationState,
   type QueryClientConfig,
 } from "@tanstack/react-query";
 import {
@@ -13,6 +15,28 @@ import {
   shouldRetryTransientReadQuery,
   TRANSIENT_READ_RETRY_DELAY_MS,
 } from "@/hooks/queries/query-helpers";
+import { captureProductAnalyticsContext, withProductAnalyticsContext } from "./product-analytics";
+
+class AppMutationCache extends MutationCache {
+  override build<TData, TError, TVariables, TOnMutateResult>(
+    client: QueryClient,
+    options: MutationOptions<TData, TError, TVariables, TOnMutateResult>,
+    state?: MutationState<TData, TError, TVariables, TOnMutateResult>,
+  ) {
+    const context = captureProductAnalyticsContext();
+    const mutation = super.build(client, options, state);
+    const setOptions = mutation.setOptions.bind(mutation);
+    mutation.setOptions = (next) => {
+      const mutationFn = next.mutationFn;
+      setOptions(mutationFn === undefined ? next : {
+        ...next,
+        mutationFn: (variables, mutationContext) => withProductAnalyticsContext(context, () => mutationFn(variables, mutationContext)),
+      });
+    };
+    mutation.setOptions(mutation.options);
+    return mutation;
+  }
+}
 
 interface CreateAppQueryClientOptions {
   defaultOptions?: QueryClientConfig["defaultOptions"];
@@ -102,7 +126,7 @@ export function createAppQueryClient(
   const shouldRefetchOnWindowFocus = options.shouldRefetchOnWindowFocus;
 
   return new QueryClient({
-    mutationCache: new MutationCache({
+    mutationCache: new AppMutationCache({
       onError: (error, _variables, _context, mutation) => {
         if (!showMutationErrorToasts) {
           return;

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { appSettingsValues, threads, type DbConnection } from "@bb/db";
 import type { TurnRequestTarget } from "@bb/domain";
-import { productAnalyticsModeSchema } from "@bb/server-contract";
+import { productAnalyticsModeSchema, type ProductAnalyticsMode } from "@bb/server-contract";
 import { and, count, eq, gte, like, lt } from "drizzle-orm";
 import type { AppDeps } from "../../types.js";
 import { ANALYTICS_MAX_PENDING, ANALYTICS_PENDING_TURN_MODE_PREFIX, ANALYTICS_RETENTION_MS, analyticsMode, getPrivateProductAnalytics, initializePrivateProductAnalytics, productAnalyticsContext } from "./product-analytics.js";
@@ -12,6 +12,14 @@ const pendingModePrefix = ANALYTICS_PENDING_TURN_MODE_PREFIX;
 
 function pendingModeKey(threadId: string): string {
   return `${pendingModePrefix}${createHash("sha256").update(threadId).digest("hex")}`;
+}
+function turnOperationId(threadId: string, turnId: string): string {
+  const hash = createHash("sha256").update(`${threadId}:${turnId}`).digest("hex");
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
+
+export function analyticsTurnMode(db: DbConnection, threadId: string, turnId: string, projectId: string): ProductAnalyticsMode {
+  return getPrivateProductAnalytics(db).modeForOperation({ scope: { kind: "project", projectId }, operationId: turnOperationId(threadId, turnId), featureId: "core.execution", action: "turn", version: 1 });
 }
 
 export function rememberAnalyticsTurnMode(db: DbConnection, threadId: string, target: TurnRequestTarget): void {
@@ -39,8 +47,7 @@ export function observeAnalyticsTurn(deps: Pick<AppDeps, "db" | "config" | "logg
   const service = initializePrivateProductAnalytics({ db: deps.db, release: deps.config.appVersion, mode: analyticsMode(deps.config.isDevelopment), logger: deps.logger });
   const thread = deps.db.select({ projectId: threads.projectId, providerId: threads.providerId }).from(threads).where(eq(threads.id, threadId)).get();
   if (thread === undefined) return;
-  const hash = createHash("sha256").update(`${threadId}:${turnId}`).digest("hex");
-  const operationId = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+  const operationId = turnOperationId(threadId, turnId);
   const pendingKey = pendingModeKey(threadId);
   let pending: { value: string; updatedAt: number } | undefined;
   let mode = service.mode;

@@ -4,6 +4,7 @@ import { BrowserAnalyticsStore } from "./product-analytics-store";
 
 const mode = import.meta.env.MODE === "production" ? "production" : import.meta.env.MODE === "test" ? "test" : import.meta.env.MODE === "smoke" ? "smoke" : "preview";
 let currentInput: { actor: ProductAnalyticsActor; operationId: string; event: Event } | null = null;
+let requestContext: ExperimentalProductAnalyticsContext | null = null;
 let currentScope: ProductAnalyticsScope = { kind: "instance" };
 let surface: ProductAnalyticsEvent["surface"] = "web";
 let sessionId: string | null = null;
@@ -30,10 +31,22 @@ export function productAnalyticsInput(event: Event): void {
   setTimeout(() => { if (currentInput === context) currentInput = null; }, 0);
 }
 function activeInput() { return currentInput?.event.eventPhase === Event.NONE ? null : currentInput; }
-export function productAnalyticsRequestInit(init: RequestInit = {}): RequestInit {
+export function captureProductAnalyticsContext(): ExperimentalProductAnalyticsContext {
+  if (requestContext !== null) return requestContext;
   const input = activeInput();
-  const context: ExperimentalProductAnalyticsContext = { actorKind: input?.actor ?? "unknown", surface, mode, intentional: input !== null, actorSessionId: actorSessionId(), ...(input === null ? {} : { operationId: input.operationId }), ...(currentScope.kind === "project" ? { projectId: currentScope.projectId } : {}) };
-  return experimental_productAnalyticsRequestInit(context, init);
+  return { actorKind: input?.actor ?? "unknown", operationId: input?.operationId ?? crypto.randomUUID(), surface, mode, intentional: input !== null, actorSessionId: actorSessionId(), ...(currentScope.kind === "project" ? { projectId: currentScope.projectId } : {}) };
+}
+export function withProductAnalyticsContext<T>(context: ExperimentalProductAnalyticsContext, run: () => T): T {
+  const previous = requestContext;
+  requestContext = context;
+  try {
+    return run();
+  } finally {
+    requestContext = previous;
+  }
+}
+export function productAnalyticsRequestInit(init: RequestInit = {}): RequestInit {
+  return experimental_productAnalyticsRequestInit(captureProductAnalyticsContext(), init);
 }
 export function recordProductAnalytics(featureId: string, action: string, stage: ProductAnalyticsEvent["stage"], options: { operationId?: string; outcome?: ProductAnalyticsEvent["outcome"]; errorCode?: ProductAnalyticsEvent["errorCode"]; durationMs?: number; scope?: ProductAnalyticsScope; actorKind?: ProductAnalyticsActor } = {}): void {
   const input = activeInput();

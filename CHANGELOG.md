@@ -18,6 +18,10 @@
 - Correct private analytics scheduler UUID imports, bound JSON-call forwarding
   types, and align consumer fixtures with normalized SDK input and fetch types
   without changing outcome classification or delivery semantics.
+- Preserve shared browser RPC provenance and capture TanStack mutation scope,
+  intent and operation identity before asynchronous preparation and retries.
+  Bind authenticated native tool and Core SDK child usage to deliberate agent
+  provenance and the owning root turn's persisted QA mode.
 - Fence Tasks Start against concurrent draft revision/selection changes in its
   launch-receipt transaction. Retain the first validated bugfix reproduction
   across Return, permit retry after an exit-zero attempt, and keep legacy

@@ -45,7 +45,8 @@ export function productAnalyticsContext(): AnalyticsContext | undefined {
 export function analyticsScopeKey(scope: ProductAnalyticsScope): string {
   return scope.kind === "instance" ? "instance" : scope.projectId;
 }
-function eventKey(event: ProductAnalyticsEvent): string {
+type AnalyticsOperation = Pick<ProductAnalyticsEvent, "scope" | "operationId" | "featureId" | "action" | "version">;
+function eventKey(event: AnalyticsOperation & Pick<ProductAnalyticsEvent, "stage">): string {
   return createHash("sha256").update(JSON.stringify([analyticsScopeKey(event.scope), event.operationId, event.featureId, event.action, event.version, event.stage])).digest("hex");
 }
 function emptyRow(feature: ProductAnalyticsFeature): ProductAnalyticsRow {
@@ -220,6 +221,15 @@ export class PrivateProductAnalytics {
   }
   admitBatch(batch: ProductAnalyticsEvent[]): ProductAnalyticsAck {
     return { receipts: batch.map((event) => this.admit(event, "client")) };
+  }
+  modeForOperation(operation: AnalyticsOperation): ProductAnalyticsMode {
+    try {
+      const stored = this.db.select({ mode: events.mode }).from(events).where(eq(events.id, eventKey({ ...operation, stage: "started" }))).get();
+      return productAnalyticsModeSchema.parse(stored?.mode ?? this.mode);
+    } catch {
+      this.noteGap(operation.scope);
+      return this.mode;
+    }
   }
   record(featureId: string, action: string, stage: ProductAnalyticsEvent["stage"], outcome: ProductAnalyticsEvent["outcome"] = "none", errorCode: ProductAnalyticsEvent["errorCode"] = "none", durationMs: number | null = null, override?: Partial<AnalyticsContext> & { timestamp?: number }): ProductAnalyticsReceipt {
     const context = contextStorage.getStore();
