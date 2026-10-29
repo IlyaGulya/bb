@@ -2,6 +2,12 @@
 
 ## AgentOS fork — unreleased
 
+- Keep startup progress and cleanup diagnostics current without accumulating stale
+  summaries or letting late progress replace a terminal attempt.
+- Name editable task descriptions and comments, keep saved comments out of input
+  semantics, and keep workflow keyboard focus clear of the action footer.
+- Expose the committed model choice independently of keyboard focus, and require
+  selected source-workspace inputs before repository inspection.
 - Retain numeric tool spills for full 64-character native tool names, including
   their original-log suffix, without loosening source or ambiguity checks.
 - Let explicit stop reach an already-owned bounded startup before provider-session

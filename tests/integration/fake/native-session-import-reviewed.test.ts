@@ -268,7 +268,7 @@ describe("native archive Core timeline", () => {
     const preview = "Bounded preview only\n[Raw output: artifact://17]";
     const needle = "RETAINED_TIMELINE_SPILL_TAIL";
     const spill = Buffer.from(`${"Saved native tool output\n".repeat(16_000)}${needle}`);
-    const saved = await createNativeArchiveFixture({ records: (id, cwd) => [
+    const saved = await createNativeArchiveFixture({ records: (id, cwd): JsonValue[] => [
       { type: "session", version: 3, id, cwd },
       { type: "message", message: { role: "toolResult", toolName: "bash", content: [{ type: "text", text: preview }] } },
     ] });
