@@ -27,6 +27,8 @@ import {
   withoutBridgeRuntimeEnv,
   type BridgeToolCallRequest,
   experimental_defineProviderBridge,
+  experimental_BridgeRecoveryError,
+  experimental_threadStartupNotificationSchema,
 } from "@get-bb/plugin-sdk/provider-bridge";
 import { randomUUID } from "node:crypto";
 import { join as joinPath, resolve as resolvePath } from "node:path";
@@ -61,6 +63,7 @@ import {
 import {
   isBypassPermissionsAvailable,
   SdkSession,
+  ClaudeStartupReadinessError,
   type SdkSessionOptions,
 } from "./sdk-session.js";
 import { MissingClaudeCliError } from "./missing-cli-error.js";
@@ -1099,7 +1102,15 @@ function createThreadAttachment(
 function createThreadSession(attachment: ThreadAttachment): ThreadSession {
   const sessionSerial = nextSessionSerial();
   const session = new SdkSession(
-    attachment.sessionOptions,
+    {
+      ...attachment.sessionOptions,
+      onStartup: (event) => {
+        const threadId = attachment.threadIdRef.current;
+        if (!getCurrentThreadSession({ sessionSerial, threadId })) return;
+        const parsed = experimental_threadStartupNotificationSchema.safeParse({ threadId, ...event });
+        if (parsed.success) send({ jsonrpc: "2.0", method: BRIDGE_NOTIFICATION_METHODS.threadStartup, params: parsed.data });
+      },
+    },
     createOnSdkMessage({
       sessionSerial,
       threadIdRef: attachment.threadIdRef,
@@ -2169,6 +2180,7 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
           threadRename: false,
           threadGoalClear: false,
           fork: "checkpoint",
+          startupReadiness: "native-init",
           approvalEnforcedBy: "provider",
           grammarVersions: [THREAD_DELTA_GRAMMAR_V3, THREAD_DELTA_GRAMMAR_V3],
           steerMode: "inject",
@@ -2268,13 +2280,13 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
   }
 }
 
-function attachThreadSession(
+async function attachThreadSession(
   id: string | number,
   params: SessionConstructionParams,
   providerThreadId: string,
   resume: boolean,
   verifyGatewayBinding?: () => void,
-): void {
+): Promise<void> {
   if (params.modelConnection?.gateway) {
     if (!contextStore) {
       throw new Error(
@@ -2349,6 +2361,17 @@ function attachThreadSession(
   });
   threadAttachments.set(params.threadId, attachment);
   startResidentThreadSession(attachment, resume ? providerThreadId : undefined);
+  if (attachment.sessionOptions.startup) {
+    try {
+      await attachment.residentSession?.session.waitUntilInitialized();
+    } catch (error) {
+      if (error instanceof ClaudeStartupReadinessError && error.code === "auth_required") {
+        throw new experimental_BridgeRecoveryError({ code: -32000, message: error.message,
+          recovery: { kind: "authRequired", message: error.message, retryable: false } });
+      }
+      throw error;
+    }
+  }
 
   sendThreadIdentity(params.threadId, providerThreadId);
   sendSessionReset(params.threadId);
@@ -2375,7 +2398,7 @@ async function handleThreadStart(
     });
   }
 
-  attachThreadSession(id, params, providerThreadId, false, verifyGateway);
+  await attachThreadSession(id, params, providerThreadId, false, verifyGateway);
 }
 
 async function handleThreadResume(
@@ -2446,7 +2469,7 @@ async function handleThreadResume(
     });
   }
 
-  attachThreadSession(
+  await attachThreadSession(
     id,
     params,
     requestedProviderThreadId,
@@ -2477,7 +2500,7 @@ async function handleThreadFork(
     });
   }
   if (params.executionContext || params.modelConnection) {
-    attachThreadSession(id, params, providerThreadId, false, verifyGateway);
+    await attachThreadSession(id, params, providerThreadId, false, verifyGateway);
     return;
   }
 
@@ -2495,7 +2518,7 @@ async function handleThreadFork(
     return;
   }
 
-  attachThreadSession(id, params, forkedProviderThreadId, true);
+  await attachThreadSession(id, params, forkedProviderThreadId, true);
 }
 
 function toClaudeSessionParams(
@@ -2628,11 +2651,13 @@ async function runTurnInput(
       params.permissionEscalation,
     );
     emitCanonicalTurnInputAccepted(threadSession, acceptance, params.threadId);
+    await threadSession.session.waitForStartup();
     threadSession.attachment.permissionEscalation = params.permissionEscalation;
     sendResult(id, { threadId: params.threadId });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    sendError(id, -32000, message);
+    sendError(id, -32000, message, error instanceof ClaudeStartupReadinessError && error.code === "auth_required"
+      ? { recovery: { kind: "authRequired", message, retryable: false } } : undefined);
   }
 }
 

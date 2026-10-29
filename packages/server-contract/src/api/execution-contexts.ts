@@ -52,6 +52,7 @@ export const updateExecutionContextRequestSchema = z
     hooksPath: executionContextFieldsSchema.shape.hooksPath
       .removeDefault()
       .optional(),
+    startupPolicy: executionContextFieldsSchema.shape.startupPolicy,
     autoMemory: executionContextFieldsSchema.shape.autoMemory
       .removeDefault()
       .optional(),

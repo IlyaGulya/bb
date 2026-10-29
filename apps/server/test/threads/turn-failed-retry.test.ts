@@ -437,6 +437,29 @@ describe("the turn.failed announcement", () => {
 });
 
 describe("retrying a failed turn", () => {
+  it("retains an unverified startup ownership blocker across unrelated events without queuing another executor", async () => {
+    await withTestHarness(async (harness) => {
+      const { environment, requestId, thread } = seedFailableThread(harness, "host-startup-stop");
+      failThread(harness, thread.id);
+      for (const operation of ["provider_startup", "unrelated_operation"]) {
+        seedEvent(harness.deps, {
+          threadId: thread.id, environmentId: environment.id,
+          sequence: getLatestThreadSequence(harness.db, { threadId: thread.id }) + 1,
+          type: "system/operation", scope: { kind: "thread" },
+          data: { operation, operationId: operation, status: "failed", message: "Owned fixture cleanup is unverified", metadata: {
+            phase: "stopped", elapsedMs: 1000, deadlineMs: 1000, hookEvent: null, hookId: null, hookState: null,
+            code: "provider_startup_stop_unverified", retryBlocked: operation === "provider_startup", optionalMcpServerCount: 0,
+          } },
+        });
+      }
+      await expect(retryFailedTurn(harness.deps, {
+        thread: requireThread(harness, thread.id),
+        request: { turnRequestId: requestId, sendAt: Date.now() + 60_000, reason: "Prerequisites changed" },
+      })).rejects.toMatchObject({ status: 409, body: { code: "provider_startup_stop_unverified" } });
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
+      expect(turnRequests(harness, thread.id).map((row) => turnRequestData(row).requestId)).toEqual([requestId]);
+    });
+  });
   it("queues a by-reference row on the clock and re-submits the original turn", async () => {
     await withTestHarness(async (harness) => {
       const sendAt = Date.now() + 60_000;

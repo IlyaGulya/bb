@@ -357,6 +357,14 @@ export function buildSessionOptions(
           requireNativeCloudMcp:
             params.executionContext.nativeMcpProfile !== undefined,
           mcpServers: params.contextFiles?.mcpServers ?? {},
+          ...(params.executionContext.startupPolicy ? {
+            startup: {
+              requiredMcpServers: params.executionContext.mcpServers
+                .filter((server) => !params.executionContext?.startupPolicy?.optionalMcpServers.includes(server.name))
+                .map((server) => server.name),
+              optionalMcpServers: params.executionContext.startupPolicy.optionalMcpServers,
+            },
+          } : {}),
         }
       : {}),
     ...(params.contextFiles

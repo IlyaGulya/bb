@@ -7,8 +7,10 @@ import {
 } from "@bb/domain";
 import type { DynamicTool, InstructionMode, ThreadEvent } from "@bb/domain";
 import type { AdapterCommand } from "./provider-adapter.js";
+import { RuntimeStartup, readStartupPolicy } from "./runtime-startup.js";
 import {
   BRIDGE_JSON_RPC_ERRORS,
+  BRIDGE_NOTIFICATION_METHODS,
   providerHealthResultSchema,
   providerInstallationRunResultSchema,
   providerInstallationStatusSchema,
@@ -124,6 +126,8 @@ interface ResolveProviderProcessKeyArgs {
   bridgeLaunch: AgentRuntimeBridgeLaunch;
   skillRoots?: readonly AgentRuntimeSkillRoot[];
   providerId: string;
+  threadId?: string;
+  executionOptions?: AgentRuntimeExecutionOptions;
 }
 
 interface ArchiveOrUnarchiveThreadArgs {
@@ -310,6 +314,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
   const backgroundWorkState = new RuntimeBackgroundWorkState();
   const threadEventGrammar = new ThreadEventGrammar();
   const bridgeNodeEnv = defaultBridgeNodeEnv();
+  const startup = new RuntimeStartup(options.onEvent);
+  const startupOwners = new Map<string, string>();
 
   const providerProcesses = new RuntimeProviderProcessManager({
     additionalWorkspaceWriteRoots,
@@ -368,7 +374,9 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       roots.length === 0
         ? ""
         : `#skills:${createHash("sha256").update(JSON.stringify(roots)).digest("hex")}`;
-    return `${args.providerId}#bridge:${bridgeLaunchProcessKey(args.bridgeLaunch)}${catalogKey}`;
+    const startupKey = args.threadId && readStartupPolicy(args.executionOptions?.providerOptions)
+      ? `#startup-thread:${createHash("sha256").update(args.threadId).digest("hex")}` : "";
+    return `${args.providerId}#bridge:${bridgeLaunchProcessKey(args.bridgeLaunch)}${catalogKey}${startupKey}`;
   }
 
   function requireProviderProcessForThread(threadId: string): ProviderProcess {
@@ -383,6 +391,29 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     return providerProcesses.requireProviderProcess({
       processKey: config.processKey,
       providerId,
+    });
+  }
+
+  async function runStartupOperation<TResult>(args: RunThreadOperationArgs<TResult> & {
+    execOpts: AgentRuntimeExecutionOptions;
+    providerId: string;
+    bridgeLaunch: AgentRuntimeBridgeLaunch;
+    sessionSkillRoots: readonly AgentRuntimeSkillRoot[];
+    processKeyOverride?: string;
+  }): Promise<TResult> {
+    const policy = readStartupPolicy(args.execOpts.providerOptions);
+    if (!policy) return runThreadOperation(args);
+    const processKey = args.processKeyOverride ?? threadRuntimeConfigs.get(args.threadId)?.processKey ?? resolveProviderProcessKey({
+      providerId: args.providerId, bridgeLaunch: args.bridgeLaunch,
+      skillRoots: args.sessionSkillRoots, threadId: args.threadId, executionOptions: args.execOpts,
+    });
+    if (!processKey.includes("#startup-thread:")) throw new Error("A bounded startup cannot take ownership of a shared legacy provider process.");
+    return startup.run({
+      threadId: args.threadId, policy,
+      stop: () => providerProcesses.shutdownProvider({
+        processKey, providerId: args.providerId, timeoutMs: 1_000, requireConfirmedTree: true,
+      }),
+      work: () => runThreadOperation(args),
     });
   }
 
@@ -1276,6 +1307,14 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
   }
 
   function handleProviderNotification(args: RuntimeParsedMessageArgs): void {
+    if (args.parsed.method === BRIDGE_NOTIFICATION_METHODS.threadStartup) {
+      const threadId = getJsonRpcStringParam(args.parsed, "threadId");
+      if (threadId && args.proc.identity.threadIds.has(threadId)) {
+        const owner = startupOwners.get(threadId) ?? threadId;
+        startup.observe(owner, owner === threadId ? args.parsed.params : { ...args.parsed.params, threadId: owner });
+      }
+      return;
+    }
     if (args.parsed.method === PROVIDER_TOOL_CALL_CANCELLED_METHOD) {
       const cancellation = providerToolCallCancellationSchema.safeParse(
         args.parsed.params,
@@ -1326,7 +1365,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       parsedLine.kind === "non_json" ||
       parsedLine.kind === "invalid_json_rpc"
     ) {
-      options.onStderr?.(line);
+      if (!proc.processKey.includes("#startup-thread:")) options.onStderr?.(line);
       return;
     }
 
@@ -1525,19 +1564,24 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       instructionMode = "append",
       fork,
     }) {
-      return runThreadOperation({
+      if (readStartupPolicy(execOpts.providerOptions) && threadIdentityRegistry.getProviderSession(threadId) !== null) throw new CompetingTurnError(threadId);
+      return runStartupOperation({
         threadId,
+        execOpts, providerId, bridgeLaunch, sessionSkillRoots,
         work: async () => {
           const processKey = resolveProviderProcessKey({
             bridgeLaunch,
             providerId,
             skillRoots: sessionSkillRoots,
+            threadId, executionOptions: execOpts,
           });
-          await runtime.ensureProvider({
+          await providerProcesses.ensureProvider({
+            processKey, signal: startup.signal(threadId),
             providerId,
             bridgeLaunch,
             skillRoots: sessionSkillRoots,
           });
+          startup.signal(threadId)?.throwIfAborted();
 
           const proc = providerProcesses.requireProviderProcess({
             processKey,
@@ -1615,16 +1659,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
               proc,
               message: cmd,
               resultSchema: threadIdentityResultSchema,
-              timeoutMs: threadCreationRequestTimeoutMs,
-              ...(fork
-                ? {
-                    recovery: {
-                      providerId,
-                      providerThreadId: fork.sourceProviderThreadId,
-                      threadId,
-                    },
-                  }
-                : {}),
+              timeoutMs: readStartupPolicy(execOpts.providerOptions)?.deadlineMs ?? threadCreationRequestTimeoutMs,
+              recovery: { providerId, providerThreadId: fork?.sourceProviderThreadId ?? threadId, threadId },
             });
             updateSessionRestoreCapability(threadId, result.sessionRestorable);
             recordProviderThreadIdentity(
@@ -1633,6 +1669,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
               result.providerThreadId,
             );
             resolved = result.providerThreadId;
+            startup.signal(threadId)?.throwIfAborted();
+            if (proc.adapter.startupReadiness === "session-created") startup.ready(threadId);
             emitResolvedProviderEnvironment({
               droppedContributions: resolvedEnvironment.droppedContributions,
               entries: resolvedEnvironment.entries,
@@ -1689,19 +1727,20 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
           : { providerThreadId: existing.providerThreadId };
       }
 
-      const preparation = runThreadOperation({
+      const stagingThreadId = `${threadId}:rewind:${leaseId}`;
+      const processKey = resolveProviderProcessKey({ bridgeLaunch, providerId, skillRoots: sessionSkillRoots, threadId: stagingThreadId, executionOptions: execOpts });
+      startupOwners.set(stagingThreadId, threadId);
+      const preparation = runStartupOperation({
         threadId,
+        execOpts, providerId, bridgeLaunch, sessionSkillRoots, processKeyOverride: processKey,
         work: async () => {
-          const processKey = resolveProviderProcessKey({
-            bridgeLaunch,
-            providerId,
-            skillRoots: sessionSkillRoots,
-          });
-          await runtime.ensureProvider({
+          await providerProcesses.ensureProvider({
+            processKey, signal: startup.signal(threadId),
             providerId,
             bridgeLaunch,
             skillRoots: sessionSkillRoots,
           });
+          startup.signal(threadId)?.throwIfAborted();
           const proc = providerProcesses.requireProviderProcess({
             processKey,
             providerId,
@@ -1717,7 +1756,6 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
             providerId,
           });
 
-          const stagingThreadId = `${threadId}:rewind:${leaseId}`;
           suppressedThreadEventIds.add(stagingThreadId);
           threadIdentityRegistry.registerThreadProvider({
             providerId,
@@ -1756,7 +1794,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
               proc,
               message: command,
               resultSchema: threadIdentityResultSchema,
-              timeoutMs: threadCreationRequestTimeoutMs,
+              timeoutMs: readStartupPolicy(execOpts.providerOptions)?.deadlineMs ?? threadCreationRequestTimeoutMs,
               recovery: {
                 bridgeLaunch,
                 providerId,
@@ -1764,6 +1802,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
                 threadId: stagingThreadId,
               },
             });
+            startup.signal(threadId)?.throwIfAborted();
             const providerThreadId = result.providerThreadId;
             providerThreadIdForCleanup = providerThreadId;
             recordProviderThreadIdentity(
@@ -1831,6 +1870,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
           stagedThreadRewinds.delete(leaseId);
         }
         throw error;
+      } finally {
+        startupOwners.delete(stagingThreadId);
       }
     },
 
@@ -1852,19 +1893,23 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       dynamicTools,
       instructionMode = "append",
     }) {
-      return runThreadOperation({
+      return runStartupOperation({
         threadId,
+        execOpts, providerId, bridgeLaunch, sessionSkillRoots,
         work: async () => {
-          const processKey = resolveProviderProcessKey({
+          const processKey = threadRuntimeConfigs.get(threadId)?.processKey ?? resolveProviderProcessKey({
             bridgeLaunch,
             providerId,
             skillRoots: sessionSkillRoots,
+            threadId, executionOptions: execOpts,
           });
-          await runtime.ensureProvider({
+          await providerProcesses.ensureProvider({
+            processKey, signal: startup.signal(threadId),
             providerId,
             bridgeLaunch,
             skillRoots: sessionSkillRoots,
           });
+          startup.signal(threadId)?.throwIfAborted();
 
           const proc = providerProcesses.requireProviderProcess({
             processKey,
@@ -1949,7 +1994,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
               proc,
               message: plan,
               resultSchema: threadIdentityResultSchema,
-              timeoutMs: threadCreationRequestTimeoutMs,
+              timeoutMs: readStartupPolicy(execOpts.providerOptions)?.deadlineMs ?? threadCreationRequestTimeoutMs,
               recovery: {
                 providerId,
                 providerThreadId: adapterCommand.providerThreadId,
@@ -1963,6 +2008,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
             );
             updateSessionRestoreCapability(threadId, result.sessionRestorable);
             resolved = result.providerThreadId;
+            startup.signal(threadId)?.throwIfAborted();
+            startup.ready(threadId);
             emitResolvedProviderEnvironment({
               droppedContributions: resolvedEnvironment.droppedContributions,
               entries: resolvedEnvironment.entries,
@@ -1987,6 +2034,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       contributedEnv,
       instructions,
     }) {
+      startup.assertAvailable(threadId);
       return runThreadOperation({
         threadId,
         work: async () => {
@@ -2050,16 +2098,26 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
           });
           markProviderSessionNotIdle(threadId);
           try {
-            await sendCommand({
+            const policy = readStartupPolicy(execOpts.providerOptions);
+            const submit = () => sendCommand({
               proc,
               message: cmd,
               resultSchema: ignoredJsonRpcResultSchema,
+              ...(policy && proc.adapter.startupReadiness === "native-init" ? { timeoutMs: policy.deadlineMs } : {}),
               recovery: {
                 providerId: pid,
                 providerThreadId: adapterCommand.providerThreadId,
                 threadId,
               },
             });
+            if (policy && proc.adapter.startupReadiness === "native-init" && !startup.isActive(threadId)) {
+              await startup.run({
+                threadId, policy, work: submit,
+                stop: () => providerProcesses.shutdownProvider({
+                  processKey: proc.processKey, providerId: pid, timeoutMs: 1_000, requireConfirmedTree: true,
+                }),
+              });
+            } else await submit();
             setThreadRuntimeConfig(threadId, {
               ...currentConfig,
               contributedEnv: resolvedContributedEnv,
@@ -2092,6 +2150,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       contributedEnv,
       instructions,
     }) {
+      startup.assertAvailable(threadId);
       return runThreadOperation({
         threadId,
         work: async () => {
@@ -2212,6 +2271,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     },
 
     async stopThread({ threadId }) {
+      if (await startup.cancel(threadId)) return { providerCheckpointId: null };
       toolCalls.cancelThread(threadId);
       return runThreadOperation({
         threadId,
@@ -2554,7 +2614,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     },
 
     hasThread(threadId) {
-      return threadIdentityRegistry.getProviderSession(threadId) !== null;
+      return startup.isActive(threadId) || threadIdentityRegistry.getProviderSession(threadId) !== null;
     },
 
     getLiveThreadIds() {
@@ -2562,16 +2622,18 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         ...new Set([
           ...turnState.getActiveThreadIds(),
           ...pendingTurnStarts.keys(),
+          ...startup.threadIds(),
         ]),
       ];
     },
 
     hasOpenBackgroundWork() {
-      return backgroundWorkState.hasOpenWork();
+      return startup.hasOwnedWork() || backgroundWorkState.hasOpenWork();
     },
 
     async shutdown() {
       clearInterval(turnStartWatchdogTimer);
+      await startup.shutdown();
       await Promise.all(
         [...stagedThreadRewinds.keys()].map((leaseId) =>
           discardStagedThreadRewind(leaseId),

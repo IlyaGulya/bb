@@ -13,6 +13,7 @@ interface StopProcessGroupLeaderFirstArgs {
   child: ChildProcess;
   timeoutMs: number;
   killGraceMs: number;
+  identityMatches?: () => boolean;
 }
 
 export interface ProcessStopResult {
@@ -73,6 +74,7 @@ export function stopProcessGroupLeaderFirst(
 ): Promise<ProcessStopResult> {
   const { child, timeoutMs, killGraceMs } = args;
   if (process.platform === "win32") return stopWindowsProcessTree(child);
+  if (args.identityMatches && !args.identityMatches()) return Promise.resolve({ treeTermination: "unverified" });
   if (hasChildExited(child) && !isProcessGroupAlive(child)) {
     return Promise.resolve({ treeTermination: "confirmed" });
   }
@@ -104,6 +106,7 @@ export function stopProcessGroupLeaderFirst(
         finish();
         return;
       }
+      if (args.identityMatches && !args.identityMatches()) { finish(); return; }
       killProcessGroup({ child, signal: "SIGKILL" });
       if (killGraceMs <= 0) {
         finish();
@@ -117,6 +120,7 @@ export function stopProcessGroupLeaderFirst(
         finish();
         return;
       }
+      if (args.identityMatches && !args.identityMatches()) { finish(); return; }
       killProcessGroup({ child, signal: "SIGTERM" });
       poll = setInterval(() => {
         if (!isProcessGroupAlive(child)) {

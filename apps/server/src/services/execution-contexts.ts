@@ -324,6 +324,9 @@ function validateContextDefinition(
   db: DbConnection,
   value: ExecutionContext,
 ): void {
+  if (value.startupPolicy?.optionalMcpServers.some((name) => !value.mcpServers.some((server) => server.name === name))) {
+    throw new ApiError(400, "startup_policy_invalid", "Optional startup capabilities must name selected MCP servers.");
+  }
   for (const projectId of value.projectIds) requireProject(db, projectId);
   if (new Set(value.projectIds).size !== value.projectIds.length)
     throw new ApiError(

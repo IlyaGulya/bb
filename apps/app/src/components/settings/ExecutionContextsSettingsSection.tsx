@@ -128,6 +128,9 @@ export function ExecutionContextsSettingsSection() {
               <p className="text-xs text-muted-foreground">
                 {context.projectIds.length ? context.projectIds.map(id => projectNames.get(id) ?? "Project unavailable").join(", ") : "No project membership"}
               </p>
+              <p className="text-xs text-muted-foreground">
+                {context.startupPolicy ? `${context.startupPolicy.deadlineMs / 1000}s startup deadline · ${context.startupPolicy.optionalMcpServers.length} optional MCP servers` : "Legacy startup policy · existing request timeouts only"}
+              </p>
             </div>
             <div className="flex shrink-0 gap-3">
               <Button
@@ -382,10 +385,12 @@ function ContextEditor({
       ? { nativeMcpProfile: value.nativeMcpProfile }
       : {}),
     hooksPath: value?.hooksPath ?? null,
+    startupPolicy: value?.startupPolicy ?? null,
     autoMemory: value?.autoMemory ?? false,
     gitIdentity: value?.gitIdentity ?? null,
     defaultModelConnectionId: value?.defaultModelConnectionId ?? null,
   }));
+  const [deadlineSeconds, setDeadlineSeconds] = useState(String((value?.startupPolicy?.deadlineMs ?? 120_000) / 1000));
   const projects = useSidebarNavigation();
   const [rootTexts, setRootTexts] = useState(() => ({
     skillRoots: draft.skillRoots.join("\n"),
@@ -399,16 +404,24 @@ function ContextEditor({
     <EditorForm
       title={value ? "Edit execution context" : "New execution context"}
       onCancel={onCancel}
-      onSave={() =>
-        onSave({
+      onSave={() => {
+        const seconds = Number(deadlineSeconds);
+        if (draft.startupPolicy && (!Number.isSafeInteger(seconds) || seconds < 1 || seconds > 1800)) {
+          throw new Error("Startup deadline must be a whole number from 1 to 1800 seconds.");
+        }
+        return onSave({
           ...draft,
+          startupPolicy: draft.startupPolicy ? {
+            deadlineMs: seconds * 1000,
+            optionalMcpServers: draft.startupPolicy.optionalMcpServers.filter((name) => draft.mcpServers.some((server) => server.name === name)),
+          } : null,
           name: draft.name.trim(),
           skillRoots: lines(rootTexts.skillRoots),
           commandRoots: lines(rootTexts.commandRoots),
           pluginRoots: lines(rootTexts.pluginRoots),
           settingsPaths: lines(rootTexts.settingsPaths),
-        })
-      }
+        });
+      }}
     >
       <Field label="Name">
         <Input
@@ -487,6 +500,48 @@ function ContextEditor({
           {draft.defaultModelConnectionId && !connections.some(entry => entry.id === draft.defaultModelConnectionId) && <option value={draft.defaultModelConnectionId} disabled>Saved connection unavailable</option>}
         </select>
       </Field>
+      <Field label="Provider startup policy">
+        <select
+          className={selectClass}
+          value={draft.startupPolicy ? "bounded" : "legacy"}
+          onChange={(event) => set("startupPolicy", event.target.value === "bounded" ? { deadlineMs: 120_000, optionalMcpServers: [] } : null)}
+        >
+          <option value="legacy">Keep existing provider behavior</option>
+          <option value="bounded">Require bounded startup</option>
+        </select>
+        <p className="text-xs text-muted-foreground">
+          Existing threads keep their frozen policy. Legacy behavior has only existing request timeouts, not a separate startup deadline.
+        </p>
+      </Field>
+      {draft.startupPolicy ? (
+        <div className="space-y-3">
+          <Field label="Startup deadline (seconds)">
+            <Input type="number" inputMode="numeric" min={1} max={1800} step={1} required value={deadlineSeconds} onChange={(event) => setDeadlineSeconds(event.target.value)} />
+            <p className="text-xs text-muted-foreground">
+              Stops only this thread’s owned startup processes. The deadline ends at provider readiness, not at the model’s response. Hooks remain enabled; authentication setup is a separate operator action.
+            </p>
+          </Field>
+          <p className="text-xs text-muted-foreground">
+            Selected MCP servers are required unless explicitly allowed below. Providers that cannot prove required readiness fail closed.
+          </p>
+          {draft.mcpServers.map((server) => (
+            <label key={server.name} className="flex min-h-11 items-start gap-2 py-2 text-sm sm:min-h-8">
+              <input
+                type="checkbox"
+                className="mt-1 shrink-0"
+                checked={draft.startupPolicy?.optionalMcpServers.includes(server.name) ?? false}
+                onChange={(event) => {
+                  if (!draft.startupPolicy) return;
+                  set("startupPolicy", { ...draft.startupPolicy, optionalMcpServers: event.target.checked
+                    ? [...draft.startupPolicy.optionalMcpServers, server.name]
+                    : draft.startupPolicy.optionalMcpServers.filter((name) => name !== server.name) });
+                }}
+              />
+              <span className="min-w-0 break-words">Allow startup without {server.name} if unavailable</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
       <details className="space-y-3" open={draft.mcpServers.length > 0 || draft.nativeMcpProfile !== undefined ? true : undefined}>
         <summary className="cursor-pointer py-3 text-sm font-medium">Tools &amp; MCP · {draft.mcpServers.length} selected servers</summary>
       <McpServerManager

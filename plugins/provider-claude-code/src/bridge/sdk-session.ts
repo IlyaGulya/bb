@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   query,
@@ -14,6 +15,7 @@ import {
 import {
   experimental_isProviderBridgeRecording,
   experimental_recordProviderChildIo,
+  type ThreadStartupNotification,
 } from "@get-bb/plugin-sdk/provider-bridge";
 import type { ClaudePermissionMode } from "../interactive-contract.js";
 import {
@@ -49,6 +51,8 @@ export interface SdkSessionOptions {
   recordThreadId?: () => string;
   redactGatewayText?: (text: string) => string;
   requireNativeCloudMcp?: boolean;
+  startup?: { requiredMcpServers: string[]; optionalMcpServers: string[] };
+  onStartup?: (event: Omit<ThreadStartupNotification, "threadId">) => void;
 }
 
 export type ClaudeSdkReasoningEffort =
@@ -125,7 +129,7 @@ function buildSdkDoneErrorMessage(args: BuildSdkDoneErrorMessageArgs): string {
   return `${errorMessage}\n\nClaude Code stderr:\n${stderrTail}`;
 }
 
-function spawnRecordedClaudeProcess(args: {
+function spawnClaudeProcess(args: {
   onStderr: (data: string) => void;
   spawnOptions: SpawnOptions;
   threadId: string | null;
@@ -165,6 +169,17 @@ function buildSdkPermissionOptions(
   };
 }
 
+export class ClaudeStartupReadinessError extends Error {
+  constructor(readonly code: "auth_required" | "capability_unavailable" | "startup_failed") {
+    super(code === "auth_required"
+      ? "A required native capability reports that human authentication is needed. Complete setup on this host, then retry this thread."
+      : code === "capability_unavailable"
+        ? "A required native capability is not connected. Check its local prerequisites, then retry this thread."
+        : "Native provider startup failed. Raw startup output is withheld because it may contain credentials.");
+    this.name = "ClaudeStartupReadinessError";
+  }
+}
+
 export class SdkSession {
   private query: Query | undefined;
   private sessionId: string | undefined;
@@ -184,20 +199,34 @@ export class SdkSession {
         reject: (reason: unknown) => void;
       }
     | undefined;
+  private readonly hookSalt = randomUUID();
+  private readonly startupHooks = new Set<string>();
+  private nativeInitSeen = false;
+  private capabilitiesReady = false;
+  private startupReady: { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } | undefined;
 
   constructor(
     private readonly options: SdkSessionOptions,
     private readonly onMessage: SdkSessionMessageHandler,
     private readonly onDone: SdkSessionDoneHandler,
   ) {
-    if (options.requireNativeCloudMcp) {
+    this.capabilitiesReady = options.startup === undefined;
+    if (options.requireNativeCloudMcp || options.startup) {
       let resolve!: () => void;
       let reject!: (reason: unknown) => void;
       const promise = new Promise<void>((onResolve, onReject) => {
         resolve = onResolve;
         reject = onReject;
       });
+      void promise.catch(() => undefined);
       this.cloudReadiness = { promise, resolve, reject };
+    }
+    if (options.startup) {
+      let resolve!: () => void;
+      let reject!: (error: Error) => void;
+      const promise = new Promise<void>((onResolve, onReject) => { resolve = onResolve; reject = onReject; });
+      void promise.catch(() => undefined);
+      this.startupReady = { promise, resolve, reject };
     }
     this.completion = new Promise((resolve) => {
       this.complete = resolve;
@@ -206,6 +235,14 @@ export class SdkSession {
 
   getSessionId(): string | undefined {
     return this.sessionId;
+  }
+
+  async waitUntilInitialized(): Promise<void> {
+    if (this.cloudReadiness) await this.cloudReadiness.promise;
+  }
+
+  async waitForStartup(): Promise<void> {
+    if (this.startupReady) await this.startupReady.promise;
   }
 
   canPushInput(): boolean {
@@ -248,6 +285,7 @@ export class SdkSession {
   }
 
   start(resumeSessionId?: string): void {
+    this.options.onStartup?.({ phase: "initializing", hookEvent: null, hookId: null, hookState: null });
     this.options.verifyContextSources?.();
     if (resumeSessionId) {
       this.sessionId = resumeSessionId;
@@ -261,6 +299,7 @@ export class SdkSession {
       permissionMode: this.options.permissionMode,
     });
     const onStderr = (data: string): void => {
+      if (this.options.startup) return;
       this.stderrTail = appendBoundedText({
         current: this.stderrTail,
         chunk: data,
@@ -272,10 +311,10 @@ export class SdkSession {
       cwd: this.options.cwd,
       systemPrompt: this.options.systemPrompt,
       ...permissionOptions,
-      ...(experimental_isProviderBridgeRecording()
+      ...(experimental_isProviderBridgeRecording() || this.options.startup
         ? {
             spawnClaudeCodeProcess: (spawnOptions: SpawnOptions) =>
-              spawnRecordedClaudeProcess({
+              spawnClaudeProcess({
                 onStderr,
                 spawnOptions,
                 threadId: recordThreadId?.() ?? null,
@@ -343,6 +382,7 @@ export class SdkSession {
         options: sdkOptions,
       });
     } catch (error) {
+      if (this.options.startup) throw new ClaudeStartupReadinessError("startup_failed");
       const translated = translateMissingClaudeCliError(error);
       throw this.options.redactGatewayText
         ? new Error(this.options.redactGatewayText(getErrorMessage(translated)))
@@ -350,10 +390,21 @@ export class SdkSession {
     }
     if (this.cloudReadiness) {
       const readiness = this.cloudReadiness;
-      void this.requireNativeCloudMcp().then(
-        readiness.resolve,
-        readiness.reject,
-      );
+      void this.requireReadiness().then(() => {
+        this.capabilitiesReady = true;
+        readiness.resolve();
+        this.finishStartupIfReady();
+      }, (error: unknown) => {
+        const failure = this.options.startup && !(error instanceof ClaudeStartupReadinessError)
+          ? new ClaudeStartupReadinessError("startup_failed") : error;
+        readiness.reject(failure);
+        if (this.options.startup) {
+          const startupFailure = failure instanceof Error ? failure : new ClaudeStartupReadinessError("startup_failed");
+          this.startupReady?.reject(startupFailure);
+          this.rejectQueuedInputs(startupFailure);
+          this.query?.close();
+        }
+      });
     }
 
     void this.consumeStream();
@@ -400,6 +451,7 @@ export class SdkSession {
 
   stop(): void {
     this.inputDone = true;
+    this.startupReady?.reject(new ClaudeStartupReadinessError("startup_failed"));
     this.rejectQueuedInputs("Claude SDK session stopped before input consumed");
     this.resolveInputDone();
     this.abortController.abort();
@@ -505,26 +557,25 @@ export class SdkSession {
     if (!q) return;
 
     try {
-      if (this.cloudReadiness) await this.cloudReadiness.promise;
+      if (this.cloudReadiness && !this.options.startup) await this.cloudReadiness.promise;
       for await (const message of q) {
         this.captureSessionId(message);
+        if (this.handleStartupMessage(message)) continue;
         this.onMessage(this.redactGatewayValue(message));
       }
       this.onDone();
     } catch (error) {
-      const failure = new Error(
-        this.redactGatewayText(
-          buildSdkDoneErrorMessage({
-            error,
-            stderrTail: this.stderrTail,
-          }),
-        ),
-      );
+      const failure = this.options.startup
+        ? error instanceof ClaudeStartupReadinessError ? error : new ClaudeStartupReadinessError("startup_failed")
+        : new Error(this.redactGatewayText(buildSdkDoneErrorMessage({ error, stderrTail: this.stderrTail })));
+      this.startupReady?.reject(failure);
+      this.cloudReadiness?.reject(failure);
       this.rejectQueuedInputs(failure);
       if (this.cloudReadiness) q.close();
       this.onDone(failure);
     } finally {
       this.inputDone = true;
+      if (!this.nativeInitSeen) this.startupReady?.reject(new ClaudeStartupReadinessError("startup_failed"));
       this.rejectQueuedInputs("Claude SDK stream ended before input consumed");
       this.resolveInputDone();
       this.query = undefined;
@@ -554,6 +605,56 @@ export class SdkSession {
       ) as T;
     }
     return value;
+  }
+
+  private handleStartupMessage(message: SDKMessage): boolean {
+    if (message.type === "auth_status") return true;
+    if (this.options.startup && !this.nativeInitSeen && message.type === "assistant" && (message.error === "authentication_failed" || message.error === "oauth_org_not_allowed")) {
+      throw new ClaudeStartupReadinessError("auth_required");
+    }
+    if (message.type !== "system") return false;
+    if (message.subtype === "init") {
+      this.nativeInitSeen = true;
+      this.finishStartupIfReady();
+      return false;
+    }
+    if (message.subtype !== "hook_started" && message.subtype !== "hook_progress" && message.subtype !== "hook_response") return false;
+    if (message.hook_event !== "SessionStart" && message.hook_event !== "Setup") return true;
+    const hookId = createHash("sha256").update(this.hookSalt).update(message.hook_id).digest("hex").slice(0, 16);
+    const hookState = message.subtype === "hook_started" ? "started"
+      : message.subtype === "hook_progress" ? "progress" : message.outcome;
+    this.options.onStartup?.({ phase: "hook", hookEvent: message.hook_event, hookId, hookState });
+    if (message.subtype === "hook_started") this.startupHooks.add(hookId);
+    if (message.subtype === "hook_response") {
+      this.startupHooks.delete(hookId);
+      if (this.options.startup && message.outcome !== "success") throw new ClaudeStartupReadinessError("startup_failed");
+      this.finishStartupIfReady();
+    }
+    return true;
+  }
+
+  private finishStartupIfReady(): void {
+    if (!this.nativeInitSeen || !this.capabilitiesReady || this.startupHooks.size > 0) return;
+    this.options.onStartup?.({ phase: "ready", hookEvent: null, hookId: null, hookState: null });
+    this.startupReady?.resolve();
+  }
+
+  private async requireReadiness(): Promise<void> {
+    const q = this.query;
+    if (!q) throw new ClaudeStartupReadinessError("startup_failed");
+    if (this.options.startup) await q.initializationResult();
+    if (this.options.requireNativeCloudMcp) await this.requireNativeCloudMcp();
+    if (!this.options.startup || this.options.startup.requiredMcpServers.length === 0) return;
+    this.options.onStartup?.({ phase: "capabilities", hookEvent: null, hookId: null, hookState: null });
+    while (!this.abortController.signal.aborted) {
+      const servers = await q.mcpServerStatus();
+      const required = this.options.startup.requiredMcpServers.map((name) => servers.find((server) => server.name === name));
+      if (required.some((server) => server?.status === "needs-auth")) throw new ClaudeStartupReadinessError("auth_required");
+      if (required.every((server) => server?.status === "connected")) return;
+      if (required.some((server) => server && (server.status === "failed" || server.status === "disabled"))) throw new ClaudeStartupReadinessError("capability_unavailable");
+      await delay(200, undefined, { signal: this.abortController.signal });
+    }
+    throw new ClaudeStartupReadinessError("startup_failed");
   }
 
   private async requireNativeCloudMcp(): Promise<void> {

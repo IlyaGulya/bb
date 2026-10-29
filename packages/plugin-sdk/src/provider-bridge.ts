@@ -102,6 +102,7 @@ export {
   providerRecoveryNotificationSchema,
   bridgeErrorDataSchema,
   threadDeltaNotificationParamsSchema,
+  threadStartupNotificationSchema as experimental_threadStartupNotificationSchema,
   threadDeltaSchema,
   initializeParamsSchema,
   modelListParamsSchema,
@@ -136,6 +137,7 @@ export {
 } from "@bb/provider-bridge-protocol";
 export type {
   BridgeCapabilities,
+  ThreadStartupNotification,
   BridgeExecutionOptions,
   BridgeGrammarVersions,
   BridgeSteerMode,

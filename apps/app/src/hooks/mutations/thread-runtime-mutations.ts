@@ -170,6 +170,16 @@ export function useCreateThread() {
   return useMutation(createThreadMutationOptions(queryClient));
 }
 
+export function useRetryThread() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    meta: { errorMessage: "Could not retry provider startup.", showErrorToast: false,
+      lifecycleOperation: "retry_thread", feature: "provider-startup", action: "retry", intent: "recover", scope: "thread" },
+    mutationFn: (threadId: string) => sdk.threads.retry({ threadId }),
+    onSuccess: (_result, threadId) => invalidateThreadBannerQueries({ queryClient, threadId }),
+  });
+}
+
 export function sendThreadMessageMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     meta: {

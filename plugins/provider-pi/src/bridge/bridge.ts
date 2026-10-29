@@ -517,6 +517,7 @@ async function handleRequest(
           threadRename: false,
           threadGoalClear: false,
           fork: "checkpoint",
+          startupReadiness: "session-created",
           approvalEnforcedBy: "runtime",
           grammarVersions: [THREAD_DELTA_GRAMMAR_V3, THREAD_DELTA_GRAMMAR_V3],
           steerMode: "inject",

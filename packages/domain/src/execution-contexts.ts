@@ -8,6 +8,12 @@ const referencePathSchema = z
   .refine((value) => !value.includes("\0"), "Native paths cannot contain NUL");
 const idSchema = z.string().trim().min(1);
 
+export const providerStartupPolicySchema = z.object({
+  deadlineMs: z.number().int().min(1_000).max(30 * 60_000),
+  optionalMcpServers: z.array(idSchema).max(250),
+}).strict();
+export type ProviderStartupPolicy = z.infer<typeof providerStartupPolicySchema>;
+
 export const executionContextFieldsSchema = z
   .object({
     name: z.string().trim().min(1),
@@ -32,6 +38,7 @@ export const executionContextFieldsSchema = z
       .strict()
       .optional(),
     hooksPath: referencePathSchema.nullable().default(null),
+    startupPolicy: providerStartupPolicySchema.nullable().optional(),
     autoMemory: z.boolean().default(false),
     gitIdentity: z
       .object({ name: z.string().trim().min(1), email: z.email() })

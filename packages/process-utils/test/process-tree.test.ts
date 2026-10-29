@@ -47,6 +47,17 @@ async function readFirstLine(stream: NodeJS.ReadableStream): Promise<string> {
 }
 
 posixOnly("process tree helpers", () => {
+  it("does not signal a process group when its captured identity fence no longer matches", async () => {
+    const child = spawnPortablePipedProcess({ command: process.execPath, args: ["-e", "process.stdout.write('ready'); setInterval(() => {}, 1000)"], detached: true });
+    await readFirstLine(child.stdout);
+    try {
+      expect(await stopProcessGroupLeaderFirst({ child, timeoutMs: 50, killGraceMs: 50, identityMatches: () => false })).toEqual({ treeTermination: "unverified" });
+      expect(child.pid !== undefined && isAlive(child.pid)).toBe(true);
+    } finally {
+      killProcessGroup({ child, signal: "SIGKILL" });
+      await once(child, "exit");
+    }
+  });
   const cleanupPids: number[] = [];
   const cleanupDirs: string[] = [];
 

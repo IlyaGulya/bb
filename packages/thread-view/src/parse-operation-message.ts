@@ -198,6 +198,10 @@ function threadOperationTitle(
     case "ownership_change":
       return ownershipChangeOperationTitle(meta, threadName);
     case "other":
+      if (meta.rawOperation === "provider_startup") {
+        return meta.status === "failed" ? "Provider startup blocked"
+          : meta.status === "completed" ? "Provider startup ready" : "Starting provider";
+      }
       if (
         meta.rawOperation === THREAD_CONTEXT_CLEAR_OPERATION &&
         meta.status === "completed"

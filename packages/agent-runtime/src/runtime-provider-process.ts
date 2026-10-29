@@ -80,6 +80,7 @@ interface EnsureRuntimeProviderArgs {
   skillRoots?: readonly AgentRuntimeSkillRoot[];
   processKey: string;
   providerId: string;
+  signal?: AbortSignal;
 }
 
 interface RequireRuntimeProviderProcessArgs {
@@ -91,6 +92,7 @@ interface ShutdownRuntimeProviderArgs {
   processKey: string;
   providerId: string;
   timeoutMs?: number;
+  requireConfirmedTree?: boolean;
 }
 
 interface CleanupFailedStartupArgs {
@@ -103,6 +105,7 @@ interface CleanupFailedStartupArgs {
 interface TerminateProviderProcessArgs {
   providerProcess: RuntimeProviderProcess;
   timeoutMs?: number;
+  requireConfirmedTree?: boolean;
 }
 
 interface SpawnProviderArgs {
@@ -143,6 +146,8 @@ export class RuntimeProviderProcessManager {
   private readonly providerRetiring = new Map<string, Promise<void>>();
   private readonly currentProcessKeyByProviderId = new Map<string, string>();
   private shuttingDown = false;
+  private readonly ownedStartupProcesses = new Map<string, RuntimeProviderProcess>();
+  private readonly unverifiedRetirements = new Set<string>();
 
   constructor(args: RuntimeProviderProcessManagerArgs) {
     this.args = args;
@@ -150,11 +155,17 @@ export class RuntimeProviderProcessManager {
 
   async ensureProvider(args: EnsureRuntimeProviderArgs): Promise<void> {
     if (this.shuttingDown) return;
+    args.signal?.throwIfAborted();
+    if (this.unverifiedRetirements.has(args.processKey)) {
+      throw new Error("Owned provider process cleanup remains unverified; retry is blocked.");
+    }
     const retirement = this.providerRetiring.get(args.processKey);
     if (retirement !== undefined) {
       await retirement;
       if (this.shuttingDown) return;
     }
+    if (this.unverifiedRetirements.has(args.processKey)) throw new Error("Owned provider cleanup remains unverified; retry is blocked.");
+    args.signal?.throwIfAborted();
 
     const existing = this.providerStarting.get(args.processKey);
     if (existing) {
@@ -177,6 +188,7 @@ export class RuntimeProviderProcessManager {
     }
 
     const startPromise = (async () => {
+      args.signal?.throwIfAborted();
       const adapter = this.getAdapter(args.providerId, args.bridgeLaunch);
       const providerProcess = this.spawnProvider({
         adapter,
@@ -263,6 +275,7 @@ export class RuntimeProviderProcessManager {
       const process = this.processes.get(processKey);
       if (
         processKey === args.processKey ||
+        processKey.includes("#startup-thread:") ||
         !process ||
         process.providerId !== args.providerId ||
         process.identity.threadIds.size > 0 ||
@@ -300,15 +313,16 @@ export class RuntimeProviderProcessManager {
   }
 
   async shutdownProvider(args: ShutdownRuntimeProviderArgs): Promise<void> {
+    if (this.unverifiedRetirements.has(args.processKey)) throw new Error("Owned provider cleanup remains unverified; retry is blocked.");
     const existingRetirement = this.providerRetiring.get(args.processKey);
     if (existingRetirement !== undefined) return existingRetirement;
 
-    const providerProcess = this.processes.get(args.processKey);
+    const providerProcess = this.processes.get(args.processKey) ?? this.ownedStartupProcesses.get(args.processKey);
     if (!providerProcess) {
       return;
     }
 
-    if (hasChildProcessExited(providerProcess.child)) {
+    if (hasChildProcessExited(providerProcess.child) && !args.requireConfirmedTree && !args.processKey.includes("#startup-thread:")) {
       await providerProcess.exitFinalized;
       return;
     }
@@ -317,17 +331,24 @@ export class RuntimeProviderProcessManager {
     const retirement = this.terminateProviderProcess({
       providerProcess,
       timeoutMs: args.timeoutMs,
+      requireConfirmedTree: args.requireConfirmedTree,
     }).then(async () => {
       if (hasChildProcessExited(providerProcess.child)) {
         await providerProcess.exitFinalized;
       }
     });
     this.providerRetiring.set(args.processKey, retirement);
-    await retirement.finally(() => {
+    try {
+      await retirement;
+      this.ownedStartupProcesses.delete(args.processKey);
+    } catch (error) {
+      if (args.requireConfirmedTree || args.processKey.includes("#startup-thread:")) this.unverifiedRetirements.add(args.processKey);
+      throw error;
+    } finally {
       if (this.providerRetiring.get(args.processKey) === retirement) {
         this.providerRetiring.delete(args.processKey);
       }
-    });
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -373,12 +394,14 @@ export class RuntimeProviderProcessManager {
   }
 
   private spawnProvider(args: SpawnProviderArgs): RuntimeProviderProcess {
+    const isolatedStartup = args.processKey.includes("#startup-thread:");
     const processConfig = args.adapter.process;
     const env: NodeJS.ProcessEnv = {
       ...sanitizeInheritedChildProcessEnv({ env: process.env }),
       ...this.args.env,
       ...processConfig.env,
     };
+    if (isolatedStartup) delete env[PROVIDER_BRIDGE_RECORD_DIR_ENV];
     const recordRoot = env[PROVIDER_BRIDGE_RECORD_DIR_ENV];
     if (recordRoot !== undefined && recordRoot !== "") {
       env[PROVIDER_BRIDGE_RECORD_DIR_ENV] = join(recordRoot, args.providerId);
@@ -389,6 +412,7 @@ export class RuntimeProviderProcessManager {
       args: processConfig.args,
       cwd: this.args.workspacePath,
       env,
+      fenceIdentity: isolatedStartup,
     });
     const { child } = managed;
     let finalizeExit: () => void = () => undefined;
@@ -446,6 +470,7 @@ export class RuntimeProviderProcessManager {
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
+      if (isolatedStartup) return;
       if (
         this.shuttingDown ||
         !this.isCurrentProviderProcess({ providerProcess })
@@ -459,6 +484,7 @@ export class RuntimeProviderProcessManager {
       });
     });
     child.stderr.on("end", () => {
+      if (isolatedStartup) return;
       if (
         this.shuttingDown ||
         !this.isCurrentProviderProcess({ providerProcess }) ||
@@ -521,6 +547,7 @@ export class RuntimeProviderProcessManager {
     });
 
     this.processes.set(args.processKey, providerProcess);
+    if (isolatedStartup) this.ownedStartupProcesses.set(args.processKey, providerProcess);
     return providerProcess;
   }
 
@@ -550,6 +577,9 @@ export class RuntimeProviderProcessManager {
       gracePeriodMs: args.timeoutMs ?? 5000,
     });
     if (result.treeTermination === "unverified") {
+      if (args.requireConfirmedTree || args.providerProcess.processKey.includes("#startup-thread:")) {
+        throw new Error("Owned provider descendant termination could not be confirmed.");
+      }
       this.args.onStderr?.(
         "Provider process exited, but descendant cleanup could not be confirmed",
       );
@@ -591,13 +621,22 @@ export class RuntimeProviderProcessManager {
     );
     this.processes.delete(args.providerProcess.processKey);
     if (!expected) {
-      void this.terminateProviderProcess({
-        providerProcess: args.providerProcess,
-      }).catch((error: Error) => {
-        this.args.onStderr?.(
-          `Provider process cleanup failed: ${error.message}`,
-        );
-      });
+      if (args.providerProcess.processKey.includes("#startup-thread:")) {
+        const processKey = args.providerProcess.processKey;
+        const retirement = this.terminateProviderProcess({ providerProcess: args.providerProcess, requireConfirmedTree: true }).then(() => {
+          if (this.ownedStartupProcesses.get(processKey) === args.providerProcess) this.ownedStartupProcesses.delete(processKey);
+          this.providerRetiring.delete(processKey);
+        }, () => {
+          this.unverifiedRetirements.add(processKey);
+          throw new Error("Owned provider cleanup remains unverified; retry is blocked.");
+        });
+        this.providerRetiring.set(processKey, retirement);
+        void retirement.catch(() => undefined);
+      } else {
+        void this.terminateProviderProcess({ providerProcess: args.providerProcess }).catch((error: Error) => {
+          this.args.onStderr?.(`Provider process cleanup failed: ${error.message}`);
+        });
+      }
     }
     const threadIds = [...args.providerProcess.identity.threadIds];
     const threads = threadIds.map((threadId) =>

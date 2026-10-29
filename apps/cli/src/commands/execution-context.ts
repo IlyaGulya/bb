@@ -185,7 +185,14 @@ async function readDefinition(path: string): Promise<unknown> {
 const CONTEXT_HELP = `
 JSON fields: name, enabled, projectIds, instructions, skillRoots, commandRoots,
 pluginRoots, settingsPaths, mcpServers:[{name,configPath}], hooksPath (or null),
-autoMemory, gitIdentity:{name,email} (or null), defaultModelConnectionId (or null).
+autoMemory, gitIdentity:{name,email} (or null), defaultModelConnectionId (or null),
+startupPolicy:{deadlineMs,optionalMcpServers:[name,...]} (or null).
+Startup deadline is 1000–1800000 milliseconds. Required MCP capabilities fail
+closed; only explicitly listed optional servers may be unavailable. Native
+startup diagnostics never expose hook output. Null/omitted policy preserves
+legacy request timeouts. Existing thread bindings retain their frozen policy.
+After fixing prerequisites, use bb thread retry on the retained thread; no new
+task or independent executor is created.
 Create requires name; projectIds defaults to [] (no permitted projects).
 Update accepts partial fields; omitted fields remain unchanged. IDs and timestamps
 are not definition fields. Paths refer to the execution host, not this CLI machine.
