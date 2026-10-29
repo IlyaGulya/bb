@@ -358,3 +358,50 @@ it.each([
   expect(f.host.harness.sdk.callsTo("threads.spawn")).toEqual([]);
   expect(f.host.harness.sdk.callsTo("threads.send")).toEqual([]);
 });
+
+it.each(["exhausted", "expired", "revoked"] as const)("retrieves a lost preview receipt after its away grant becomes %s without admitting another action", async boundary => {
+  const requests: PreviewRequest[] = [];
+  const f = await fixture(undefined, async (raw, host) => {
+    const input = routingRpcContract.previewInboxRoute.input.parse(raw);
+    requests.push(input);
+    const result = await host.harness.callRpc("previewInboxRoute", input);
+    if (requests.length === 1) {
+      if (boundary === "expired") f.store.database.prepare("UPDATE task_local_away_grants SET expires_at = ? WHERE id = ?").run(Date.now() - 1, input.grantId);
+      if (boundary === "revoked") f.persistence.revoke(input.grantId!);
+      throw new Error("Completed away preview acknowledgement was lost");
+    }
+    return result;
+  });
+  const grant = routingRpcContract.enableLocalAway.output.parse(await f.host.harness.callRpc("enableLocalAway", {
+    operationId: `receipt-${boundary}`, projectId: f.task.projectId, inboxIds: [f.item.id],
+    taskIds: [f.task.id], actions: ["preview"], maxAttempts: boundary === "exhausted" ? 1 : 2,
+    durationSeconds: 600, acknowledgedBoundary: true,
+  }));
+  const trigger = f.slot.getByRole("button", { name: "Routing & local away" });
+  fireEvent.click(trigger);
+  fireEvent.click(await f.slot.findByRole("combobox", { name: "Routing tracker project" }));
+  fireEvent.click(await f.slot.findByRole("option", { name: "RUI · Routing UI" }));
+  fireEvent.click(f.slot.getByRole("combobox", { name: "Action authority" }));
+  fireEvent.click(await f.slot.findByRole("option", { name: /^active · 0\// }));
+  const preview = f.slot.getByRole("button", { name: "Preview route" });
+  await waitFor(() => expect(preview.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(preview);
+  await f.slot.findByRole("alert");
+  await waitFor(() => expect(f.persistence.grant(grant.id)).toMatchObject({ attempts: 1, state: boundary }));
+  await waitFor(() => expect(f.slot.getByRole("combobox", { name: "Action authority" }).textContent).toContain(boundary));
+  fireEvent.click(f.slot.getByRole("button", { name: "Close · no execution" }));
+  await waitFor(() => expect(f.slot.queryByRole("dialog", { name: "Advisory routing and local-action away" })).toBeNull());
+  fireEvent.click(trigger);
+  const retry = await f.slot.findByRole("button", { name: "Preview route" });
+  await waitFor(() => expect(retry.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(retry);
+  await waitFor(() => expect(requests).toHaveLength(2));
+  await waitFor(() => expect(f.slot.queryByRole("alert")).toBeNull());
+  expect(requests[1]).toEqual(requests[0]);
+  expect(f.persistence.grant(grant.id)).toMatchObject({ attempts: 1, state: boundary });
+  expect(f.persistence.proposal(f.item.id)?.revision).toBe(2);
+  expect(f.persistence.journal(f.item.id).filter(entry => entry.operationId !== "seed-advice")).toMatchObject([{ operationId: requests[0]!.operationId, state: "applied" }]);
+  expect(f.slot.getByRole("button", { name: "Preview route" }).hasAttribute("disabled")).toBe(true);
+  expect(f.host.harness.sdk.callsTo("threads.spawn")).toEqual([]);
+  expect(f.host.harness.sdk.callsTo("threads.send")).toEqual([]);
+});
