@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TestAppHarness } from "../../../apps/server/test/helpers/test-app.js";
 import type * as FileSystem from "node:fs/promises";
@@ -9,11 +9,28 @@ import type * as Database from "@bb/db";
 import type * as Domain from "@bb/domain";
 import type * as Files from "@bb/process-utils";
 
+const filesystemFault = vi.hoisted((): { directory: string | null } => ({ directory: null }));
+vi.mock("node:fs/promises", async importOriginal => {
+  const real = await importOriginal<typeof FileSystem>();
+  return {
+    ...real,
+    open: async (...args: Parameters<typeof real.open>) => {
+      const handle = await real.open(...args);
+      if (typeof args[0] !== "string" || args[0] !== filesystemFault.directory) return handle;
+      return new Proxy(handle, {
+        get(target, property) {
+          if (property === "sync") return async () => { throw Object.assign(new Error("SYNTHETIC_ANCESTOR_SYNC_FAILURE"), { code: "EIO" }); };
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    },
+  };
+});
 
 describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("capture storage consumer failure boundaries", () => {
   let harness: TestAppHarness | undefined;
   let disposeKeys: (() => void) | undefined;
-  let failureDirectory: string | null = null;
   let service: typeof CaptureService;
   let fixtures: typeof CaptureFixtures;
   let database: typeof Database;
@@ -23,25 +40,7 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("
   beforeEach(async () => {
     harness = undefined;
     disposeKeys = undefined;
-    failureDirectory = null;
-    vi.resetModules();
-    vi.doMock("node:fs/promises", async importOriginal => {
-      const real = await importOriginal<typeof FileSystem>();
-      return {
-        ...real,
-        open: async (...args: Parameters<typeof real.open>) => {
-          const handle = await real.open(...args);
-          if (typeof args[0] !== "string" || resolve(args[0]) !== failureDirectory) return handle;
-          return new Proxy(handle, {
-            get(target, property) {
-              if (property === "sync") return async () => { throw Object.assign(new Error("SYNTHETIC_ANCESTOR_SYNC_FAILURE"), { code: "EIO" }); };
-              const value: unknown = Reflect.get(target, property, target);
-              return typeof value === "function" ? value.bind(target) : value;
-            },
-          });
-        },
-      };
-    });
+    filesystemFault.directory = null;
     const { createTestAppHarness } = await import("../../../apps/server/test/helpers/test-app.js");
     harness = await createTestAppHarness({ seedFirstPartyProviders: false });
     fixtures = await import("../../../apps/host-daemon/test/private-capture-fixtures.js");
@@ -52,15 +51,13 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("
     disposeKeys = fixtures.captureFixtureKeys(harness.config.dataDir);
   });
   afterEach(async () => {
-    failureDirectory = null;
+    filesystemFault.directory = null;
     if (harness) {
       await harness.cleanup();
       harness.db.$client.close();
     }
     disposeKeys?.();
     vi.unstubAllEnvs();
-    vi.doUnmock("node:fs/promises");
-    vi.resetModules();
   });
 
   function createCapture() {
@@ -89,7 +86,7 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("
       scope: scopeRoot,
       session: join(scopeRoot, session.id),
     };
-    failureDirectory = ancestors[ancestor];
+    filesystemFault.directory = ancestors[ancestor];
     const chunk = artifact.manifest.chunks[0]!;
     const outcome = await service.acceptCaptureChunk(current.deps, scope, {
       captureId: session.id, artifactId: artifact.manifest.artifactId,

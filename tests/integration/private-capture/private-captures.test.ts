@@ -107,7 +107,7 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("
       Buffer.from([0, 255, 254, 128]),
     ]);
     const api = createPrivateCapturesArea({ transport: createHttpTransport({
-      baseUrl: "http://synthetic-capture.local", runtime: "browser",
+      baseUrl: "http://localhost", runtime: "browser",
       fetch: async (input, init) => harness.app.request(new Request(input, init)),
     }) });
     const input = { ...scope, captureId: session.id, operationId: "00000000-0000-4000-8000-000000000002", sourceId: `sensitive-${representation}`, file: new Blob([source]), representation, streamState: "unknown" as const };
