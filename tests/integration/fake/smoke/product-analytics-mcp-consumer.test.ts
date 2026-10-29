@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { getProject, productAnalyticsEvents } from "@bb/db";
 import { turnScope } from "@bb/domain";
@@ -74,7 +73,7 @@ describe("analytics real MCP CLI admission", () => {
 describe("analytics actual MCP semantic producer", () => {
   it("keeps a request-tagged smoke tool in its project and QA plane while retaining ordinary production usage", async () => {
     await withAnalyticsConsumer(async ({ harness, collector, work, personal }) => withListeningConsumerSdk(harness, async () => {
-      const plugin = await harness.pluginService.installPath(fileURLToPath(new URL("../../../../plugins/mcp/", import.meta.url)));
+      const plugin = await harness.pluginService.install("builtin:mcp", { kind: "root" });
       if (plugin.status !== "running") throw new Error(`Actual MCP plugin did not load: ${plugin.statusDetail}`);
       const path = `/api/v1/plugins/${plugin.id}/http/mcp`;
       const privateResult = "owned MCP result excluded from analytics";
