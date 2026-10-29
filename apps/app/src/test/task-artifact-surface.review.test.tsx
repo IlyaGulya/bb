@@ -56,13 +56,13 @@ describe.each(["move", "relink"] as const)("readable history recovery after %s",
     });
     try {
       fireEvent.click(await screen.findByRole("combobox", { name: "Artifact context" }));
-      fireEvent.click(await screen.findByRole("option", { name: "Work", exact: true }));
-      fireEvent.click(await screen.findByRole("button", { name: REVIEW_DECISION, exact: true }));
-      expect((await screen.findByRole("link", { name: "Open source message", exact: true })).getAttribute("href")).toBe("/projects/proj_work/threads/thr_work_source#msg=7");
-      fireEvent.click(screen.getByRole("button", { name: "Remove retained artifact", exact: true }));
-      fireEvent.click(await screen.findByRole("button", { name: "Remove artifact", exact: true }));
+      fireEvent.click(await screen.findByRole("option", { name: "Work" }));
+      fireEvent.click(await screen.findByRole("button", { name: REVIEW_DECISION }));
+      expect((await screen.findByRole("link", { name: "Open source message" })).getAttribute("href")).toBe("/projects/proj_work/threads/thr_work_source#msg=7");
+      fireEvent.click(screen.getByRole("button", { name: "Remove retained artifact" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Remove artifact" }));
       await waitFor(() => expect(new TaskArtifactStore(f.store).get(retained.saved.id)).toBeNull());
-      await waitFor(() => expect(screen.queryByRole("button", { name: REVIEW_DECISION, exact: true })).toBeNull());
+      await waitFor(() => expect(screen.queryByRole("button", { name: REVIEW_DECISION })).toBeNull());
       expect(f.store.tasks.getTask(f.workTask.id)?.status).toBe(f.workTask.status);
       expect((await f.readImage(retained.image.attachmentId)).equals(snapshot)).toBe(true);
       const removed = tasksRpcContract.deleteAttachment.output.parse(await f.harness.callRpc("deleteAttachment", { attachmentId: retained.image.attachmentId }));

@@ -24,7 +24,6 @@ import {
 import { delegationRpcContract } from "../delegate/contract";
 import { handlers as delegationHandlers } from "../delegate";
 import {
-  presetReasoningLevelSchema,
   tasksRpcContract,
   PRESET_PERMISSION_MODES,
   TASK_PRIORITIES,
