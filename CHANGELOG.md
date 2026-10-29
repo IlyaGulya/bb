@@ -2,6 +2,8 @@
 
 ## AgentOS fork — unreleased
 
+- Restore Tasks bundled-build prerequisites and declared runtime outputs so clean
+  package builds wait for the plugin build tool and cache their bundled artifacts.
 - Preserve successful startup history during ordinary runtime shutdown while still
   awaiting confirmed owned-provider termination. If cleanup cannot be confirmed,
   persist a separate allowlisted failure receipt that blocks retry after cold reopen.

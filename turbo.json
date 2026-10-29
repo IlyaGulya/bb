@@ -253,6 +253,7 @@
       ]
     },
     "bb-plugin-tasks#prepare:bundled": {
+      "dependsOn": ["topo", "^build"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -260,7 +261,8 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**",
         "$TURBO_ROOT$/plugins/workflows/src/build-review-contract.ts",
         "$TURBO_ROOT$/apps/server/src/services/hosts/file-byte-range.ts"
-      ]
+      ],
+      "outputs": [".bundled-runtime/**"]
     },
     "@bb/desktop#build": {
       "dependsOn": ["bb-app#build"],
