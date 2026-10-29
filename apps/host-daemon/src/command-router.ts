@@ -448,6 +448,12 @@ export class CommandRouter {
   }
 
   private resolveThreadLaneKey(command: HostDaemonCommand): string | null {
+    if (command.type === "thread.stop" && command.intent === "interrupt") {
+      const runtime = this.options.runtimeManager.get(command.environmentId)?.runtime;
+      if (runtime?.hasThread(command.threadId) && runtime.getProviderSession(command.threadId) === null) {
+        return null;
+      }
+    }
     switch (command.type) {
       case "thread.start":
       case "turn.submit":

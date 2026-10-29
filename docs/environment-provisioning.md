@@ -67,6 +67,13 @@ the owned process tree before acknowledging stop. If that termination cannot be
 confirmed, it retains ownership and the retry blocker instead of reporting
 successful cancellation or treating a scheduled background retry as cleanup.
 
+An explicit interrupt can reach a bounded startup that already owns its thread
+but has not established a provider session. It bypasses the per-thread command
+lane and the active-turn wait, rather than waiting behind the startup it must
+cancel. The existing runtime stop still waits for confirmed owned-process cleanup
+before acknowledgment. Legacy startup handoff ordering, release requests, and the
+five-second active-turn wait outside that owned startup state are unchanged.
+
 Startup diagnostics retain the coordinator's last known stage in `failureStage`
 before switching to `stopping`/`stopped`: `initializing`, `hook`, `capabilities`,
 or `ready`. It is `null` before interruption and when parsing older receipts

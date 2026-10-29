@@ -2,6 +2,9 @@
 
 ## AgentOS fork — unreleased
 
+- Let explicit stop reach an already-owned bounded startup before provider-session
+  creation without waiting behind its command lane or active-turn wait. Keep
+  confirmed cleanup before acknowledgment and preserve legacy ordering and waits.
 - Regenerate capture migration metadata from the composed analytics schema without
   changing applied SQL or migration timestamps. Keep the real startup logging
   regression inside the existing runtime test-package boundary.
