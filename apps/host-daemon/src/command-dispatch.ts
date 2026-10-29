@@ -133,7 +133,10 @@ async function stopThreadRuntime(
       await options.eventSink.flush();
       return { providerCheckpointId, activeTurnRetained: true };
     }
-    if (command.type !== "thread.stop" || command.intent !== "release") {
+    const interruptingOwnedStartup =
+      command.type === "thread.stop" && command.intent === "interrupt" &&
+      entry.runtime.getProviderSession(command.threadId) === null;
+    if (!interruptingOwnedStartup && (command.type !== "thread.stop" || command.intent !== "release")) {
       await entry.runtime.waitForActiveTurn(command.threadId, {
         timeoutMs: THREAD_STOP_ACTIVE_TURN_WAIT_MS,
       });
