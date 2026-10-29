@@ -351,8 +351,12 @@ export function ResponsiveDrawerShell({
   children,
 }: ResponsiveDrawerShellProps) {
   const { isContentRealized } = useResponsiveDrawerRealization({ open });
+  const [hasOpened, setHasOpened] = React.useState(open);
+  if (open && !hasOpened) {
+    setHasOpened(true);
+  }
 
-  if (!open && !isContentRealized) {
+  if (!open && !hasOpened) {
     return null;
   }
 
