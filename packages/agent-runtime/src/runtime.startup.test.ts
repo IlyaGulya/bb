@@ -104,6 +104,32 @@ describe.skipIf(process.platform === "win32")("bounded owned provider startup", 
     expect(await f.runtime.stopThread({ threadId: "retained-thread" })).toEqual({ providerCheckpointId: "fixture-checkpoint" });
   });
 
+  it("keeps completed startup history ready while shutdown terminates its owned provider", async () => {
+    const f = setup();
+    await f.start("success");
+    await f.runtime.runTurn({
+      threadId: "retained-thread",
+      clientRequestId: clientTurnRequestIdSchema.parse("creq_2222222222"),
+      input: [{ type: "text", text: "Fixture only", mentions: [] }],
+      options: f.options("success"),
+    });
+    await until(() => f.events.some((event) => event.type === "turn/completed"));
+    const startupEvents = f.events.filter((event) =>
+      event.type === "system/operation" && event.operation === "provider_startup");
+    expect(startupEvents.at(-1)).toMatchObject({
+      status: "completed", metadata: { phase: "ready", code: null },
+    });
+    const providerPid = Number(readFileSync(f.startsFile, "utf8").trim());
+
+    await f.runtime.shutdown();
+
+    expect(alive(providerPid)).toBe(false);
+    expect(f.runtime.hasOpenBackgroundWork()).toBe(false);
+    expect(f.events.filter((event) =>
+      event.type === "system/operation" && event.operation === "provider_startup"))
+      .toEqual(startupEvents);
+  });
+
   it("preserves verified missing-auth classification without exposing ordinary startup output", async () => {
     const f = setup();
     await expect(f.start("missing-auth")).rejects.toMatchObject({ code: "auth_required" });
