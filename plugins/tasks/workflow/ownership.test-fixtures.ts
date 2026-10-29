@@ -1,5 +1,5 @@
 import type { TasksApiStore } from "../api/index.js";
-import type { BuildReviewStart } from "./remote-contract.js";
+import type { BuildReviewStart } from "../../workflows/src/build-review-contract.js";
 import type { TaskWorkflow } from "../shared/workflow-contract.js";
 import { TaskWorkflowStore } from "./store.js";
 

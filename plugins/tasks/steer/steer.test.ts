@@ -11,7 +11,7 @@ import { tasksRpcContract } from "../shared/contract.js";
 import { registerTaskWorkflows, releaseTaskWorkflowContexts } from "../workflow/index.js";
 import { TaskWorkflowStore } from "../workflow/store.js";
 import { HELD_WORKFLOW_STATES, seedWorkflowOwnership } from "../workflow/ownership.test-fixtures.js";
-import { buildReviewStartSchema, type BuildReviewStart } from "../workflow/remote-contract.js";
+import { buildReviewStartSchema, type BuildReviewStart } from "../../workflows/src/build-review-contract.js";
 import type { WorkflowSelection } from "../shared/workflow-preparation.js";
 
 const notificationHosts: Array<ReturnType<typeof createFakePluginHost>> = [];

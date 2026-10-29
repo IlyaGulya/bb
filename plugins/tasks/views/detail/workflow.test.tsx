@@ -11,7 +11,7 @@ import { TaskWorkflowPanel } from "./workflow.js";
 import { registerTaskWorkflows } from "../../workflow/index.js";
 import { seedWorkflowOwnership } from "../../workflow/ownership.test-fixtures.js";
 import { workflowRpcContract, type TaskWorkflow } from "../../shared/workflow-contract.js";
-import { buildReviewStartSchema, type BuildReviewStart } from "../../workflow/remote-contract.js";
+import { buildReviewStartSchema, type BuildReviewStart } from "../../../workflows/src/build-review-contract.js";
 import type { WorkflowSelection } from "../../shared/workflow-preparation.js";
 import { CompactViewportOverrideProvider } from "@/components/ui/hooks/use-compact-viewport";
 import { TaskWorkflowStore } from "../../workflow/store.js";
