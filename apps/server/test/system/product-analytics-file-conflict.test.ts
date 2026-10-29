@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { once } from "node:events";
+import { serve } from "@hono/node-server";
 import { describe, expect, it } from "vitest";
 import { productAnalyticsEvents } from "@bb/db";
 import { and, eq } from "drizzle-orm";
@@ -8,12 +10,27 @@ import { writeHostFile } from "../../../host-daemon/src/command-handlers/file-wr
 import { rpcContract } from "../../../../plugins/monaco-editor/server.js";
 import { reportQueuedCommandSuccess, waitForQueuedCommand } from "../helpers/commands.js";
 import { consumerReport, consumerSdk, withAnalyticsConsumer } from "../helpers/product-analytics-consumer.js";
+import type { TestAppHarness } from "../helpers/test-app.js";
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
+async function withListeningPluginSdk<T>(harness: TestAppHarness, run: () => Promise<T>): Promise<T> {
+  const server = serve({ hostname: "127.0.0.1", port: 0, fetch: harness.app.fetch });
+  try {
+    if (!server.listening) await once(server, "listening");
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("File consumer fixture did not bind a TCP port");
+    harness.config.serverPort = address.port;
+    harness.pluginService.bindSdk({ baseUrl: `http://127.0.0.1:${address.port}` });
+    return await run();
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+}
+
 describe("analytics genuine file conflict outcomes", () => {
   it.each(["core", "monaco"] as const)("reports a real %s stale-hash conflict as a failure while preserving the file", async (entrypoint) => {
-    await withAnalyticsConsumer(async ({ harness, collector, host, work, environment }) => {
+    await withAnalyticsConsumer(async ({ harness, collector, host, work, environment }) => withListeningPluginSdk(harness, async () => {
       const path = join(harness.config.dataDir, "owned-conflict.txt");
       const original = "current file bytes";
       await writeFile(path, original);
@@ -40,6 +57,6 @@ describe("analytics genuine file conflict outcomes", () => {
       const identities = [{ featureId: "core.files", action: "write" }];
       if (pluginId !== undefined) identities.push({ featureId: `plugin.${pluginId}`, action: "rpc.write" });
       for (const identity of identities) expect(harness.db.select({ outcome: productAnalyticsEvents.outcome, errorCode: productAnalyticsEvents.errorCode }).from(productAnalyticsEvents).where(and(eq(productAnalyticsEvents.featureId, identity.featureId), eq(productAnalyticsEvents.action, identity.action), eq(productAnalyticsEvents.stage, "completed"))).get()).toEqual({ outcome: "failed", errorCode: "conflict" });
-    });
+    }));
   });
 });
