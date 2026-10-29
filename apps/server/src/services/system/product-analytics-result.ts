@@ -40,7 +40,8 @@ export async function withProductAnalyticsJsonResult<T>(context: Pick<Context, "
   context.json = new Proxy(originalJson, {
     apply(target, receiver, args) {
       semantic = classifyProductAnalyticsResult(args[0]);
-      return Reflect.apply(target, receiver, args);
+      const invoke: (...args: never[]) => unknown = target;
+      return Reflect.apply(invoke, receiver, args);
     },
   });
   try {

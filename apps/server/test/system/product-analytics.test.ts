@@ -19,7 +19,7 @@ describe("private analytics public contract", () => {
   it.each(["core", "http", "sdk"] as const)("deduplicates the same operation through %s admission and reports actual outcomes", async (surface) => {
     await withTestHarness(async (harness) => {
       const collector = getPrivateProductAnalytics(harness.db);
-      const sdk = createNodeBbSdk({ baseUrl: "http://localhost", fetch: (url, init) => harness.app.request(String(url), init) });
+      const sdk = createNodeBbSdk({ baseUrl: "http://localhost", fetch: async (url, init) => harness.app.request(String(url), init) });
       const send = async (batch: ProductAnalyticsBatch) => {
         if (surface === "core") return collector.admitBatch(batch.events);
         if (surface === "sdk") return sdk.experimental_productAnalytics.record(batch);
@@ -91,7 +91,7 @@ describe("private analytics public contract", () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
       const { project } = seedProjectWithSource(harness.deps, { hostId: host.id });
-      const sdk = createNodeBbSdk({ baseUrl: "http://localhost", fetch: (url, init) => harness.app.request(url instanceof Request ? url.url : String(url), init) });
+      const sdk = createNodeBbSdk({ baseUrl: "http://localhost", fetch: async (url, init) => harness.app.request(url instanceof Request ? url.url : String(url), init) });
       const name = "private-product-name-not-an-analytics-property";
       await sdk.projects.update({ projectId: project.id, name });
       expect(getProject(harness.db, project.id)?.name).toBe(name);

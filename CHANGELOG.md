@@ -15,6 +15,9 @@
   Carry explicit CLI/MCP and native QA modes through existing durable lifecycle
   attribution. Stage plugin declarations until activation and retire removed
   framework actions without losing acknowledged history or duplicate receipts.
+- Correct private analytics scheduler UUID imports, bound JSON-call forwarding
+  types, and align consumer fixtures with normalized SDK input and fetch types
+  without changing outcome classification or delivery semantics.
 - Fence Tasks Start against concurrent draft revision/selection changes in its
   launch-receipt transaction. Retain the first validated bugfix reproduction
   across Return, permit retry after an exit-zero attempt, and keep legacy

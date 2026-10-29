@@ -35,7 +35,7 @@ describe("analytics queued send admission", () => {
   it("reports a real queued thread send as accepted rather than completed successfully", async () => {
     await withAnalyticsConsumer(async ({ harness, collector, work, thread }) => {
       const sdk = consumerSdk(harness, { actorKind: "agent", surface: "sdk", mode: "production", intentional: true, projectId: work.id, operationId: randomUUID() });
-      const input = [{ type: "text" as const, text: "owned queued message, never an analytics payload" }];
+      const input = [{ type: "text" as const, text: "owned queued message, never an analytics payload", mentions: [] }];
       const result = await sdk.threads.send({ threadId: thread.id, input, mode: "queue-if-active", model: "gpt-5", permissionMode: "full", serviceTier: "default", reasoningLevel: "medium" });
       expect(result).toMatchObject({ delivery: "queued" });
       expect(consumerReport(collector, work.id).rows.find((row) => row.featureId === "core.threads" && row.action === "send")).toMatchObject({ attempts: 1, accepted: 1, successes: 0, failures: 0, agent: 1 });

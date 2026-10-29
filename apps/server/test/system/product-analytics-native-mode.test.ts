@@ -15,7 +15,7 @@ describe("analytics native explicit smoke mode", () => {
       const providerThreadId = "owned-mode-provider-thread";
       seedThreadRuntimeState(harness.deps, { threadId: thread.id, environmentId: environment.id, providerThreadId });
       const sdk = consumerSdk(harness, { actorKind: "agent", surface: "sdk", mode: "smoke", intentional: true, projectId: work.id });
-      expect(await sdk.threads.send({ threadId: thread.id, input: [{ type: "text", text: "owned mode regression" }], mode: "start", model: "gpt-5", permissionMode: "full", reasoningLevel: "medium", serviceTier: "default" })).toMatchObject({ delivery: "sent" });
+      expect(await sdk.threads.send({ threadId: thread.id, input: [{ type: "text", text: "owned mode regression", mentions: [] }], mode: "start", model: "gpt-5", permissionMode: "full", reasoningLevel: "medium", serviceTier: "default" })).toMatchObject({ delivery: "sent" });
       const started = await harness.app.request("/internal/session/events", { method: "POST", headers: internalAuthHeaders(harness), body: JSON.stringify({ sessionId: session.id, eventGroups: groupHostDaemonEvents([{ threadId: thread.id, event: { type: "turn/started", threadId: thread.id, providerThreadId, scope: turnScope("owned-mode-turn") } }]) }) });
       expect(started.status).toBe(200);
       expect(await sdk.threads.get({ threadId: thread.id })).toMatchObject({ id: thread.id, status: "active" });
