@@ -37,6 +37,12 @@ does not become an attempt merely because the request uses POST or plugin RPC.
 Queued delivery is accepted admission, and a stale-hash write conflict is a
 failed conflict outcome rather than successful completion.
 
+Returned thread-action callbacks retain the target thread's Core project when
+their item is constructed; invoking them from another project's view does not
+replace that ownership. The local callback and its initiating RPC share that
+scope. Split-close observations use the removed pane's project rather than the
+newly focused surviving pane's project.
+
 Shared browser RPC calls use the same app-surface request wrapper as the SDK.
 The central TanStack mutation cache captures bounded provenance when a mutation
 is built, before asynchronous `onMutate` preparation. Each mutation-function
@@ -101,9 +107,12 @@ Bounds:
 
 `BB_PRODUCT_ANALYTICS_MODE` selects production, preview, smoke or test at the
 server boundary. CLI requests also forward an explicit value from their process
-environment, including MCP's inherited CLI environment. A non-production server
-does not accept client production tags as production popularity. Reports keep
-those planes separate. A test suite or replayed workload is not production demand.
+environment. MCP's existing per-request server factory validates the request's
+QA mode and binds it to each actual CLI call; the runner applies it only to that
+child's copied environment. Concurrent requests do not change the server's
+process environment. A non-production server does not accept client production
+tags as production popularity. Reports keep those planes separate. A test suite
+or replayed workload is not production demand.
 
 MCP semantic search/read/run observers receive the original HTTP request from
 the existing per-request server factory. They retain its bounded operation,
@@ -160,10 +169,14 @@ actual invocation/exit through the shared SDK outbox. A filesystem adapter uses
 500 exclusive reservation directories, seven-day expiry and per-envelope identity
 checks. A replayed receipt cannot remove a different queued action. The spool is
 isolated by a hash of the configured server URL; events retain their actual Core
-project, actor and QA plane. Exit recording uses synchronous filesystem admission;
-it does not wait for network delivery. Subsequent local activity retries pending
-delivery. `bb diagnostics product-analytics --json` exposes local health without
-event payloads. A watch starting is not a successful build. Diagnostic totals are
+project, actor and QA plane. Process-exit recording uses synchronous filesystem
+admission; it does not wait for network delivery. Normal local command completion
+also awaits the existing bounded outbox flush even if that command's own event
+could not enter a full spool. Reconnect delivery therefore does not require free
+capacity for a new event. `bb diagnostics product-analytics --json` exposes local
+health without event payloads. A watch starting is not a successful build;
+nonzero plugin-dev exit is failure, while a normally stopped watcher is cancelled.
+Diagnostic totals are
 bounded lower bounds after their 1 MiB log saturates; overflow, concurrent crashes,
 expiry, unavailable storage and device loss can leave gaps. This is not a power-loss
 or exactly-once guarantee. Production popularity cannot be inferred from these gaps.

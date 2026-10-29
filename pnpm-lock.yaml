@@ -5704,6 +5704,9 @@ importers:
       '@bb/process-utils':
         specifier: workspace:*
         version: link:../../packages/process-utils
+      '@bb/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@bb/server':
         specifier: workspace:*
         version: link:../../apps/server

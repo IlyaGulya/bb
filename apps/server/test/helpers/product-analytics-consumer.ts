@@ -1,5 +1,6 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { copyFile, mkdir, symlink, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createNodeBbSdk, experimental_createProductAnalyticsFetch, type ExperimentalProductAnalyticsContext } from "@bb/sdk";
 import type { ProductAnalyticsEvent, ProductAnalyticsReportQuery } from "@bb/server-contract";
 import { getPrivateProductAnalytics } from "../../src/services/system/product-analytics.js";
@@ -58,11 +59,14 @@ export function clientCompletion(action: string, operationId: string, projectId:
   return { operationId, featureId: "plugin.analytics-consumer", action, version: 1, scope: { kind: "project", projectId }, mode: "production", actorKind: "human", actorSessionId: null, surface: "web", stage: "completed", outcome: "succeeded", errorCode: "none", durationMs: 12, timestamp: Date.now() };
 }
 
-export async function installConsumerPlugin(harness: TestAppHarness, serverSource: string) {
+export async function installConsumerPlugin(harness: TestAppHarness, serverSource: string, options: { appSource?: string; sourceFiles?: readonly URL[]; nodeModules?: URL } = {}) {
   const root = join(harness.config.dataDir, "owned-plugin");
   await mkdir(root, { recursive: true });
-  await writeFile(join(root, "package.json"), JSON.stringify({ name: "bb-plugin-analytics-consumer", version: "0.1.0", type: "module", bb: { name: "Owned analytics consumer", description: "Consumer regression fixture", branding: { icon: "Zap" }, server: "./server.ts" } }));
+  await writeFile(join(root, "package.json"), JSON.stringify({ name: "bb-plugin-analytics-consumer", version: "0.1.0", type: "module", bb: { name: "Owned analytics consumer", description: "Consumer regression fixture", branding: { icon: "Zap" }, server: "./server.ts", ...(options.appSource === undefined ? {} : { app: "./app.tsx" }) } }));
   await writeFile(join(root, "server.ts"), serverSource);
+  if (options.appSource !== undefined) await writeFile(join(root, "app.tsx"), options.appSource);
+  for (const source of options.sourceFiles ?? []) await copyFile(source, join(root, basename(fileURLToPath(source))));
+  if (options.nodeModules !== undefined) await symlink(fileURLToPath(options.nodeModules), join(root, "node_modules"), "dir");
   const installed = await harness.pluginService.installPath(root);
   if (installed.status !== "running") throw new Error(`Owned plugin did not load: ${installed.statusDetail}`);
   return { root, pluginId: installed.id };

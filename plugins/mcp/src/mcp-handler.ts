@@ -9,6 +9,8 @@ import {
   type ToolTextResult,
 } from "./tools.js";
 
+export const mcpAnalyticsModeSchema = z.enum(["production", "preview", "smoke", "test"]);
+
 const SERVER_INSTRUCTIONS = [
   "bb is an agentic IDE: it runs coding agents (threads) inside projects, on environments and machines the user controls.",
   "This server exposes the whole `bb` command line through three tools.",
@@ -139,10 +141,15 @@ export function createBbMcpHttpHandler(
 ): BbMcpHttpHandler {
   const observeAnalytics = dependencies.observeAnalytics;
   const handler = createMcpHandler(
-    ({ requestInfo }) => createBbMcpServer(observeAnalytics === undefined ? dependencies : {
-      ...dependencies,
-      observeAnalytics: (action, run) => observeAnalytics(action, run, requestInfo),
-    }, version),
+    ({ requestInfo }) => {
+      if (observeAnalytics === undefined) return createBbMcpServer(dependencies, version);
+      const analyticsMode = mcpAnalyticsModeSchema.safeParse(requestInfo?.headers.get("x-bb-product-mode")).data ?? "production";
+      return createBbMcpServer({
+        ...dependencies,
+        runCli: (argv, options) => dependencies.runCli(argv, { ...options, analyticsMode }),
+        observeAnalytics: (action, run) => observeAnalytics(action, run, requestInfo),
+      }, version);
+    },
     { legacy: "stateless", onerror: onError },
   );
   return {
