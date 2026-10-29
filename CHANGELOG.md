@@ -2,6 +2,12 @@
 
 ## AgentOS fork — unreleased
 
+- Durably reset optional Core native-event v1-to-v2 replay before archiving when
+  retained in-scope events lack their own completed v2 artifacts. Do not infer safe
+  cursor progress from any one v2 artifact. Add a real-SQLite interruption/reopen
+  consumer regression preserving historical v1 evidence and deterministic receipts.
+  Raw bytes, permissions, CPA behavior and wire contracts remain unchanged; the
+  tests-only and product checkpoints await parent-owned BEFORE/AFTER execution.
 - Keep private-capture inputs and buttons comfortably tappable on compact screens,
   and wrap artifact actions within their card without changing desktop density.
 - Keep startup progress and cleanup diagnostics current without accumulating stale

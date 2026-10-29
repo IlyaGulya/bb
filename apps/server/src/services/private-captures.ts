@@ -377,13 +377,26 @@ async function archiveCoreSources(deps: CaptureDeps, row: SessionRow): Promise<v
   const session = row.session;
   if (!row.enabled || session.subject.threadId === null) return;
   if (session.policy.nativeEvents) {
+    const nativeScope = and(eq(events.threadId, session.subject.threadId), session.subject.runId === null ? undefined : eq(events.turnId, session.subject.runId), session.subject.nativeSessionId === null ? undefined : eq(events.providerThreadId, session.subject.nativeSessionId));
     let cursor = row.eventCursor;
     if (cursor > 0) {
       const historical = deps.db.select({ id: artifacts.artifactId }).from(artifacts).where(and(eq(artifacts.captureId, session.id), sql`json_extract(${artifacts.manifest}, '$.source') = 'native-events'`, sql`json_extract(${artifacts.manifest}, '$.version') = 1`)).limit(1).get();
-      const current = historical && deps.db.select({ id: artifacts.artifactId }).from(artifacts).where(and(eq(artifacts.captureId, session.id), sql`json_extract(${artifacts.manifest}, '$.source') = 'native-events'`, sql`json_extract(${artifacts.manifest}, '$.version') = 2`, sql`${artifacts.completedAt} is not null`)).limit(1).get();
-      if (historical && !current) cursor = 0;
+      const missing = historical && deps.db.select({ id: events.id }).from(events).where(and(nativeScope, gt(events.sequence, 0), lte(events.sequence, cursor), sql`not exists (
+        select 1 from ${artifacts}
+        where ${artifacts.captureId} = ${session.id}
+          and ${artifacts.completedAt} is not null
+          and ${artifacts.rejectedAt} is null
+          and json_extract(${artifacts.manifest}, '$.version') = 2
+          and json_extract(${artifacts.manifest}, '$.source') = 'native-events'
+          and json_extract(${artifacts.manifest}, '$.sourceId') = 'event:' || ${events.id} || ':' || ${events.sequence}
+      )`)).limit(1).get();
+      if (missing) {
+        committedBoundary(deps.db);
+        deps.db.update(sessions).set({ eventCursor: 0 }).where(eq(sessions.id, session.id)).run();
+        cursor = 0;
+      }
     }
-    const actual = deps.db.select({ id: events.id, sequence: events.sequence, dataBytes: sql<number>`octet_length(${events.data})` }).from(events).where(and(eq(events.threadId, session.subject.threadId), gt(events.sequence, cursor), session.subject.runId === null ? undefined : eq(events.turnId, session.subject.runId), session.subject.nativeSessionId === null ? undefined : eq(events.providerThreadId, session.subject.nativeSessionId))).orderBy(asc(events.sequence)).limit(32).all();
+    const actual = deps.db.select({ id: events.id, sequence: events.sequence, dataBytes: sql<number>`octet_length(${events.data})` }).from(events).where(and(nativeScope, gt(events.sequence, cursor))).orderBy(asc(events.sequence)).limit(32).all();
     for (const entry of actual) {
       requireCapture(deps, session.id, session.subject, true);
       if (entry.dataBytes > CAPTURE_MAX_ARTIFACT_BYTES - 65536) { gap(deps, session.id, "source_limit"); break; }

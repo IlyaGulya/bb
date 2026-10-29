@@ -96,6 +96,13 @@ service, instrumentation plan or inferred protocol support is introduced.
    and receipts, not silently skipped. Missing/corrupt bytes are failures. Recovered
    sync clears the current error without erasing cumulative gap counts. No success
    is inferred from an empty index, mapped root or absent activity.
+   Optional Core native-event v1-to-v2 replay checks the retained in-scope events
+   at or below the saved cursor for their own completed v2 artifacts. One completed
+   v2 event does not prove that the old cursor is safe. A missing event durably
+   resets the cursor to zero before any replay artifact is written; interruption
+   after artifact completion but before cursor advancement then reuses deterministic
+   manifests/receipts on retry. Historical v1 data remains immutable. This changes
+   no CPA capability claim, payload representation, authorization or wire field.
 7. **Bounded storage and retention.** At most 64 MiB/artifact, 256 MiB/512 artifacts
    per capture, 64 Core registrations and 2 GiB Core plaintext reservation plus
    bounded ciphertext framing overhead. Existing host optional-data outbox has
@@ -329,3 +336,30 @@ offline-ACK/privacy acceptance remain open. Use fresh actual native CPA artifact
 with byte-equal source/stored hashes, not old redacted artifacts or their stamps.
 No activation, deployment, Done/Accept or live source43 action is authorized by
 this handoff.
+
+## Native-event replay interruption checkpoint
+
+The bounded amendment starts at `3d2c610a46be60595c64e28e0beb16f886b4337c`.
+Tests-only checkpoint `2888adb3639afbfd5b010cd105e6b08e5bc943d6` adds
+`tests/integration/private-capture/native-events.test.ts` without changing product
+code or existing tests. Parent runs BEFORE from that checkpoint, then the same
+command after the separate product/docs/changelog commit:
+
+```sh
+pnpm exec turbo run test --filter=@bb/integration-tests -- '--project=@bb/integration-tests:private-capture*' private-capture/native-events.test.ts
+```
+
+The regression uses a real migrated SQLite copy, historical v1 artifacts and a
+saved cursor of 100. A SQLite trigger rejects the first event's cursor update only
+after its v2 artifact completes. The connection closes/reopens before retry; the
+consumer requires every retained event's exact normalized bytes, one v2 artifact
+and receipt set per event, stable replay identities, and unchanged v1 records and
+ciphertext. This models the logical interruption boundary, not physical power-loss
+durability or protected-key restoration. Source-inferred BEFORE behavior skips
+remaining retained rows; neither BEFORE nor AFTER was executed by this writer.
+
+Parent reports capture 16 PASS (7015), native 49 PASS (7002), and typed/build
+72 PASS (7017) for the preceding candidate. Those reports do not qualify this
+amendment. Parent's localhost fixture and stable hoisted filesystem mock fixes
+are untouched. No runtime, checks, probes, Main/source43 changes or nested actors
+were invoked for this amendment.
