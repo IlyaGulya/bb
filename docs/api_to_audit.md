@@ -107,6 +107,10 @@ Import and writer identities use POSIX-normalized session-file pathnames, not
 the discovery root or literal pathname spelling. Submitted descriptor paths still
 pass unchanged through host confinement checks. `attemptedSource` records an uncommitted candidate separately;
 rejected prefixes do not replace the committed source or Core provenance.
+The completed-import fast path uses the same POSIX pathname equivalence. Retrying
+an unchanged source after handoff or native admission returns its existing ready
+manifest without staging a candidate, pausing the import or changing its original
+continuation, committed provenance or registered writer.
 Admission waits for native resume acknowledgement, persists execution under the
 `native/session/admitted` source, and distinguishes unclaimed refusals from
 uncertain ownership. Only an unclaimed, never-accepted binding may be replaced.

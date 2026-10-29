@@ -52,6 +52,9 @@
 - Require complete native JSONL records for all artifact authority, including
   generic checkpoints, and normalize POSIX pathname spellings in import/writer
   identities without relaxing host path, descriptor or revision confinement.
+- Keep completed handoff and native-admitted imports ready when an unchanged
+  source is reselected through an equivalent POSIX pathname; preserve the
+  original continuation, committed provenance and writer without staging a retry.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact
