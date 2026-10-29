@@ -4,18 +4,25 @@ import memoryPlugin, { memoryRpcContract } from "./server.js";
 import type { MemorySelection } from "./lineage.js";
 
 type FixtureSdk = NonNullable<NonNullable<Parameters<typeof createFakePluginHost>[0]>["sdk"]>;
+type FixtureSource = {
+  bb: ReturnType<typeof createFakePluginHost>["bb"];
+  harness: ReturnType<typeof createFakePluginHost>["harness"];
+  store: ReturnType<typeof createStore>;
+  project: ReturnType<ReturnType<typeof createStore>["tasks"]["createProject"]>;
+  task: ReturnType<ReturnType<typeof createStore>["tasks"]["createTask"]>;
+};
 
-export async function createTaskMemoryFixture(projectId: string, sdk: FixtureSdk) {
-  const tasksHost = createFakePluginHost({ pluginId: "tasks" });
-  const tasks = createStore(tasksHost.bb);
+export async function createTaskMemoryFixture(projectId: string, sdk: FixtureSdk, source?: FixtureSource) {
+  const tasksHost = source ?? createFakePluginHost({ pluginId: "tasks" });
+  const tasks = source?.store ?? createStore(tasksHost.bb);
   registerTasksApi(tasksHost.bb, tasks);
-  const project = tasks.tasks.createProject({
+  const project = source?.project ?? tasks.tasks.createProject({
     name: "Owned task memory fixture",
     prefix: "MEMORY",
     color: "blue",
     linkedBbProjectId: projectId,
   });
-  const task = tasks.tasks.createTask({
+  const task = source?.task ?? tasks.tasks.createTask({
     projectId: project.id,
     title: "Retain the SQLite original",
     description: "Owned bounded evidence: use the existing SQLite store.",
@@ -56,7 +63,7 @@ export async function createTaskMemoryFixture(projectId: string, sdk: FixtureSdk
       commentId: null,
       revision: tasks.tasks.getTask(task.id)!.updatedAt,
       observedAt: Date.now(),
-      quote: "Owned bounded evidence: use the existing SQLite store.",
+      quote: task.description.slice(0, 600),
     },
     reason: "Inspected owned synthetic evidence",
     replaces: null,
