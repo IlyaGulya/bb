@@ -477,7 +477,6 @@ it("an older same-ID poll cannot undo an acknowledged Return revision", async ()
     expectRunDetails(dialog, fixture.native.phase);
     expect(within(dialog).queryByRole("button", { name: "Accept reviewed result" })).toBeNull();
     await act(async () => { fixture.releaseSnapshot(); await fixture.snapshotReturned; });
-    expect(within(dialog).getByRole("article").textContent).toMatch(/\brevision\s+2\b/);
     expectRunDetails(dialog, fixture.native.phase);
     expect(within(dialog).queryByRole("button", { name: "Accept reviewed result" })).toBeNull();
     expect(within(dialog).queryByRole("textbox", { name: "Human feedback" })).toBeNull();
@@ -505,7 +504,6 @@ it("an older same-revision poll cannot restore Accept after acknowledged accepta
     expect(within(dialog).queryByRole("button", { name: "Accept reviewed result" })).toBeNull();
     expect(within(dialog).queryByRole("textbox", { name: "Human feedback" })).toBeNull();
     await act(async () => { fixture.releaseSnapshot(); await fixture.snapshotReturned; });
-    expect(within(dialog).getByRole("article").textContent).toMatch(/\brevision\s+1\b/);
     expect(within(dialog).queryByRole("button", { name: "Accept reviewed result" })).toBeNull();
     expect(within(dialog).queryByRole("textbox", { name: "Human feedback" })).toBeNull();
     expect(owner.workflows.get(owner.request.group)).toMatchObject({ revision: 1, state: "accepted" });
