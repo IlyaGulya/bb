@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import type { ComponentType } from "react";
+import { z } from "zod";
 import { act, cleanup, fireEvent } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderSlot } from "@get-bb/plugin-sdk/testing/app";
@@ -19,7 +21,14 @@ vi.mock("@get-bb/plugin-sdk/app", async (importOriginal) => ({
 
 import { wsManager } from "./ws";
 import { useRealtime as useCoreRealtime } from "./plugin-sdk-hooks";
-import { SelectedThreadUsage } from "../../../../plugins/provider-usage/app";
+const usageModules = import.meta.glob(["../../../../plugins/provider-usage/app.tsx"]);
+const loadUsage = usageModules["../../../../plugins/provider-usage/app.tsx"];
+if (!loadUsage) throw new Error("Actual Provider Usage app module could not be located");
+const { SelectedThreadUsage } = z.object({
+  SelectedThreadUsage: z.custom<ComponentType<Record<string, unknown>>>(
+    (value) => typeof value === "function",
+  ),
+}).parse(await loadUsage());
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
