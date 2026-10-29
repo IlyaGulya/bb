@@ -390,6 +390,9 @@ Unknown or unbounded initial duration is displayed as unknown, not treated as
 corruption or playback readiness. Metadata/duration changes can supply a real
 finite duration later; can-play/playing and actual media errors still govern
 readiness and playback failure.
+Loading and buffering status stays below the player rather than covering native
+controls, including metadata-only preload before can-play. Uncovered controls do
+not imply decoded frames or successful playback.
 Core's shared acknowledged analytics outbox records local video outcomes without
 video content, filenames, URLs, task/attachment IDs or raw errors.
 
