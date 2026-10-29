@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { link, mkdtemp, mkdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { link, mkdtemp, mkdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { NativeRead, NativeSessionRoot } from "@bb/host-daemon-contract";
+import { NATIVE_SESSION_CHUNK_BYTES, type NativeRead, type NativeSessionRoot } from "@bb/host-daemon-contract";
 import { discoverNativeSessions, readNativeSession } from "./native-sessions.js";
+import type { NativeRecordObject } from "@bb/domain";
 
 const directories: string[] = [];
 afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
@@ -53,6 +54,33 @@ async function imageFixture(bytes = nativePng, hash = createHash("sha256").updat
     return proof;
   });
   return { directory, canonical, hash, source, records, imageProof: proofs[0]!, descriptorProof: proofs[1]!, argumentsProof: proofs[2]! };
+}
+
+async function numericSpillFixture(options: { toolName?: string; id?: string; record?: NativeRecordObject } = {}) {
+  const directory = await mkdtemp(join(tmpdir(), "bb-native-spill-"));
+  directories.push(directory);
+  const sessions = join(directory, "sessions");
+  const stem = join(sessions, "selected");
+  const foreignStem = join(sessions, "foreign");
+  const cwd = join(directory, "workspace");
+  await mkdir(stem, { recursive: true }); await mkdir(foreignStem); await mkdir(cwd);
+  const toolName = options.toolName ?? "bash";
+  const id = options.id ?? "25";
+  const reference = `artifact://${id}`;
+  const header = `${JSON.stringify({ type: "session", version: 3, id: "synthetic-numeric-spill", cwd })}\n`;
+  const record = JSON.stringify(options.record ?? { type: "message", message: { role: "toolResult", toolName, content: [{ type: "text", text: `Visible preview only\n[Raw output: ${reference}]` }], details: { timeoutSeconds: 60, wallTimeMs: 5 } } });
+  const original = Buffer.from(`${header}${record}\n`);
+  const path = join(sessions, "selected.jsonl");
+  await writeFile(path, original);
+  const fullBytes = Buffer.from(`START\0${"Full native tool output 🧭\n".repeat(20_000)}FULL-NATIVE-SPILL-TAIL`);
+  const spillPath = join(stem, `${id}.${toolName}-original.log`);
+  await writeFile(spillPath, fullBytes);
+  const discovered = await discoverNativeSessions({ roots: [{ engine: "omp", path: sessions, profile: "Synthetic numeric spill", artifactRoots: [stem] }], cursor: 0, limit: 100 });
+  const source = discovered.sessions.find((entry) => entry.path === path);
+  if (!source) throw new Error(discovered.warnings.join("; "));
+  const proof = { reference, recordOffset: Buffer.byteLength(header), recordLength: Buffer.byteLength(record), recordSha256: checksum(record), revision: null };
+  const input: NativeRead = { source, artifact: proof, offset: 0, length: NATIVE_SESSION_CHUNK_BYTES };
+  return { directory, stem, foreignStem, cwd, path, record, original, fullBytes, spillPath, source, proof, input };
 }
 
 describe("explicit native source boundaries", () => {
@@ -186,5 +214,83 @@ describe("explicit native source boundaries", () => {
     await writeFile(saved.canonical, Buffer.concat([nativePng, Buffer.from("changed")]));
     await expect(readNativeSession({ source: saved.source, artifact: { ...saved.imageProof, revision: first.revision }, offset: 16, length: 16 })).rejects.toThrow();
     await expect(readNativeSession({ source: saved.source, artifact: saved.imageProof, offset: 16, length: 16 })).rejects.toThrow();
+  });
+
+  it.each([
+    { toolName: "bash", id: "25" },
+    { toolName: "read", id: "25" },
+    { toolName: "eval", id: "25" },
+    { toolName: "bash", id: "0" },
+  ])("retains full native numeric spill bytes for $toolName artifact://$id without changing the native header or cwd", async (options) => {
+    const saved = await numericSpillFixture(options);
+    const pieces: Buffer[] = [];
+    let revision: string | null = null;
+    for (let offset = 0; offset < saved.fullBytes.length; offset += NATIVE_SESSION_CHUNK_BYTES) {
+      const result = await readNativeSession({ ...saved.input, offset, artifact: { ...saved.proof, revision } });
+      expect(result.sizeBytes).toBe(saved.fullBytes.length);
+      revision ??= result.revision;
+      expect(result.revision).toBe(revision);
+      pieces.push(Buffer.from(result.content, "base64"));
+    }
+    expect(Buffer.concat(pieces)).toEqual(saved.fullBytes);
+    expect(await readFile(saved.path)).toEqual(saved.original);
+    expect(saved.source.cwd).toBe(saved.cwd);
+  });
+
+  it("does not grant numeric spill authority to a user message", async () => {
+    const saved = await numericSpillFixture({ record: { type: "message", message: { role: "user", content: [{ type: "text", text: "[Raw output: artifact://25]" }] } } });
+    await expect(readNativeSession(saved.input)).rejects.toThrow();
+  });
+
+  it("does not grant numeric spill authority to tool arguments or a nested tool-result fragment", async () => {
+    const nested = { type: "message", message: { role: "toolResult", toolName: "bash", content: [{ type: "text", text: "[Raw output: artifact://25]" }], details: { timeoutSeconds: 60, wallTimeMs: 5 } } };
+    const saved = await numericSpillFixture({ record: { type: "message", message: { role: "assistant", content: [{ type: "toolCall", name: "bash", arguments: { entry: nested } }] } } });
+    await expect(readNativeSession(saved.input)).rejects.toThrow();
+    const fragment = JSON.stringify(nested);
+    const start = saved.record.indexOf(fragment);
+    if (start < 0) throw new Error("Synthetic tool-result fragment must occur inside the arguments.");
+    await expect(readNativeSession({ ...saved.input, artifact: { ...saved.proof, recordOffset: saved.proof.recordOffset + Buffer.byteLength(saved.record.slice(0, start)), recordLength: Buffer.byteLength(fragment), recordSha256: checksum(fragment) } })).rejects.toThrow();
+  });
+
+  it.each(["neighbor session", "native cwd"])("does not resolve a numeric spill from a foreign %s root", async (location) => {
+    const saved = await numericSpillFixture();
+    const foreign = location === "neighbor session" ? saved.foreignStem : saved.cwd;
+    await rename(saved.spillPath, join(foreign, basename(saved.spillPath)));
+    await expect(readNativeSession({ ...saved.input, source: { ...saved.source, artifactRoots: [saved.stem, foreign] } })).rejects.toThrow();
+  });
+
+  it.each(["25.credentials.json", ".mcp.json"])("does not treat an adjacent %s auth/configuration file as a numeric spill", async (name) => {
+    const saved = await numericSpillFixture();
+    await rm(saved.spillPath);
+    await writeFile(join(saved.stem, name), "SYNTHETIC CONFIGURATION THAT MUST NOT BE TRANSFERRED");
+    await expect(readNativeSession(saved.input)).rejects.toThrow();
+  });
+
+  it("does not follow a numeric spill symlink to another session", async () => {
+    const saved = await numericSpillFixture();
+    const outside = join(saved.foreignStem, basename(saved.spillPath));
+    await rename(saved.spillPath, outside);
+    await symlink(outside, saved.spillPath);
+    await expect(readNativeSession(saved.input)).rejects.toThrow();
+  });
+
+  it("does not follow a symbolic numeric spill session-stem directory", async () => {
+    const saved = await numericSpillFixture();
+    await rename(saved.stem, `${saved.stem}-moved`);
+    await writeFile(join(saved.foreignStem, basename(saved.spillPath)), saved.fullBytes);
+    await symlink(saved.foreignStem, saved.stem);
+    await expect(readNativeSession(saved.input)).rejects.toThrow();
+  });
+
+  it("retains the non-image hardlink ban for numeric spill outputs", async () => {
+    const saved = await numericSpillFixture();
+    await link(saved.spillPath, join(saved.foreignStem, "outside-alias.log"));
+    await expect(readNativeSession(saved.input)).rejects.toThrow();
+  });
+
+  it("refuses an ambiguous numeric spill ID instead of choosing between original logs", async () => {
+    const saved = await numericSpillFixture();
+    await writeFile(join(saved.stem, "25.read-original.log"), "DIFFERENT SAVED OUTPUT WITH THE SAME SESSION-LOCAL ID");
+    await expect(readNativeSession(saved.input)).rejects.toThrow();
   });
 });
