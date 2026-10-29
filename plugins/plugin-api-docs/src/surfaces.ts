@@ -1295,7 +1295,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         summary: "Retain selected native histories through the same Core path as the import UI and CLI, without starting agents or Tasks.",
         bullets: [
           "Discover explicit machine/profile roots and preview bounded source bytes; archive selected or bulk OMP, Claude Code and Codex histories",
-          "Page and search full retained native records, stream original JSONL and referenced artifacts, and inspect source identities, branches, checksums and recoverable import progress",
+          "Page and search full retained native records and ready numeric OMP tool spill text with native-record authority and complete spill checksum validation; stream original JSONL and referenced artifacts, and inspect source identities, branches, checksums and recoverable import progress",
           "Retain canonical OMP blob:sha256 image references from native image positions, including saved images and snapcompact frames; select their blob directory explicitly as an artifact root, with no file authority from ordinary text or tool arguments",
           "Native image display-sidecar hardlinks require whole-record image authority, verified canonical content hash and positive image-format identification; generic hardlinks remain forbidden and every chunk retains confined-path and file-revision checks",
           "All artifact authority requires complete native JSONL records, never record-shaped fragments in tool arguments; POSIX pathname aliases share import/writer identities without weakening host path or file-descriptor confinement",
