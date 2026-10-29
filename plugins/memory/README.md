@@ -102,11 +102,19 @@ provenance changes cannot erase acquired restrictions. Conflicting historical
 origins fail closed rather than choosing a wider context. No new archive,
 Core database migration or governance action is introduced.
 
-Stored-original controls pass the persisted artifact ID, execution context and
-raw-text hash to `readMemoryArtifact` as `pin`. The server validates that pin
-against the actual native result before returning evidence. Deletion and UUID
-reuse cannot silently substitute different content. Fresh inspection uses a
-null pin; CLI `artifact --revision <stored-hash>` requests pinned inspection.
+Stored-original controls pass the persisted artifact ID, execution context,
+raw-message hash and bounded source excerpt to `readMemoryArtifact` as `pin`.
+The raw hash identifies the containing message, not its retained selection.
+Before returning evidence, the server requires every nonempty stored excerpt
+to occur exactly within the native retained selected quote, not merely within
+the containing message. A valid bounded subset is accepted; a different
+selection lacking that excerpt is rejected even when UUID and raw hash match.
+The returned source preserves the validated excerpt.
+
+Fresh inspection still uses a null pin. CLI `artifact --revision <stored-hash>
+--quote '<stored-excerpt>'` uses the same guard; `--quote` requires `--revision`.
+An explicitly empty excerpt means no selected text was persisted: only the
+ID/context/container hash can be verified, not full selection identity.
 Native original status and URL still come from Tasks; the inspector reads
 retained selected text/metadata, not image bytes or full transcripts.
 

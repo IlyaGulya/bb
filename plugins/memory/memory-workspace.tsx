@@ -175,7 +175,7 @@ function TaskDraft({ selection, sources, memory, replacing, onSaved, onCancel, o
     setInspecting(true);
     try {
       const inspected = await rpc.call("readMemoryArtifact", { ...selection, artifactId: source.artifactId,
-        pin: { artifactId: source.artifactId, executionContextId: source.executionContextId, revision: source.revision } });
+        pin: { artifactId: source.artifactId, executionContextId: source.executionContextId, revision: source.revision, quote: "" } });
       if (request !== sourceRequest.current) return;
       if (inspected.source.artifactId !== source.artifactId || inspected.source.executionContextId !== source.executionContextId || inspected.source.revision !== source.revision) throw new Error("Retained evidence changed; refresh and explicitly select it again");
       setSelectedSource({ ...source, observedAt: inspected.source.observedAt }); setInspection(inspected);
@@ -293,7 +293,7 @@ function TaskMemories({ selection, threadId }: { selection: MemorySelection; thr
   const inspectOriginal = (source: ArtifactSource, event: { isTrusted: boolean }) => {
     analytics.opened("source.inspect", selection, event);
     void act(async () => { setOriginal(null); setOriginal(await rpc.call("readMemoryArtifact", { ...selection, artifactId: source.artifactId,
-      pin: { artifactId: source.artifactId, executionContextId: source.executionContextId, revision: source.revision } })); });
+      pin: { artifactId: source.artifactId, executionContextId: source.executionContextId, revision: source.revision, quote: source.quote } })); });
   };
   if (loading && data === null) return <p role="status" className="text-sm text-muted-foreground">Loading scoped task memory and source revisions…</p>;
   return <div aria-busy={loading} className="space-y-4">

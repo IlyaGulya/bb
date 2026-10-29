@@ -132,12 +132,19 @@ availability; deletion or revoked access to the artifact itself may prevent
 inspection. Memory stores the source reference, not a second artifact copy.
 
 Reading a stored original must preserve its pin. Use `artifact --revision
-'<revision from the stored source>'` with the stored artifact ID and actual
-execution-context selector. Without `--revision`, `artifact` is a fresh
-inspection, not verification of an older reference. Fact, history and proposal
-original controls send the persisted ID/context/hash automatically; draft
-selection pins the listed identity before inspection. A reused UUID with a
-different retained hash fails instead of showing substituted evidence.
+'<revision from the stored source>' --quote '<exact stored source excerpt>'`
+with the stored artifact ID and actual execution-context selector. `--quote`
+requires `--revision`. Without either flag, `artifact` remains fresh inspection,
+not verification of an older reference. Fact, history and proposal original
+controls send the persisted ID/context/hash/excerpt automatically; draft
+selection pins the listed identity with an explicitly empty excerpt.
+
+A nonempty persisted excerpt must occur exactly within the native retained
+selected quote before a view is returned. It may be a bounded subset, not the
+entire selection. UUID reuse choosing a disjoint excerpt from the same unchanged
+message is rejected even though the raw-message hash stays equal. The returned
+source preserves the validated excerpt. An empty excerpt carries no selected
+text to verify; it does not establish full retained-selection identity.
 
 Artifact-derived revisions retain server-owned `lineage.evidenceContextIds`
 independently of mutable provenance. Reflection cannot remove an originating
@@ -283,10 +290,12 @@ an explicit value. `memoryHistory` accepts `name` and nullable `version`;
 inspection paths shared by UI and CLI. Settings RPC does not provide an
 unscoped all-project read or ID-only mutation.
 `readMemoryArtifact` accepts `artifactId` and nullable `pin`, whose strict shape
-is `{artifactId,executionContextId,revision}`. Omission normalizes to `null`
-for fresh inspection. A stored pin must match the selected ID/context and the
-native retained raw-text SHA-256 before a view is returned. This does not
-change Source30's native RPC contracts. `evidenceContextIds` is output/store
+is `{artifactId,executionContextId,revision,quote}`. A non-null pin requires all
+four fields; `quote` is the exact persisted excerpt, at most 600 characters,
+or explicitly empty when absent. Omitting the pin normalizes to `null` for
+fresh inspection. ID/context, native raw-message SHA-256 and nonempty excerpt
+membership in the retained selected quote are validated before returning a
+view. This does not change Source30's native RPC contracts. `evidenceContextIds` is output/store
 metadata, not an accepted draft or reflection input field.
 `listMemories` takes `{projectId,task,executionContextId,offset}` and returns
 `{memories,total,previousOffset,nextOffset}`; `null` marks a page boundary.
