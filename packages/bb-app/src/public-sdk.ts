@@ -66,6 +66,7 @@ export class BBSdk implements BbSdk {
   readonly experimental_gatewayLogs: BbSdk["experimental_gatewayLogs"];
   readonly experimental_modelConnections: BbSdk["experimental_modelConnections"];
   readonly experimental_promptHistory: BbSdk["experimental_promptHistory"];
+  readonly experimental_productAnalytics: BbSdk["experimental_productAnalytics"];
   readonly experimental_server: BbSdk["experimental_server"];
   readonly files: BbSdk["files"];
   readonly guide: BbSdk["guide"];
@@ -90,6 +91,7 @@ export class BBSdk implements BbSdk {
     this.experimental_gatewayLogs = sdk.experimental_gatewayLogs;
     this.experimental_modelConnections = sdk.experimental_modelConnections;
     this.experimental_promptHistory = sdk.experimental_promptHistory;
+    this.experimental_productAnalytics = sdk.experimental_productAnalytics;
     this.experimental_server = sdk.experimental_server;
     this.files = sdk.files;
     this.guide = sdk.guide;
