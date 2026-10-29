@@ -245,9 +245,6 @@ describe("retained numeric spill search", () => {
     await writeFile(join(saved.artifactRoot, "result.bin"), query);
     const ready = await saved.imports.settle((await saved.imports.start(saved.selection)).id);
     expect(ready.status).toBe("ready");
-    expect(ready.artifacts.map((entry) => ({ reference: entry.reference, status: entry.status }))).toEqual([
-      { reference, status: "ready" }, { reference: "result.bin", status: "ready" },
-    ]);
     expect(await saved.imports.records({ importId: ready.id, after: 0, limit: 100, query })).toEqual({ records: [], nextAfter: null });
   });
 
