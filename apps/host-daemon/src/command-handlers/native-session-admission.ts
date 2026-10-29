@@ -1,10 +1,11 @@
 import type { NativeSessionSource } from "@bb/host-daemon-contract";
-import type { AgentRuntime, ResumeThreadArgs } from "@bb/agent-runtime";
+import type { AgentRuntime } from "@bb/agent-runtime";
 import type { RuntimeThreadExecutionOptions } from "@bb/domain";
 import { requireResolvedWorkspaceForCommand } from "../workspace-resolution.js";
 import { resolveRuntimeBridgeLaunch, type CommandDispatchOptions, type CommandOf } from "../command-dispatch-support.js";
 import { readNativeSession, readNativeSessionIdentity } from "./native-sessions.js";
 
+type ResumeThreadArgs = Parameters<AgentRuntime["resumeThread"]>[0];
 type NativeOwner = { key: string; state: "pending" | "owned" | "uncertain"; promise: Promise<void> };
 const owners = new WeakMap<AgentRuntime, Map<string, NativeOwner>>();
 class NativeOwnershipUncertainError extends Error {}
