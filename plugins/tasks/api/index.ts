@@ -439,7 +439,7 @@ export async function createComment(
   if (!input.notify) return comment;
 
   const deliver = async (): Promise<StoredComment> => {
-    const notifiedCount = await deliverCommentToLatestAgent(bb, store.tasks, {
+    const notifiedCount = await deliverCommentToLatestAgent(bb, store, {
       taskId: comment.taskId,
       commentId: comment.id,
       body: comment.body,

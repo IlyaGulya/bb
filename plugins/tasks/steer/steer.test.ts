@@ -4,7 +4,6 @@ import {
   makeHostResponse,
 } from "@get-bb/plugin-sdk/testing";
 import { afterEach, describe, expect, it } from "vitest";
-import { createTasksStore } from "../db";
 import { deliverCommentToLatestAgent } from ".";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { createComment, createStore, registerTasksApi } from "../api/index.js";
@@ -34,14 +33,14 @@ function setup(
       },
     },
   });
-  const db = host.bb.storage.database();
-  const store = createTasksStore(db);
-  const project = store.createProject({
+  const store = createStore(host.bb);
+  const db = store.database;
+  const project = store.tasks.createProject({
     name: "Plugin",
     prefix: "PLUG",
     color: "blue",
   });
-  const task = store.createTask({ projectId: project.id, title: "Steer work" });
+  const task = store.tasks.createTask({ projectId: project.id, title: "Steer work" });
   return { ...host, db, store, task };
 }
 
@@ -54,28 +53,28 @@ const input = {
 describe("comment notification delivery", () => {
   it("notifies only the latest replying agent despite newer unrelated task activity", async () => {
     const { bb, db, harness, store, task } = setup();
-    const older = store.createComment({
+    const older = store.tasks.createComment({
       taskId: task.id,
       kind: "agent",
       authorName: "First agent",
       threadId: "thr_first",
       body: "First reply",
     });
-    const latest = store.createComment({
+    const latest = store.tasks.createComment({
       taskId: task.id,
       kind: "agent",
       authorName: "Second agent",
       threadId: "thr_second",
       body: "Latest reply",
     });
-    store.upsertTaskThread({
+    store.tasks.upsertTaskThread({
       taskId: task.id,
       threadId: "thr_second",
       presetName: "Default",
       title: "Second agent",
       liveStatus: "working",
     });
-    const unrelated = store.upsertTaskThread({
+    const unrelated = store.tasks.upsertTaskThread({
       taskId: task.id,
       threadId: "thr_first",
       presetName: "Default",
@@ -121,7 +120,7 @@ describe("comment notification delivery", () => {
     const { bb, harness, store, task } = setup((threadId) =>
       makeThreadResponse({ id: threadId, status: "idle" }),
     );
-    store.createComment({
+    store.tasks.createComment({
       taskId: task.id,
       kind: "agent",
       authorName: "Idle agent",
@@ -154,14 +153,14 @@ describe("comment notification delivery", () => {
 
   it("does not fall back when the latest agent reply has no thread", async () => {
     const { bb, harness, store, task } = setup();
-    store.createComment({
+    store.tasks.createComment({
       taskId: task.id,
       kind: "agent",
       authorName: "Older linked agent",
       threadId: "thr_older",
       body: "Older reply",
     });
-    store.createComment({
+    store.tasks.createComment({
       taskId: task.id,
       kind: "agent",
       authorName: "Legacy agent",
@@ -185,7 +184,7 @@ describe("comment notification delivery", () => {
         visibility: "hidden",
       }),
     );
-    store.createComment({
+    store.tasks.createComment({
       taskId: task.id,
       kind: "agent",
       authorName: "Side chat",
@@ -204,7 +203,7 @@ describe("comment notification delivery", () => {
 
   it("records delivery failure without trying another agent", async () => {
     const { bb, harness, store, task } = setup();
-    store.createComment({
+    store.tasks.createComment({
       taskId: task.id,
       kind: "agent",
       authorName: "Latest agent",
