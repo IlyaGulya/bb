@@ -268,12 +268,12 @@ describe("native archive Core timeline", () => {
   }
 
   it.each([true, false])("renders a ready two-record standalone tool-result archive with deferContent=%s", async (deferContent) => {
-    const preview = "Saved standalone bash output\n[Raw output: artifact://17]";
+    const preview = "Bounded preview only\n[Raw output: artifact://17]";
     const needle = "RETAINED_TIMELINE_SPILL_TAIL";
     const spill = Buffer.from(`${"Saved native tool output\n".repeat(16_000)}${needle}`);
     const saved = await createNativeArchiveFixture({ records: (id, cwd) => [
-      nativeHeader("omp", id, cwd),
-      { type: "message", id: "standalone-result", message: { role: "toolResult", toolCallId: "saved-call", toolName: "bash", content: [{ type: "text", text: preview }] } },
+      { type: "session", version: 3, id, cwd },
+      { type: "message", message: { role: "toolResult", toolName: "bash", content: [{ type: "text", text: preview }] } },
     ] });
     const stem = join(saved.leafRoot, "source");
     await mkdir(stem);
@@ -302,7 +302,7 @@ describe("native archive Core timeline", () => {
     expect(allRows(timeline.rows)).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: "work", status: "completed", output: preview }),
     ]));
-    expect((await saved.imports.records({ importId: ready.id, after: 0, limit: 100, query: needle })).records.map((record) => record.nativeId)).toEqual(["standalone-result"]);
+    expect((await saved.imports.records({ importId: ready.id, after: 0, limit: 100, query: needle })).records.map((record) => ({ ordinal: record.ordinal, nativeId: record.nativeId }))).toEqual([{ ordinal: 2, nativeId: null }]);
     expect(stored()).toEqual(before);
     expect(await saved.imports.get(ready.id)).toEqual(ready);
     await expectOriginalArchive(saved, ready.id);
