@@ -1,13 +1,16 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-import { classifyStoredProviderThreadClaim, createProject, getLastStoredProviderThreadId, getLatestThreadSequence, getThreadExecutionBinding, getThreadPluginMetadata, insertEvents, noopNotifier } from "@bb/db";
+import { classifyStoredProviderThreadClaim, createProject, events, getLastStoredProviderThreadId, getLatestThreadSequence, getThread, getThreadExecutionBinding, getThreadPluginMetadata, insertEvents, noopNotifier } from "@bb/db";
 import { NATIVE_HISTORY_OWNER, type JsonValue } from "@bb/domain";
 import { NATIVE_SESSION_CHUNK_BYTES } from "@bb/host-daemon-contract";
+import { threadTimelineResponseSchema, timelineRowChildren, type TimelineRow } from "@bb/server-contract";
 import { createNativeArchiveFixture, disposeNativeArchiveFixtures, nativeChecksum, nativeHeader, nativeUser } from "./helpers/native-session-import.js";
 import { completeNativeAdmission, createNativeContinuationFixture, disposeNativeContinuationFixtures } from "./helpers/native-session-continuation.js";
 import { createNativeSessionHandoff } from "../../../apps/server/src/services/threads/native-session-continuation.js";
 import { nativeWriterNamespace } from "../../../apps/server/src/services/threads/native-session-imports.js";
+import { buildThreadTimelineWithProfile } from "../../../apps/server/src/services/threads/timeline.js";
 
 afterEach(disposeNativeArchiveFixtures);
 afterEach(disposeNativeContinuationFixtures);
@@ -256,5 +259,52 @@ describe("retained numeric spill search", () => {
     const saved = await retainedSpill(Buffer.from(query));
     await writeFile(join(saved.imports.directory(saved.ready.id), "native.jsonl"), saved.original.replace("Bounded", "B0unded"));
     await expect(saved.imports.records({ importId: saved.ready.id, after: 0, limit: 100, query })).rejects.toThrow("Native archive record checksum mismatch.");
+  });
+});
+
+describe("native archive Core timeline", () => {
+  function allRows(rows: readonly TimelineRow[]): TimelineRow[] {
+    return rows.flatMap((row) => [row, ...allRows(timelineRowChildren(row) ?? [])]);
+  }
+
+  it.each([true, false])("renders a ready two-record standalone tool-result archive with deferContent=%s", async (deferContent) => {
+    const preview = "Saved standalone bash output\n[Raw output: artifact://17]";
+    const needle = "RETAINED_TIMELINE_SPILL_TAIL";
+    const spill = Buffer.from(`${"Saved native tool output\n".repeat(16_000)}${needle}`);
+    const saved = await createNativeArchiveFixture({ records: (id, cwd) => [
+      nativeHeader("omp", id, cwd),
+      { type: "message", id: "standalone-result", message: { role: "toolResult", toolCallId: "saved-call", toolName: "bash", content: [{ type: "text", text: preview }] } },
+    ] });
+    const stem = join(saved.leafRoot, "source");
+    await mkdir(stem);
+    await writeFile(join(stem, "17.bash-original.log"), spill);
+    const selection = { ...saved.selection, source: { ...saved.source, artifactRoots: [...saved.source.artifactRoots, stem] } };
+    const ready = await saved.imports.settle((await saved.imports.start(selection)).id);
+    expect(ready).toMatchObject({ status: "ready", mode: "archive", records: 2, continuationThreadId: null, sha256: nativeChecksum(saved.original) });
+    expect(ready.artifacts).toMatchObject([{ reference: "artifact://17", recordOrdinal: 2, status: "ready", bytes: spill.length, sha256: nativeChecksum(spill) }]);
+    const thread = ready.threadId === null ? null : getThread(saved.db, ready.threadId);
+    if (!thread) throw new Error("Ready synthetic import has no Core thread.");
+    const stored = () => saved.db.select().from(events).where(eq(events.threadId, thread.id)).orderBy(events.sequence).all();
+    const before = stored();
+    const { response } = buildThreadTimelineWithProfile(saved.db, thread, {
+      completedTurnDisplay: "collapse",
+      deferContent,
+      eventBudget: 1_000_000,
+      includeClearedContextHistory: false,
+      includeDiagnosticOperations: false,
+      includeNestedRows: false,
+      maxInlineOutputChars: 32_000,
+      maxSeq: getLatestThreadSequence(saved.db, { threadId: thread.id }),
+      page: { kind: "latest", segmentLimit: 8 },
+      summaryOnly: false,
+    });
+    const timeline = threadTimelineResponseSchema.parse(response);
+    expect(allRows(timeline.rows)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "work", status: "completed", output: preview }),
+    ]));
+    expect((await saved.imports.records({ importId: ready.id, after: 0, limit: 100, query: needle })).records.map((record) => record.nativeId)).toEqual(["standalone-result"]);
+    expect(stored()).toEqual(before);
+    expect(await saved.imports.get(ready.id)).toEqual(ready);
+    await expectOriginalArchive(saved, ready.id);
   });
 });
