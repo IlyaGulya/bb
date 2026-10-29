@@ -2,6 +2,8 @@
 
 ## AgentOS fork — unreleased
 
+- Keep first-use workflow checks open while entering commands, so autosave
+  preserves the complete smoke command instead of closing after its first character.
 - Restore Tasks bundled-build prerequisites and declared runtime outputs so clean
   package builds wait for the plugin build tool and cache their bundled artifacts.
 - Preserve successful startup history during ordinary runtime shutdown while still

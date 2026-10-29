@@ -225,7 +225,13 @@ it("keeps one actionable workflow entry across draft saves, refresh and reopen w
   fireEvent.click(trigger);
   await slot.findByRole("dialog", { name: "Launch workflow" });
   const checks = await slot.findByRole("textbox", { name: /Required platform smoke commands/ });
-  fireEvent.change(checks, { target: { value: "node smoke.mjs" } });
+  const setup = checks.closest("details");
+  if (!(checks instanceof HTMLTextAreaElement) || !(setup instanceof HTMLDetailsElement)) throw new Error("First-use workflow checks are unavailable");
+  checks.focus();
+  for (const character of "node smoke.mjs") {
+    fireEvent.change(checks, { target: { value: checks.value + character } });
+    expect(setup.open).toBe(true);
+  }
   await waitFor(() => expect(drafts.draft(task.id).selection.smokeCommands).toEqual(["node smoke.mjs"]));
   slot.rerender(<WorkflowHarness taskId={task.id} />);
   await slot.behavior.emitRealtime("projects:changed", {});

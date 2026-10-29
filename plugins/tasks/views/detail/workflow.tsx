@@ -32,6 +32,7 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
   const [feedback, setFeedback] = useState("");
   const [settings, setSettings] = useState<{ revision: number; selection: WorkflowSelection | null } | null>(null);
   const [checksText, setChecksText] = useState<string | null>(null);
+  const [checksOpen, setChecksOpen] = useState<boolean | null>(null);
   const lock = useRef(false);
   const runMutationGeneration = useRef(0);
   const active = runs.some(run => run.state !== "accepted");
@@ -136,7 +137,7 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
         {!runsLoaded ? <div aria-label="Loading workflow state"><Skeleton className="h-40 w-full" /></div> : !showSetup ? <section aria-label="Workflow run details" className="space-y-4">{runDetails}</section> : !selection ? <div className="space-y-3" aria-label="Loading saved workflow draft"><Skeleton className="h-10 w-full" /><Skeleton className="h-40 w-full" /></div> : <div className="min-w-0 space-y-4">
           <p className="text-sm text-muted-foreground">Code project: {project.data?.name ?? "Link this task's tracker project to a code project first"}</p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="min-w-0 space-y-1 text-sm"><span>Workflow</span><ExecutionPicker label="Workflow template" value={selection.template} options={WORKFLOW_TEMPLATES.map(entry => ({ value: entry.id, label: entry.name }))} dialogOpen={open} disabled={frozen} onChange={value => { const next = WORKFLOW_TEMPLATES.find(entry => entry.id === value); if (next) { change({ template: next.id }); setChecksText(null); } }} /></label>
+            <label className="min-w-0 space-y-1 text-sm"><span>Workflow</span><ExecutionPicker label="Workflow template" value={selection.template} options={WORKFLOW_TEMPLATES.map(entry => ({ value: entry.id, label: entry.name }))} dialogOpen={open} disabled={frozen} onChange={value => { const next = WORKFLOW_TEMPLATES.find(entry => entry.id === value); if (next) { change({ template: next.id }); setChecksText(null); setChecksOpen(null); } }} /></label>
             <label className="min-w-0 space-y-1 text-sm"><span>Execution machine</span><ExecutionPicker label="Execution machine" value={selection.hostId} options={(machines.data ?? []).map(machine => ({ value: machine.id, label: machine.name }))} dialogOpen={open} disabled={frozen} onChange={hostId => change({ hostId })} /></label>
             {(error ?? preparationError)?.toLowerCase().startsWith("machine:") && <p role="alert" className="text-sm text-destructive">{error ?? preparationError}</p>}
           </div>
@@ -145,12 +146,12 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
           {repairingFirstLaunch && <p className="text-sm text-muted-foreground">No writer session was created. You can explicitly repair the role choices here, save the draft, then Return with feedback to retry. Existing or uncertain sessions are never replaced.</p>}
           <WorkflowRoleFields label="Writer" role={selection.writer} onChange={writer => change({ writer })} profiles={profiles} contexts={selections.contexts.data ?? []} connections={selections.connections.data ?? []} hostId={selection.hostId} projectId={project.data?.id ?? null} open={open} disabled={roleFrozen} error={(error ?? preparationError)?.toLowerCase().startsWith("writer:") ? error ?? preparationError ?? undefined : undefined} />
           <WorkflowRoleFields label="Independent reviewer" role={selection.reviewer} onChange={reviewer => change({ reviewer })} profiles={profiles} contexts={selections.contexts.data ?? []} connections={selections.connections.data ?? []} hostId={selection.hostId} projectId={project.data?.id ?? null} open={open} disabled={roleFrozen} error={(error ?? preparationError)?.toLowerCase().startsWith("reviewer:") ? error ?? preparationError ?? undefined : undefined} />
-          <details open={selection.smokeCommands.length === 0 ? true : undefined} className="border-t border-border pt-3">
+          <details open={checksOpen ?? (selection.smokeCommands.length === 0)} onToggle={event => setChecksOpen(event.currentTarget.open)} className="border-t border-border pt-3">
             <summary className="cursor-pointer text-sm font-medium">{selection.smokeCommands.length ? `Project checks · ${selection.smokeCommands.length} configured` : "First-use setup · configure real project checks"}</summary>
             <div className="mt-3 space-y-3">
               <p className="text-sm text-muted-foreground">Checks come from this project and template. Nothing has passed until the native writer executes them. Saving project settings is always explicit.</p>
               {settings?.selection && <Button type="button" variant="outline" size="sm" disabled={frozen} onClick={() => { draft.change(settings.selection!); setChecksText(null); }}>Use saved project settings</Button>}
-              <label className="block space-y-1 text-sm"><span>Required platform smoke commands · one per line</span><Textarea disabled={frozen} value={checksText ?? selection.smokeCommands.join("\n")} onChange={event => { setChecksText(event.target.value); change({ smokeCommands: event.target.value.split("\n").map(command => command.trim()).filter(Boolean) }); }} rows={4} /></label>
+              <label className="block space-y-1 text-sm"><span>Required platform smoke commands · one per line</span><Textarea disabled={frozen} value={checksText ?? selection.smokeCommands.join("\n")} onFocus={() => setChecksOpen(true)} onChange={event => { setChecksText(event.target.value); change({ smokeCommands: event.target.value.split("\n").map(command => command.trim()).filter(Boolean) }); }} rows={4} /></label>
               <label className="block space-y-1 text-sm"><span>Human-review evidence policy</span><ExecutionPicker label="Human-review evidence policy" value={selection.evidencePolicy?.requirement ?? (selection.uiRequired ? "legacy-ui" : "legacy-technical")} options={[
                 { value: "technical", label: "Backend / CLI · technical smoke required" },
                 { value: "video", label: "UI / interactive · video required (default for new UI work)" },
