@@ -78,6 +78,7 @@ import {
   type PromptWithGroups,
 } from "./deferred-first-turn-context.js";
 import type { TelemetryEvent } from "../system/telemetry.js";
+import { rememberAnalyticsTurnMode } from "../system/product-analytics-turns.js";
 import { assertThreadHostAcceptsWork } from "./thread-host-admission.js";
 
 type SendThreadMessageMode = SendMessageRequest["mode"];
@@ -455,6 +456,7 @@ function appendAndQueueSendThreadMessageInTransaction({
     },
     { behavior: "immediate" },
   );
+  rememberAnalyticsTurnMode(db, thread.id, target);
   return {
     activeThread,
     request,

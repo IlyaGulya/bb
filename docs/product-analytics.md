@@ -29,6 +29,14 @@ cross-project aggregate or new authorization model: the existing owner-facing
 API gate still applies, and an absent/deleted project is not an available
 report scope.
 
+Request observation does not read or clone the incoming body. Scope selectors
+are observed only when the guarded product consumer parses JSON; raw-body
+handlers retain the original bytes. Actual project/thread/environment/terminal
+ownership takes precedence over ambient client context. Explicit observe intent
+does not become an attempt merely because the request uses POST or plugin RPC.
+Queued delivery is accepted admission, and a stale-hash write conflict is a
+failed conflict outcome rather than successful completion.
+
 ## Collection and delivery
 
 The server appends validated events in an independent committed SQLite
@@ -47,6 +55,12 @@ outbox can match its queued envelope; the report's stored plane is authoritative
 for normalized QA attribution. A receipt's echoed production tag does not mean
 a smoke/preview server stored production popularity.
 
+Plugin declarations stay local to the candidate handle until activation.
+Disposal retires only the declaration owned by that handle; a failed candidate
+cannot replace the active generation's completion authority. Live framework
+catalog reconciliation retires removed RPC/HTTP/CLI entries without deleting
+their committed history or changing duplicate delivery receipts.
+
 The browser uses IndexedDB and the shared SDK outbox. It retains pending
 records across reload, retries after reconnect, checks per-stage receipt
 identity, and retains missing/mismatched/retry receipts. An accepted or duplicate
@@ -57,6 +71,12 @@ Bounds:
 - Server: 30-day event retention, 100,000 events, 10,000 pending; project at most
   500 pending records per sweep. Instance identity and cumulative delivery
   counters are diagnostic state, not a retained payload/event history.
+- Native dispatch retains only a validated QA mode under a hashed pending-thread
+  key in existing Core key-value storage: one marker per pending thread, at most
+  10,000 markers, with 30-day expiry in the existing collector sweep. An admitted
+  native start consumes the marker; paired completion uses the existing durable
+  event attribution across restart. Marker storage failure remains a visible gap
+  and does not fail the primary dispatch. No request content or new queue is stored.
 - Browser: 500 pending events, seven-day expiry, 50 events per batch, at most
   ten batches per flush. Reconnect and periodic delivery reuse the same outbox.
 - Storage failures, projection failures, capacity limits, expiry, rejected
@@ -66,9 +86,10 @@ Bounds:
   store can lose events. This is not an exactly-once or lossless guarantee.
 
 `BB_PRODUCT_ANALYTICS_MODE` selects production, preview, smoke or test at the
-server boundary. A non-production server does not accept client production tags
-as production popularity. Reports keep those planes separate. A test suite or
-replayed workload is not production feature demand.
+server boundary. CLI requests also forward an explicit value from their process
+environment, including MCP's inherited CLI environment. A non-production server
+does not accept client production tags as production popularity. Reports keep
+those planes separate. A test suite or replayed workload is not production demand.
 
 ## Coverage inventory
 

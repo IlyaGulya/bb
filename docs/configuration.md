@@ -43,6 +43,12 @@ that server's non-production plane. Explicit non-production client events also
 stay non-production. A late completion preserves its already admitted start's
 mode, actor and surface across a server promotion.
 
+The CLI also forwards an explicit `BB_PRODUCT_ANALYTICS_MODE` from its process
+environment. For example, `BB_PRODUCT_ANALYTICS_MODE=smoke bb project list --json`
+tags that invocation as smoke without changing the server's configured plane.
+MCP CLI subprocesses preserve the same explicit environment value. This does not
+change actor classification or infer scope from an account.
+
 This setting is not a collection opt-out and never changes `BB_TELEMETRY` or
 the existing anonymous telemetry setting. Logical scope comes from the actual
 Core project/thread/environment or explicit project context, never from a

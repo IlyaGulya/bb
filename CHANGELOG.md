@@ -9,6 +9,12 @@
   contracts, durable admission and bounded acknowledged browser delivery.
   Keep logical projects and QA modes separate; expose delivery gaps, unknown
   availability and incomplete coverage rather than treating them as unused.
+- Preserve raw request bodies and guard ordering in private analytics. Respect
+  explicit observation intent, report queued sends as accepted and stale-hash
+  writes as conflicts, and resolve terminal actions from actual ownership.
+  Carry explicit CLI/MCP and native QA modes through existing durable lifecycle
+  attribution. Stage plugin declarations until activation and retire removed
+  framework actions without losing acknowledged history or duplicate receipts.
 - Fence Tasks Start against concurrent draft revision/selection changes in its
   launch-receipt transaction. Retain the first validated bugfix reproduction
   across Return, permit retry after an exit-zero attempt, and keep legacy

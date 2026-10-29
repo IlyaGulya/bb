@@ -40,8 +40,13 @@ admission, not completed projection, and does not promise lossless collection
 after device loss, expiry, overflow or a failed admission.
 
 For owned non-production verification, set BB_PRODUCT_ANALYTICS_MODE to preview,
-smoke or test in that server's process environment and restart it. This knob
-does not enable or change anonymous vendor telemetry and is not an opt-out.
+smoke or test in that server's process environment and restart it. The CLI also
+forwards an explicit process value, including through MCP's CLI environment:
+
+  BB_PRODUCT_ANALYTICS_MODE=smoke bb project list --json
+
+This tags the invocation without changing server configuration or actor
+classification. The knob does not change anonymous telemetry and is not an opt-out.
 
 Theming — the app-wide palette and typography
 
