@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -131,6 +131,26 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("
     const result = await exchange(session, false);
     expect(result.chunk).toBeNull();
     expect(result.status.pendingBytes).toBe(0);
+    await expect(lstat(join(directory, "0.chunk"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not exceed physical quota or delete ciphertext while publishing a larger ACK file", async () => {
+    const session = captureSessionFixture();
+    const artifact = captureArtifactFixture(session, Buffer.from("SYNTHETIC_QUOTA_RETAINED_BODY"), "ack-quota");
+    await writeCaptureSessionFixture(root, session);
+    const directory = await writeCaptureArtifactFixture(root, artifact);
+    let retained = 0;
+    for (const name of await readdir(directory)) retained += (await lstat(join(directory, name))).size;
+    const padding = join(directory, "quota-padding.bin");
+    const handle = await open(padding, "wx", 0o600);
+    try { await handle.truncate(512 * 1024 * 1024 - retained - 128); } finally { await handle.close(); }
+    const command = { type: "capture.exchange" as const, session, leaseUntil: Math.min(session.expiresAt, Date.now() + 300000), ack: captureAckFixture(artifact.manifest, 0), poll: false };
+    await expect(exchangeHostCapture(root, command)).rejects.toThrow("source_limit");
+    expect(await readFile(join(directory, "acks.json"), "utf8")).toBe("[]");
+    expect(await readCaptureFixtureBody(root, session, artifact.manifest, 0)).toEqual(artifact.bytes);
+    await rm(padding);
+    const recovered = await exchangeHostCapture(root, command);
+    expect(recovered.status.pendingChunks).toBe(0);
     await expect(lstat(join(directory, "0.chunk"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
