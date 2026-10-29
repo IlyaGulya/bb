@@ -15,9 +15,11 @@ import { ApiError } from "../errors.js";
 import type { AppDeps } from "../types.js";
 import {
   downloadGatewayLog,
+  gatewayLogManifest,
   listGatewayLogs,
   readGatewayLog,
 } from "../services/gateway-logs.js";
+import { gatewayLogCoverage } from "../services/gateway-log-coverage.js";
 
 export function gatewayLogDirectory(
   baseUrl: string,
@@ -76,6 +78,31 @@ export function registerGatewayLogRoutes(app: Hono, deps: AppDeps): void {
       process.env.BB_CPA_LOG_DIRS,
     );
   }
+  get(routes.coverage, (context, query) => {
+    if (!getThread(deps.db, query.threadId)) {
+      throw new ApiError(404, "thread_not_found", "Thread does not exist.");
+    }
+    const binding = getThreadExecutionBinding(deps.db, query.threadId);
+    const connection = binding?.modelConnection;
+    const gatewayCompatible = connection?.gateway !== null &&
+      connection?.gateway !== undefined &&
+      isModelGatewayProviderCompatible(connection.provider, connection.gateway.protocol);
+    const directory = gatewayCompatible && connection?.gateway
+      ? gatewayLogDirectory(connection.gateway.baseUrl, process.env.BB_CPA_LOG_DIRS)
+      : undefined;
+    context.header("cache-control", "private, no-store");
+    return context.json(gatewayLogCoverage({
+      threadId: query.threadId,
+      binding,
+      gatewayCompatible,
+      logRootMapped: directory !== undefined,
+    }));
+  });
+  get(routes.manifest, async (context, query) => {
+    const directory = requireGatewayThread(query.threadId);
+    context.header("cache-control", "private, no-store");
+    return context.json(await gatewayLogManifest(directory, query.threadId, context.req.param("logId")));
+  });
   get(routes.list, async (context, query) => {
     const directory = requireGatewayThread(query.threadId);
     context.header("cache-control", "private, no-store");

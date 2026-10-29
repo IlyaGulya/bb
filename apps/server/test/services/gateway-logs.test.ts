@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { gatewayLogDirectory } from "../../src/routes/gateway-logs.js";
 import {
   downloadGatewayLog,
+  gatewayLogManifest,
   listGatewayLogs,
   readGatewayLog,
 } from "../../src/services/gateway-logs.js";
@@ -194,6 +196,27 @@ describe.skipIf(process.platform !== "linux")("native CPA gateway logs", () => {
     await expect(
       readGatewayLog(root, "thread-a", logId("large.log"), 262145),
     ).rejects.toMatchObject({ body: { code: "invalid_request" } });
+  });
+
+  it("hashes every retained byte including binary tails and refuses foreign ownership", async () => {
+    const prefix = Buffer.from(nativeLog("thread-a", "x".repeat(300000)));
+    const first = Buffer.concat([prefix, Buffer.from([0, 255, 128, 1])]);
+    const second = Buffer.concat([prefix, Buffer.from([0, 255, 128, 2])]);
+    for (const [name, bytes] of [["first.log", first], ["second.log", second]] as const) {
+      const path = join(root, name);
+      await writeFile(path, bytes);
+      const past = new Date(Date.now() - 10000);
+      await utimes(path, past, past);
+    }
+    const firstManifest = await gatewayLogManifest(root, "thread-a", logId("first.log"));
+    const secondManifest = await gatewayLogManifest(root, "thread-a", logId("second.log"));
+    expect(firstManifest.sha256).toBe(createHash("sha256").update(first).digest("hex"));
+    expect(secondManifest.sha256).toBe(createHash("sha256").update(second).digest("hex"));
+    expect(firstManifest.sha256).not.toBe(secondManifest.sha256);
+    expect(firstManifest).toMatchObject({ sizeBytes: first.length, completeness: "unverified", redaction: "unverified", deliveryAck: null });
+    await expect(gatewayLogManifest(root, "thread-b", logId("first.log"))).rejects.toMatchObject({ body: { code: "gateway_log_not_found" } });
+    await symlink(join(root, "first.log"), join(root, "alias.log"));
+    await expect(gatewayLogManifest(root, "thread-a", logId("alias.log"))).rejects.toMatchObject({ body: { code: "gateway_log_not_found" } });
   });
 
   it("does not seek a spoofed header beyond the bounded inbound header block", async () => {

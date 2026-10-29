@@ -14,6 +14,27 @@ question.
 [provider-bridge-protocol.md](provider-bridge-protocol.md). An entry without
 a "Docs:" line has no owning doc, so it keeps the essential contract itself.
 
+## Private request-log coverage and retained-file manifests
+
+`sdk.experimental_gatewayLogs.coverage({ threadId })` returns source-contract
+coverage, frozen context/connection references and explicit unknown raw delivery
+state. It does not inspect raw payloads, activate capture, discover native homes
+or establish actual runtime coverage. `manifest({ threadId, logId })` hashes all
+bytes of the retained native CPA file through the same confined, exact-header
+ownership check as read/download. It refuses a changing file and labels
+completeness/redaction unverified; `deliveryAck: null` is not success. Existing
+owner API access is not a new per-context/per-run authorization layer.
+
+Core callers: the Thread Info request-log drawer and `bb gateway-logs
+coverage|manifest` use these same SDK/backend paths. The Plugin Guide documents
+the public SDK surface under **The bb SDK**. Before stabilization: qualify
+retained-file mutation, full/binary/large-body identity, scope authorization,
+resource limits and actual desktop/compact UI; bind safe feature analytics to
+the parent source38 API without exporting raw content. Full opt-in capture,
+durable raw ingestion/ACK/dedupe, retention enforcement, independent sources
+and the complete BBDEV-33 runtime/privacy matrix are separate requirements,
+not satisfied by these read-only inspection methods.
+
 ## Scoped execution context roots and launch bindings
 
 `PluginProviderDeclaration.experimental_executionBindings` declares independent

@@ -1271,6 +1271,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Select independent execution contexts and native or gateway model-account references when creating a thread, and inspect its frozen binding",
           "Inspect named MCP configuration on the execution worker without returning native descriptors or credentials; validity is not authentication readiness",
           "Prepare a real titled execution context with threads.spawn({ preparationOnly: true, input: [] }) through normal Core binding/admission and environment provisioning, without an origin donor, imported conversation or model turn; later workflow Start is explicit",
+          "Inspect private CPA request logs through experimental_gatewayLogs; coverage distinguishes independent native/tool/MCP/standalone/bypass gaps, while manifest hashes only the full retained file and never implies delivery ACK or complete capture",
         ],
         apiSymbols: [
           "BbPluginApi",
@@ -1291,6 +1292,9 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginBbSdk.experimental_executionContexts",
           "PluginBbSdk.experimental_executionContexts.inspectMcp",
           "PluginBbSdk.experimental_modelConnections",
+          "PluginBbSdk.experimental_gatewayLogs",
+          "PluginBbSdk.experimental_gatewayLogs.coverage",
+          "PluginBbSdk.experimental_gatewayLogs.manifest",
           "PluginProviderDeclaration.experimental_executionBindings",
           "experimental_executionContextSnapshotSchema",
           "experimental_modelConnectionSnapshotSchema",

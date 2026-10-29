@@ -104,6 +104,29 @@ Inspecting:
     --timeout <duration>                   Seconds, or a duration with a unit: 90s, 20m, 4h (default: 1200s / 20 min)
     --poll-interval <duration>             Milliseconds, or a duration with a unit
 
+
+Private capture source visibility:
+
+  bb gateway-logs coverage --thread <id> [--json]
+                                             Show frozen context/connection and source gaps without reading payloads
+  bb gateway-logs list --thread <id> [--json]
+                                             List retained native CPA files for a gateway-bound thread
+  bb gateway-logs read <logId> --thread <id> [--preview-bytes <1-262144>] [--json]
+                                             Read a bounded private raw preview
+    --output <path>                         Save the full file to a new mode-0600 file instead; cannot combine with --preview-bytes
+  bb gateway-logs manifest <logId> --thread <id> [--json]
+                                             SHA-256 of the entire retained file, not a delivery ACK
+
+  SDK: experimental_gatewayLogs.coverage({ threadId }), list({ threadId }),
+  read({ threadId, logId, previewBytes }), download({ threadId, logId }) and
+  manifest({ threadId, logId }). The Thread Info request-log drawer uses the
+  same API. Coverage is source-contract information, not runtime qualification.
+  Configured CPA roots do not prove logging is active or complete; raw files
+  may contain private prompts, code and tool results. The existing owner API
+  is not a new per-context/per-run ACL. Keep raw files outside Git and shared
+  reports. Bridge/native tool/transcript/stdio-MCP/standalone/bypass sources
+  are separate; unknown raw backlog and ACK are not zero or success. No command
+  here activates capture, configures a CA or reads authentication homes.
 Opening threads and files in the app:
 
   In chat, reference a thread as @thread:thr_abc123, substituting its actual ID.

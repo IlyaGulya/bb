@@ -5,13 +5,15 @@ This index lists every command path that the core CLI registers, including alias
 ## gateway-logs
 
 - `bb gateway-logs`
+- `bb gateway-logs coverage`
+- `bb gateway-logs manifest`
 - `bb gateway-logs list`
 - `bb gateway-logs read`
 
-Native CPA request logs are available only for gateway-bound threads. Use
-`list --thread <id>`, then `read <log-id> --thread <id>`. Previews are bounded;
-`read --output <path>` downloads the full private log to the invoking machine.
-Raw logs may contain sensitive prompts and tool results; keep them outside Git.
+Read the thread-inspection guide for private CPA log list/read/download,
+retained-file manifests and independent source coverage. Coverage works for
+non-gateway threads too and reports missing instrumentation explicitly; it
+does not activate capture or establish raw offline delivery, redaction or ACLs.
 
 ## status
 

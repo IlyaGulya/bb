@@ -2,6 +2,11 @@
 
 ## AgentOS fork — unreleased
 
+- Expose source-contract capture coverage and full retained CPA file SHA-256
+  manifests through the existing private request-log API, SDK, CLI and drawer.
+  Keep native/bridge/tool/MCP/standalone/bypass gaps and unknown raw sync/ACK
+  explicit. File integrity is not stream completeness, universal redaction,
+  stronger authorization or full-capture acceptance; no capture is activated.
 - Bind the Provider Usage footer to the focused thread's frozen model connection
   and actual execution machine. Never substitute shared pools or unrelated host
   logins for explicit gateway/profile accounts; show unsupported/unknown when no

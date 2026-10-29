@@ -120,6 +120,20 @@ confined preview/download guards still apply. Logs may contain full prompts,
 tool results and secrets; correlation headers are not authorization and this
 is neither lossless capture nor visibility into MCP/Git/browser traffic.
 
+`bb gateway-logs coverage --thread <id>` and the Thread Info log drawer expose
+source-contract gaps separately from the configured root. This metadata report
+also works for non-gateway threads and never activates a recorder or reads a
+native auth home. `bb gateway-logs manifest <logId> --thread <id>` computes
+SHA-256 over the complete retained file, including bytes beyond the preview,
+while preserving the same frozen endpoint and inbound thread-header guard.
+It refuses a file that changes during hashing. The manifest is a retained-file
+identity, not proof of every SSE/WebSocket chunk, redaction, durability or an
+offline delivery ACK. Unknown raw sync/backlog/ACK remain null, not zero.
+Work/Personal scope is the frozen execution context, never the model payer;
+the existing owner API does not establish a new per-context/per-run ACL.
+See [private capture source checkpoint](private-capture.md) for the source
+inventory and remaining full acceptance boundaries.
+
 ### Selecting named MCP servers
 
 The context editor's **MCP servers** section is separate from advanced native

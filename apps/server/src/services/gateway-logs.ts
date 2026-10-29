@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import {
   lstat,
@@ -13,6 +14,7 @@ import type {
   GatewayLogEntry,
   GatewayLogList,
   GatewayLogPreview,
+  GatewayLogManifest,
 } from "@bb/server-contract";
 import { ApiError } from "../errors.js";
 
@@ -275,6 +277,40 @@ export async function readGatewayLog(
       truncated: bytesRead < stat.size,
       sizeBytes: stat.size,
       previewBytes: bytesRead,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function gatewayLogManifest(
+  configuredRoot: string | undefined,
+  threadId: string,
+  logId: string,
+): Promise<GatewayLogManifest> {
+  const { handle, stat } = await ownedLog(configuredRoot, threadId, logId);
+  try {
+    const hash = createHash("sha256");
+    let bytes = 0;
+    const buffer = Buffer.alloc(65536);
+    while (bytes < stat.size) {
+      const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, stat.size - bytes), bytes);
+      if (bytesRead === 0) throw notReady();
+      hash.update(buffer.subarray(0, bytesRead));
+      bytes += bytesRead;
+    }
+    if (!sameFile(stat, await handle.stat())) throw notReady();
+    return {
+      id: logId,
+      threadId,
+      source: "cpa-request-log",
+      representation: "raw",
+      sizeBytes: bytes,
+      sha256: hash.digest("hex"),
+      integrity: "retained-file-only",
+      completeness: "unverified",
+      redaction: "unverified",
+      deliveryAck: null,
     };
   } finally {
     await handle.close();
