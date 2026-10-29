@@ -74,7 +74,7 @@ without a captured stage. The existing failure code remains allowlisted; no
 provider-supplied stage or arbitrary exception code is copied into diagnostics.
 The original caught exception remains available by identity as non-enumerable,
 internal `Error.cause`, not as serialized metadata or transcript content. Public
-failure messages remain generic. Daemon protocol 245 carries the enriched
+failure messages remain generic. Composed daemon protocol 246 carries the enriched
 startup diagnostic.
 
 At the host RPC logging boundary, recognized startup failures are projected to

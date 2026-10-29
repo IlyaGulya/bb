@@ -9,3 +9,4 @@ export {
   type ScriptedEchoRequestRecord,
 } from "./runtime-test-harness.js";
 export { MemoryBridge } from "./memory-startup-bridge.js";
+export { ProviderStartupError } from "../runtime-startup.js";

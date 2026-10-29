@@ -31,7 +31,7 @@ import {
   fetchDispatchTestArtifact,
 } from "./dispatch-helpers.js";
 import { RuntimeManager } from "../../src/runtime-manager.js";
-import { ProviderStartupError } from "../../../../packages/agent-runtime/src/runtime-startup.js";
+import { ProviderStartupError } from "@bb/agent-runtime/test";
 
 type EnvironmentProvisionCommand = Extract<
   HostDaemonCommand,

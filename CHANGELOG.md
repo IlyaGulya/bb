@@ -2,6 +2,9 @@
 
 ## AgentOS fork — unreleased
 
+- Regenerate capture migration metadata from the composed analytics schema without
+  changing applied SQL or migration timestamps. Keep the real startup logging
+  regression inside the existing runtime test-package boundary.
 - Keep retained decisions and annotations mounted across asynchronous task-detail
   refreshes by separating their reconciliation key from the Jira source panel.
 - Preserve explicit workflow evidence choices when CLI boolean defaults are absent.
