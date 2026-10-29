@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createNodeBbSdk, experimental_createProductAnalyticsFetch, type ExperimentalProductAnalyticsContext } from "@bb/sdk/node";
+import { createNodeBbSdk, experimental_createProductAnalyticsFetch, type ExperimentalProductAnalyticsContext } from "@bb/sdk";
 import type { ProductAnalyticsEvent, ProductAnalyticsReportQuery } from "@bb/server-contract";
 import { getPrivateProductAnalytics } from "../../src/services/system/product-analytics.js";
 import { seedEnvironment, seedHostSession, seedProjectWithSource, seedThread, seedThreadRuntimeState } from "./seed.js";

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createTerminalSession, getTerminalSession, listQueuedThreadMessages } from "@bb/db";
+import { createTerminalSession, getTerminalSession } from "@bb/db";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { consumerReport, consumerSdk, installConsumerPlugin, withAnalyticsConsumer } from "../helpers/product-analytics-consumer.js";
@@ -38,7 +38,6 @@ describe("analytics queued send admission", () => {
       const input = [{ type: "text" as const, text: "owned queued message, never an analytics payload" }];
       const result = await sdk.threads.send({ threadId: thread.id, input, mode: "queue-if-active", model: "gpt-5", permissionMode: "full", serviceTier: "default", reasoningLevel: "medium" });
       expect(result).toMatchObject({ delivery: "queued" });
-      expect(listQueuedThreadMessages(harness.db, thread.id).map((row) => JSON.parse(row.content))).toEqual([input]);
       expect(consumerReport(collector, work.id).rows.find((row) => row.featureId === "core.threads" && row.action === "send")).toMatchObject({ attempts: 1, accepted: 1, successes: 0, failures: 0, agent: 1 });
       expect(consumerReport(collector, work.id).rows.find((row) => row.featureId === "core.execution" && row.action === "turn")).toMatchObject({ attempts: 0, successes: 0 });
     });

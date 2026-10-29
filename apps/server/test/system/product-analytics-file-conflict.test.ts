@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { productAnalyticsEvents } from "@bb/db";
 import { and, eq } from "drizzle-orm";
@@ -21,7 +20,7 @@ describe("analytics genuine file conflict outcomes", () => {
       const sdk = consumerSdk(harness, { actorKind: "human", surface: "web", mode: "production", intentional: true, projectId: work.id, operationId: randomUUID() });
       let pluginId: string | undefined;
       if (entrypoint === "monaco") {
-        const plugin = await harness.pluginService.installPath(fileURLToPath(new URL("../../../../plugins/monaco-editor/", import.meta.url)));
+        const plugin = await harness.pluginService.install("builtin:monaco-editor", { kind: "root" });
         if (plugin.status !== "running") throw new Error(`Actual Monaco plugin did not load: ${plugin.statusDetail}`);
         pluginId = plugin.id;
       }
