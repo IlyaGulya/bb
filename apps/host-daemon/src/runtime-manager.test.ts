@@ -1852,6 +1852,49 @@ describe("RuntimeManager", () => {
     expect(runtime.shutdown).not.toHaveBeenCalled();
   });
 
+  it("retains the cleanup owner after its last bridge exits, including an unverified stop, without creating a replacement runtime", async () => {
+    const workspace = createFakeWorkspace("/tmp/env-owned-exit");
+    const runtime = createFakeRuntime();
+    const cleanup = createDeferredPromise<{ treeTermination: "confirmed" | "unverified" }>();
+    runtime.setOpenBackgroundWork(true);
+    const cleanupSettled = cleanup.promise.then((result) => {
+      runtime.setOpenBackgroundWork(result.treeTermination !== "confirmed");
+    });
+    let onProcessExit: AgentRuntimeOptions["onProcessExit"];
+    const createRuntime = vi.fn((options: AgentRuntimeOptions) => {
+      onProcessExit = options.onProcessExit;
+      return runtime;
+    });
+    const manager = new RuntimeManager({
+      provisionWorkspace: createProvisionWorkspaceMock(workspace.path).mockResolvedValue(workspace),
+      createRuntime,
+    });
+    const args = { environmentId: "env-owned-exit", workspacePath: workspace.path };
+    try {
+      const original = await manager.ensureEnvironment(args);
+      if (!onProcessExit) throw new Error("Runtime did not install its exit callback");
+      onProcessExit({
+        providerId: "fake", threads: [{ threadId: "owned-thread", activeTurnId: null, pendingTurnStart: false, providerThreadId: null }],
+        code: 1, expected: false, signal: null, stderr: null,
+      });
+      expect(runtime.listRunningProviders()).toEqual([]);
+      expect(manager.get(args.environmentId)).toBe(original);
+      expect(await manager.ensureEnvironment(args)).toBe(original);
+      expect(createRuntime).toHaveBeenCalledTimes(1);
+
+      cleanup.resolve({ treeTermination: "unverified" });
+      await cleanupSettled;
+      expect(runtime.hasOpenBackgroundWork()).toBe(true);
+      expect(await manager.ensureEnvironment(args)).toBe(original);
+      expect(createRuntime).toHaveBeenCalledTimes(1);
+      expect(runtime.shutdown).not.toHaveBeenCalled();
+    } finally {
+      cleanup.resolve({ treeTermination: "confirmed" });
+      await cleanupSettled;
+      await manager.shutdownAll();
+    }
+  });
+
   it("keeps sibling provider threads running when one provider exits", async () => {
     const workspace = createFakeWorkspace("/tmp/env-shared");
     const runtime = createFakeRuntime();
