@@ -121,7 +121,19 @@ it.each(["pending acknowledgement", "failed save"] as const)("first-writer retry
   const finished = new Promise<void>(resolve => { finish = resolve; });
   const rpc = Object.fromEntries([...Object.keys(workflowSetupContract), ...Object.keys(workflowRpcContract)].map(method => [method, (input: unknown) => host.harness.callRpc(method, input)]));
   const slot = renderSlot({ component: WorkflowHarness }, { taskId: task.id }, {
-    sdk: host.bb.sdk,
+    sdk: {
+      hosts: { list: host.bb.sdk.hosts.list },
+      projects: { get: host.bb.sdk.projects.get },
+      experimental_executionContexts: {
+        list: host.bb.sdk.experimental_executionContexts.list,
+        getProjectDefaults: host.bb.sdk.experimental_executionContexts.getProjectDefaults,
+      },
+      experimental_modelConnections: { list: host.bb.sdk.experimental_modelConnections.list },
+      providers: { models: host.bb.sdk.providers.models },
+      environments: { get: host.bb.sdk.environments.get },
+      threads: { get: host.bb.sdk.threads.get, list: host.bb.sdk.threads.list },
+      plugins: { callRpc: host.bb.sdk.plugins.callRpc },
+    },
     rpc: {
       ...rpc,
       listMachines: async () => ({ machines: await sdk.hosts.list() }),
