@@ -393,6 +393,7 @@ it.each([
   const slot = fixture.render(compact);
   fireEvent.click(await slot.findByRole("button", { name: "Workflow details" }));
   const dialog = await slot.findByRole("dialog", { name: "Workflow details" });
+  await within(dialog).findByRole("region", { name: "Workflow run details" });
   expectRunDetails(dialog, fixture.native.phase);
   expect(new WorkflowPreparationStore(fixture.store).savedDraft(fixture.task.id)?.selection).toEqual(fixture.selection);
 });
