@@ -23,7 +23,7 @@ async function fixture(pending?: { entered: () => void; release: Promise<void> }
   const host = createFakePluginHost({ pluginId: "tasks", sdk: {
     hosts: { list: async () => [] }, projects: { list: async () => [] },
     experimental_executionContexts: { list: async () => [] }, experimental_modelConnections: { list: async () => [] },
-    ...(source ? { threads: { get: async ({ threadId }: { threadId: string }) => makeThreadResponse({ id: threadId, projectId: "proj_code", status: "working" }) } } : {}),
+    ...(source ? { threads: { get: async ({ threadId }: { threadId: string }) => makeThreadResponse({ id: threadId, projectId: "proj_code", status: "active" }) } } : {}),
   } });
   hosts.push(host);
   const store = createStore(host.bb);

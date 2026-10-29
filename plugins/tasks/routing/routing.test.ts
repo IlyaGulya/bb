@@ -496,7 +496,7 @@ describe("follow-up regressions: context-only separate-work references", () => {
     const historicalThread = "thr_historicalcontext";
     f.harness.sdk.stub("threads.get", async () => {
       if (boundary === "unavailable" || boundary === "excessive") throw new Error("Historical native context is unavailable");
-      return makeThreadResponse({ id: historicalThread, projectId: "proj_code", archivedAt: boundary === "archived" ? "2026-10-29T00:00:00.000Z" : null, deletedAt: boundary === "deleted" ? "2026-10-29T00:00:00.000Z" : null });
+      return makeThreadResponse({ id: historicalThread, projectId: "proj_code", archivedAt: boundary === "archived" ? 1793232000000 : null, deletedAt: boundary === "deleted" ? 1793232000000 : null });
     });
     const body = boundary === "excessive" ? Array.from({ length: 21 }, (_, index) => `thr_historicalcontext${index}`).join(" ") : `Historical context only: ${historicalThread}`;
     const { item } = await f.inbox.createInbox({ title: "Separate work from historical context", body, context: "work" });
