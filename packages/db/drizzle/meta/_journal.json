@@ -1023,6 +1023,13 @@
       "when": 1793094550603,
       "tag": "0145_complex_red_skull",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "6",
+      "when": 1793260173978,
+      "tag": "0147_private_capture",
+      "breakpoints": true
     }
   ]
 }

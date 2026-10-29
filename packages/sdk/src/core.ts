@@ -1,3 +1,4 @@
+import { createPrivateCapturesArea, type ExperimentalPrivateCapturesArea } from "./areas/private-captures.js";
 import {
   createGatewayLogsArea,
   type ExperimentalGatewayLogsArea,
@@ -57,6 +58,7 @@ export interface CreateBbSdkWithGuideArgs extends CreateBbSdkArgs {
 }
 
 export interface BbSdkAreas extends BbRealtime {
+  experimental_privateCaptures: ExperimentalPrivateCapturesArea;
   experimental_gatewayLogs: ExperimentalGatewayLogsArea;
   experimental_executionContexts: ExecutionContextsArea;
   experimental_modelConnections: ModelConnectionsArea;
@@ -92,6 +94,7 @@ export function createBbSdk(
     transport: args.transport,
   });
   const areas: BbSdkAreas = {
+    experimental_privateCaptures: createPrivateCapturesArea(sdkContext),
     experimental_gatewayLogs: createGatewayLogsArea(sdkContext),
     experimental_executionContexts: createExecutionContextsArea(sdkContext),
     experimental_modelConnections: createModelConnectionsArea(sdkContext),

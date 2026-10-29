@@ -1,3 +1,4 @@
+import { schedulePrivateCaptureSweep } from "../private-captures.js";
 import {
   runThreadPruningSweep,
   THREAD_PRUNING_SWEEP_LIMITS,
@@ -497,6 +498,12 @@ export function createThreadEventPruningJob(
 }
 
 const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
+  {
+    cadenceMs: 30_000,
+    category: "durable-intent-retry",
+    name: "private-capture-data",
+    run: schedulePrivateCaptureSweep,
+  },
   {
     cadenceMs: 0,
     category: "durable-intent-retry",

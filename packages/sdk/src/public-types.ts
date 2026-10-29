@@ -1,3 +1,4 @@
+export type * from "./areas/private-captures.js";
 export type * from "./areas/gateway-logs.js";
 export type * from "./areas/execution-contexts.js";
 export type {

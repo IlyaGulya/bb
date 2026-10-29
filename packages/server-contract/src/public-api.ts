@@ -1,3 +1,4 @@
+import { privateCaptureRoutes } from "./private-capture-routes.js";
 import {
   gatewayLogListQuerySchema,
   gatewayLogReadQuerySchema,
@@ -458,6 +459,7 @@ type PathThreadInteractionId = {
 type PathGatewayLogId = { param: { logId: string } };
 
 export const publicApiRoutes = {
+  ...privateCaptureRoutes,
   gatewayLogs: {
     coverage: defineRoute({
       path: "/gateway-logs/coverage",

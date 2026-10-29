@@ -14,6 +14,22 @@ question.
 [provider-bridge-protocol.md](provider-bridge-protocol.md). An entry without
 a "Docs:" line has no owning doc, so it keeps the essential contract itself.
 
+## Scoped private capture data
+
+`sdk.experimental_privateCaptures` exposes explicit create/list/get/stop/sync,
+same-context `link` owner associations, artifact metadata/preview/download,
+manifest staging, committed chunk ACKs and reviewed resumable `upload`.
+Original project/context/account/model identity is immutable; reported source
+host/run/native-session/model labels are separate and unknown values stay null.
+Core callers: Thread Info's private capture drawer and `bb captures` use this
+same API. The Plugin Guide's **The bb SDK** documents these symbols.
+Before stabilization: integrate the immutable source38 native analytics API,
+compose migration 0147 after parent 0146 and wire protocol 245 after parent 244,
+and qualify the complete BBDEV-33 native/offline/ACK/privacy/transport matrix.
+Retained CPA/bridge files, normalized native events and owner imports do not
+certify independent MCP, bypass traffic, lossless streaming or full capture.
+No capture activation, deployment or acceptance is implied by this source.
+
 ## Private request-log coverage and retained-file manifests
 
 `sdk.experimental_gatewayLogs.coverage({ threadId })` returns source-contract

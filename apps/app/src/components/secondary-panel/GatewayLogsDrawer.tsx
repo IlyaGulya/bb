@@ -5,6 +5,7 @@ import { ResponsiveDrawerShell } from "@bb/shared-ui/responsive-overlay";
 import { cn } from "@bb/shared-ui/lib/utils";
 import { BbHttpError, sdk } from "@/lib/sdk";
 import { saveFile } from "@/lib/save-file";
+import { PrivateCapturesAction } from "./PrivateCapturesDrawer";
 
 const PREVIEW_BYTES = 65_536;
 const LOG_SECTION_PATTERN =
@@ -53,32 +54,21 @@ export function GatewayLogsAction({ threadId }: { threadId: string }) {
   const [open, setOpen] = useState(false);
   const binding = useQuery({
     queryKey: ["thread-execution-binding", threadId],
-    queryFn: () =>
-      sdk.experimental_executionContexts.getThreadBinding({ threadId }),
+    queryFn: () => sdk.experimental_executionContexts.getThreadBinding({ threadId }),
     staleTime: Infinity,
   });
-
-  if (!binding.data?.modelConnection?.gateway) return null;
-
   return (
-    <div className="shrink-0 px-4 pb-2">
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="w-full"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen(true)}
-      >
-        Native CPA request logs
-      </Button>
-      <GatewayLogsDrawer
-        threadId={threadId}
-        open={open}
-        onOpenChange={setOpen}
-      />
-    </div>
+    <>
+      <PrivateCapturesAction threadId={threadId} />
+      {binding.data?.modelConnection?.gateway ? (
+        <div className="shrink-0 px-4 pb-2">
+          <Button type="button" variant="outline" size="sm" className="w-full" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>
+            Native CPA request logs
+          </Button>
+          <GatewayLogsDrawer threadId={threadId} open={open} onOpenChange={setOpen} />
+        </div>
+      ) : null}
+    </>
   );
 }
 

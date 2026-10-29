@@ -2,6 +2,16 @@
 
 ## AgentOS fork — unreleased
 
+- Add explicit scoped private capture data contracts across Core, SDK, CLI and
+  Thread Info: immutable manifests, confined private chunks, deterministic
+  committed ACK/dedupe, bounded host data outbox, leases, retention, quotas,
+  reviewed imports, same-context evidence links and honest source coverage.
+  Reuse retained CPA files, already-enabled thread bridge lanes and hydrated
+  Core native events without enabling capture or changing runtime accounts.
+  Reserve migration 0147 and host protocol 245 for ordered parent integration;
+  source38 analytics receives only its native allowlisted metadata. Source is
+  unqualified and unactivated; the full BBDEV-33 native/privacy matrix remains
+  a parent gate, not a completion or acceptance claim.
 - Expose source-contract capture coverage and full retained CPA file SHA-256
   manifests through the existing private request-log API, SDK, CLI and drawer.
   Keep native/bridge/tool/MCP/standalone/bypass gaps and unknown raw sync/ACK

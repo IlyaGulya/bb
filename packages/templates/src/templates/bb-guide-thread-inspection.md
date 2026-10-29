@@ -127,6 +127,48 @@ Private capture source visibility:
   reports. Bridge/native tool/transcript/stdio-MCP/standalone/bypass sources
   are separate; unknown raw backlog and ACK are not zero or success. No command
   here activates capture, configures a CA or reads authentication homes.
+
+Opt-in private capture data (all but create require --project <Core-id> --context <id>):
+
+  bb captures create --file <private-policy.json> [--json]
+  bb captures list [--thread <id>] [--host <id>] [--model <configured-model>]
+    [--runtime <id>] [--session <native-id>] [--after <uuid>] [--limit <1-100>] [--json]
+  bb captures show|stop|sync <captureId> [--json]
+  bb captures link <captureId> --thread <id> [--run <id>] --operation <uuid> [--json]
+  bb captures artifacts <captureId> [--source <kind>] [--destination <exact-url>]
+    [--host <source-host>] [--run <source-run>] [--session <source-native-id>]
+    [--model <reported-label>] [--after <digest>] [--limit <1-100>] [--json]
+  bb captures inspect <captureId> <artifactId> [--preview-bytes <1-262144>] [--json]
+  bb captures import <captureId> --file <private-file> --operation <uuid>
+    --representation <raw|transcript|binary> --stream-state <complete|interrupted|unknown>
+    --reviewed [--json]
+  bb captures download <captureId> <artifactId> --output <new-private-file> [--json]
+
+  SDK: experimental_privateCaptures exposes these same actions plus stageManifest,
+  putChunk and resumable upload. The Thread Info private capture drawer uses it.
+  Create accepts a CaptureCreate object: id (opaque UUID), actual projectId,
+  executionContextId and hostId; threadId/runId/nativeSessionId/modelConnectionId/
+  model/runtimeVersion are explicit nullable values; runtimeId is required.
+  Its policy requires consent=private-full-content,
+  payloadReview=owner-approved-sensitive-application-data, retentionHours,
+  maxBytes, maxArtifacts, syncIntervalSeconds, offlineLeaseSeconds,
+  bridgeRecorder, nativeEvents, cpaLogs and nativeExports. Each export names a
+  sourceId, relativePath, representation and binaryReview; none means [].
+  Existing thread subject/account/runtime/host bindings are verified, not inferred
+  from payer identity. Standalone means threadId=null and a distinct capture UUID;
+  link is a same-context owner association, not native execution provenance.
+  Reuse capture/import/link operation UUIDs for retries; never use payload hashes.
+  Inputs must be owned, owner-only, stable regular files, with no symlink/hardlink.
+  Create input is limited to 65536 bytes; each artifact to 64 MiB. No raw source
+  file is silently truncated to fit a quota. Limits and unavailable sources are gaps.
+  Raw files stay in private application storage, not analytics or normal logs.
+  Inspect prints only metadata unless preview is explicit. Never put real previews
+  in CI or agent/tool transcripts; download full content to --output instead.
+  Stop denies new Core intake; a disconnected host stops by its bounded lease.
+  Existing provider loggers are not enabled, reconfigured or stopped by these
+  controls. Original provider source retention is separate. HTTP/3, bypass,
+  independent MCP and lossless streaming remain unqualified, not captured by fiat.
+
 Opening threads and files in the app:
 
   In chat, reference a thread as @thread:thr_abc123, substituting its actual ID.

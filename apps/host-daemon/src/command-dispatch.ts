@@ -1,3 +1,4 @@
+import { exchangeHostCapture } from "./private-capture.js";
 import {
   captureWorkspace,
   copyWorkspaceRead,
@@ -610,6 +611,7 @@ const commandHandlers: CommandHandlerMap = {
 };
 
 const onlineRpcHandlers: OnlineRpcHandlerMap = {
+  "capture.exchange": (command, options) => exchangeHostCapture(options.dataDir, command),
   "environment.hook.run": runEnvironmentHook,
   "environment.hook.cancel": cancelEnvironmentHook,
   "desktop.browser.list_instances": forwardDesktopBrowserCommand,

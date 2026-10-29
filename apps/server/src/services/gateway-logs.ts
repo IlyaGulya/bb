@@ -248,6 +248,27 @@ async function ownedLog(
   }
 }
 
+export async function captureGatewayLogSource(
+  configuredRoot: string | undefined,
+  threadId: string,
+  logId: string,
+  knownStamps: ReadonlySet<string>,
+  maxBytes: number,
+): Promise<{ sourceId: string; stamp: string; bytes: Buffer } | null> {
+  const { handle, stat } = await ownedLog(configuredRoot, threadId, logId);
+  try {
+    const stamp = createHash("sha256").update(JSON.stringify([logId, stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs])).digest("hex");
+    const sourceId = `cpa:${logId}`;
+    if (knownStamps.has(`${sourceId}:${stamp}`)) return null;
+    if (stat.size > maxBytes) throw new ApiError(413, "capture_source_limit", "Private capture source exceeds its artifact limit.");
+    const bytes = await handle.readFile();
+    if (bytes.length !== stat.size || !sameFile(stat, await handle.stat())) throw notReady();
+    return { sourceId, stamp, bytes };
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function readGatewayLog(
   configuredRoot: string | undefined,
   threadId: string,

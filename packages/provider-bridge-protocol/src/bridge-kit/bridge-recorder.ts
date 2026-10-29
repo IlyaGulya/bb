@@ -160,10 +160,11 @@ export function createBridgeRecorder(args: { dir: string }): BridgeRecorder {
       return existing;
     }
     const scopeDir = join(dir, scope);
-    mkdirSync(scopeDir, { recursive: true });
+    mkdirSync(scopeDir, { recursive: true, mode: 0o700 });
     const fd = openSync(
       join(scopeDir, bridgeRecordingFileName(direction)),
       "a",
+      0o600,
     );
     fds.set(key, fd);
     return fd;

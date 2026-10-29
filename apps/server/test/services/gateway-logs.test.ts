@@ -3,7 +3,7 @@ import { mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { gatewayLogDirectory } from "../../src/routes/gateway-logs.js";
+import { gatewayLogDirectory } from "../../src/services/gateway-log-directory.js";
 import {
   downloadGatewayLog,
   gatewayLogManifest,

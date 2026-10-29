@@ -1,113 +1,220 @@
-# BBDEV-33 private capture source checkpoint
+# BBDEV-33 private capture source handoff
 
-This is an unqualified source checkpoint, not full-capture implementation,
-activation, deployment, task completion or human acceptance. The complete
-BBDEV-33 contract remains required. The immutable execution context and model
-connection stay independent; model payer identity never selects data scope.
-No global runtime, SDK installation, defaults, auth, CA or service is changed.
+This is unqualified, unactivated source for the authorized isolated worktree,
+not deployment, task completion, full-capture certification or human acceptance.
+The complete BBDEV-33 contract remains required. No runtime/model/account,
+installed SDK, auth, CA, global defaults, live source43 or service configuration
+was changed. No real raw log, credential, business payload or authentication
+home was copied. The previously verified Personal Sol6.1/high/full binding is
+not substituted by this work; capture data scope never follows the model payer.
 
-## Implemented read-only inspection contract
+## Existing owners and new source contracts
 
-The existing gateway-log routes now expose:
+The implementation stays inside the existing Core server, SQLite/private-file
+storage, host daemon and its authenticated `capture.exchange` RPC. The outbox
+contains capture data only, not runnable tasks. There is no new execution queue,
+supervisor, orchestrator, recording service, proxy or browser service.
 
-- `GET /api/v1/gateway-logs/coverage?threadId=...`: frozen context/connection
-  references and source-contract gaps. No raw file/body is read by this route.
-  Missing context is null rather than inferred. Configuration is not capture
-  evidence. The report is explicitly `source-contract-only`.
-- `GET /api/v1/gateway-logs/:logId/manifest?threadId=...`: the SHA-256 and byte
-  count of the entire retained CPA file. It uses the existing confined Linux
-  read-only-root and exact inbound thread-header ownership boundary, checks
-  file identity/size/timestamps before and after hashing, reads in bounded
-  blocks and refuses an unstable file. Completeness/redaction are unverified
-  and `deliveryAck` is null. Neither file age nor checksum proves source
-  finalization, every streamed chunk or server-acknowledged offline delivery.
+- `packages/domain/src/private-capture.ts` defines explicit consent/policy,
+  immutable subject, versioned manifest, chunk, committed ACK and gap schemas.
+- `packages/process-utils/src/private-capture-files.ts` confines POSIX private
+  roots, uses owner-only directories/files, rejects symlink/hardlink sources,
+  bounds file reads, checks stable snapshots, uses atomic writes and fsync, and
+  preserves a 64 MiB free-disk reserve before writes.
+- `apps/server/src/services/private-captures.ts` owns current context/project
+  authorization, actual frozen thread/account/runtime checks, manifest/index
+  reservations, chunk integrity and committed receipts, source ingestion,
+  retention, bounded flushes and expiry/shutdown IO fencing.
+- `apps/host-daemon/src/private-capture.ts` owns the host-local private data
+  outbox, source cursors, admission lease, persisted ACKs and periodic scanning.
+  Collection does not begin until an explicit registration is delivered. Existing
+  provider recorders are neither enabled nor reconfigured by registration.
+- `apps/server/src/routes/private-captures.ts` and the shared server contract
+  expose create/list/get/stop/sync, owner-association links, manifest staging,
+  chunk receipt, artifact listing/metadata, preview and full download.
+- `sdk.experimental_privateCaptures`, `bb captures` and the Thread Info private
+  capture drawer use those same routes. The shipped thread-inspection guide,
+  command index, JSON shapes, Plugin Guide and experimental API audit describe
+  the public surfaces. The drawer uses the existing persistent responsive shell.
 
-The existing SDK `experimental_gatewayLogs`, CLI `gateway-logs coverage` and
-`gateway-logs manifest`, and Thread Info request-log drawer all use this same
-backend. Existing list/read/full-download behavior remains separate. Hashing
-is explicit, not automatically repeated with the directory preview. No raw
-store, event outbox, capture loop or new process is introduced by this patch.
+## Identity, permissions and provenance
 
-## Actual inspected source seams
+A capture UUID is an explicit logical identity. Its project/context/host,
+thread/run/native-session, runtime/version, model-connection and configured-model
+subject is immutable. Thread captures must match the actual Core project and
+frozen execution context/account/runtime and delivery host. A supplied run/native
+session pair must exist together in actual Core events. CPA and bridge capture
+cannot be asserted to have per-run/native-session correlation when only thread
+ownership is available; such registration is refused rather than guessed.
 
-| Source | Actual seam | Capability and boundary |
+Standalone registration has `threadId: null`, no asserted Core run or model
+connection, and its own UUID. Owner-reviewed evidence can later be associated
+with an actual same-project, same-context thread/run using `link`. This is a
+bounded, idempotent owner association for navigation; it does not rewrite origin
+or prove native execution provenance. Cross-context association is refused.
+
+Current context enablement/project membership and actual thread binding are
+checked at admission, reads and delivery. Preview/download recheck access around
+file IO; download also checks each chunk hash. Scope is not inferred from paths,
+timestamps, project labels, another account or a successful model request.
+These are guards on the existing owner-authenticated Core API, not a new
+per-agent/per-user ACL or a claim of regulatory authorization. Explicit Work
+export permission, encrypted disks and an approved encrypted transport remain
+operator prerequisites. A Personal model payer never converts Work data into
+Personal data. Owner imports are explicit owner assertions, not attested origin.
+
+Manifest source host/run/native-session IDs are separate from the selected
+capture subject and nullable when not observed. Native events preserve actual
+Core turn/provider-session IDs and a resolvable event-environment host. CPA
+retained files have no invented run/session/host association. Bridge/export
+host attribution identifies the enrolled machine that supplied the file, not
+an inferred original network endpoint. Model labels are parsed source-reported
+labels, not billing, routing or availability certification. The index contains
+at most 32 labels/destinations; a bound is exposed by `indexLimited`, never by
+truncating the stored source body.
+
+## Actual ingestion and remaining coverage gaps
+
+| Source | Real seam used | Boundary |
 | --- | --- | --- |
-| Native CPA request logs | `apps/server/src/services/gateway-logs.ts`; endpoint selection in `apps/server/src/routes/gateway-logs.ts` | Confined retained-file list/preview/download and full-file hash. Only the frozen CPA endpoint and exact inbound BB thread header associate a file. No per-run ACL, universal redaction, lossless stream claim or raw-delivery ACK. |
-| Provider bridge recorder | `packages/provider-bridge-protocol/src/bridge-kit/bridge-recorder.ts` | Existing explicit host-local opt-in. Runtime/provider directions, process run and sequence in NDJSON. Process-wide records can have no thread. Appends are not a durable server outbox; oversized partial lines and append errors prevent a lossless claim. No recorder is enabled or changed here. |
-| Recorder reader | `packages/provider-bridge-protocol/src/testing/recording.ts` | Existing replay/fixture lane reader. A test fixture parser is not a production authenticated raw ingestion interface. |
-| Provider-normalized thread events | `apps/host-daemon/src/event-sink.ts`; `apps/server/src/internal/events.ts` | Actual event post, retry and server transaction/accepted-event response. The client queue is in memory and disposal clears it. Those ACKs concern normalized events, not raw files. This is not restart-safe raw-body delivery. |
-| Native session data | Existing provider bridge/session implementations under `plugins/provider-claude-code/src/bridge`, `plugins/provider-codex/src/bridge`, `plugins/provider-pi/src/bridge` | Provider-owned session/reopen and reported tool events are distinct from raw network facts. No auth home, native transcript or standalone process is scanned/imported by this patch. |
-| Project attachment storage | Existing `apps/server/src/routes/projects.ts` attachment endpoints | Existing project file upload is not automatically a private capture ledger: its scope, access, retention and ACK semantics cannot be substituted for the full raw-capture contract. It is not repurposed silently. |
+| Retained CPA files | `services/gateway-logs.ts`, selected via the frozen endpoint and `BB_CPA_LOG_DIRS` | Existing confined read-only root and exact inbound BB thread-header ownership. Stable, settled whole-file snapshots are read and redacted. Source-file bytes are not proof of lossless network/SSE capture, retry accounting or per-run correlation. Original CPA source retention is not changed. |
+| Existing bridge recorder | `packages/provider-bridge-protocol/src/bridge-kit/bridge-recorder.ts`; host reader of runtime/provider direction NDJSON | Only an already-enabled owner-private host/thread recorder root. Process-wide unknown-scope lanes are excluded. Bounded complete-line snapshots retain original process run/sequence inside the evidence. Missing, oversized or unterminated lanes remain gaps; recorder append failures are not retroactively repaired. |
+| Actual Core native events | SQLite events plus the existing retained-output hydration functions | Available normalized messages, tools, approvals/results and retained outputs are archived. Oversized/unhydratable output and retained truncation are explicit gaps. This is normalized evidence, not an independent raw network or stdio-MCP tap. |
+| Explicit host exports | Existing thread-storage root, or standalone `private-capture-input/<captureId>`, with owner-registered relative paths | Stable owned private regular files only. Raw text/transcript/binary representation is explicit; no auth home, arbitrary-root discovery or timestamp matching. Supplied evidence retains `owner-import` provenance. |
+| Explicit SDK/CLI/UI import | Reviewed Blob/private invoking-machine file through shared redaction, manifest, chunk and ACK routes | No browser payload outbox. Retrying identical evidence resumes committed chunks; binary requires owner review. This does not instrument the originating terminal/process. |
 
-The full `bb tasks show BBDEV-33` description and comments, plus BBDEV-6 CPA
-integration receipts and BBDEV-38 contract/comments were read. Earlier CPA
-qualification in those receipts is historical evidence, not a new runtime
-observation. Task attachment names were seen; raw attachments/logs, credentials
-and external source URLs were not fetched or copied.
+Native transcript discovery, terminal/cmux/tmux automatic capture, independent
+local-tool/MCP I/O, bypass HTTP/3/gRPC/WebSocket traffic, pinning/application
+encryption, provider-internal retries and unavailable provider reasoning remain
+uninstrumented or unsupported unless a real source supplies evidence. Tool
+schemas or replayed tool results in CPA requests do not prove independent tool
+execution. `captured` means retained evidence exists for that source, not that
+all its channels are complete. Empty indexes/unknown backlog are not zero
+activity or full coverage. Existing gateway coverage/manifest inspection remains
+separate and cannot certify the new delivery chain.
 
-## Coverage and privacy boundary
+## Bytes, privacy, ACKs and resource limits
 
-The response exposes separate CPA, bridge recorder, native normalized events,
-native transcript, bypass network, standalone, stdio MCP and local-tool rows.
-A configured CPA mount is not promoted to `captured`; normalized events/tools
-are `metadata-only` relative to the full raw contract. The other independent
-sources remain explicitly uninstrumented, or CPA is unsupported when there is
-no compatible frozen gateway binding. These labels describe inspected source
-contracts, not observed host/runtime/version/transport qualification.
+Core bytes live under `<dataDir>/private-capture/core/<scope-digest>/<captureId>/`
+and artifact directories. Host bytes/ACKs/cursors live under
+`<dataDir>/private-capture/host/<captureId>/`. SQLite stores private metadata,
+immutable manifests and committed receipts, not body blobs. These paths are
+application data and must be outside Git, CI artifacts, analytics and ordinary
+diagnostic logs. Existing provider source files have their own separate policy.
 
-Schema/tool metadata or replayed results in a model request do not prove that a
-local tool or MCP call was made or that raw stdio I/O was captured. Unknown
-raw backlog bytes/events, last-sync and last-ACK remain null. Work-context data
-with a Personal payer still belongs to Work context. The existing owner API
-is identified honestly; this patch adds no per-context/per-run ACL and does
-not certify privacy isolation. Source-owned retention and unverified redaction
-are visible; no auth headers, tokens or CA keys are copied for this work.
+Known HTTP/JSON credential forms, bearer/basic values and token query values are
+redacted; PEM private keys are rejected. Nested JSON strings are handled, and a
+64-level structured-redaction bound fails explicitly rather than bypassing the
+redactor. Invalid UTF-8 text is a source gap; opaque binary requires owner review.
+This is not universal secret detection: payload secret absence is explicitly
+`not-guaranteed`. Work/export review and encrypted storage/transport cannot be
+replaced by a redaction marker. Core audits owner-import completion across chunk
+boundaries. Privacy-denied artifacts retain a rejection receipt, deny body
+access and purge their staged bytes; failed cleanup is retried by existing
+sweeps. Invalid chunks never receive a successful final artifact-completion
+claim. Rejected metadata still consumes its bounded reservation until expiry.
 
-## Contract checkpoint needed before integration
+Source and stored byte counts/SHA-256 are distinct. Redaction/normalization is
+explicit; only unchanged source bytes receive `source-bytes` fidelity. Each
+262144-byte chunk has sequence/size/hash and a deterministic receipt identity.
+Core verifies and fsyncs private bytes before committing its SQLite chunk receipt;
+ACK is returned only after that transaction boundary. Replays verify the retained
+bytes and return the same receipt. Full artifact completion separately verifies
+the assembled stored hash. The host persists matching committed ACKs before
+removing acknowledged local chunks. Missing/conflicting receipts do not permit
+raw deletion. Interrupted writes/ACK loss are replayable by identity; runtime
+proof of crash boundaries is still a parent gate.
 
-The authorized isolated checkout has no source38 analytics implementation or
-API manifest. Parent must provide the immutable source38 checkpoint and the
-existing API's module/symbol, declaration identity, context/actor/surface/QA
-provenance, completion authority, bounded outcomes and operation/dedupe rules.
-No alternative tracker or invented analytics contract is installed. Analytics
-must receive only allowlisted feature metadata, never raw capture payloads,
-paths, request headers, prompts, tool arguments or credentials.
+Each artifact is at most 64 MiB; a capture reserves at most 256 MiB/512 artifacts.
+Core has a 2 GiB/64-capture ceiling; the host has a 512 MiB pending-data/
+32-registration ceiling. The policy further bounds captures, source exports,
+retention (1–720 hours), sync (30–3600 seconds) and offline admission lease
+(30–3600 seconds, at least the sync interval). Disk pressure, source instability,
+quota or inaccessible files produce explicit gaps/backpressure, not hidden
+sampling, smaller-body success or a normal-log fallback.
 
-That safe analytics checkpoint is not a raw-body backend. A raw ingestion
-binding separately requires the actual existing permitted durable raw store,
-node/source admission and context permission interface, manifest/chunk ACK and
-retention/quota contract. The inspected CPA files, bridge recorder, normalized
-event sink and attachment API do not establish that interface. There is no
-fictional collector, fallback ACK, new queue or supervisor in this checkpoint.
-These missing interfaces must be resolved rather than reducing the acceptance
-contract to this report or treating metadata-only paths as full capture.
+The existing Core periodic sweep performs bounded flushes and expiry cleanup;
+manual sync flushes one bounded batch, not an unbounded catch-up job. The host
+uses its existing daemon lifecycle for 30-second private-outbox ticks. A lease
+permits bounded local collection during disconnection; expiry stops collection
+without pretending an ACK occurred. Stop immediately denies new Core intake;
+a disconnected host stops by its lease, while unacknowledged local data remains
+subject to retention. Stop does not disable independent provider recorders.
+Host raw copies expire at the capture deadline; bounded host metadata receipts
+can remain for up to a further 24 hours and count against registration capacity.
+Core expired records/bytes are pruned. Deletion by retention is not delivery.
+Status is the last reported snapshot, not a live observation during outage;
+gap/count history is not silently erased by reconnect. Clocks, lease behavior,
+shutdown and recovery ordering require parent qualification.
 
-## Full contract still requiring implementation and parent proof
+Preview is explicitly bounded and marked truncated/base64 as appropriate. Full
+SDK download verifies the whole stored checksum; CLI writes a new mode-0600 file
+and never defaults to body stdout. Explicit previews must not be run against
+real payloads in CI or agent/tool transcripts. CLI input errors are generic and
+do not forward private paths or malformed policy snippets to diagnostics.
 
-- Explicit per-process/per-source opt-in/off with immutable host/runtime/version,
-  context/account/model and task/project/thread/run/native-session/capture IDs;
-  standalone identity and subsequent explicit authorized binding.
-- Private raw-body/large-body/binary storage outside the index; safe boundary
-  redaction, redaction/truncation/gap markers, source/stored checksums and
-  authenticated inspect/download, with enforceable Work/Personal permissions,
-  retention, quotas and encrypted storage/transport.
-- Real ingestion from the existing CPA/bridge/native sources, stable chunk/event
-  identities and sequence, persisted receipt/index/ACK/dedupe, restart-safe
-  offline accumulation and periodic/manual flush through the existing delivery
-  infrastructure, without a second runnable queue or recording service.
-- Measured raw request/response and SSE/WebSocket/cancellation/retry coverage,
-  independent tool/MCP I/O/approvals and bypass transport facts. Pinning,
-  application encryption, HTTP/3/gRPC and inaccessible provider reasoning remain
-  explicit limitations, never hidden bypasses.
-- Full owned OMP/native Claude/Codex, macOS/Linux and BB/standalone matrix;
-  unrelated-process exclusion, no model/account substitution, shutdown behavior,
-  disk pressure, collector restart/reconnect, logical dedupe and access/privacy.
-- Task/thread navigation, full source filters and safe source38 feature analytics
-  through actual Core/CLI/SDK/UI consumers after the agreed contracts are bound.
+## Native source38 integration and ordered parent composition
 
-No build, test, typecheck, lint, formatter, install, runtime smoke, browser,
+No alternative analytics service/schema/store is introduced. Consumers call the
+existing `experimental_productAnalyticsRequestInit` and forward the existing
+actor/surface/mode/QA/session/project context. Capture/create, import and link use
+opaque logical operation UUIDs retained on retry, never payload hashes. Automatic
+polls, intermediate chunk transport and upload reconciliation are observations,
+not new feature-use intents. Source38's existing catalog discovers declared
+public routes as `core.privateCaptures` actions; its existing server middleware
+is the admission/result authority. Create/stop/staging are bounded admissions,
+not claims of full-capture or downstream/client-save completion. Raw delivery
+ACKs and feature analytics are separate contracts.
+
+The isolated checkout intentionally does not copy the parent source38 analytics
+implementation. Ordered integration must provide its SDK helper, shared header
+contracts, UI provenance helper and native server/CLI metadata plumbing. The
+actual existing parent helper/catalog/result contracts were read; no new tracker
+or made-up feature ID is needed. Parent must prove native metadata admission,
+retry dedupe, completion authority, QA exclusion and that no payload, path,
+header, prompt, tool argument, credential or payload hash reaches analytics.
+
+Migration `0147_private_capture.sql` and its Drizzle-generated snapshot are
+reserved for these four private-capture tables. They were generated from this
+isolated checkout's 0145 schema. Parent owns 0146: after composing its immutable
+source38 schema/migration, regenerate/rebase the 0147 snapshot against the
+combined schema with Drizzle; never hand-edit snapshot JSON or lose parent
+analytics tables. The reserved journal index is 147, not an invented 0146 entry.
+Host protocol is 245, reserved after parent's source40 protocol 244; parent must
+compose the native host wire changes and qualify/update enrolled machines before
+using the new required manifest fields. No old-host compatibility is claimed.
+
+## Stopped verification and remaining parent proof
+
+No build, typecheck, test, lint, formatter, install, runtime smoke, browser,
 network/model/auth/business probe or capture activation was run for this source
-checkpoint. The added synthetic retained-file test is authored only, not a
-passing-test claim. Parent owns qualification/review after freeze, including
-full-file mutation/ownership tests and actual UI/CLI/SDK exercise; the original
-full-capture acceptance cannot be met by these inspection checks alone.
+implementation. Drizzle was invoked only to generate required migration source;
+that is not a passing check. The existing synthetic retained-file test edits are
+authored source only. This handoff has no native runtime/coverage/latency/privacy
+passing claim and does not change the task's backlog/acceptance state.
+
+After ordered source38/source40 integration and source review, parent owns:
+
+1. Native source gates and synthetic actual Core/CLI/SDK/UI execution, including
+   desktop/compact drawer realization, no app-root inertness, and iOS Safari.
+2. Real SQLite/file commit and lost-ACK/crash/restart/reconnect proof; duplicate,
+   conflict, reordered/chunk-boundary, corrupt-state, missing-file, interrupted
+   and large/binary behavior; no deletion before valid ACK except explicit
+   privacy rejection or retention.
+3. Actual context/project/account/host/run isolation, revoked permission between
+   read and delivery, Work data with a Personal payer, denied cross-context links,
+   owner export policy, encrypted storage/transport and absence of raw/credential
+   leakage into diagnostics, analytics, Git or CI.
+4. Offline leases, collector/daemon shutdown/restart, finite quotas, free-disk
+   pressure, late/expired registrations, retention and bounded tombstone cleanup,
+   plus measured CPU/RAM/disk/latency overhead without changing request streaming.
+5. The complete owned OMP/native Claude/Codex, macOS/Linux, BB and standalone
+   matrix with exact runtime/version/context/account/model identity, unrelated
+   process exclusion, raw request/response/SSE cancellation/retry facts and
+   independent tool/MCP/bypass coverage. Missing real source/machine/auth/export
+   prerequisites stay explicit; no timestamp, normalized event or CPA success
+   substitutes for them.
+
+Full raw-body/stream/tool/MCP/bypass/standalone/offline-ACK/privacy acceptance
+remains full. Unsupported/uninstrumented channels are visible gaps, not a reduced
+acceptance contract or permission to enable MITM/CA/capture or probe real data.

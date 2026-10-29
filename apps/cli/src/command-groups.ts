@@ -26,6 +26,11 @@ function group<Module>(
 
 export const CORE_COMMAND_GROUPS: readonly CommandGroup[] = [
   group(
+    "captures",
+    () => import("./commands/private-captures.js"),
+    (m) => (program, deps) => m.registerPrivateCapturesCommands(program, deps.getUrl),
+  ),
+  group(
     "gateway-logs",
     () => import("./commands/gateway-logs.js"),
     (m) => (program, deps) =>

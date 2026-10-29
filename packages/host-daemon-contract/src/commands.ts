@@ -1,3 +1,4 @@
+import { captureExchangeCommandSchema, captureExchangeResultSchema } from "./private-capture.js";
 import {
   workspaceTransferCommandSchemas,
   workspaceTransferResultSchemas,
@@ -1433,6 +1434,15 @@ function defineHostDaemonCommandDescriptor<
 }
 
 export const hostDaemonCommandRegistry = {
+  "capture.exchange": defineHostDaemonCommandDescriptor({
+    type: "capture.exchange",
+    schema: captureExchangeCommandSchema,
+    resultSchema: captureExchangeResultSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
   "workspace.transferPreview": defineHostDaemonCommandDescriptor({
     type: "workspace.transferPreview",
     schema: workspaceTransferCommandSchemas["workspace.transferPreview"],

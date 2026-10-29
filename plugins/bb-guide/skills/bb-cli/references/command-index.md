@@ -2,6 +2,23 @@
 
 This index lists every command path that the core CLI registers, including aliases: `thread get|view|status` run `thread show`, `thread message|send` run `thread tell`, `thread messages|timeline` run `thread log`, `thread create|new` run `thread spawn`, `terminal read` runs `terminal output`, `plugin uninstall` runs `plugin remove`, and `environment get` runs `environment show`. At the top level `bb host`, `bb hosts`, and `bb machines` run `bb machine`, `bb env` runs `bb environment`, and the plurals `threads`, `projects`, `terminals`, `providers`, `plugins`, and `skills` run their singular command, unless a plugin registers that name. `bb guide commands <group>` prints a group's commands with every option on one page. Check live help for flags and defaults.
 
+## captures
+
+- `bb captures`
+- `bb captures create`
+- `bb captures list`
+- `bb captures show`
+- `bb captures stop`
+- `bb captures sync`
+- `bb captures link`
+- `bb captures artifacts`
+- `bb captures inspect`
+- `bb captures import`
+- `bb captures download`
+
+Read the thread-inspection guide for explicit project/context consent,
+private capture data, source gaps, offline ACKs and reviewed evidence imports.
+
 ## gateway-logs
 
 - `bb gateway-logs`

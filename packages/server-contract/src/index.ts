@@ -1,3 +1,4 @@
+export * from "./api/private-captures.js";
 export * from "./api/execution-contexts.js";
 export * from "./api/gateway-logs.js";
 export * from "./api-client.js";
