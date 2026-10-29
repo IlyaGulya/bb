@@ -273,11 +273,15 @@ bytes in its existing attachment storage. The source reference is the real
 `threadId` plus canonical message `eventSeq` (`experimental_messageSeq` in the
 rendered message action), not the provider fork/acceptance anchor. Source text
 is retained only as an explicitly confirmed quote of up to 4000 characters.
-Quote verification parses the actual message with the renderer's shared GFM/math
-configuration and Markdown-to-render-tree semantics, so emphasis, links, inline
-code and decoded entities do not require a raw Markdown substring match. The
-saved quote remains display text, alongside a hash of the original raw message
-rather than a full prompt dump.
+Quote verification uses the actual source message's role with the renderer's
+shared GFM/math configuration and Markdown-to-render-tree semantics, so emphasis,
+links, inline code and decoded entities do not require a raw Markdown substring
+match. User-authored HTML remains literal display text; assistant-authored HTML
+uses the existing sanitized rendering semantics. Visible line breaks and block
+boundaries stay separated rather than becoming fabricated joined phrases. The
+same shared text semantics feed ordinary-action prefill, identity-only restored
+panels and server quote verification. The saved quote remains display text,
+alongside a hash of the original raw message rather than a full prompt dump.
 
 The typed `taskArtifactRpcContract` in `shared/artifacts.ts` defines
 `taskArtifactTargets`, `inspectTaskArtifactImage`, `createTaskArtifact`,

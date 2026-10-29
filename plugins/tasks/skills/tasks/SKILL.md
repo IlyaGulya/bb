@@ -148,8 +148,12 @@ kinds are reserved; source links are HTTP(S) and source text remains untrusted.
    orientation-applied screenshot instead. The original upload is not rewritten.
    Decoding aborts on warnings or after ten seconds. A matching file hash alone
    does not make a historical header-only record safe to send as an image.
-   Selected display text is verified against the actual message's parsed Markdown
-   rendering semantics; keep the displayed quote, not its Markdown formatting.
+   Selected display text is verified against the actual source message's role
+   and parsed Markdown rendering semantics. Keep literal HTML tags in user
+   display text; assistant HTML uses sanitized rendering semantics. Preserve
+   visible line and block breaks instead of joining separated words. Ordinary
+   action prefill, restored panels and server verification share these rules;
+   the saved raw-source hash still covers the original message, not display text.
 
    `artifact remove ABC-12 <artifact-id> --json` removes only that explicit
    retained artifact. Its task image remains an ordinary attachment and cannot

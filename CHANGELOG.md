@@ -8,6 +8,10 @@
   through shared Markdown parsing, and require a full strict static-image
   decode rather than header-only dimensions. Animated or orientation-dependent
   screenshots require an explicitly exported static image; originals stay intact.
+- Match retained Tasks quotes to the actual source message role: preserve user
+  literal HTML, use sanitized assistant HTML, and keep visible line/block
+  boundaries in action prefill, restored panels and server verification. Reject
+  fabricated joined phrases while retaining the original raw-source hash.
 - Give Tasks one header workflow action backed by the shared persistent drawer;
   retain single-agent dispatch as a secondary action. Keep draft selections and
   explicit unavailable choices while Core definition/account catalog events and
