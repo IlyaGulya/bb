@@ -89,7 +89,7 @@ it.each(["pending acknowledgement", "failed save"] as const)("first-writer retry
       get: async ({ threadId }: { threadId: string }) => makeThreadResponse({ id: threadId, projectId: "proj_ui", environmentId: "owned-environment", status: "idle" }),
       list: async () => [],
     },
-    plugins: { callRpc: async ({ method, input }: { method: string; input: unknown }) => {
+    plugins: { callRpc: async ({ method, input }: { method: string; input?: unknown }) => {
       if (method !== "startBuildReview") throw new Error(`Unexpected native action ${method}`);
       const request = buildReviewStartSchema.parse(input);
       nativeRequests.push(request);
@@ -121,7 +121,7 @@ it.each(["pending acknowledgement", "failed save"] as const)("first-writer retry
   const finished = new Promise<void>(resolve => { finish = resolve; });
   const rpc = Object.fromEntries([...Object.keys(workflowSetupContract), ...Object.keys(workflowRpcContract)].map(method => [method, (input: unknown) => host.harness.callRpc(method, input)]));
   const slot = renderSlot({ component: WorkflowHarness }, { taskId: task.id }, {
-    sdk,
+    sdk: host.bb.sdk,
     rpc: {
       ...rpc,
       listMachines: async () => ({ machines: await sdk.hosts.list() }),
@@ -145,7 +145,7 @@ it.each(["pending acknowledgement", "failed save"] as const)("first-writer retry
     fireEvent.click(await slot.findByRole("option", { name: "Repaired context" }));
     await entered;
     if (boundary === "failed save") await act(async () => { release(); await finished; });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(slot.queryByRole("dialog", { name: "Launch workflow" })).toBeNull());
     fireEvent.change(slot.getByRole("textbox", { name: "Human feedback" }), { target: { value: "Retry only my acknowledged repair choices" } });
     await act(async () => { fireEvent.click(slot.getByRole("button", { name: "Retry first writer with feedback" })); });

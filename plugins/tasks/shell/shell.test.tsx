@@ -1017,7 +1017,7 @@ describe("tasks app shell", () => {
     trigger.focus();
     fireEvent.click(trigger);
     const drawer = await slot.findByRole("dialog", { name: "Launch workflow" });
-    await within(drawer).findByRole("button", { name: "Close", exact: true });
+    await within(drawer).findByRole("button", { name: "Close" });
     fireEvent.keyDown(window, { key: "c" });
     expect(slot.queryByPlaceholderText("Task title")).toBeNull();
     expect(slot.navigateCalls).toEqual([]);

@@ -78,7 +78,7 @@ describe.each([false, true])("registered Tasks workflow lifecycle (compact=%s)",
 
     fireEvent.click(trigger);
     expect(await slot.findByRole("dialog", { name: "Launch workflow" })).toBe(panel);
-    fireEvent.click(within(panel).getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(slot.queryByRole("dialog", { name: "Launch workflow" })).toBeNull());
     expect(document.activeElement).toBe(trigger);
     fireEvent.click(trigger);

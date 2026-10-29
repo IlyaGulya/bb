@@ -116,7 +116,7 @@ export function workflowCommands(
       options: {
         json, revision,
         feedback: { type: "string", required: true, description: "Explicit human revision feedback" },
-        "repair-revision": { type: "integer", min: 1, description: "Exact acknowledged task draft revision for an explicit first-writer profile repair; omit to retain persisted roles" },
+        "repair-revision": { type: "integer", min: 1, max: Number.MAX_SAFE_INTEGER, description: "Exact acknowledged task draft revision for an explicit first-writer profile repair; omit to retain persisted roles" },
       },
       run: input => emit(async () => handlers.returnTaskWorkflow(workflowRpcContract.returnTaskWorkflow.input.parse({
         id: input.positionals.id,
