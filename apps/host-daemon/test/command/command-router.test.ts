@@ -5,6 +5,7 @@ import {
   type HostDaemonOnlineRpcResponseMessage,
 } from "@bb/host-daemon-contract";
 import { WorkspaceError } from "@bb/host-workspace";
+import { createLogger } from "@bb/logger";
 import {
   encodeClientTurnRequestIdNumber,
   type ClientTurnRequestId,
@@ -30,6 +31,7 @@ import {
   fetchDispatchTestArtifact,
 } from "./dispatch-helpers.js";
 import { RuntimeManager } from "../../src/runtime-manager.js";
+import { ProviderStartupError } from "../../../../packages/agent-runtime/src/runtime-startup.js";
 
 type EnvironmentProvisionCommand = Extract<
   HostDaemonCommand,
@@ -243,6 +245,75 @@ describe("CommandRouter", () => {
       errorMessage: "Workspace provisioning was cancelled",
     });
     expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("does not log startup cause secrets through the routed thread.start failure", async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "bb-router-startup-log-"));
+    try {
+      vi.stubEnv("BB_LOG_LEVEL", "warn");
+      const logger = createLogger({ component: "startup-redaction", dataDir });
+      const sensitive = {
+        message: "SYNTHETIC_STARTUP_CAUSE_MESSAGE",
+        credential: "SYNTHETIC_STARTUP_CREDENTIAL",
+        privatePath: "/synthetic/private/startup-provider-item",
+        code: "SYNTHETIC_UNTRUSTED_PROVIDER_CODE",
+        stderr: "SYNTHETIC_RAW_STARTUP_STDERR",
+        stackFrame: "SYNTHETIC_STARTUP_CAUSE_STACK_FRAME",
+      };
+      const original = Object.assign(
+        new Error(`${sensitive.message}: credential=${sensitive.credential} path=${sensitive.privatePath}`),
+        {
+          credential: sensitive.credential,
+          privatePath: sensitive.privatePath,
+          code: sensitive.code,
+          stderr: sensitive.stderr,
+        },
+      );
+      original.stack = `${original.name}: ${original.message}\n    at ${sensitive.stackFrame} (${sensitive.privatePath}:1:1)`;
+      const failure = new ProviderStartupError("provider_startup_failed", original);
+      const harness = createHarness({ workspacePath: "/tmp/env-router" });
+      await harness.manager.ensureEnvironment({
+        environmentId: "env-router",
+        workspacePath: "/tmp/env-router",
+      });
+      harness.runtime.startThread = async () => { throw failure; };
+      const router = createRouter(harness, {
+        logger: {
+          debug: logger.debug.bind(logger),
+          warn: logger.warn.bind(logger),
+        },
+      });
+      const response = await runRouterCommand({
+        command: createThreadStartCommand(),
+        requestId: "synthetic-startup-log-redaction",
+        router,
+      });
+      expect(response).toMatchObject({
+        ok: false,
+        errorCode: "provider_startup_failed",
+        errorMessage: failure.message,
+      });
+      const logDir = path.join(dataDir, "logs");
+      const readLogOutput = async (): Promise<string> => {
+        const files = (await fs.readdir(logDir)).filter((entry) => entry.endsWith(".log"));
+        const contents = await Promise.all(files.map((entry) => fs.readFile(path.join(logDir, entry), "utf8")));
+        return contents.join("\n");
+      };
+      await expect.poll(readLogOutput, { timeout: 5_000 }).toContain('"level":40');
+      const output = await readLogOutput();
+      const warning = output.split("\n").find((line) => line.includes('"level":40'));
+      expect(warning).toContain('"type":"thread.start"');
+      expect(warning).toContain("provider_startup_failed");
+      expect(failure.cause).toBe(original);
+      const publicResponse = JSON.stringify(response);
+      for (const sentinel of Object.values(sensitive)) {
+        expect.soft(output).not.toContain(sentinel);
+        expect.soft(publicResponse).not.toContain(sentinel);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    }
   });
 
   it("cancels an in-flight path search when the server cancels its request", async () => {
