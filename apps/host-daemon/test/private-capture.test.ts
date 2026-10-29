@@ -7,21 +7,24 @@ import { exchangeHostCapture, startHostCaptureOutbox } from "../src/private-capt
 import {
   captureAckFixture, captureArtifactFixture, captureSessionFixture,
   orderedCaptureArtifacts, writeCaptureArtifactFixture, writeCaptureSessionFixture,
+  captureFixtureKeys, readCaptureFixtureBody,
 } from "./private-capture-fixtures.js";
 
 const forbiddenBinary = Buffer.from("SYNTHETIC_BINARY\u0000-----BEGIN PRIVATE KEY-----\nSYNTHETIC_NOT_A_REAL_KEY\n-----END PRIVATE KEY-----");
 
 describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("private host capture restart states", () => {
   let root: string;
+  let disposeKeys: () => void;
   const lifecycles: ReturnType<typeof startHostCaptureOutbox>[] = [];
   const readOnlyRoots: string[] = [];
-  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), "bb-capture-host-regression-")); });
+  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), "bb-capture-host-regression-")); disposeKeys = captureFixtureKeys(root); });
   afterEach(async () => {
     for (const lifecycle of lifecycles.splice(0)) await lifecycle.stop();
     for (const directory of readOnlyRoots.splice(0)) await chmod(directory, 0o700);
     const cleanup = startHostCaptureOutbox(root);
     await cleanup.stop();
     await rm(root, { recursive: true, force: true });
+    disposeKeys();
   });
 
   function exchange(session: CaptureSession, poll = true) {
@@ -63,7 +66,8 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("
     expect(result.manifest?.artifactId).toBe(pair.later.manifest.artifactId);
     expect(Buffer.from(result.chunk!.base64, "base64")).toEqual(pair.later.bytes);
     expect(result.status.gap).not.toBe("none");
-    expect(await readFile(join(incomplete, "0.chunk"))).toEqual(pair.earlier.bytes.subarray(0, CAPTURE_CHUNK_BYTES));
+    expect(await readCaptureFixtureBody(root, session, pair.earlier.manifest, 0)).toEqual(pair.earlier.bytes.subarray(0, CAPTURE_CHUNK_BYTES));
+    expect((await readFile(join(incomplete, "0.chunk"))).includes(pair.earlier.bytes.subarray(0, 256))).toBe(false);
   });
 
   async function retentionPair() {
@@ -112,7 +116,8 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("
     expect(result.status.pendingBytes).toBe(23);
     expect(result.status.pendingChunks).toBe(1);
     await expect(lstat(join(directory, "0.chunk"))).rejects.toMatchObject({ code: "ENOENT" });
-    expect(await readFile(join(directory, "1.chunk"))).toEqual(bytes.subarray(CAPTURE_CHUNK_BYTES));
+    expect(await readCaptureFixtureBody(root, session, artifact.manifest, 1)).toEqual(bytes.subarray(CAPTURE_CHUNK_BYTES));
+    expect((await readFile(join(directory, "1.chunk"))).includes(bytes.subarray(CAPTURE_CHUNK_BYTES))).toBe(false);
   });
 
   it("reconciles a fully acknowledged artifact during daemon recovery without another ACK command", async () => {

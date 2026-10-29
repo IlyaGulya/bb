@@ -1558,3 +1558,46 @@ its source-file retention remain separate. No opening of a drawer or inspection
 command activates capture. The unactivated source is not full-capture/privacy
 certification or authorization to enable MITM, a CA or network probing.
 
+An optional per-registration `policy.process` selects an absolute Python >=3.12
+with cryptography, pinned mitmproxy 12.3.1 or an explicit absolute `mitmdump`
+standalone path, explicit-proxy/local-pid networking, process-local CA trust and
+native stdio/Claude hooks/terminal operation. CLI `captures process` and SDK
+sync/get return scoped argv prefixes; they do not execute them. No global proxy,
+CA, auth home, SDK, provider configuration or shared MCP setting is changed.
+An explicit standalone binary still needs the separate wrapper Python/crypto;
+its bundled Python is not assumed to be an executable general interpreter.
+
+Managed host/Core payload files, process records and decompression scratch use
+authenticated AES-256-GCM before disk writes. Service-side key references are
+separate from capture policy and data scope:
+
+| Variable | Owner and meaning |
+| --- | --- |
+| `BB_PRIVATE_CAPTURE_HOST_KEY_REF` | Host-only dedicated key reference; required for body spooling/reading and process capture. |
+| `BB_PRIVATE_CAPTURE_CORE_KEY_REF` | Core-only dedicated key reference; required for body receipt/decryption/download. |
+| `BB_PRIVATE_CAPTURE_EPHEMERAL_DIR` | Process CA/private proxy runtime root; Linux defaults to `/dev/shm` and requires ramfs or tmpfs with no active swap. Mac defaults to its private runtime root on the parent-confirmed FileVault machine. |
+
+References are `keychain:<service>:<account>` on macOS, or
+`memory-file:/absolute/path` on Linux. The existing dedicated item/file must hold
+64 hex digits representing 32 random master-key bytes. Linux file ownership,
+mode, regular-file/single-link/canonical path and actual memory filesystem are
+checked; disk-backed/adjacent files are not a key-store fallback. The application
+creates no persistent key or Keychain item. Operator provisioning, OS approval,
+secure restoration and the same key across the complete pending/retention horizon
+are required. Missing key access fails closed; no attestation flag enables plain
+body files. The existing machine-environment adjacent key and secrets dotenv
+workflow are not used as capture master storage.
+
+Ciphertext is scope/object/role authenticated; plaintext SHA-256, redaction and
+committed ACK contracts are unchanged. Indexes/manifests remain private metadata.
+Existing source logs/event DB and intentional plaintext exports need their own
+proven protection. This source is not a claim that the unencrypted Linux volume,
+old sources, transport, OS key restore or the full native matrix is qualified.
+
+Maintainer-only `test:capture-process` is explicitly invoked, not a default test
+project. `BB_CAPTURE_PYTHON` and optional `BB_CAPTURE_MITMDUMP` select temporary
+parent-owned executables for that synthetic suite; they are not product runtime
+defaults. It additionally requires the host operator key reference and appropriate
+ephemeral storage. It must not receive provider auth or real business payloads.
+
+

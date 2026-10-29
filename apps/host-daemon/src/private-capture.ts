@@ -1,3 +1,4 @@
+import { prepareCaptureProcess, ingestCaptureProcess } from "./private-capture-process.js";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, opendir, realpath, rm } from "node:fs/promises";
@@ -14,6 +15,7 @@ import { captureRejectionSchema, type CaptureExchangeCommand, type CaptureExchan
 import {
   CaptureStorageError, captureObjectDigest, capturePreparePayload, capturePrivateDirectory,
   captureReadPrivate, captureSha256, captureSyncDirectory, captureWritePrivate,
+  captureReadEncrypted, captureWriteEncrypted, captureCipherContext, captureEncryptedSize,
 } from "@bb/process-utils";
 
 const stateSchema = z.object({
@@ -85,6 +87,11 @@ class HostCaptureOutbox {
     const state = await this.readState(directory);
     state.leaseUntil = Math.min(command.leaseUntil, session.expiresAt, Date.now() + session.policy.offlineLeaseSeconds * 1000);
     await this.saveState(directory, state);
+    const processStatus = await prepareCaptureProcess(this.dataDir, session, state.leaseUntil);
+    if (processStatus) {
+      state.status.process = processStatus;
+      if (processStatus.phase !== "prepared" && processStatus.phase !== "running" && processStatus.phase !== "exited") state.status.gap = processStatus.phase === "dependency_unavailable" ? "source_unavailable" : processStatus.phase;
+    }
     if (this.failures.has(session.id)) state.status.gap = this.failures.get(session.id)!;
     const artifacts = await this.artifactNames(session.id);
     if (command.rejection) {
@@ -140,6 +147,11 @@ class HostCaptureOutbox {
           await this.expireSession(directory, session);
         } else {
           const state = await this.readState(directory);
+          const processStatus = await prepareCaptureProcess(this.dataDir, session, state.leaseUntil);
+          if (processStatus) {
+            state.status.process = processStatus;
+            if (processStatus.phase !== "prepared" && processStatus.phase !== "running" && processStatus.phase !== "exited") state.status.gap = processStatus.phase === "dependency_unavailable" ? "source_unavailable" : processStatus.phase;
+          }
           await this.inspectArtifacts(session, state, false);
           if (session.enabled && Date.now() < state.leaseUntil && Date.now() >= state.nextScanAt) await this.scan(session, state);
           await this.saveState(directory, state);
@@ -152,6 +164,8 @@ class HostCaptureOutbox {
     let discarded = 0;
     let accountingGap = false;
     const outbox = join(directory, "outbox");
+    try { if (session.policy.process) await prepareCaptureProcess(this.dataDir, { ...session, enabled: false }, 0); }
+    catch { accountingGap = true; }
     try {
       if (await optionalStat(outbox)) {
         for (const artifactId of await this.artifactNames(session.id)) {
@@ -164,6 +178,7 @@ class HostCaptureOutbox {
     } catch { accountingGap = true; }
     finally {
       await rm(outbox, { recursive: true, force: true });
+      await rm(join(directory, "sources"), { recursive: true, force: true });
       await captureSyncDirectory(directory);
     }
     const state = await this.readState(directory);
@@ -193,7 +208,7 @@ class HostCaptureOutbox {
           state.status.pendingBytes += chunk.bytes;
           state.status.pendingChunks += 1;
           if (next || !takeNext || !artifact.complete) continue;
-          const bytes = await captureReadPrivate(directory, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES);
+          const bytes = await captureReadEncrypted(directory, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES, captureCipherContext(this.dataDir, "host", session, `${artifactId}/${chunk.sequence}.chunk`));
           if (bytes.length !== chunk.bytes || captureSha256(bytes) !== chunk.sha256) throw new CaptureStorageError("integrity");
           next = { manifest: artifact.manifest, chunk: { captureId: session.id, artifactId, sequence: chunk.sequence, sha256: chunk.sha256, base64: bytes.toString("base64") } };
         }
@@ -219,6 +234,8 @@ class HostCaptureOutbox {
     await captureSyncDirectory(directory);
   }
   private async reconcileArtifact(directory: string, captureId: string, artifactId: string) {
+    const session = await this.readSession(await capturePrivateDirectory(this.dataDir, "host", captureId));
+    if (!session) throw new CaptureStorageError("integrity");
     const manifest = await this.readManifest(directory);
     if (manifest.captureId !== captureId || manifest.artifactId !== artifactId) throw new CaptureStorageError("integrity");
     if (await optionalStat(join(directory, "rejected.json"))) {
@@ -243,9 +260,9 @@ class HostCaptureOutbox {
       if (acknowledged.has(chunk.sequence)) continue;
       const stat = await optionalStat(join(directory, `${chunk.sequence}.chunk`));
       if (!stat) { complete = false; continue; }
-      if (!stat.isFile() || stat.size !== chunk.bytes || (stat.mode & 0o077) !== 0 || (process.getuid !== undefined && stat.uid !== process.getuid())) throw new CaptureStorageError("integrity");
+      if (!stat.isFile() || stat.size !== captureEncryptedSize(chunk.bytes) || (stat.mode & 0o077) !== 0 || (process.getuid !== undefined && stat.uid !== process.getuid())) throw new CaptureStorageError("integrity");
       if (!published || stat.nlink !== 1) {
-        const bytes = await captureReadPrivate(directory, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES);
+        const bytes = await captureReadEncrypted(directory, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES, captureCipherContext(this.dataDir, "host", session, `${artifactId}/${chunk.sequence}.chunk`));
         if (captureSha256(bytes) !== chunk.sha256) throw new CaptureStorageError("integrity");
         hash?.update(bytes);
       }
@@ -268,6 +285,12 @@ class HostCaptureOutbox {
   private async scan(session: CaptureSession, state: z.infer<typeof stateSchema>): Promise<void> {
     if (!session.enabled || Date.now() >= session.expiresAt || Date.now() >= state.leaseUntil) return;
     state.nextScanAt = Date.now() + session.policy.syncIntervalSeconds * 1000;
+    if (session.policy.process) {
+      try {
+        const gap = await ingestCaptureProcess(this.dataDir, session, (manifest, bytes) => this.spool(session, manifest, bytes));
+        if (gap !== "none") state.status.gap = gap;
+      } catch (error) { state.status.gap = sourceGap(error); }
+    }
     await this.scanExports(session, state);
     if (!session.policy.bridgeRecorder) return;
     const root = process.env.BB_PROVIDER_BRIDGE_RECORD_DIR;
@@ -389,6 +412,8 @@ class HostCaptureOutbox {
     let hostBytes = 0;
     let sessionBytes = 0;
     for (const id of await names(root, uuidPattern, MAX_HOST_SESSIONS)) {
+      const sources = join(root, id, "sources");
+      if (await optionalStat(sources)) hostBytes += await this.retainedBytes(sources);
       for (const artifact of await this.artifactNames(id)) {
         const artifactDir = await capturePrivateDirectory(this.dataDir, "host", id, "outbox", artifact);
         const retained = await this.retainedBytes(artifactDir);
@@ -400,9 +425,9 @@ class HostCaptureOutbox {
         }
       }
     }
-    let additionalBytes = resumed ? 0 : bytes.length + manifestBytes.length + 66;
+    let additionalBytes = resumed ? 0 : manifest.chunks.reduce((sum, chunk) => sum + captureEncryptedSize(chunk.bytes), 0) + manifestBytes.length + 66;
     if (resumed) {
-      for (const chunk of manifest.chunks) if (!acknowledged.has(chunk.sequence) && !await optionalStat(join(directory, `${chunk.sequence}.chunk`))) additionalBytes += chunk.bytes;
+      for (const chunk of manifest.chunks) if (!acknowledged.has(chunk.sequence) && !await optionalStat(join(directory, `${chunk.sequence}.chunk`))) additionalBytes += captureEncryptedSize(chunk.bytes);
       if (!await optionalStat(join(directory, "manifest.json"))) additionalBytes += manifestBytes.length;
       if (!await optionalStat(join(directory, "acks.json"))) additionalBytes += 2;
       if (!await optionalStat(join(directory, "ready"))) additionalBytes += 64;
@@ -411,7 +436,7 @@ class HostCaptureOutbox {
     await capturePrivateDirectory(this.dataDir, "host", session.id, "outbox", manifest.artifactId);
     await captureWritePrivate(directory, "manifest.json", manifestBytes);
     for (const chunk of manifest.chunks) {
-      if (!acknowledged.has(chunk.sequence)) await captureWritePrivate(directory, `${chunk.sequence}.chunk`, bytes.subarray(chunk.sequence * CAPTURE_CHUNK_BYTES, chunk.sequence * CAPTURE_CHUNK_BYTES + chunk.bytes));
+      if (!acknowledged.has(chunk.sequence)) await captureWriteEncrypted(directory, `${chunk.sequence}.chunk`, bytes.subarray(chunk.sequence * CAPTURE_CHUNK_BYTES, chunk.sequence * CAPTURE_CHUNK_BYTES + chunk.bytes), captureCipherContext(this.dataDir, "host", session, `${manifest.artifactId}/${chunk.sequence}.chunk`));
     }
     if (!await optionalStat(join(directory, "acks.json"))) await captureWritePrivate(directory, "acks.json", Buffer.from("[]"));
     await captureWritePrivate(directory, "ready", Buffer.from(manifest.artifactId));

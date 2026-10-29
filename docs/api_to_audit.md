@@ -24,10 +24,19 @@ host/run/native-session/model labels are separate and unknown values stay null.
 Core callers: Thread Info's private capture drawer and `bb captures` use this
 same API. The Plugin Guide's **The bb SDK** documents these symbols.
 Before stabilization: integrate the immutable source38 native analytics API,
-compose migration 0147 after parent 0146 and wire protocol 245 after parent 244,
-and qualify the complete BBDEV-33 native/offline/ACK/privacy/transport matrix.
-Retained CPA/bridge files, normalized native events and owner imports do not
-certify independent MCP, bypass traffic, lossless streaming or full capture.
+compose migration 0147 after parent 0146 and the additional unshipped process
+wire protocol 247 after parent 246, and qualify the complete BBDEV-33 matrix.
+Optional process policy/status uses existing sync/get and the same Core scoped
+launch path, native mitmproxy 12.3.1 streaming, stdio/Claude hooks and explicit
+per-owned-server MCP wrappers; configuration alone is not retained coverage.
+Managed bodies/source descriptors/scratch require scope/object/role-authenticated
+AES-256-GCM and separate operator host/Core key references, not an adjacent plain
+key or an encryption-attestation flag. Internal resident key providers are not
+a remote SDK surface. Prove actual key restoration, storage/transport privacy,
+original-source protection, plaintext hash/ACK compatibility, CPU/RAM/disk/SSE
+overhead, current-scope download/ingest and the full owned native/offline matrix.
+Retained files, normalized events, imports and selected callbacks do not certify
+unwrapped MCP, unrelated/bypass traffic, lossless streaming or full capture.
 No capture activation, deployment or acceptance is implied by this source.
 
 ## Private request-log coverage and retained-file manifests

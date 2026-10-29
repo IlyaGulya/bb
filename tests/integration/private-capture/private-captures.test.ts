@@ -19,17 +19,20 @@ import { exchangeHostCapture, startHostCaptureOutbox } from "../../../apps/host-
 import {
   captureArtifactFixture, captureSessionFixture, orderedCaptureArtifacts,
   writeCaptureArtifactFixture, writeCaptureSessionFixture,
+  captureFixtureKeys,
 } from "../../../apps/host-daemon/test/private-capture-fixtures.js";
 
 describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("private capture Core consumer boundaries", () => {
   let harness: TestAppHarness;
   let hostRoot: string;
+  let disposeKeys: () => void;
   const hostId = "host_capture_regression";
   const connectionId = "synthetic-capture-peer";
 
   beforeEach(async () => {
     harness = await createTestAppHarness({ seedFirstPartyProviders: false });
     hostRoot = await mkdtemp(join(tmpdir(), "bb-capture-core-peer-"));
+    disposeKeys = captureFixtureKeys(hostRoot, harness.config.dataDir);
     upsertHost(harness.db, noopNotifier, { id: hostId, name: "Synthetic capture host" });
   });
   afterEach(async () => {
@@ -39,6 +42,7 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("
     await harness.cleanup();
     harness.db.$client.close();
     await rm(hostRoot, { recursive: true, force: true });
+    disposeKeys();
   });
 
   function createCapture(withHostDelivery = false) {

@@ -2,6 +2,18 @@
 
 ## AgentOS fork — unreleased
 
+- Add opt-in, scope-isolated native mitmproxy 12.3.1 streaming, native stdio/Claude
+  hooks and explicitly wrapped MCP sources through the existing private outbox,
+  Core ACK path and CLI/SDK/Thread Info owners. Support an explicit standalone
+  executable without substituting native model/account bindings or global defaults.
+- Encrypt managed host/Core body files, raw process records, source descriptors
+  and decode scratch with scope/object/role-bound framed AES-256-GCM. Require
+  separate protected host/Core key references, reject adjacent disk keys and
+  plaintext fallbacks, and confine Linux CA runtime to swap-excluded RAM storage.
+  Preserve plaintext checksum/redaction/committed ACK contracts. Unshipped host
+  protocol 247 and authored synthetic cases remain unexecuted and unactivated;
+  actual key restore, source/transport privacy and full native acceptance are
+  parent gates, not configured-coverage or completion claims.
 - Make the private capture CLI error return explicit and place the unchanged
   five real-wire Core cases in a dedicated shared-worker integration project.
   Keep Server's compiler scope, all assertions and durable privacy behavior

@@ -1,4 +1,5 @@
 import { captureExchangeCommandSchema, captureExchangeResultSchema } from "./private-capture.js";
+import { captureSessionSchema } from "@bb/domain";
 import {
   workspaceTransferCommandSchemas,
   workspaceTransferResultSchemas,
@@ -186,6 +187,7 @@ const hostDaemonBridgeLaunchSchema = z
       .strict(),
     providerOptions: jsonObjectSchema,
     envPassthrough: z.array(z.string().min(1)),
+    capture: captureSessionSchema.optional(),
   })
   .strict();
 export type HostDaemonBridgeLaunch = z.infer<

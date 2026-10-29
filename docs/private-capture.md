@@ -13,7 +13,7 @@ not substituted by this work; capture data scope never follows the model payer.
 The implementation stays inside the existing Core server, SQLite/private-file
 storage, host daemon and its authenticated `capture.exchange` RPC. The outbox
 contains capture data only, not runnable tasks. There is no new execution queue,
-supervisor, orchestrator, recording service, proxy or browser service.
+supervisor, orchestrator, recording/browser service or long-lived proxy service.
 
 - `packages/domain/src/private-capture.ts` defines explicit consent/policy,
   immutable subject, versioned manifest, chunk, committed ACK and gap schemas.
@@ -83,15 +83,29 @@ truncating the stored source body.
 | Explicit host exports | Existing thread-storage root, or standalone `private-capture-input/<captureId>`, with owner-registered relative paths | Stable owned private regular files only. Raw text/transcript/binary representation is explicit; no auth home, arbitrary-root discovery or timestamp matching. Supplied evidence retains `owner-import` provenance. |
 | Explicit SDK/CLI/UI import | Reviewed Blob/private invoking-machine file through shared redaction, manifest, chunk and ACK routes | No browser payload outbox. Retrying identical evidence resumes committed chunks; binary requires owner review. This does not instrument the originating terminal/process. |
 
-Native transcript discovery, terminal/cmux/tmux automatic capture, independent
-local-tool/MCP I/O, bypass HTTP/3/gRPC/WebSocket traffic, pinning/application
-encryption, provider-internal retries and unavailable provider reasoning remain
-uninstrumented or unsupported unless a real source supplies evidence. Tool
-schemas or replayed tool results in CPA requests do not prove independent tool
-execution. `captured` means retained evidence exists for that source, not that
-all its channels are complete. Empty indexes/unknown backlog are not zero
-activity or full coverage. Existing gateway coverage/manifest inspection remains
-separate and cannot certify the new delivery chain.
+An optional, explicitly scoped process integration now reuses pinned mitmproxy
+12.3.1 as a leaf subprocess, not a second recording service. Its actual seams
+are `private-capture-program.ts` and `private-capture-process.ts`: request and
+response streaming callbacks return the original bytes; WebSocket messages retain
+direction/sequence; native protocol stdio or Claude hooks record native/tool
+evidence; an explicit per-owned-server MCP prefix records independent stdio.
+Those records enter the same private host outbox and committed Core ACK chain.
+The process policy is absent by default. Preparing files does not execute a
+native process, start interception, create a CA or qualify any channel.
+
+Native transcript discovery and terminal/cmux/tmux history are not automatic.
+`native: terminal` preserves terminal IO but does not independently instrument
+local tools; use supported additive Claude hooks or an already-native stdio
+protocol. Arbitrary external MCP servers must be explicitly wrapped in that
+owned process context. Unwrapped stdio, unknown native protocols, bypass traffic
+outside the selected PID/proxy, pinning/application encryption, provider-internal
+retries and unavailable provider reasoning remain honest gaps. HTTP/2, HTTP/3,
+gRPC and WebSocket completeness, OS PID/descendant isolation and real native
+behavior remain matrix gates, not promises inferred from an addon callback.
+Tool schemas or replayed results in CPA requests do not prove tool execution.
+`captured` means completed retained body evidence exists for that source, not
+universal channel completeness. Configured/prepared is not observed capture.
+Unknown backlog/loss is not zero; gateway file inspection cannot certify delivery.
 
 ## Bytes, privacy, ACKs and resource limits
 
@@ -101,6 +115,84 @@ and artifact directories. Host bytes/ACKs/cursors live under
 immutable manifests and committed receipts, not body blobs. These paths are
 application data and must be outside Git, CI artifacts, analytics and ordinary
 diagnostic logs. Existing provider source files have their own separate policy.
+
+### Required authenticated at-rest encryption
+
+The parent confirms Personal Mac FileVault is on; the Linux Core/root volume is
+ext4/LVM with no verified at-rest encryption. Owner-only modes are not encryption.
+This source therefore encrypts managed body storage rather than accepting a
+filesystem-encryption attestation flag. It has not been activated or qualified.
+
+`packages/process-utils/src/private-capture-crypto.ts` reuses Node AES-256-GCM
+and the existing private atomic-write/fsync primitives. The existing machine
+environment store demonstrates scope-bound GCM, but its automatically created
+adjacent plaintext key is unsuitable here. `@bb/secret-storage` creates ordinary
+private files; the secrets plugin writes dotenv files. Desktop safeStorage is
+Electron-owned, and browser-import Keychain readers cannot be imported into a
+headless Core/daemon. The Mac adapter follows that existing explicit Keychain
+lookup pattern without importing browser credentials or using Chromium's legacy
+fallback. No existing auth/config credential is repurposed as a capture key.
+
+Host and Core separately resolve `BB_PRIVATE_CAPTURE_HOST_KEY_REF` and
+`BB_PRIVATE_CAPTURE_CORE_KEY_REF`. Values are references, never raw key material:
+
+- `keychain:<service>:<account>`: on macOS only, read an already-provisioned
+  dedicated generic password containing exactly 32 random bytes as 64 hex digits.
+  OS access approval is an external prerequisite; the implementation creates or
+  modifies no Keychain item and does not borrow a browser/provider secret.
+- `memory-file:/absolute/path`: on Linux only, read an existing owned, private,
+  single-link regular file containing that same 64-hex key. The referenced open
+  file must be on ramfs, or tmpfs with no active swap. Ordinary ext4/LVM, an
+  adjacent mode-0600 key, a symlink and a disk-backed secret file are refused.
+  An operator must provision/restore this credential from its separate protected
+  key store. No key is generated beside ciphertext or saved by the capture code.
+
+Internal owners may supply a resident `CaptureKeyProvider` scoped to the data
+directory and role. Synthetic Node tests use independent in-memory random keys
+and dispose them after IO stops; this proves no OS key-store provisioning.
+There is no corresponding remote/SDK key-provider API or client-supplied key.
+Production defaults resolve the explicit references above and fail closed when
+unavailable. Key bytes never enter policy, RPC, SQLite, manifests or analytics.
+References live only in service environment/private helper configuration, not
+the immutable data scope. Retain the same key reference/material across restart
+and the whole pending-data/retention horizon. Online key rotation, lost-key
+recovery and automatic persistent key provisioning are not implemented.
+
+HKDF-SHA256 derives distinct host/Core keys from the master, capture UUID and
+immutable subject digest. `BBPC1` files contain bounded 64 KiB AES-GCM frames
+with random 96-bit nonces, per-frame sequence/length and object/scope/role AAD,
+plus an authenticated terminal frame. Moving ciphertext across capture/context,
+role, artifact, source record or chunk fails authentication. Completed files
+require that terminal frame; only explicitly interrupted process records may
+recover a fully authenticated prefix, never unauthenticated tail bytes.
+
+Host `.chunk` and Core `.chunk` bodies, process `.body`, payload-bearing source
+descriptors and decompression scratch files are encrypted before any disk write,
+including temporary publication files. No plaintext-read fallback, transparent
+migration or new adjacent key is provided. Old synthetic plaintext fixtures must
+be recreated, not silently admitted. SHA-256, byte counts, redaction/fidelity,
+artifact identities and ACKs still describe application plaintext, not ciphertext.
+Ciphertext fsync/publication precedes the existing SQLite receipt commit. Host
+physical accounting includes encryption overhead; pendingSourceBytes reports
+unspooled body ciphertext bytes, not plaintext or a complete live loss counter.
+Core plaintext reservation bounds remain finite, with bounded per-chunk framing
+overhead and the existing physical free-disk reserve. Downloads decrypt and
+authenticate bounded chunks only through existing current-scope authorization,
+with permission rechecks before/after IO and unchanged plaintext hashes.
+
+Linux per-process CA/private proxy configuration is created only on ramfs or
+swap-excluded tmpfs (`BB_PRIVATE_CAPTURE_EPHEMERAL_DIR`, default `/dev/shm`), not
+the unencrypted Core/root volume. The private per-run directory is removed at
+normal shutdown; OS/crash cleanup and resource behavior require parent proof.
+On the confirmed FileVault Mac the existing private runtime root is used unless
+an explicit ephemeral root is supplied. Neither branch installs a global CA.
+
+The index/manifests/receipts remain private metadata. Existing CPA/native bridge
+files, Core's original native-event database, auth homes and explicit exports or
+owner-requested plaintext downloads are outside managed body encryption. Their
+own at-rest protection must be proved separately; this change cannot retroactively
+protect a pre-existing plaintext source. These boundaries do not reduce the full
+privacy acceptance contract or authorize capture on an unprotected source.
 
 Known HTTP/JSON credential forms, bearer/basic values and token query values are
 redacted; PEM private keys are rejected. Complete JSON documents and individual
@@ -204,9 +296,11 @@ isolated checkout's 0145 schema. Parent owns 0146: after composing its immutable
 source38 schema/migration, regenerate/rebase the 0147 snapshot against the
 combined schema with Drizzle; never hand-edit snapshot JSON or lose parent
 analytics tables. The reserved journal index is 147, not an invented 0146 entry.
-Host protocol is 245, reserved after parent's source40 protocol 244; parent must
-compose the native host wire changes and qualify/update enrolled machines before
-using the new required manifest fields. No old-host compatibility is claimed.
+The earlier composed contract used host protocol 245 after parent 244. This
+additional process policy, launch wiring, process evidence and status contract
+uses unshipped protocol 247 after the intervening parent 246 reservation. Parent
+must compose the native host changes and qualify/update enrolled machines. No
+compatibility with an old host or plaintext body store is claimed.
 
 ## Stopped verification and remaining parent proof
 
@@ -284,3 +378,96 @@ After ordered source38/source40 integration and source review, parent owns:
 Full raw-body/stream/tool/MCP/bypass/standalone/offline-ACK/privacy acceptance
 remains full. Unsupported/uninstrumented channels are visible gaps, not a reduced
 acceptance contract or permission to enable MITM/CA/capture or probe real data.
+
+## Process/encryption source freeze and parent-only execution
+
+New process source is `apps/host-daemon/src/private-capture-program.ts` and
+`private-capture-process.ts`, `packages/domain/src/private-capture-process.ts`,
+the existing host `private-capture.ts`, Core `private-captures.ts`, thread command
+and host dispatch seams, and the existing agent-runtime provider launch/key.
+Core selects only the same frozen project/context/account/host thread capture;
+the added process key prevents reuse across capture boundaries. It does not
+change model/account/payer, native HOME/auth, reasoning settings, shared MCP
+defaults or provider credentials. Existing live sessions are not retroactive.
+
+The CLI `captures process <id> --project <id> --context <id> --json` performs the
+existing bounded sync and returns host-local launch/MCP/hook argv prefixes and
+prerequisites. It never executes that argv. SDK callers use the same existing
+`sync`/`get` process policy/status path; Thread Info exposes it, including explicit
+standalone runtime creation and a same-context navigation link. Standalone
+identity does not assert a Core model/account or native execution provenance.
+
+The optional `policy.process` object is explicit:
+
+```json
+{
+  "python": "/absolute/operator-selected/python",
+  "mitmdump": "/absolute/operator-selected/mitmdump",
+  "network": "explicit-proxy",
+  "trust": "node-extra-ca",
+  "native": "stdio",
+  "binaryReview": "owner-reviewed-no-auth-material"
+}
+```
+
+`mitmdump` is optional: omit it only when the selected Python itself has
+mitmproxy==12.3.1. Selecting a standalone executable is not selecting its bundled
+Python as a general-purpose interpreter; the wrapper Python still needs >=3.12
+and cryptography AESGCM/HKDF, plus stdlib/backports zstd for zstd body decoding.
+No auto-install or version substitution occurs. `network: local-pid` uses the
+existing mitmproxy OS helper and requires its real privileges/support; explicit
+proxy mode does not capture clients that ignore it. Existing proxy/trust env
+overrides are refused, not overwritten. `trust: ssl-cert-file` is explicit per
+process; `external-process-trust` requires the literal
+`@BB_PRIVATE_CAPTURE_CA_CERT@` in selected-client argv, expanded to that run's CA
+path for its existing trust option. Never disable TLS verification or install a
+system CA. `native: stdio` is for already-supported native protocol operation;
+`claude-hooks` adds process-local tool/approval/subagent hooks without a verdict,
+and refuses an already-supplied --settings rather than replacing it.
+`terminal` leaves terminal IO intact but cannot promise independent native tools.
+MCP wrapping is explicit per owned server and only valid inside that live owned
+process context; unrelated system servers are not discovered or reconfigured.
+
+Parent reports official pinned standalone 12.3.1 available at
+`/tmp/bbdev44-ui-qa-Qz0y2M/mitmproxy-standalone-12.3.1/mitmdump`, and in owned QA
+at `/opt/qa-mitmdump`; its reported version works on glibc 2.39 and 2.36.
+The earlier parent-owned mitmproxy-env path is also reported available. These
+are supplied prerequisites, not this agent's execution or proxy/CA proof. No
+temporary machine path is a product default. Separate protected host/Core key
+references, restored master material, wrapper Python/crypto availability and
+encrypted/authenticated delivery have not been supplied or qualified here.
+
+After source38 composition and source review, parent may explicitly invoke:
+
+```sh
+pnpm exec turbo run test --filter=@bb/process-utils -- test/private-capture-crypto.test.ts test/private-capture-files.test.ts
+pnpm exec turbo run test --filter=@bb/host-daemon -- test/private-capture.test.ts
+pnpm exec turbo run test --filter=@bb/integration-tests -- --project=@bb/integration-tests:private-capture private-capture/private-captures.test.ts
+pnpm exec turbo run test:capture-process --filter=@bb/integration-tests
+```
+
+Pipe qualification output to a private synthetic-only log. The last task is
+uncached and not in default projects; it requires BB_CAPTURE_PYTHON and the
+operator host key reference, with optional BB_CAPTURE_MITMDUMP and ephemeral
+root. It runs a real synthetic HTTP origin/SSE client, a separately wrapped MCP
+tool process and actual mitmproxy. Assertions cover original multichunk wire
+bytes, SSE visibility before EOF, redacted stored bytes, independent MCP output
+and exclusion of an unrelated direct client. It does not qualify TLS, native
+providers, OS local-pid capture, WebSocket/HTTP3/gRPC or full task acceptance.
+
+The Node ciphertext cases exercise real AES/fsync/private files, role/scope/object
+binding, wrong keys/tags/truncation, authenticated interrupted-prefix recovery
+and refusal of plaintext bodies. Existing host/Core cases retain their receipt,
+privacy, restart and retention behavior; physical-byte assertions now decrypt
+the new storage contract and additionally assert plaintext is absent on disk.
+Resident fixture keys do not stand in for the real key-store gate.
+
+No commands in this section have been executed by this agent. No checks, builds,
+tests, formatter, installs, capture, CA, auth/network/model probes, nested actors
+or live source43 access were performed for this amendment. Parent still owns
+real key-store restore/restart, raw-prefix/tamper/crash/ACK durability, existing
+source protection, exact Work-data/Personal-payer isolation, actual Core/CLI/SDK/
+desktop/compact/iOS surfaces, measured overhead, the complete owned native matrix
+and human acceptance. Configured integration and authored ciphertext code are
+not deployed encryption, READY, full completion or acceptance.
+

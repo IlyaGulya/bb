@@ -10,6 +10,7 @@ This index lists every command path that the core CLI registers, including alias
 - `bb captures show`
 - `bb captures stop`
 - `bb captures sync`
+- `bb captures process`
 - `bb captures link`
 - `bb captures artifacts`
 - `bb captures inspect`
@@ -17,7 +18,8 @@ This index lists every command path that the core CLI registers, including alias
 - `bb captures download`
 
 Read the thread-inspection guide for explicit project/context consent,
-private capture data, source gaps, offline ACKs and reviewed evidence imports.
+encrypted private body storage and operator key references, process preparation,
+independent source gaps, offline ACKs and reviewed evidence imports.
 
 ## gateway-logs
 

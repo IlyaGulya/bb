@@ -1272,7 +1272,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Inspect named MCP configuration on the execution worker without returning native descriptors or credentials; validity is not authentication readiness",
           "Prepare a real titled execution context with threads.spawn({ preparationOnly: true, input: [] }) through normal Core binding/admission and environment provisioning, without an origin donor, imported conversation or model turn; later workflow Start is explicit",
           "Inspect private CPA request logs through experimental_gatewayLogs; coverage distinguishes independent native/tool/MCP/standalone/bypass gaps, while manifest hashes only the full retained file and never implies delivery ACK or complete capture",
-          "Manage explicit project/context private capture data through experimental_privateCaptures: create/list/get/stop/sync, same-context owner-association links, source-reported artifact filters, bounded previews, verified full downloads and reviewed resumable uploads; deterministic raw chunk ACKs are separate from metadata analytics and do not certify full-channel capture",
+          "Manage explicit project/context private capture data through experimental_privateCaptures: create/list/get/stop/sync, same-context owner links, source filters, verified downloads and reviewed resumable uploads; optional process policy uses sync/get for host-local native mitmproxy 12.3.1/stdio/Claude hook/MCP prefixes, not automatic execution; scope-authenticated encrypted managed bodies require separate operator host/Core key references, while plaintext hashes/ACKs remain separate from metadata analytics and never certify full-channel capture",
         ],
         apiSymbols: [
           "BbPluginApi",

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { captureProcessPolicySchema, captureProcessEvidenceSchema, captureProcessStatusSchema } from "./private-capture-process.js";
 
 export const CAPTURE_CHUNK_BYTES = 262144;
 export const CAPTURE_MAX_ARTIFACT_BYTES = 64 * 1024 * 1024;
@@ -30,6 +31,7 @@ export const capturePolicySchema = z.object({
   nativeEvents: z.boolean(),
   cpaLogs: z.boolean(),
   offlineLeaseSeconds: z.number().int().min(30).max(3600),
+  process: captureProcessPolicySchema.optional(),
   nativeExports: z.array(z.object({
     sourceId: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u),
     relativePath: z.string().min(1).max(1024).refine(value => value.split("/").every(part => /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u.test(part) && part !== "." && part !== "..")),
@@ -51,7 +53,7 @@ export const captureSessionSchema = z.object({
   createdAt: z.number().int().nonnegative(),
   expiresAt: z.number().int().nonnegative(),
 }).strict();
-export const captureSourceSchema = z.enum(["cpa-request-log", "bridge-recorder", "native-events", "native-transcript", "owner-import"]);
+export const captureSourceSchema = z.enum(["cpa-request-log", "bridge-recorder", "native-events", "native-transcript", "owner-import", "mitmproxy", "native-hook", "process-stdio", "mcp-stdio"]);
 export const captureManifestSchema = z.object({
   version: z.literal(1),
   captureId: z.string().uuid(),
@@ -71,6 +73,7 @@ export const captureManifestSchema = z.object({
   requestId: z.string().min(1).max(256).nullable(),
   observedAt: z.number().int().nonnegative().nullable(),
   sourceOffset: z.number().int().nonnegative(),
+  process: captureProcessEvidenceSchema.optional(),
   sourceBytes: z.number().int().min(1).max(CAPTURE_MAX_ARTIFACT_BYTES),
   sourceSha256: captureDigestSchema,
   storedBytes: z.number().int().min(1).max(CAPTURE_MAX_ARTIFACT_BYTES),
@@ -123,6 +126,7 @@ export const captureOutboxStatusSchema = z.object({
   lastAckAt: z.number().int().nonnegative().nullable(),
   gap: captureGapSchema,
   droppedBytes: z.number().int().nonnegative(),
+  process: captureProcessStatusSchema.optional(),
 }).strict();
 export type CaptureScope = z.infer<typeof captureScopeSchema>;
 export type CaptureSubject = z.infer<typeof captureSubjectSchema>;

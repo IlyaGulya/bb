@@ -16,7 +16,7 @@ import {
 import type { CreateSdkAreaArgs } from "./common.js";
 
 export type { CaptureCreate, CaptureLinkRequest, CaptureView, CaptureArtifactView, CaptureListQuery, CaptureArtifactQuery, CapturePreview } from "@bb/server-contract";
-export type { CaptureScope, CaptureSession, CapturePolicy, CaptureManifest, CaptureChunk, CaptureAck } from "@bb/domain";
+export type { CaptureScope, CaptureSession, CapturePolicy, CaptureManifest, CaptureChunk, CaptureAck, CaptureProcessPolicy, CaptureProcessStatus, CaptureProcessEvidence } from "@bb/domain";
 type Provenance = { analytics?: ExperimentalProductAnalyticsContext; signal?: AbortSignal };
 export interface CaptureIdArgs extends CaptureScope, Provenance { captureId: string }
 export interface CaptureArtifactArgs extends CaptureIdArgs { artifactId: string }

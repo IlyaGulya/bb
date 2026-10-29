@@ -134,6 +134,7 @@ Opt-in private capture data (all but create require --project <Core-id> --contex
   bb captures list [--thread <id>] [--host <id>] [--model <configured-model>]
     [--runtime <id>] [--session <native-id>] [--after <uuid>] [--limit <1-100>] [--json]
   bb captures show|stop|sync <captureId> [--json]
+  bb captures process <captureId> [--json]  Prepare and show host-local process/MCP/hook argv; never execute it
   bb captures link <captureId> --thread <id> [--run <id>] --operation <uuid> [--json]
   bb captures artifacts <captureId> [--source <kind>] [--destination <exact-url>]
     [--host <source-host>] [--run <source-run>] [--session <source-native-id>]
@@ -154,6 +155,20 @@ Opt-in private capture data (all but create require --project <Core-id> --contex
   maxBytes, maxArtifacts, syncIntervalSeconds, offlineLeaseSeconds,
   bridgeRecorder, nativeEvents, cpaLogs and nativeExports. Each export names a
   sourceId, relativePath, representation and binaryReview; none means [].
+  Optional policy.process selects an absolute python, optional absolute mitmdump,
+  network=explicit-proxy|local-pid, trust=node-extra-ca|ssl-cert-file|external-process-trust,
+  native=stdio|claude-hooks|terminal and binaryReview=owner-reviewed-no-auth-material.
+  Pin mitmproxy 12.3.1; Python >=3.12 still needs cryptography. A standalone
+  mitmdump path is not a Python interpreter. Absent process policy means off.
+  BB uses stdio only on a new scoped process; standalone Claude hooks are additive,
+  while terminal mode cannot certify independent native tools. Wrap each owned
+  MCP server explicitly inside that live process context. Prepared is not capture.
+  External process trust requires @BB_PRIVATE_CAPTURE_CA_CERT@ in client argv,
+  expanded to the ephemeral CA for that client's existing trust flag. No global
+  CA or TLS-verification bypass is installed; conflicting proxy/trust env is refused.
+  SDK sync/get and the same Thread Info drawer expose policy, phase and argv.
+  CLI process executes only the same bounded sync, not its returned launch prefix.
+  Execute argv only on the selected host; never copy it into another context.
   Existing thread subject/account/runtime/host bindings are verified, not inferred
   from payer identity. Standalone means threadId=null and a distinct capture UUID;
   link is a same-context owner association, not native execution provenance.
@@ -168,6 +183,19 @@ Opt-in private capture data (all but create require --project <Core-id> --contex
   Existing provider loggers are not enabled, reconfigured or stopped by these
   controls. Original provider source retention is separate. HTTP/3, bypass,
   independent MCP and lossless streaming remain unqualified, not captured by fiat.
+  Managed raw bodies and process descriptors/scratch are AES-256-GCM ciphertext
+  on host/Core; private modes alone are not encryption. Separate service-side
+  BB_PRIVATE_CAPTURE_HOST_KEY_REF and BB_PRIVATE_CAPTURE_CORE_KEY_REF are required.
+  They reference an existing dedicated macOS keychain:<service>:<account>, or
+  Linux memory-file:/absolute/path on ramfs/swap-excluded tmpfs, containing a
+  64-hex 32-byte master key. No adjacent disk key, auto-generation or plaintext
+  fallback is accepted. These are operator references, never SDK policy/key values.
+  Linux CA runtime uses BB_PRIVATE_CAPTURE_EPHEMERAL_DIR (default /dev/shm),
+  also verified RAM-backed with swap excluded. Keys must survive/recover across
+  restart for all retained ciphertext. No key is put into RPC or analytics.
+  Hashes/ACKs describe application plaintext; physical framing overhead is local.
+  Source files, original event DB and explicit downloaded exports still need
+  their own protection; managed ciphertext does not retroactively encrypt them.
 
 Opening threads and files in the app:
 

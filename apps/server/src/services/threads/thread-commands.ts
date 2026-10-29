@@ -1,3 +1,4 @@
+import { withThreadProcessCapture } from "../private-captures.js";
 import {
   environments,
   getThreadExecutionBinding,
@@ -301,7 +302,7 @@ export async function buildThreadStartCommand(
     environment: args.environment,
     model: args.execution.model,
   });
-  const bridgeLaunch = requireBridgeLaunchForProviderId(deps, args.providerId);
+  const bridgeLaunch = withThreadProcessCapture(deps, args.thread.id, args.environment.hostId, requireBridgeLaunchForProviderId(deps, args.providerId));
   return {
     type: "thread.start",
     environmentId: args.environment.id,
@@ -340,10 +341,7 @@ export async function buildThreadStartCommand(
 function buildPreparedTurnSubmitCommandPayload(
   args: PreparedTurnSubmitCommandBuildArgs,
 ): PreparedTurnSubmitCommandPayload {
-  const bridgeLaunch = requireBridgeLaunchForProviderId(
-    args.deps,
-    args.runtimeContext.providerId,
-  );
+  const bridgeLaunch = withThreadProcessCapture(args.deps, args.threadId, args.hostId, requireBridgeLaunchForProviderId(args.deps, args.runtimeContext.providerId));
   return {
     type: "turn.submit",
     environmentId: args.environmentId,

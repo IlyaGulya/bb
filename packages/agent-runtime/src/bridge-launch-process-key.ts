@@ -41,7 +41,7 @@ function fingerprintStableJson(value: unknown): string {
 
 type BridgeLaunchProcessKeyInput = Pick<
   AgentRuntimeBridgeLaunch,
-  "capabilities" | "providerOptions"
+  "capabilities" | "providerOptions" | "processCapture"
 > & { source: Pick<AgentRuntimeBridgeLaunch["source"], "digest"> };
 
 export function bridgeLaunchProcessKey(
@@ -50,5 +50,6 @@ export function bridgeLaunchProcessKey(
   return `${bridgeLaunch.source.digest.slice(0, 16)}.${fingerprintStableJson({
     capabilities: bridgeLaunch.capabilities,
     providerOptions: bridgeLaunch.providerOptions,
+    ...(bridgeLaunch.processCapture ? { processCapture: bridgeLaunch.processCapture } : {}),
   })}`;
 }
