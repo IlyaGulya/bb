@@ -146,6 +146,6 @@ export function buildTimelineWithNativeHistory(
     events.push(boundary("turn/started", frame.first), ...frame.items, boundary("turn/completed", frame.last));
   }
   const historical = buildThreadTimelineFromEvents({ ...args, events, headStateEvents: [], contextWindowEvents: [], acceptedClientRequestContext: { acceptedClientRequestEvents: [], rejectedClientRequestEvents: [] }, options: { ...args.options, includeNestedRows: true } });
-  const rows = mapTimelineRowTree(historical.rows.flatMap((row) => row.kind === "turn" ? row.children ?? [] : [row]), (row) => ({ ...row, turnId: null }));
+  const rows = mapTimelineRowTree(historical.rows.flatMap((row) => row.kind === "turn" ? row.children ?? [] : [row]), (row) => row.kind === "turn" ? row : { ...row, turnId: null });
   return { ...timeline, rows: [...timeline.rows, ...rows].sort((left, right) => left.sourceSeqStart - right.sourceSeqStart || left.sourceSeqEnd - right.sourceSeqEnd) };
 }

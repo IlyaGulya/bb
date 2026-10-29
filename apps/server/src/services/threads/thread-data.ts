@@ -173,7 +173,8 @@ export function getLastThreadOutput(
 
   if (!row) return null;
 
-  const eventRow = parseStoredEventRow(row);
+  const native = decodeNativeHistoryRows(db, [row]);
+  const eventRow = parseStoredEventRow(row, native.get(row.id)?.event ?? parseStoredEvent(row));
 
   if (eventRow.type === "system/manager/user_message") {
     return eventRow.data.text.length > 0 ? eventRow.data.text : null;
@@ -196,6 +197,6 @@ export function getLastThreadErrorMessage(
 ): string | null {
   const row = getLatestThreadSystemErrorEventRow(db, { threadId });
   if (!row) return null;
-  const eventRow = parseStoredEventRow(row);
+  const eventRow = parseStoredEventRow(row, parseStoredEvent(row));
   return eventRow.type === "system/error" ? eventRow.data.message : null;
 }
