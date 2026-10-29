@@ -22,11 +22,16 @@ const MAX_RESULT_LIMIT = 100;
 const bindingTaskKeysSchema = z.record(taskScopeSchema.shape.taskId, lineageSchema.shape.taskKey);
 const NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,79}$/;
 const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]{0,39}$/;
-const reflectionVisibilitySql = `(json_extract(proposal_json, '$.selection.executionContextId') IS ? OR NOT EXISTS (
+const artifactPinSchema = artifactSourceSelectionSchema.pick({ artifactId: true, executionContextId: true, revision: true });
+const reflectionVisibilitySql = `NOT EXISTS (
   SELECT 1 FROM json_each(proposal_json, '$.diffs') AS diff
-  WHERE json_extract(diff.value, '$.before.lineage.source.kind') = 'artifact'
-     OR json_extract(diff.value, '$.after.source.kind') = 'artifact'
-))`;
+  JOIN json_each(diff.value, '$.before.lineage.evidenceContextIds') AS evidence
+  WHERE evidence.value IS NOT ?
+) AND NOT EXISTS (
+  SELECT 1 FROM json_each(proposal_json, '$.diffs') AS diff
+  WHERE json_extract(diff.value, '$.after.source.kind') = 'artifact'
+    AND json_extract(diff.value, '$.after.source.executionContextId') IS NOT ?
+)`;
 
 type MemoryScope = "global" | "project";
 type ReadScope = MemoryScope | "all";
@@ -128,7 +133,7 @@ export const memoryRpcContract = defineRpcContract({
     output: z.object({ artifacts: z.array(taskArtifactProjection) }).strict(),
   },
   readMemoryArtifact: {
-    input: memorySelectionSchema.safeExtend({ artifactId: z.uuid() }),
+    input: memorySelectionSchema.safeExtend({ artifactId: z.uuid(), pin: artifactPinSchema.nullable().default(null) }),
     output: z.object({ view: taskArtifactViewProjection, source: artifactSourceSelectionSchema }).strict(),
   },
   threadMemoryState: {
@@ -235,6 +240,12 @@ interface MemoryUpdate {
 }
 
 class CliError extends PluginCliError {}
+
+function retainEvidenceContexts(contextIds: string[], source: MemoryLineage["source"]): string[] {
+  if (source.kind !== "artifact" || contextIds.includes(source.executionContextId)) return contextIds;
+  if (contextIds.length > 0) throw new CliError("Retained evidence cannot cross execution-context restrictions");
+  return [source.executionContextId];
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -419,7 +430,7 @@ function scopeSql(
     if (snapshotScoped) return { sql, params };
     params.push(executionContextId);
     return {
-      sql: `${sql} AND (json_extract(m.lineage_json, '$.source.kind') IS NOT 'artifact' OR json_extract(m.lineage_json, '$.source.executionContextId') = ?)`,
+      sql: `${sql} AND NOT EXISTS (SELECT 1 FROM json_each(m.lineage_json, '$.evidenceContextIds') AS evidence WHERE evidence.value IS NOT ?)`,
       params,
     };
   }
@@ -573,7 +584,9 @@ class MemoryStore {
           input.tags === undefined ? current.tags : validateTags(input.tags),
         importance: input.importance ?? current.importance,
         pinned: input.pinned ?? current.pinned,
-        lineage: input.lineage ?? current.lineage,
+        lineage: input.lineage ? { ...input.lineage,
+          evidenceContextIds: retainEvidenceContexts(current.lineage?.evidenceContextIds ?? input.lineage.evidenceContextIds, input.lineage.source),
+        } : current.lineage,
         sourceThreadId: input.sourceThreadId,
         writeReason: validateText("reason", input.writeReason, 500),
         version: current.version + 1,
@@ -760,7 +773,7 @@ class MemoryStore {
            ORDER BY CASE WHEN m.id = ? THEN 0 ELSE 1 END,
              CASE WHEN m.scope = 'project' THEN 0 ELSE 1 END, m.updated_at DESC LIMIT 1)
          AND (? IS NULL OR h.version = ?)
-         AND (json_extract(h.snapshot_json, '$.lineage.source.kind') IS NOT 'artifact' OR json_extract(h.snapshot_json, '$.lineage.source.executionContextId') = ?)
+         AND NOT EXISTS (SELECT 1 FROM json_each(h.snapshot_json, '$.lineage.evidenceContextIds') AS evidence WHERE evidence.value IS NOT ?)
          ORDER BY h.version DESC
          LIMIT ?`,
       )
@@ -828,12 +841,16 @@ class MemoryStore {
   addTask(input: MemoryCreate, executionContextId: string | null): MemoryRecord {
     if (!input.task || !input.lineage || input.scope !== "project" || !input.projectId)
       throw new CliError("Task memory requires explicit project, task, context and provenance");
+    const lineage = input.lineage;
     return this.db.transaction(() => {
-      const link = input.lineage?.replaces;
+      const link = lineage.replaces;
       const prior = link ? this.get(link.id, "project", input.projectId ?? undefined, false, input.task, true, executionContextId) : null;
       if (link && (!prior || prior.version !== link.version || prior.lineage?.state !== "current"))
         throw new CliError("Replacement base changed or is outside this task/context");
-      const record = this.add(input);
+      const inherited = prior?.lineage?.evidenceContextIds;
+      const record = this.add({ ...input, lineage: { ...lineage,
+        evidenceContextIds: inherited && inherited.length > 0 ? retainEvidenceContexts(inherited, lineage.source) : lineage.evidenceContextIds,
+      } });
       if (prior?.lineage) this.update(prior.id, {
         expectedVersion: prior.version, lineage: { ...prior.lineage, state: "replaced", replacedBy: { id: record.id, version: record.version } },
         sourceThreadId: input.sourceThreadId, writeReason: input.writeReason,
@@ -870,7 +887,7 @@ class MemoryStore {
   proposals(selection: MemorySelection): ReflectionProposal[] {
     if (!selection.task || !selection.projectId) return [];
     return this.db.prepare(`SELECT proposal_json FROM memory_reflections WHERE project_id = ? AND task_id = ? AND context_name = ? AND ${reflectionVisibilitySql} ORDER BY rowid DESC LIMIT 100`)
-      .all(selection.projectId, selection.task.taskId, selection.task.context, selection.executionContextId).map((row: unknown) => {
+      .all(selection.projectId, selection.task.taskId, selection.task.context, selection.executionContextId, selection.executionContextId).map((row: unknown) => {
         if (!isRecord(row)) throw new CliError("Invalid reflection storage row");
         return reflectionProposalSchema.parse(JSON.parse(String(row.proposal_json)));
       });
@@ -879,7 +896,7 @@ class MemoryStore {
   proposal(selection: MemorySelection, id: string): ReflectionProposal {
     if (!selection.task || !selection.projectId) throw new CliError("Reflection requires explicit task/context scope");
     const row: unknown = this.db.prepare(`SELECT proposal_json FROM memory_reflections WHERE id = ? AND project_id = ? AND task_id = ? AND context_name = ? AND ${reflectionVisibilitySql}`)
-      .get(id, selection.projectId, selection.task.taskId, selection.task.context, selection.executionContextId);
+      .get(id, selection.projectId, selection.task.taskId, selection.task.context, selection.executionContextId, selection.executionContextId);
     if (!isRecord(row)) throw new CliError("Reflection was not found in this task/context");
     return reflectionProposalSchema.parse(JSON.parse(String(row.proposal_json)));
   }
@@ -1093,6 +1110,51 @@ export default async function plugin(bb: BbPluginApi) {
      );
      CREATE INDEX memory_reflections_scope ON memory_reflections(project_id, task_id, context_name);`,
     `ALTER TABLE memory_task_bindings ADD COLUMN task_keys_json TEXT NOT NULL DEFAULT '{}';`,
+    `CREATE TEMP TABLE memory_evidence_origins (
+       memory_id TEXT NOT NULL, version INTEGER NOT NULL, context_id TEXT NOT NULL,
+       PRIMARY KEY(memory_id, version, context_id)
+     ) WITHOUT ROWID;
+     INSERT INTO memory_evidence_origins(memory_id, version, context_id)
+     WITH RECURSIVE versions(memory_id, version, lineage) AS (
+       SELECT memory_id, version, json_extract(snapshot_json, '$.lineage') FROM memory_history
+       WHERE json_type(snapshot_json, '$.lineage') = 'object'
+       UNION
+       SELECT id, version, lineage_json FROM memories WHERE lineage_json IS NOT NULL
+     ), origins(memory_id, version, context_id) AS (
+       SELECT memory_id, version, json_extract(lineage, '$.source.executionContextId') FROM versions
+       WHERE json_extract(lineage, '$.source.kind') = 'artifact'
+       UNION
+       SELECT v.memory_id, v.version, evidence.value FROM versions v
+       JOIN json_each(v.lineage, '$.evidenceContextIds') AS evidence
+       UNION
+       SELECT v.memory_id, v.version, origin.context_id FROM versions v JOIN origins origin
+       ON (v.memory_id = origin.memory_id AND v.version = origin.version + 1)
+         OR (json_extract(v.lineage, '$.replaces.id') = origin.memory_id
+           AND json_extract(v.lineage, '$.replaces.version') = origin.version)
+     ) SELECT memory_id, version, context_id FROM origins;
+     UPDATE memories AS m SET lineage_json = json_set(lineage_json, '$.evidenceContextIds', json((
+       SELECT json_group_array(context_id) FROM memory_evidence_origins
+       WHERE memory_id = m.id AND version = m.version
+     ))) WHERE lineage_json IS NOT NULL;
+     UPDATE memory_history AS h SET snapshot_json = json_set(snapshot_json, '$.lineage.evidenceContextIds', json((
+       SELECT json_group_array(context_id) FROM memory_evidence_origins
+       WHERE memory_id = h.memory_id AND version = h.version
+     ))) WHERE json_type(snapshot_json, '$.lineage') = 'object';
+     UPDATE memory_reflections SET proposal_json = json_set(proposal_json, '$.diffs', json((
+       SELECT json_group_array(json_set(diff.value, '$.before.lineage.evidenceContextIds', json((
+         SELECT json_group_array(context_id) FROM (
+           SELECT context_id FROM memory_evidence_origins
+           WHERE memory_id = json_extract(diff.value, '$.before.id')
+             AND version = json_extract(diff.value, '$.before.version')
+           UNION
+           SELECT evidence.value FROM json_each(diff.value, '$.before.lineage.evidenceContextIds') AS evidence
+           UNION
+           SELECT json_extract(diff.value, '$.before.lineage.source.executionContextId')
+           WHERE json_extract(diff.value, '$.before.lineage.source.kind') = 'artifact'
+         )
+       )))) FROM json_each(proposal_json, '$.diffs') AS diff
+     )));
+     DROP TABLE memory_evidence_origins;`,
   ]);
   const store = new MemoryStore(db);
 
@@ -1165,8 +1227,12 @@ export default async function plugin(bb: BbPluginApi) {
     ] };
   }
 
-  async function inspectArtifact(selection: MemorySelection, artifactId: string) {
+  async function inspectArtifact(selection: MemorySelection, artifactId: string, pin: z.output<typeof artifactPinSchema> | null = null) {
+    if (pin && (pin.artifactId !== artifactId || pin.executionContextId !== selection.executionContextId))
+      throw new CliError("Stored artifact pin does not match the selected original and execution context");
     const view = await readArtifact(selection, artifactId);
+    if (pin && pin.revision !== view.artifact.source.textSha256)
+      throw new CliError("Retained artifact revision no longer matches this stored source reference; the original was not substituted");
     return { view, source: artifactSourceSelectionSchema.parse({ kind: "artifact", commentId: null, artifactId: view.artifact.id,
       executionContextId: view.artifact.executionContextId, revision: view.artifact.source.textSha256, observedAt: Date.now(), quote: "" }) };
   }
@@ -1222,7 +1288,8 @@ export default async function plugin(bb: BbPluginApi) {
   async function createTaskMemory(selection: MemorySelection, draft: z.infer<typeof taskMemoryDraftSchema>, threadId: string | null) {
     const task = await validateSource(selection, draft.source);
     return store.addTask({ scope: "project", projectId: selection.projectId, task: selection.task,
-      lineage: { taskKey: task.key, classification: draft.classification, state: "current", source: draft.source, replaces: draft.replaces, replacedBy: null },
+      lineage: { taskKey: task.key, classification: draft.classification, state: "current", source: draft.source,
+        evidenceContextIds: draft.source.kind === "artifact" ? [draft.source.executionContextId] : [], replaces: draft.replaces, replacedBy: null },
       name: draft.name, summary: draft.summary, details: draft.details,
       kind: draft.classification === "decision" ? "decision" : "fact", tags: [], importance: 50, pinned: false,
       sourceThreadId: threadId, writeReason: draft.reason,
@@ -1284,7 +1351,7 @@ export default async function plugin(bb: BbPluginApi) {
     async listMemorySources(input) { return listSources(memorySelectionFrom(input)); },
     async listMemoryExecutionContexts({ projectId }) { return listExecutionContexts(projectId); },
     async listMemoryArtifacts(input) { return { artifacts: await listArtifacts(memorySelectionFrom(input)) }; },
-    async readMemoryArtifact(input) { return inspectArtifact(memorySelectionFrom(input), input.artifactId); },
+    async readMemoryArtifact(input) { return inspectArtifact(memorySelectionFrom(input), input.artifactId, input.pin); },
     async threadMemoryState({ threadId }) {
       const [thread, binding] = await Promise.all([bb.sdk.threads.get({ threadId }), bb.sdk.experimental_executionContexts.getThreadBinding({ threadId })]);
       if (thread.deletedAt !== null) throw new CliError("Reader thread is unavailable");
@@ -1392,8 +1459,8 @@ export default async function plugin(bb: BbPluginApi) {
       }
     }
     if (eligible.length === 0) return { tools: [], skills: ["memory"] };
-    const hasArtifacts = db.prepare("SELECT 1 FROM memories WHERE project_id = ? AND deleted_at IS NULL AND json_extract(lineage_json, '$.source.kind') = 'artifact' LIMIT 1").get(project.id) !== undefined;
-    const executionContextId = hasArtifacts ? await readerExecutionContext(project.id, thread.id) : null;
+    const hasRestrictedEvidence = db.prepare("SELECT 1 FROM memories WHERE project_id = ? AND deleted_at IS NULL AND json_array_length(lineage_json, '$.evidenceContextIds') > 0 LIMIT 1").get(project.id) !== undefined;
+    const executionContextId = hasRestrictedEvidence ? await readerExecutionContext(project.id, thread.id) : null;
     const budget = Math.min(3000, Math.floor((CATALOG_MAX_CHARS - 802 - (eligible.length - 1) * 2) / eligible.length));
     const summaries = eligible.map(({ scope, key }) => renderTaskSummary(store, { projectId: project.id, task: scope, executionContextId }, key, budget));
     return { tools: [], skills: ["memory"], instructions: summaries.join("\n\n") };
@@ -1466,8 +1533,13 @@ export default async function plugin(bb: BbPluginApi) {
         artifact: cliCommand({
           summary: "Inspect one actual retained thread decision and return its validated Memory source",
           positionals: [{ name: "id", description: "Artifact ID returned by memory artifacts", required: true }],
-          options: { ...taskOptions },
-          async run(input, ctx) { return { exitCode: 0, stdout: jsonOutput(await inspectArtifact(await cliSelection(ctx, input.options, true), z.uuid().parse(input.positionals.id))) }; },
+          options: { ...taskOptions, revision: { type: "string", description: "Expected raw-text SHA-256 from a stored artifact source; reject a substituted original" } },
+          async run(input, ctx) {
+            const selection = await cliSelection(ctx, input.options, true);
+            const artifactId = z.uuid().parse(input.positionals.id);
+            const pin = input.options.revision === undefined ? null : artifactPinSchema.parse({ artifactId, executionContextId: selection.executionContextId, revision: input.options.revision });
+            return { exitCode: 0, stdout: jsonOutput(await inspectArtifact(selection, artifactId, pin)) };
+          },
         }),
         summary: cliCommand({
           summary: "Read the same bounded current task summary used by every runtime",

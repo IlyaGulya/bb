@@ -10,6 +10,7 @@ type Memory = PluginRpcResult<(typeof memoryRpcContract)["listMemories"]>["memor
 type Sources = PluginRpcResult<(typeof memoryRpcContract)["listMemorySources"]>;
 type InitialTask = PluginRpcResult<(typeof memoryRpcContract)["resolveMemoryTask"]>;
 type ArtifactInspection = PluginRpcResult<(typeof memoryRpcContract)["readMemoryArtifact"]>;
+type ArtifactSource = Extract<NonNullable<Memory["lineage"]>["source"], { kind: "artifact" }>;
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground";
 const message = (error: unknown) => error instanceof Error ? error.message : "Memory request failed. Try again.";
 
@@ -173,7 +174,8 @@ function TaskDraft({ selection, sources, memory, replacing, onSaved, onCancel, o
     onInspect(event);
     setInspecting(true);
     try {
-      const inspected = await rpc.call("readMemoryArtifact", { ...selection, artifactId: source.artifactId });
+      const inspected = await rpc.call("readMemoryArtifact", { ...selection, artifactId: source.artifactId,
+        pin: { artifactId: source.artifactId, executionContextId: source.executionContextId, revision: source.revision } });
       if (request !== sourceRequest.current) return;
       if (inspected.source.artifactId !== source.artifactId || inspected.source.executionContextId !== source.executionContextId || inspected.source.revision !== source.revision) throw new Error("Retained evidence changed; refresh and explicitly select it again");
       setSelectedSource({ ...source, observedAt: inspected.source.observedAt }); setInspection(inspected);
@@ -228,7 +230,7 @@ function TaskDraft({ selection, sources, memory, replacing, onSaved, onCancel, o
   </form>;
 }
 
-function ProposalReview({ proposal, pending, canApply, onInspect, onDecide }: { proposal: ReflectionProposal; pending: boolean; canApply: boolean; onInspect: (artifactId: string, event: { isTrusted: boolean }) => void; onDecide: (decision: "apply" | "reject") => void }) {
+function ProposalReview({ proposal, pending, canApply, onInspect, onDecide }: { proposal: ReflectionProposal; pending: boolean; canApply: boolean; onInspect: (source: ArtifactSource, event: { isTrusted: boolean }) => void; onDecide: (decision: "apply" | "reject") => void }) {
   return <section className="space-y-3 border-t border-border pt-4" aria-label={`Reflection from ${new Date(proposal.createdAt).toLocaleString()}`}>
     <h3 className="text-sm font-medium">Reflection · {proposal.state} · {new Date(proposal.createdAt).toLocaleString()}</h3>
     {proposal.diffs.map((diff) => <div key={diff.before.id} className="space-y-2">
@@ -237,8 +239,8 @@ function ProposalReview({ proposal, pending, canApply, onInspect, onDecide }: { 
         <div className="min-w-0 space-y-1"><h4 className="text-sm font-medium">Before</h4><p className="text-xs">{diff.before.lineage.classification} · {diff.before.lineage.state}</p><p className="break-words text-sm">{diff.before.summary}</p><pre className="whitespace-pre-wrap break-words font-sans text-sm">{diff.before.details}</pre><p className="break-words text-xs text-muted-foreground">Source {diff.before.lineage.source.kind} · {diff.before.lineage.source.revision}</p></div>
         <div className="min-w-0 space-y-1"><h4 className="text-sm font-medium">Proposed</h4><p className="text-xs">{diff.after.classification} · {diff.after.state}</p><p className="break-words text-sm">{diff.after.summary}</p><pre className="whitespace-pre-wrap break-words font-sans text-sm">{diff.after.details}</pre><p className="break-words text-xs text-muted-foreground">Source {diff.after.source.kind} · {diff.after.source.revision} · observed {new Date(diff.after.source.observedAt).toLocaleString()}</p>{diff.after.source.quote ? <blockquote className="break-words text-sm">{diff.after.source.quote}</blockquote> : null}</div>
       </div>
-      {diff.before.lineage.source.kind === "artifact" ? <Button size="sm" variant="ghost" disabled={pending} onClick={(event) => { const source = diff.before.lineage.source; if (source.kind === "artifact") onInspect(source.artifactId, event); }}>Read retained before-original</Button> : null}
-      {diff.after.source.kind === "artifact" ? <Button size="sm" variant="ghost" disabled={pending} onClick={(event) => { const source = diff.after.source; if (source.kind === "artifact") onInspect(source.artifactId, event); }}>Read retained proposed original</Button> : null}
+      {diff.before.lineage.source.kind === "artifact" ? <Button size="sm" variant="ghost" disabled={pending} onClick={(event) => { const source = diff.before.lineage.source; if (source.kind === "artifact") onInspect(source, event); }}>Read retained before-original</Button> : null}
+      {diff.after.source.kind === "artifact" ? <Button size="sm" variant="ghost" disabled={pending} onClick={(event) => { const source = diff.after.source; if (source.kind === "artifact") onInspect(source, event); }}>Read retained proposed original</Button> : null}
     </div>)}
     {proposal.state === "pending" ? <div className="flex flex-wrap gap-2"><Button size="sm" disabled={pending || !canApply} onClick={() => onDecide("apply")}>{pending ? "Deciding…" : "Apply reviewed diff"}</Button><Button size="sm" variant="outline" disabled={pending} onClick={() => onDecide("reject")}>Reject proposal</Button></div> : <p className="text-xs text-muted-foreground">Explicit decision recorded {proposal.decidedAt ? new Date(proposal.decidedAt).toLocaleString() : ""}. Original revisions are retained.</p>}
   </section>;
@@ -288,9 +290,10 @@ function TaskMemories({ selection, threadId }: { selection: MemorySelection; thr
     catch (failure) { setError(message(failure)); }
     finally { setPending(false); }
   };
-  const inspectOriginal = (artifactId: string, event: { isTrusted: boolean }) => {
+  const inspectOriginal = (source: ArtifactSource, event: { isTrusted: boolean }) => {
     analytics.opened("source.inspect", selection, event);
-    void act(async () => { setOriginal(null); setOriginal(await rpc.call("readMemoryArtifact", { ...selection, artifactId })); });
+    void act(async () => { setOriginal(null); setOriginal(await rpc.call("readMemoryArtifact", { ...selection, artifactId: source.artifactId,
+      pin: { artifactId: source.artifactId, executionContextId: source.executionContextId, revision: source.revision } })); });
   };
   if (loading && data === null) return <p role="status" className="text-sm text-muted-foreground">Loading scoped task memory and source revisions…</p>;
   return <div aria-busy={loading} className="space-y-4">
@@ -325,7 +328,7 @@ function TaskMemories({ selection, threadId }: { selection: MemorySelection; thr
         <details><summary className="cursor-pointer text-sm">Details and provenance for {memory.name}</summary><div className="mt-2 space-y-2"><p className="whitespace-pre-wrap break-words text-sm">{memory.details}</p><p className="break-words text-xs text-muted-foreground">Source {memory.lineage?.source.kind} · revision {memory.lineage?.source.revision} · observed {memory.lineage ? new Date(memory.lineage.source.observedAt).toLocaleString() : ""}</p>{memory.lineage?.source.quote ? <blockquote className="break-words text-sm">{memory.lineage.source.quote}</blockquote> : null}</div></details>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="ghost" disabled={pending} onClick={() => void act(async () => { setHistory((await rpc.call("memoryHistory", { ...selection, name: memory.name })).history); })}>History of {memory.name}</Button>
-          {memory.lineage?.source.kind === "artifact" ? <Button size="sm" variant="ghost" disabled={pending} onClick={(event) => { const source = memory.lineage?.source; if (source?.kind === "artifact") inspectOriginal(source.artifactId, event); }}>Read retained original for {memory.name}</Button> : null}
+          {memory.lineage?.source.kind === "artifact" ? <Button size="sm" variant="ghost" disabled={pending} onClick={(event) => { const source = memory.lineage?.source; if (source?.kind === "artifact") inspectOriginal(source, event); }}>Read retained original for {memory.name}</Button> : null}
           {memory.lineage?.state !== "replaced" ? <Button size="sm" variant="outline" disabled={!data.live.available || pending || draft !== null} onClick={(event) => { analytics.opened("draft.open", selection, event); setDraft({ memory, replacing: false }); }}>Propose change to {memory.name}</Button> : null}
           {memory.lineage?.state === "current" ? <Button size="sm" variant="outline" disabled={!data.live.available || pending || draft !== null} onClick={(event) => { analytics.opened("draft.open", selection, event); setDraft({ memory, replacing: true }); }}>Replace {memory.name}</Button> : null}
           {[memory.lineage?.replaces, memory.lineage?.replacedBy].map((link, index) => link ? <Button key={index} size="sm" variant="ghost" disabled={pending} onClick={() => void act(async () => { setHistory((await rpc.call("memoryHistory", { ...selection, name: link.id, version: link.version })).history); })}>{index === 0 ? "Inspect replaced original" : "Inspect replacement"} v{link.version}</Button> : null)}
@@ -340,7 +343,7 @@ function TaskMemories({ selection, threadId }: { selection: MemorySelection; thr
           <p className="break-words text-sm">{entry.snapshot.summary}</p>
           <p className="whitespace-pre-wrap break-words text-sm">{entry.snapshot.details}</p>
           <p className="break-words text-xs text-muted-foreground">{entry.snapshot.lineage?.classification} · {entry.snapshot.lineage?.state} · source revision {entry.snapshot.lineage?.source.revision}</p>
-          {entry.snapshot.lineage?.source.kind === "artifact" ? <Button size="sm" variant="ghost" disabled={pending} onClick={(event) => { const source = entry.snapshot.lineage?.source; if (source?.kind === "artifact") inspectOriginal(source.artifactId, event); }}>Read retained original for {entry.snapshot.name} v{entry.version}</Button> : null}
+          {entry.snapshot.lineage?.source.kind === "artifact" ? <Button size="sm" variant="ghost" disabled={pending} onClick={(event) => { const source = entry.snapshot.lineage?.source; if (source?.kind === "artifact") inspectOriginal(source, event); }}>Read retained original for {entry.snapshot.name} v{entry.version}</Button> : null}
         </details>)}
       </section> : null}
       <section className="space-y-3" aria-label="Reflection proposals">

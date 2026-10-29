@@ -131,12 +131,31 @@ not rewrite the retained evidence. Native source status describes current
 availability; deletion or revoked access to the artifact itself may prevent
 inspection. Memory stores the source reference, not a second artifact copy.
 
-Artifact-backed records and historical snapshots are visible only in their
-permitted actual execution context, including catalog, FTS, history, proposals
-and injected summaries. Task/comment-only history and proposals keep their
-original project/task/logical-context scope. Moving a task does not move its
-retained evidence to the destination project. Context permission checks are
-repeated on reads; a stored reference does not grant access by itself.
+Reading a stored original must preserve its pin. Use `artifact --revision
+'<revision from the stored source>'` with the stored artifact ID and actual
+execution-context selector. Without `--revision`, `artifact` is a fresh
+inspection, not verification of an older reference. Fact, history and proposal
+original controls send the persisted ID/context/hash automatically; draft
+selection pins the listed identity before inspection. A reused UUID with a
+different retained hash fails instead of showing substituted evidence.
+
+Artifact-derived revisions retain server-owned `lineage.evidenceContextIds`
+independently of mutable provenance. Reflection cannot remove an originating
+restriction, including when marking a record obsolete; replacements inherit
+the predecessor's restrictions. Catalog, FTS, reads, historical snapshots,
+proposals and injected summaries require every retained restriction to match
+the reader's permitted actual execution context. Changing provenance to a task
+or comment does not authorize broader access. Independently native-only
+history and proposals keep their original project/task/logical-context scope.
+Moving a task does not move retained evidence to the destination project.
+Permissions are rechecked on reads; a stored reference grants no access.
+
+The private Memory migration reconstructs older restrictions from retained
+revisions and pinned replacement ancestry, including proposal before-images.
+Snapshots keep the restrictions acquired at that version. Conflicting legacy
+origins fail closed, rather than selecting one context or treating them as
+shared. These are visibility constraints, not a new archive or automatic
+governance/declassification policy.
 
 Keep the evidence types explicit:
 
@@ -263,6 +282,12 @@ an explicit value. `memoryHistory` accepts `name` and nullable `version`;
 `listMemoryArtifacts` and `readMemoryArtifact` are the artifact discovery and
 inspection paths shared by UI and CLI. Settings RPC does not provide an
 unscoped all-project read or ID-only mutation.
+`readMemoryArtifact` accepts `artifactId` and nullable `pin`, whose strict shape
+is `{artifactId,executionContextId,revision}`. Omission normalizes to `null`
+for fresh inspection. A stored pin must match the selected ID/context and the
+native retained raw-text SHA-256 before a view is returned. This does not
+change Source30's native RPC contracts. `evidenceContextIds` is output/store
+metadata, not an accepted draft or reflection input field.
 `listMemories` takes `{projectId,task,executionContextId,offset}` and returns
 `{memories,total,previousOffset,nextOffset}`; `null` marks a page boundary.
 `memoryAnalytics` returns the shared collector's declared action identities.

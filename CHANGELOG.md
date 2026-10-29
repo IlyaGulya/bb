@@ -2,6 +2,14 @@
 
 ## AgentOS fork — unreleased
 
+- Preserve originating Memory evidence restrictions independently of mutable
+  provenance across reflection, obsolescence, replacement, retained snapshots,
+  proposals and runtime summaries. Backfill private scope metadata from existing
+  revisions and replacement ancestry without adding an archive or changing
+  Source30 ACLs. Validate stored-original ID/context/hash pins before returning
+  evidence after artifact UUID reuse; expose pinned CLI reads with
+  `bb memory artifact --revision`. Security after-proof and native integration
+  remain release gates; source changes do not imply activation or acceptance.
 - Add owner-local private feature analytics across Core routes, live plugin
   registrations, UI navigation and command intent, CLI/SDK/MCP calls and actual
   root-turn/provider outcomes. Keep anonymous vendor telemetry unchanged.

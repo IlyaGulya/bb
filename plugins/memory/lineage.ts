@@ -44,6 +44,7 @@ export const lineageSchema = z.object({
   classification: z.enum(["observation", "decision", "assumption"]),
   state: z.enum(["current", "obsolete", "replaced"]),
   source: sourceSelectionSchema,
+  evidenceContextIds: z.array(executionContextIdSchema).default([]),
   replaces: memoryLinkSchema.nullable(),
   replacedBy: memoryLinkSchema.nullable(),
 }).strict().refine((value) => (value.state === "replaced") === (value.replacedBy !== null), {
