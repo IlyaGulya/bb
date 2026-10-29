@@ -16,12 +16,12 @@ interface StartupRun {
   stopPromise: Promise<void> | null;
   reject: (error: Error) => void;
   ready: boolean;
+  prepared: boolean;
   deadline: ReturnType<typeof setTimeout> | null;
   heartbeat: ReturnType<typeof setInterval> | null;
   stopSettled: boolean;
   failureCode: ProviderStartupCode | null;
   work: Set<Promise<unknown>>;
-  readyWaiters: Set<() => void> | null;
 }
 
 export class ProviderStartupError extends Error {
@@ -53,7 +53,7 @@ export class RuntimeStartup {
   private readonly active = new Map<string, StartupRun>();
   private readonly blocked = new Set<string>();
   private readonly nativeReady = new Set<string>();
-  private readonly readyRuns = new Map<string, StartupRun>();
+  private readonly retainedRuns = new Map<string, StartupRun>();
 
   signal(threadId: string): AbortSignal | undefined {
     return this.active.get(threadId)?.controller.signal;
@@ -69,9 +69,18 @@ export class RuntimeStartup {
     run.hookState = null;
     if (run.deadline) clearTimeout(run.deadline);
     if (run.heartbeat) clearInterval(run.heartbeat);
-    this.readyRuns.set(threadId, run);
+    this.retainedRuns.set(threadId, run);
     this.publish(threadId, run, "completed");
-    run.readyWaiters?.forEach((resolve) => resolve());
+    this.releaseIfSettled(threadId, run);
+  }
+
+  prepared(threadId: string): void {
+    const run = this.active.get(threadId);
+    if (!run || run.controller.signal.aborted || run.prepared) return;
+    run.prepared = true;
+    this.retainedRuns.set(threadId, run);
+    if (run.deadline) clearTimeout(run.deadline);
+    if (run.heartbeat) clearInterval(run.heartbeat);
     this.releaseIfSettled(threadId, run);
   }
 
@@ -81,9 +90,16 @@ export class RuntimeStartup {
     return this.active.has(threadId) || this.blocked.has(threadId);
   }
 
+  owns(threadId: string): boolean {
+    return this.isActive(threadId) || this.retainedRuns.has(threadId);
+  }
+
   *threadIds(): IterableIterator<string> {
     yield* this.active.keys();
     yield* this.blocked;
+    for (const [threadId, run] of this.retainedRuns) {
+      if (run.prepared) yield threadId;
+    }
   }
 
   assertAvailable(threadId: string): void {
@@ -92,7 +108,11 @@ export class RuntimeStartup {
   }
 
   hasOwnedWork(): boolean {
-    return this.active.size > 0 || this.blocked.size > 0;
+    if (this.active.size > 0 || this.blocked.size > 0) return true;
+    for (const run of this.retainedRuns.values()) {
+      if (run.prepared) return true;
+    }
+    return false;
   }
 
   observe(threadId: string, value: unknown): void {
@@ -116,39 +136,21 @@ export class RuntimeStartup {
 
   forgetReadiness(threadId: string): void {
     this.nativeReady.delete(threadId);
-    this.readyRuns.delete(threadId);
+    this.retainedRuns.delete(threadId);
   }
 
-  async waitForReady(threadId: string): Promise<void> {
-    const run = this.active.get(threadId);
-    if (!run) throw new Error("Provider startup ownership is unavailable while waiting for readiness.");
-    if (run.ready) return;
-    const signal = run.controller.signal;
-    signal.throwIfAborted();
-    await new Promise<void>((resolve, reject) => {
-      const cleanup = () => {
-        signal.removeEventListener("abort", onAbort);
-        run.readyWaiters?.delete(onReady);
-        if (run.readyWaiters?.size === 0) run.readyWaiters = null;
-      };
-      const onReady = () => { cleanup(); resolve(); };
-      const onAbort = () => { cleanup(); reject(signal.reason); };
-      (run.readyWaiters ??= new Set()).add(onReady);
-      signal.addEventListener("abort", onAbort, { once: true });
-    });
-  }
-
-  requireCleanup(threadId: string): void {
-    const run = this.active.get(threadId) ?? this.readyRuns.get(threadId);
+  requireCleanup(threadId: string, code: "provider_startup_failed" | "provider_startup_cancelled" = "provider_startup_failed"): void {
+    const run = this.active.get(threadId) ?? this.retainedRuns.get(threadId);
     if (!run) return;
     this.forgetReadiness(threadId);
-    if (run.ready) {
+    if (run.ready || run.prepared) {
       run.operationId = randomUUID();
       run.startedAt = performance.now();
     }
     run.ready = false;
+    run.prepared = false;
     this.active.set(threadId, run);
-    void this.interrupt(threadId, run, "provider_startup_failed");
+    void this.interrupt(threadId, run, code);
   }
 
   async track<T>(threadId: string, work: () => Promise<T>): Promise<T> {
@@ -184,11 +186,10 @@ export class RuntimeStartup {
     const run: StartupRun = {
       controller: new AbortController(), operationId: randomUUID(), phase: "initializing",
       hookEvent: null, hookId: null, hookState: null, policy: args.policy,
-      startedAt: performance.now(), stop: args.stop, stopPromise: null, reject, ready: false, deadline: null,
+      startedAt: performance.now(), stop: args.stop, stopPromise: null, reject, ready: false, prepared: false, deadline: null,
       stopSettled: false, failureCode: null,
       heartbeat: null,
       work: new Set(),
-      readyWaiters: null,
     };
     this.active.set(args.threadId, run);
     this.publish(args.threadId, run, "running");
@@ -224,6 +225,7 @@ export class RuntimeStartup {
   }
 
   async cancel(threadId: string): Promise<boolean> {
+    if (this.blocked.has(threadId)) throw new ProviderStartupError("provider_startup_stop_unverified");
     const run = this.active.get(threadId);
     if (!run) return false;
     if (run?.ready) return false;
@@ -233,11 +235,16 @@ export class RuntimeStartup {
   }
 
   async shutdown(): Promise<void> {
-    await Promise.all([...this.active.keys()].map((threadId) => this.cancel(threadId)));
+    for (const threadId of [...this.retainedRuns.keys()]) this.requireCleanup(threadId, "provider_startup_cancelled");
+    const results = await Promise.allSettled([...this.active.keys()].map((threadId) => this.cancel(threadId)));
+    if (this.blocked.size > 0) throw new ProviderStartupError("provider_startup_stop_unverified");
+    for (const result of results) {
+      if (result.status === "rejected") throw result.reason;
+    }
   }
 
   private releaseIfSettled(threadId: string, run: StartupRun): void {
-    if (!run.stopSettled && (!run.ready || run.work.size > 0)) return;
+    if (!run.stopSettled && ((!run.ready && !run.prepared) || run.work.size > 0)) return;
     if (run.deadline) clearTimeout(run.deadline);
     if (run.heartbeat) clearInterval(run.heartbeat);
     if (this.active.get(threadId) === run) this.active.delete(threadId);
@@ -252,6 +259,7 @@ export class RuntimeStartup {
   private async interrupt(threadId: string, run: StartupRun, code: ProviderStartupError["code"]): Promise<void> {
     if (run.ready) return;
     if (run.stopPromise) return run.stopPromise;
+    run.prepared = false;
     const failure = new ProviderStartupError(code);
     run.phase = "stopping";
     run.failureCode = code;

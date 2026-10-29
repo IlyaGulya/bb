@@ -267,6 +267,7 @@ export class RuntimeManager {
   private shellEnvGeneration = 0;
   private readonly entries = new Map<string, RuntimeEntry>();
   private readonly pendingEntries = new Map<string, Promise<RuntimeEntry>>();
+  private readonly retiringEntries = new Map<RuntimeEntry, Promise<void>>();
   private readonly pendingEnvironmentEnsures = new Map<
     string,
     Promise<RuntimeEntry>
@@ -777,6 +778,20 @@ export class RuntimeManager {
     }
   }
 
+  private async retireEntry(entry: RuntimeEntry): Promise<void> {
+    const pending = this.retiringEntries.get(entry);
+    if (pending) return pending;
+    const retirement = Promise.resolve().then(() => entry.runtime.shutdown()).then(() => {
+      if (this.entries.get(entry.environmentId) === entry) this.entries.delete(entry.environmentId);
+    });
+    this.retiringEntries.set(entry, retirement);
+    try {
+      await retirement;
+    } finally {
+      if (this.retiringEntries.get(entry) === retirement) this.retiringEntries.delete(entry);
+    }
+  }
+
   private async replaceEntryForSkillCatalog(
     args: ReplaceEntryForSkillCatalogArgs,
   ): Promise<void> {
@@ -791,8 +806,7 @@ export class RuntimeManager {
       });
     }
 
-    this.entries.delete(args.entry.environmentId);
-    await args.entry.runtime.shutdown();
+    await this.retireEntry(args.entry);
     await this.cleanupUnusedInjectedSkillStagingDirs([
       args.skillConfig.catalogHash,
     ]);
@@ -806,8 +820,7 @@ export class RuntimeManager {
       !this.entryHasActiveRuntimeWork(args.entry) &&
       !this.hasInFlightThreadCommand(args.entry, args.targetThreadId)
     ) {
-      this.entries.delete(args.entry.environmentId);
-      await args.entry.runtime.shutdown();
+      await this.retireEntry(args.entry);
       await this.cleanupUnusedInjectedSkillStagingDirs(
         args.skillConfig ? [args.skillConfig.catalogHash] : [],
       );
@@ -921,11 +934,7 @@ export class RuntimeManager {
       (entry) => !this.entryHasActiveEnvironmentWork(entry),
     );
 
-    for (const entry of idleEntries) {
-      this.entries.delete(entry.environmentId);
-    }
-
-    await Promise.all(idleEntries.map((entry) => entry.runtime.shutdown()));
+    await Promise.all(idleEntries.map((entry) => this.retireEntry(entry)));
     await this.cleanupUnusedInjectedSkillStagingDirs([]);
   }
 
@@ -1193,8 +1202,7 @@ export class RuntimeManager {
       return undefined;
     }
 
-    this.entries.delete(environmentId);
-    await entry.runtime.shutdown();
+    await this.retireEntry(entry);
     return entry;
   }
 
@@ -1207,17 +1215,15 @@ export class RuntimeManager {
   }
 
   async shutdownAll(): Promise<void> {
-    const entries = [...this.entries.values()];
+    const entries = new Set(this.entries.values());
     for (const pending of this.pendingEntries.values()) {
       try {
-        entries.push(await pending);
+        entries.add(await pending);
       } catch {}
     }
-    this.entries.clear();
-    this.pendingEntries.clear();
 
     for (const entry of entries) {
-      await entry.runtime.shutdown();
+      await this.retireEntry(entry);
     }
     await this.shutdownProviderMaintenanceRuntime();
     await this.stopWatchingDataDirSkillsRoot();

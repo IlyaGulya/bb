@@ -104,6 +104,8 @@ interface PreparedThreadRewind {
 
 interface PreparingThreadRewind {
   state: "preparing";
+  stagingThreadId: string;
+  threadId: string;
   promise: Promise<{ providerThreadId: string }>;
 }
 
@@ -1122,10 +1124,15 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       `Restarting the "${currentConfig.providerId}" bridge for thread "${args.threadId}": ${hint.message}`,
       args.threadId,
     );
-    await providerProcesses.shutdownProvider({
-      processKey: proc.processKey,
-      providerId: proc.providerId,
-    });
+    try {
+      await providerProcesses.shutdownProvider({
+        processKey: proc.processKey,
+        providerId: proc.providerId,
+      });
+    } catch (error) {
+      startup.requireCleanup(args.threadId);
+      throw error;
+    }
     await resumeThreadFromConfig({
       currentConfig,
       instructions: args.instructions,
@@ -1534,12 +1541,15 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
   async function discardStagedThreadRewind(leaseId: string): Promise<void> {
     const staged = stagedThreadRewinds.get(leaseId);
     if (staged?.state === "preparing") {
+      startup.requireCleanup(staged.stagingThreadId, "provider_startup_cancelled");
+      await startup.cancel(staged.stagingThreadId);
       try {
         await staged.promise;
       } catch {
         return;
       }
     }
+    if (staged) startup.assertAvailable(staged.stagingThreadId);
     const prepared = stagedThreadRewinds.get(leaseId);
     if (prepared === undefined || prepared.state !== "prepared") {
       return;
@@ -1609,6 +1619,18 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         prepared.cleanupPromise = null;
       }
     }
+  }
+
+  async function cancelThreadRewinds(threadId: string): Promise<boolean> {
+    const leases = [...stagedThreadRewinds].filter(([, staged]) => staged.threadId === threadId);
+    const results = await Promise.allSettled(leases.map(([leaseId]) => discardStagedThreadRewind(leaseId)));
+    for (const result of results) {
+      if (result.status === "rejected") throw result.reason;
+    }
+    for (const [stagingThreadId, owner] of startupOwners) {
+      if (owner === threadId) startup.assertAvailable(stagingThreadId);
+    }
+    return leases.length > 0;
   }
 
   const runtime: AgentRuntime = {
@@ -1894,7 +1916,6 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
               stagingThreadId,
               providerThreadId,
             );
-            if (readStartupPolicy(execOpts.providerOptions) && proc.adapter.startupReadiness === "native-init") await startup.waitForReady(stagingThreadId);
             startup.signal(stagingThreadId)?.throwIfAborted();
             const prepared: PreparedThreadRewind = {
               state: "prepared",
@@ -1914,6 +1935,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
               PREPARED_THREAD_REWIND_TTL_MS,
             );
             retainedForDiscard = true;
+            startup.prepared(stagingThreadId);
             return { providerThreadId };
           } finally {
             if (!retainedForDiscard) {
@@ -1946,6 +1968,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       });
       stagedThreadRewinds.set(leaseId, {
         state: "preparing",
+        stagingThreadId,
+        threadId,
         promise: preparation,
       });
       try {
@@ -2124,17 +2148,18 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       instructions,
     }) {
       assertStartupAvailable(threadId);
+      assertThreadCanStartTurn(threadId);
+      await restartThreadBridgeIfRecommended({
+        threadId,
+        options: execOpts,
+        instructions,
+      });
       return runNativeStartupOperation({
         threadId, execOpts,
         work: async () => {
           const pid = threadIdentityRegistry.resolveProviderForThread(threadId);
           requireProviderProcessForThread(threadId);
           assertThreadCanStartTurn(threadId);
-          await restartThreadBridgeIfRecommended({
-            threadId,
-            options: execOpts,
-            instructions,
-          });
           const proc = requireProviderProcessForThread(threadId);
           assertProviderSupportsExecutionOptions({
             adapter: proc.adapter,
@@ -2352,7 +2377,11 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     },
 
     async stopThread({ threadId }) {
-      if (await startup.cancel(threadId)) return { providerCheckpointId: null };
+      const cancelled = await startup.cancel(threadId);
+      const discardedRewinds = await cancelThreadRewinds(threadId);
+      if (cancelled || (discardedRewinds && threadIdentityRegistry.getProviderSession(threadId) === null)) {
+        return { providerCheckpointId: null };
+      }
       toolCalls.cancelThread(threadId);
       return runThreadOperation({
         threadId,
@@ -2695,9 +2724,9 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     },
 
     hasThread(threadId) {
-      if (startup.isActive(threadId) || threadIdentityRegistry.getProviderSession(threadId) !== null) return true;
+      if (startup.owns(threadId) || threadIdentityRegistry.getProviderSession(threadId) !== null) return true;
       for (const [stagingThreadId, owner] of startupOwners) {
-        if (owner === threadId && startup.isActive(stagingThreadId)) return true;
+        if (owner === threadId && startup.owns(stagingThreadId)) return true;
       }
       return false;
     },
@@ -2718,12 +2747,15 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
 
     async shutdown() {
       clearInterval(turnStartWatchdogTimer);
-      await startup.shutdown();
-      await Promise.all(
+      const rewinds = await Promise.allSettled(
         [...stagedThreadRewinds.keys()].map((leaseId) =>
           discardStagedThreadRewind(leaseId),
         ),
       );
+      await startup.shutdown();
+      for (const result of rewinds) {
+        if (result.status === "rejected") throw result.reason;
+      }
       idleProviderSessionSinceMsByThreadId.clear();
       pendingTurnStarts.clear();
       threadOperationCounts.clear();
