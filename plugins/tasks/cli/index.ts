@@ -55,6 +55,7 @@ import type { RepositoryHandlers } from "../repositories";
 import type { TaskWorkflowHandlers } from "../workflow/index.js";
 import { repositoryCommands } from "./repositories";
 import { workflowCommands } from "./workflow.js";
+import { artifactCommands } from "./artifacts.js";
 
 const TASK_KEY_PATTERN = /^([A-Z][A-Z0-9]{0,9})-(\d+)$/;
 const BB_PROJECT_ID_PATTERN = /^proj_[A-Za-z0-9_-]+$/;
@@ -705,6 +706,18 @@ export function registerTasksCli(
       description:
         "Tasks are addressed by key (ABC-12) or ULID. --project takes a tracker project prefix or id, never a bb project id (proj_...).",
       commands: {
+        artifact: groupCommand(
+          "artifact",
+          "Retain task decisions, source-message bookmarks and screenshot annotations",
+          [
+            ["list", "List retained task artifacts in the selected context"],
+            ["show", "Read text, coordinates, image references and source availability"],
+            ["image", "Inspect an existing task screenshot"],
+            ["create", "Explicitly retain a bounded source selection"],
+            ["remove", "Remove one retained artifact without dispatch or acceptance"],
+          ],
+        ),
+        ...artifactCommands(bb, store, (address) => resolveTask(domain, address), guard),
         ...(repositories
           ? {
               repositories: groupCommand(

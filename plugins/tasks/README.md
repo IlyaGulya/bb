@@ -266,6 +266,54 @@ grip so gestures elsewhere can scroll the board and its columns. Parent badges
 have independent navigation and do not start a card drag. Filter chips scroll
 separately from the visible result count and task navigation controls.
 
+## Retained decision and annotation contract
+
+Tasks owns retained decision metadata in `task_artifacts` and keeps screenshot
+bytes in its existing attachment storage. The source reference is the real
+`threadId` plus canonical message `eventSeq` (`experimental_messageSeq` in the
+rendered message action), not the provider fork/acceptance anchor. Source text
+is retained only as an explicitly confirmed quote of up to 4000 characters,
+with a hash of the original text rather than a full prompt dump.
+
+The typed `taskArtifactRpcContract` in `shared/artifacts.ts` defines
+`taskArtifactTargets`, `inspectTaskArtifactImage`, `createTaskArtifact`,
+`listTaskArtifacts`, `getTaskArtifact`, and `deleteTaskArtifact`. Existing SDK
+plugin RPC calls and `bb tasks artifact list|show|image|create|remove` share the
+same handlers. The Tasks skill documents their exact fields and retrieval
+sequence. `bb_task_artifact_read({artifactId})` uses the existing native tool
+image result contract to return actual screenshot bytes with the saved text
+and original-image pixel coordinates. It derives scope from the invoking
+thread's execution-context binding, independently of its model account.
+Authenticated operator RPC/CLI context selection is organizational scoping,
+not a new per-user security boundary. Artifact reads do not spawn, resume,
+fork, dispatch, or accept work; the existing task execution owner is unchanged.
+
+The source UI entry is **Save decision to task** on a source message or
+selected passage. It uses readable task/image pickers and a bounded rectangle
+selection over an uploaded/existing screenshot, with equivalent keyboard pixel
+fields. No canvas/editor engine or capture mechanism is added. Live element
+picking remains in the native desktop Agent Annotations plugin; uploading a
+task screenshot does not require that desktop-only capability or enabling a
+different plugin. PNG/JPEG/WebP/GIF inspection is bounded to 32768 pixels per
+dimension, 64 megapixels and the existing 25 MB attachment limit. JPEG dimensions
+account for EXIF orientation. Other image types may remain task attachments,
+but are not accepted as coordinate-bound screenshots by this contract.
+
+The exact external reuse pin reviewed is
+[`rebryk/bb-plugins@1f123e5ecf7e6ac42f865f8d230de8ed2ce44049`](https://github.com/rebryk/bb-plugins/tree/1f123e5ecf7e6ac42f865f8d230de8ed2ce44049).
+Its recursive tree has no repository license; the Canvas 0.1.13 and Bookmarks
+0.1.1 package manifests declare none. The DejaVu font license in Canvas does
+not license plugin source. Permission remains unestablished: no external
+Canvas/Bookmarks/Annotate source is copied, installed, or distributed by this
+change. The native BB source is covered by this repository's MIT license.
+Source-only work does not authorize production activation or upgrades.
+
+Source regressions and an isolated synthetic-image/SQLite reopen scenario do
+not establish deployed acceptance. Compiled ordinary-web/narrow-viewport UI,
+real server restart, screenshot-to-agent-to-revised-UI proof, coordinated
+analytics consumption and independent review remain integration gates. Keep
+release/changelog acceptance claims gated on those observed results.
+
 ## CLI reference
 
 Run `bb tasks --help` or `bb tasks <command> --help` for exact options; help
