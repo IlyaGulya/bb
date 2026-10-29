@@ -69,10 +69,9 @@ const memoryRecordSchema: z.ZodType<MemoryRecord> = z
   })
   .strict();
 
-const memoryUpdateInputSchema = z
-  .object({
+const memoryUpdateInputSchema = memorySelectionSchema
+  .safeExtend({
     id: z.string(),
-    selection: memorySelectionSchema,
     expectedVersion: z.number().int().positive(),
     summary: z.string(),
     details: z.string(),
@@ -85,8 +84,13 @@ const memoryUpdateInputSchema = z
 
 export const memoryRpcContract = defineRpcContract({
   listMemories: {
-    input: memorySelectionSchema,
-    output: z.object({ memories: z.array(memoryRecordSchema) }).strict(),
+    input: memorySelectionSchema.safeExtend({ offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }),
+    output: z.object({ memories: z.array(memoryRecordSchema), total: z.number().int().nonnegative(),
+      previousOffset: z.number().int().nonnegative().nullable(), nextOffset: z.number().int().nonnegative().nullable() }).strict(),
+  },
+  memoryAnalytics: {
+    input: z.null(),
+    output: z.object({ actions: z.array(z.object({ featureId: z.string(), action: z.string(), version: z.literal(1) }).strict()) }).strict(),
   },
   listMemoryProjects: {
     input: z.null(),
@@ -113,15 +117,15 @@ export const memoryRpcContract = defineRpcContract({
     output: z.object({ projectId: z.string(), bindings: bindingStateSchema }).strict(),
   },
   searchMemories: {
-    input: z.object({ selection: memorySelectionSchema, query: z.string().min(1).max(200) }).strict(),
+    input: memorySelectionSchema.safeExtend({ query: z.string().min(1).max(200) }),
     output: z.object({ memories: z.array(memoryRecordSchema) }).strict(),
   },
   getMemory: {
-    input: z.object({ selection: memorySelectionSchema, name: z.string() }).strict(),
+    input: memorySelectionSchema.safeExtend({ name: z.string() }),
     output: z.object({ memory: memoryRecordSchema.nullable() }).strict(),
   },
   memoryHistory: {
-    input: z.object({ selection: memorySelectionSchema, name: z.string() }).strict(),
+    input: memorySelectionSchema.safeExtend({ name: z.string() }),
     output: z.object({ history: z.array(z.object({ version: z.number(), action: z.string(), snapshot: memoryRecordSchema, createdAt: z.number() }).strict()) }).strict(),
   },
   taskSummary: {
@@ -129,7 +133,7 @@ export const memoryRpcContract = defineRpcContract({
     output: z.object({ summary: z.string(), generatedAt: z.number() }).strict(),
   },
   createTaskMemory: {
-    input: z.object({ selection: memorySelectionSchema, draft: taskMemoryDraftSchema }).strict(),
+    input: memorySelectionSchema.safeExtend({ draft: taskMemoryDraftSchema }),
     output: z.object({ memory: memoryRecordSchema }).strict(),
   },
   getTaskBindings: {
@@ -141,7 +145,7 @@ export const memoryRpcContract = defineRpcContract({
     output: bindingStateSchema,
   },
   proposeReflection: {
-    input: z.object({ selection: memorySelectionSchema, changes: z.array(reflectionChangeSchema).min(1).max(20) }).strict(),
+    input: memorySelectionSchema.safeExtend({ changes: z.array(reflectionChangeSchema).min(1).max(20) }),
     output: reflectionProposalSchema,
   },
   listReflections: {
@@ -149,11 +153,11 @@ export const memoryRpcContract = defineRpcContract({
     output: z.object({ proposals: z.array(reflectionProposalSchema) }).strict(),
   },
   getReflection: {
-    input: z.object({ selection: memorySelectionSchema, id: z.string() }).strict(),
+    input: memorySelectionSchema.safeExtend({ id: z.string() }),
     output: reflectionProposalSchema,
   },
   decideReflection: {
-    input: z.object({ selection: memorySelectionSchema, id: z.string(), decision: z.enum(["apply", "reject"]) }).strict(),
+    input: memorySelectionSchema.safeExtend({ id: z.string(), decision: z.enum(["apply", "reject"]) }),
     output: reflectionProposalSchema,
   },
   updateMemory: {
@@ -161,10 +165,9 @@ export const memoryRpcContract = defineRpcContract({
     output: z.object({ memory: memoryRecordSchema }).strict(),
   },
   deleteMemory: {
-    input: z
-      .object({
+    input: memorySelectionSchema
+      .safeExtend({
         id: z.string(),
-        selection: memorySelectionSchema,
         expectedVersion: z.number().int().positive(),
       })
       .strict(),
@@ -281,6 +284,10 @@ function createMemoryId(): string {
   return `mem_${randomBytes(8).toString("base64url").toLowerCase()}`;
 }
 
+function memorySelectionFrom(input: MemorySelection): MemorySelection {
+  return { projectId: input.projectId, task: input.task };
+}
+
 function scopeKey(scope: MemoryScope, projectId: string | null, task: TaskScope | null): string {
   return task ? `task:${projectId}:${task.taskId}:${task.context}`
     : scope === "global" ? "global" : `project:${projectId ?? "missing"}`;
@@ -319,7 +326,7 @@ function unsafeMemoryReason(value: string): string | null {
   if (/(?:authorization|proxy-authorization)\s*[:=]\s*["']?(?:bearer|basic)\s+\S+/iu.test(value) || /(?:set-cookie|cookie)\s*:\s*\S+/iu.test(value)) {
     return "contains authentication headers";
   }
-  if (/["']?(?:access_token|refresh_token|client_secret|api_key|password)["']?\s*[:=]\s*["']?[^\s"',}]+/iu.test(value)) {
+  if (/(?:^|[\s{,])["']?(?:access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|password|token)["']?\s*[:=]\s*["']?[^\s"',}]+/iu.test(value)) {
     return "contains a credential field";
   }
   if (/(?:^|[\s/\\])\.(?:claude|codex|omp|aws|ssh)[/\\](?:[^\s]*[/\\])?(?:auth|credentials|config|settings|id_rsa|id_ed25519)[^\s]*/iu.test(value)) {
@@ -515,7 +522,7 @@ class MemoryStore {
     readScope: ReadScope = "all",
   ): MemoryRecord {
     return this.db.transaction(() => {
-      const current = this.get(id, readScope, ctxProjectId, false, task);
+      const current = this.get(id, readScope, ctxProjectId, false, task, true);
       if (!current)
         throw new CliError(`memory "${id}" was not found in the current scope`);
       if (current.version !== input.expectedVersion) {
@@ -588,7 +595,7 @@ class MemoryStore {
     readScope: ReadScope = "all",
   ): MemoryRecord {
     return this.db.transaction(() => {
-      const current = this.get(id, readScope, ctxProjectId, false, task);
+      const current = this.get(id, readScope, ctxProjectId, false, task, true);
       if (!current)
         throw new CliError(`memory "${id}" was not found in the current scope`);
       if (current.version !== expectedVersion) {
@@ -616,7 +623,7 @@ class MemoryStore {
           writeReason,
           forgotten.version,
           forgotten.updatedAt,
-          id,
+          forgotten.id,
           current.version,
         );
       if (result.changes !== 1)
@@ -632,16 +639,18 @@ class MemoryStore {
     projectId: string | undefined,
     touch = true,
     task: TaskScope | null = null,
+    exactId = false,
   ): MemoryRecord | null {
     const scoped = scopeSql(scope, projectId, task);
     const row: unknown = this.db
       .prepare(
         `SELECT m.* FROM memories m
-         WHERE m.deleted_at IS NULL AND (m.id = ? OR m.name = ?) AND ${scoped.sql}
-         ORDER BY CASE WHEN m.scope = 'project' THEN 0 ELSE 1 END, m.updated_at DESC
+         WHERE m.deleted_at IS NULL AND (m.id = ? OR (? = 0 AND m.name = ?)) AND ${scoped.sql}
+         ORDER BY CASE WHEN m.id = ? THEN 0 ELSE 1 END,
+           CASE WHEN m.scope = 'project' THEN 0 ELSE 1 END, m.updated_at DESC
          LIMIT 1`,
       )
-      .get(idOrName, idOrName, ...scoped.params);
+      .get(idOrName, exactId ? 1 : 0, idOrName, idOrName, ...scoped.params);
     if (row === undefined) return null;
     const memory = parseMemoryRow(row);
     if (touch) {
@@ -658,6 +667,7 @@ class MemoryStore {
     limit: number,
     task: TaskScope | null = null,
     currentOnly = false,
+    offset = 0,
   ): {
     memories: MemoryRecord[];
     total: number;
@@ -672,9 +682,9 @@ class MemoryStore {
            CASE WHEN m.scope = 'project' THEN 0 ELSE 1 END,
            m.importance DESC, COALESCE(m.last_accessed_at, 0) DESC,
            m.updated_at DESC, m.name ASC
-         LIMIT ?`,
+         LIMIT ? OFFSET ?`,
       )
-      .all(...scoped.params, limit);
+      .all(...scoped.params, limit, offset);
     const countRow: unknown = this.db
       .prepare(
         `SELECT COUNT(*) AS count FROM memories m
@@ -715,11 +725,21 @@ class MemoryStore {
          FROM memory_history h
          WHERE h.memory_id = (SELECT m.id FROM memories m
            WHERE (m.id = ? OR m.name = ?) AND ${scoped.sql}
-           ORDER BY CASE WHEN m.scope = 'project' THEN 0 ELSE 1 END, m.updated_at DESC LIMIT 1)
+           ORDER BY CASE WHEN m.id = ? THEN 0 ELSE 1 END,
+             CASE WHEN m.scope = 'project' THEN 0 ELSE 1 END, m.updated_at DESC LIMIT 1)
          ORDER BY h.version DESC
          LIMIT ?`,
       )
-      .all(id, id, ...scoped.params, limit);
+      .all(id, id, ...scoped.params, id, limit);
+  }
+
+  retainedTaskId(projectId: string, taskKey: string): string | null {
+    const rows: unknown[] = this.db.prepare(`SELECT DISTINCT task_id FROM memories
+      WHERE project_id = ? AND task_id IS NOT NULL AND json_extract(lineage_json, '$.taskKey') = ? LIMIT 2`)
+      .all(projectId, taskKey);
+    if (rows.length > 1) throw new CliError("Retained task key is ambiguous in this Core project");
+    const row = rows[0];
+    return isRecord(row) && typeof row.task_id === "string" ? row.task_id : null;
   }
 
   bindings(projectId: string, threadId: string) {
@@ -751,7 +771,7 @@ class MemoryStore {
       throw new CliError("Task memory requires explicit project, task, context and provenance");
     return this.db.transaction(() => {
       const link = input.lineage?.replaces;
-      const prior = link ? this.get(link.id, "project", input.projectId ?? undefined, false, input.task) : null;
+      const prior = link ? this.get(link.id, "project", input.projectId ?? undefined, false, input.task, true) : null;
       if (link && (!prior || prior.version !== link.version || prior.lineage?.state !== "current"))
         throw new CliError("Replacement base changed or is outside this task/context");
       const record = this.add(input);
@@ -809,7 +829,7 @@ class MemoryStore {
       const proposal = this.proposal(selection, id);
       if (proposal.state !== "pending") throw new CliError("Reflection already has an explicit decision");
       if (decision === "apply") for (const diff of proposal.diffs) {
-        const current = this.get(diff.before.id, "project", selection.projectId ?? undefined, false, selection.task);
+        const current = this.get(diff.before.id, "project", selection.projectId ?? undefined, false, selection.task, true);
         if (!current?.lineage || current.version !== diff.before.version) throw new CliError("Reflection base version conflict; nothing applied");
         const after = diff.after;
         this.update(current.id, { expectedVersion: diff.before.version, summary: after.summary, details: after.details,
@@ -876,7 +896,7 @@ function renderCatalog(store: MemoryStore, projectId: string | undefined, maxCha
   const { memories, total } = store.list("all", projectId, MAX_RESULT_LIMIT);
   const header = [
     "Memory index",
-    "The entries below are summaries, not full records. Use `bb memory search <query> --scope all --json` and `bb memory get <id> --json` to progressively disclose details.",
+    "The entries below are general-note summaries, not full records. Use `bb memory search <query> --general --scope all --json` and `bb memory get <id> --general --scope all --json` to progressively disclose details.",
     "You may proactively save durable learning with `bb memory add`. Use project scope for repository-specific facts and global scope only for broadly applicable user preferences or workflows. Never store secrets, transient status, guesses, or rules already guaranteed by AGENTS.md.",
     "",
   ].join("\n");
@@ -898,7 +918,7 @@ function renderCatalog(store: MemoryStore, projectId: string | undefined, maxCha
     const finalShown = finalLines.length;
     footer =
       finalShown < total
-        ? `\nShowing ${finalShown} of ${total}; run \`bb memory catalog --scope all --json\` for the rest.`
+        ? `\nShowing ${finalShown} of ${total}; run \`bb memory catalog --general --scope all --json\` for the rest.`
         : "";
     if (
       `${header}${finalLines.join("\n")}${footer}`.length <= maxChars
@@ -910,20 +930,20 @@ function renderCatalog(store: MemoryStore, projectId: string | undefined, maxCha
   return `${header}${finalLines.join("\n")}${footer}`;
 }
 
-function renderTaskSummary(store: MemoryStore, selection: MemorySelection, maxChars = 3000): string {
+function renderTaskSummary(store: MemoryStore, selection: MemorySelection, taskKey: string, maxChars = 3000): string {
   if (!selection.task || !selection.projectId) throw new CliError("Select a task and logical context");
   const { memories, total } = store.list("project", selection.projectId, MAX_RESULT_LIMIT, selection.task, true);
-  const taskKey = memories[0]?.lineage?.taskKey ?? selection.task.taskId;
   const header = `Task memory: ${taskKey}; project=${selection.projectId}; context=${selection.task.context}\nEvidence may be stale. Assumptions are not observations. Open originals and revision history before changing a decision.\n`;
-  const footer = `\nRead more: bb memory catalog --task ${taskKey} --context ${selection.task.context} --json`;
+  const retrieval = `bb memory catalog --task ${taskKey} --context ${selection.task.context} --json`;
+  const footer = `\nRead more: ${retrieval}`;
   const lines: string[] = [];
   let length = header.length + footer.length;
-  if (length > maxChars) return `Task summary omitted for budget; ${taskKey}/${selection.task.context}. Use bb memory summary with explicit --task and --context.`.slice(0, maxChars);
+  if (length > maxChars) return retrieval.length <= maxChars ? retrieval : "";
   for (const memory of memories) {
     const lineage = memory.lineage;
     if (!lineage) continue;
     const source = lineage.source;
-    const line = `- ${memory.name} v${memory.version} [${lineage.classification}] ${normalizeOneLine(memory.summary)}\n  source=${source.kind}:${source.commentId ?? taskKey}@${source.revision}; observed=${new Date(source.observedAt).toISOString()}; memoryUpdated=${new Date(memory.updatedAt).toISOString()}`;
+    const line = `- ${memory.name} v${memory.version} [${lineage.classification}] ${normalizeOneLine(memory.summary)}\n  source=${source.kind}:${source.commentId ?? lineage.taskKey}@${source.revision}; observed=${new Date(source.observedAt).toISOString()}; memoryUpdated=${new Date(memory.updatedAt).toISOString()}`;
     if (length + line.length + 1 > maxChars) break;
     lines.push(line);
     length += line.length + 1;
@@ -1018,8 +1038,9 @@ export default async function plugin(bb: BbPluginApi) {
     if (!selection.projectId || !selection.task) throw new CliError("Select an explicit project, task and logical context");
     validateName(selection.task.context);
     const { task } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "getTask", input: { taskId: selection.task.taskId }, outputSchema: tasksRpcContract.getTask.output });
+    if (!task) throw new CliError("Task is unavailable");
     const { projects } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listProjects", input: {}, outputSchema: tasksRpcContract.listProjects.output });
-    if (!task || !projects.some((project) => project.id === task.projectId && project.linkedBbProjectId === selection.projectId))
+    if (!projects.some((project) => project.id === task.projectId && project.linkedBbProjectId === selection.projectId))
       throw new CliError("Task is not linked to the selected Core project");
     await bb.sdk.projects.get({ projectId: selection.projectId });
     return task;
@@ -1028,6 +1049,17 @@ export default async function plugin(bb: BbPluginApi) {
   async function validateSelection(selection: MemorySelection) {
     if (selection.task) await taskFor(selection);
     return selection;
+  }
+
+  async function validateHistoricalSelection(selection: MemorySelection) {
+    if (selection.task) validateName(selection.task.context);
+    if (selection.projectId) await bb.sdk.projects.get({ projectId: selection.projectId });
+    return selection;
+  }
+
+  async function taskSummary(selection: MemorySelection) {
+    const task = await taskFor(selection);
+    return renderTaskSummary(store, selection, task.key);
   }
 
   async function validateSource(selection: MemorySelection, source: MemoryLineage["source"]) {
@@ -1070,15 +1102,17 @@ export default async function plugin(bb: BbPluginApi) {
   }
 
   async function decideReflection(selection: MemorySelection, id: string, decision: "apply" | "reject", threadId: string | null) {
-    await validateSelection(selection);
+    await validateHistoricalSelection(selection);
     const proposal = store.proposal(selection, id);
     if (decision === "apply") for (const diff of proposal.diffs) await validateSource(selection, diff.after.source);
     return store.decide(selection, id, decision, threadId);
   }
 
-  for (const action of ["scope.select", "draft.open", "reflection.review"]) {
-    bb.experimental_productAnalytics.declareAction({ action, surfaces: ["web", "compact", "mobile", "desktop"], completionSource: "client" });
-  }
+  const analytics = {
+    actions: ["scope.select", "draft.open", "reflection.review"].map((action) =>
+      bb.experimental_productAnalytics.declareAction({ action, surfaces: ["web", "compact", "mobile", "desktop"], completionSource: "client" }),
+    ),
+  };
 
   async function resolveTaskKey(taskKey: string) {
     const { task } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "getTaskByKey", input: { taskKey }, outputSchema: tasksRpcContract.getTaskByKey.output });
@@ -1090,6 +1124,7 @@ export default async function plugin(bb: BbPluginApi) {
   }
 
   bb.rpc.register(memoryRpcContract, {
+    async memoryAnalytics() { return analytics; },
     async resolveMemoryTask({ taskKey }) {
       return resolveTaskKey(taskKey);
     },
@@ -1109,9 +1144,10 @@ export default async function plugin(bb: BbPluginApi) {
       const thread = await bb.sdk.threads.get({ threadId });
       return { projectId: thread.projectId, bindings: store.bindings(thread.projectId, threadId) };
     },
-    async searchMemories({ selection, query }) {
+    async searchMemories(input) {
+      const selection = memorySelectionFrom(input);
       await validateSelection(selection);
-      return { memories: store.search(query, selection.projectId ? "project" : "global", selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task) };
+      return { memories: store.search(input.query, selection.projectId ? "project" : "global", selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task) };
     },
     async listMemoryTasks({ projectId, search }) {
       await bb.sdk.projects.get({ projectId });
@@ -1124,17 +1160,24 @@ export default async function plugin(bb: BbPluginApi) {
       }
       return { tasks };
     },
-    async listMemories(selection) {
+    async listMemories(input) {
+      const { offset } = input;
+      const selection = memorySelectionFrom(input);
       await validateSelection(selection);
-      return { memories: store.list(selection.projectId ? "project" : "global", selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task).memories };
+      const page = store.list(selection.projectId ? "project" : "global", selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task, false, offset);
+      return { memories: page.memories, total: page.total,
+        previousOffset: offset === 0 ? null : Math.max(0, offset - MAX_RESULT_LIMIT),
+        nextOffset: offset + page.memories.length < page.total ? offset + page.memories.length : null };
     },
-    async getMemory({ selection, name }) {
+    async getMemory(input) {
+      const selection = memorySelectionFrom(input);
       await validateSelection(selection);
-      return { memory: store.get(name, selection.projectId ? "project" : "global", selection.projectId ?? undefined, true, selection.task) };
+      return { memory: store.get(input.name, selection.projectId ? "project" : "global", selection.projectId ?? undefined, true, selection.task) };
     },
-    async memoryHistory({ selection, name }) {
-      await validateSelection(selection);
-      return { history: store.history(name, selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task, selection.projectId ? "project" : "global").map((row) => {
+    async memoryHistory(input) {
+      const selection = memorySelectionFrom(input);
+      await validateHistoricalSelection(selection);
+      return { history: store.history(input.name, selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task, selection.projectId ? "project" : "global").map((row) => {
         if (!isRecord(row)) throw new CliError("Invalid memory history row");
         const snapshot = JSON.parse(String(row.snapshot_json));
         return { version: Number(row.version), action: String(row.action), createdAt: Number(row.created_at),
@@ -1142,11 +1185,10 @@ export default async function plugin(bb: BbPluginApi) {
       }) };
     },
     async taskSummary(selection) {
-      await validateSelection(selection);
-      return { summary: selection.task ? renderTaskSummary(store, selection) : renderCatalog(store, selection.projectId ?? undefined), generatedAt: Date.now() };
+      return { summary: selection.task ? await taskSummary(selection) : renderCatalog(store, selection.projectId ?? undefined), generatedAt: Date.now() };
     },
-    async createTaskMemory({ selection, draft }) {
-      return { memory: await createTaskMemory(selection, draft, null) };
+    async createTaskMemory(input) {
+      return { memory: await createTaskMemory(memorySelectionFrom(input), input.draft, null) };
     },
     async getTaskBindings({ projectId, threadId }) {
       await validateThread(projectId, threadId);
@@ -1157,44 +1199,53 @@ export default async function plugin(bb: BbPluginApi) {
       for (const task of tasks) await taskFor({ projectId, task });
       return store.setBindings(projectId, threadId, expectedVersion, tasks);
     },
-    async proposeReflection({ selection, changes }) { return proposeReflection(selection, changes); },
+    async proposeReflection(input) { return proposeReflection(memorySelectionFrom(input), input.changes); },
     async listReflections(selection) {
-      await validateSelection(selection);
+      await validateHistoricalSelection(selection);
       return { proposals: store.proposals(selection) };
     },
-    async getReflection({ selection, id }) {
-      await validateSelection(selection);
-      return store.proposal(selection, id);
+    async getReflection(input) {
+      const selection = memorySelectionFrom(input);
+      await validateHistoricalSelection(selection);
+      return store.proposal(selection, input.id);
     },
-    async decideReflection({ selection, id, decision }) { return decideReflection(selection, id, decision, null); },
+    async decideReflection(input) { return decideReflection(memorySelectionFrom(input), input.id, input.decision, null); },
     async updateMemory(input) {
-      await validateSelection(input.selection);
-      if (input.selection.task) throw new CliError("Task changes require a reviewed reflection or explicit replacement");
+      const selection = memorySelectionFrom(input);
+      await validateSelection(selection);
+      if (selection.task) throw new CliError("Task changes require a reviewed reflection or explicit replacement");
       return { memory: store.update(input.id, { expectedVersion: input.expectedVersion, summary: input.summary,
         details: input.details, kind: input.kind, tags: input.tags, importance: input.importance, pinned: input.pinned,
         sourceThreadId: null, writeReason: "Edited in Memory settings",
-      }, input.selection.projectId ?? undefined, null, input.selection.projectId ? "project" : "global") };
+      }, selection.projectId ?? undefined, null, selection.projectId ? "project" : "global") };
     },
     async deleteMemory(input) {
-      await validateSelection(input.selection);
+      const selection = memorySelectionFrom(input);
+      await validateSelection(selection);
       const memory = store.forget(input.id, input.expectedVersion, "Explicitly deleted in Memory settings", null,
-        input.selection.projectId ?? undefined, input.selection.task, input.selection.projectId ? "project" : "global");
+        selection.projectId ?? undefined, selection.task, selection.projectId ? "project" : "global");
       return { deleted: { id: memory.id, version: memory.version } };
     },
   });
 
-  bb.agents.contributeInstructions(({ projectId, threadId }) => {
-    const bindings = store.bindings(projectId, threadId).tasks;
-    if (bindings.length === 0) return renderCatalog(store, projectId);
-    const summaries: string[] = [];
-    let remaining = 3000;
-    for (const task of bindings) {
-      const summary = renderTaskSummary(store, { projectId, task }, Math.min(remaining, Math.floor(3000 / bindings.length)));
-      if (summary.length > remaining) break;
-      summaries.push(summary);
-      remaining -= summary.length + 2;
+  bb.agents.contributeInstructions(({ projectId, threadId }) =>
+    renderCatalog(store, projectId, store.bindings(projectId, threadId).tasks.length > 0 ? 800 : CATALOG_MAX_CHARS),
+  );
+
+  bb.agents.configure(async ({ project, thread }) => {
+    const eligible: Array<{ scope: TaskScope; key: string }> = [];
+    for (const scope of store.bindings(project.id, thread.id).tasks) {
+      try {
+        const task = await taskFor({ projectId: project.id, task: scope });
+        eligible.push({ scope, key: task.key });
+      } catch (error) {
+        if (!(error instanceof CliError)) throw error;
+      }
     }
-    return `${summaries.join("\n\n")}\n\n${renderCatalog(store, projectId, 800)}`;
+    if (eligible.length === 0) return { tools: [], skills: ["memory"] };
+    const budget = Math.min(3000, Math.floor((CATALOG_MAX_CHARS - 802 - (eligible.length - 1) * 2) / eligible.length));
+    const summaries = eligible.map(({ scope, key }) => renderTaskSummary(store, { projectId: project.id, task: scope }, key, budget));
+    return { tools: [], skills: ["memory"], instructions: summaries.join("\n\n") };
   });
 
   const taskOptions = {
@@ -1203,7 +1254,7 @@ export default async function plugin(bb: BbPluginApi) {
     general: { type: "boolean", description: "Explicitly select general notes, not a thread task binding" },
   } as const;
 
-  async function cliSelection(ctx: { projectId?: string; threadId?: string }, options: { task?: string; context?: string; general: boolean }): Promise<MemorySelection> {
+  async function cliSelection(ctx: { projectId?: string; threadId?: string }, options: { task?: string; context?: string; general: boolean }, historical = false): Promise<MemorySelection> {
     const projectId = ctx.projectId ?? null;
     if (options.general) {
       if (options.task || options.context) throw new CliError("--general cannot be combined with --task or --context");
@@ -1211,6 +1262,10 @@ export default async function plugin(bb: BbPluginApi) {
     }
     if (options.task || options.context) {
       if (!options.task || !options.context || !projectId) throw new CliError("--task and --context require each other and a Core project");
+      if (historical) {
+        const taskId = store.retainedTaskId(projectId, options.task);
+        if (taskId) return validateHistoricalSelection(memorySelectionSchema.parse({ projectId, task: { taskId, context: options.context } }));
+      }
       const resolved = await resolveTaskKey(options.task);
       if (resolved.projectId !== projectId) throw new CliError("Task is not linked to the current Core project");
       validateName(options.context);
@@ -1219,7 +1274,7 @@ export default async function plugin(bb: BbPluginApi) {
     const bindings = ctx.threadId && projectId ? store.bindings(projectId, ctx.threadId).tasks : [];
     if (bindings.length > 1) throw new CliError("This thread has multiple explicit bindings; select --task and --context, or --general");
     const task = bindings[0] ?? null;
-    return validateSelection({ projectId, task });
+    return historical ? validateHistoricalSelection({ projectId, task }) : validateSelection({ projectId, task });
   }
 
   bb.cli.register(
@@ -1234,7 +1289,7 @@ export default async function plugin(bb: BbPluginApi) {
           options: { ...taskOptions, json: { type: "boolean", description: "Emit JSON" } },
           async run(input, ctx) {
             const selection = await cliSelection(ctx, input.options);
-            const summary = selection.task ? renderTaskSummary(store, selection) : renderCatalog(store, ctx.projectId);
+            const summary = selection.task ? await taskSummary(selection) : renderCatalog(store, ctx.projectId);
             return { exitCode: 0, stdout: input.options.json ? jsonOutput({ selection, summary, generatedAt: Date.now() }) : summary };
           },
         }),
@@ -1257,7 +1312,7 @@ export default async function plugin(bb: BbPluginApi) {
           async run(input, ctx) {
             if (!ctx.projectId || !ctx.threadId) throw new CliError("Bindings require a project thread");
             await validateThread(ctx.projectId, ctx.threadId);
-            const selection = await cliSelection(ctx, { ...input.options, general: false });
+            const selection = await cliSelection(ctx, { ...input.options, general: false }, input.options.remove);
             if (!selection.task) throw new CliError("Select a task/context");
             const task = selection.task;
             const current = store.bindings(ctx.projectId, ctx.threadId);
@@ -1295,7 +1350,7 @@ export default async function plugin(bb: BbPluginApi) {
           summary: "Inspect pending and decided reflection diffs in one task/context",
           options: { ...taskOptions },
           async run(input, ctx) {
-            const selection = await cliSelection(ctx, input.options);
+            const selection = await cliSelection(ctx, input.options, true);
             if (!selection.task) throw new CliError("Select a task/context");
             return { exitCode: 0, stdout: jsonOutput({ proposals: store.proposals(selection) }) };
           },
@@ -1307,7 +1362,7 @@ export default async function plugin(bb: BbPluginApi) {
             proposal: { type: "string", required: true, description: "Retained proposal identifier" },
           },
           async run(input, ctx) {
-            const selection = await cliSelection(ctx, input.options);
+            const selection = await cliSelection(ctx, input.options, true);
             return { exitCode: 0, stdout: jsonOutput(store.proposal(selection, input.options.proposal)) };
           },
         }),
@@ -1319,7 +1374,7 @@ export default async function plugin(bb: BbPluginApi) {
             decision: { type: "enum", values: ["apply", "reject"], required: true, description: "Explicit operator decision" },
           },
           async run(input, ctx) {
-            const selection = await cliSelection(ctx, input.options);
+            const selection = await cliSelection(ctx, input.options, input.options.decision === "reject");
             return { exitCode: 0, stdout: jsonOutput(await decideReflection(selection, input.options.proposal, input.options.decision, ctx.threadId ?? null)) };
           },
         }),
@@ -1341,21 +1396,29 @@ export default async function plugin(bb: BbPluginApi) {
               default: DEFAULT_RESULT_LIMIT,
               description: "How many memories to list",
             },
+            offset: {
+              type: "integer",
+              min: 0,
+              max: Number.MAX_SAFE_INTEGER,
+              default: 0,
+              description: "Skip this many scoped catalog entries before the next page",
+            },
             json: {
               type: "boolean",
               description: "Emit machine-readable JSON",
             },
           },
           async run(input, ctx) {
-            const { scope, limit } = input.options;
+            const { scope, limit, offset } = input.options;
             const selection = await cliSelection(ctx, input.options);
-            const result = store.list(scope, ctx.projectId, limit, selection.task);
+            const result = store.list(scope, ctx.projectId, limit, selection.task, false, offset);
             return {
               exitCode: 0,
               stdout: input.options.json
                 ? jsonOutput({
                     ok: true,
                     scope,
+                    offset,
                     memories: result.memories.map(toMemorySummary),
                     total: result.total,
                   })
@@ -1637,9 +1700,11 @@ export default async function plugin(bb: BbPluginApi) {
           async run(input, ctx) {
             const selection = await cliSelection(ctx, input.options);
             if (selection.task) throw new CliError("Task updates require memory propose or an explicit replacement through memory remember");
+            const current = store.get(input.positionals.id, "all", ctx.projectId, false);
+            if (!current) throw new CliError("Memory was not found in the current scope");
             const tags = input.options.tag;
             const memory = store.update(
-              input.positionals.id,
+              current.id,
               {
                 expectedVersion: input.options["expected-version"],
                 summary: input.options.summary,
@@ -1691,8 +1756,10 @@ export default async function plugin(bb: BbPluginApi) {
           },
           async run(input, ctx) {
             const selection = await cliSelection(ctx, input.options);
+            const current = store.get(input.positionals.id, "all", ctx.projectId, false, selection.task);
+            if (!current) throw new CliError("Memory was not found in the current scope");
             const memory = store.forget(
-              input.positionals.id,
+              current.id,
               input.options["expected-version"],
               input.options.reason,
               ctx.threadId ?? null,
@@ -1730,7 +1797,7 @@ export default async function plugin(bb: BbPluginApi) {
             },
           },
           async run(input, ctx) {
-            const selection = await cliSelection(ctx, input.options);
+            const selection = await cliSelection(ctx, input.options, true);
             const id = input.positionals.id;
             const history = store.history(
               id,

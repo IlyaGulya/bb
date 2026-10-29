@@ -2291,6 +2291,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([pluginId, plugin]) => ({
           pluginId,
+          handle: plugin.handle,
           provider: plugin.handle.agentConfigurationProvider,
         }));
       const configuringPluginIds = plugins
@@ -2311,7 +2312,11 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         metadataByPluginId.set(row.pluginId, metadata ?? {});
       }
 
-      for (const { pluginId, provider } of plugins) {
+      for (const { pluginId, handle, provider } of plugins) {
+        if (loaded.get(pluginId)?.handle !== handle) {
+          selectedSkillIdsByPlugin.set(pluginId, new Set());
+          continue;
+        }
         const pluginTools = allTools.filter(
           (entry) => entry.pluginId === pluginId,
         );
@@ -2328,12 +2333,12 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         const knownToolIds = new Set(
           pluginTools.map(({ record }) => record.name),
         );
-        const outcome = await invokeWrapped(pluginId, "agent configure", () =>
+        const outcome = await invokeWrapped(pluginId, "agent configure", async () =>
           normalizePluginAgentConfiguration({
             knownSkillIds,
             knownToolIds,
             pluginId,
-            value: provider({
+            value: await provider({
               ...context,
               pluginMetadata: deepFreezePluginMetadata(
                 metadataByPluginId.get(pluginId) ?? {},
@@ -2341,7 +2346,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
             }),
           }),
         );
-        if (!outcome.ok) {
+        if (!outcome.ok || loaded.get(pluginId)?.handle !== handle) {
           selectedSkillIdsByPlugin.set(pluginId, new Set());
           continue;
         }

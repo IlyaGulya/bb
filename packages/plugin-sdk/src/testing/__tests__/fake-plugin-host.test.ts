@@ -1581,6 +1581,36 @@ describe("agent tools", () => {
       'duplicate id "known-skill"',
     );
   });
+
+  it.each(["rejected", "invalid"] as const)("withholds tools and skills after an awaited %s scope lookup", async (result) => {
+    const host = createFakePluginHost({ pluginId: "async-scope", agentSkillIds: ["scoped-skill"] });
+    try {
+      host.bb.agents.registerTool({ name: "scoped_tool", description: "Read scoped evidence", parameters: { type: "object" }, execute: () => "owned" });
+      host.bb.agents.configure(async () => {
+        if (result === "rejected") throw new Error("Owned scope lookup unavailable");
+        return { tools: ["unregistered_tool"], skills: ["scoped-skill"], instructions: "Unvalidated scope must not reach the runtime." };
+      });
+      expect(await host.harness.behavior.resolveAgentConfiguration(configurationContext)).toEqual({ tools: [], skills: [], instructions: null });
+    } finally {
+      await host.harness.lifecycle.dispose();
+    }
+  });
+
+  it("discards a tool selection that resolves after its plugin is disposed", async () => {
+    const host = createFakePluginHost({ agentSkillIds: ["scoped-skill"] });
+    type Selection = { tools: string[]; skills: string[]; instructions: string };
+    let finish!: (value: Selection) => void;
+    try {
+      host.bb.agents.registerTool({ name: "scoped_tool", description: "Read scoped evidence", parameters: { type: "object" }, execute: () => "owned" });
+      host.bb.agents.configure(() => new Promise<Selection>((resolve) => { finish = resolve; }));
+      const pending = host.harness.behavior.resolveAgentConfiguration(configurationContext);
+      await host.harness.lifecycle.dispose();
+      finish({ tools: ["scoped_tool"], skills: ["scoped-skill"], instructions: "Retired scope must not reach a new runtime." });
+      expect(await pending).toEqual({ tools: [], skills: [], instructions: null });
+    } finally {
+      await host.harness.lifecycle.dispose();
+    }
+  });
 });
 
 describe("dispose", () => {

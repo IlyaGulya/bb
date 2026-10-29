@@ -1640,8 +1640,9 @@ export interface PluginAgents {
   /**
    * Select this plugin's statically registered tools and manifest skills for
    * each thread/session resolution, with optional dynamic instructions. The
-   * callback is synchronous and runs at `thread.start` / `turn.submit`; it
-   * never rebuilds registrations. Exactly one callback may be registered per
+   * callback runs at `thread.start` / `turn.submit` and may return a promise;
+   * BB awaits it before validating its result. It never rebuilds registrations.
+   * Exactly one callback may be registered per
    * factory execution. A throw, malformed result, duplicate id, unknown id,
    * or more than 256 tool/skill ids fails closed for this plugin only.
    *
@@ -1658,7 +1659,7 @@ export interface PluginAgents {
   configure(
     provider: (
       context: PluginAgentConfigurationContext,
-    ) => PluginAgentConfiguration,
+    ) => PluginAgentConfiguration | Promise<PluginAgentConfiguration>,
   ): void;
   /**
    * Register a native dynamic tool (design §4.4). `parameters` is either a

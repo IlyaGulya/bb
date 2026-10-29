@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ComponentType, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentType, type FormEvent } from "react";
 import { useRpc, useSdk, type PluginRpcResult } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,19 +14,26 @@ const message = (error: unknown) => error instanceof Error ? error.message : "Me
 
 function useLocalAnalytics() {
   const sdk = useSdk();
+  const rpc = useRpc<typeof memoryRpcContract>();
+  const declarations = useRef<Promise<PluginRpcResult<(typeof memoryRpcContract)["memoryAnalytics"]>> | null>(null);
   const [gap, setGap] = useState(false);
   const opened = (action: "scope.select" | "draft.open" | "reflection.review", selection: MemorySelection, event: { isTrusted: boolean }) => {
     const operationId = crypto.randomUUID();
     const actorKind = event.isTrusted ? navigator.webdriver ? "agent" as const : "human" as const : "unknown" as const;
     const scope = selection.projectId ? { kind: "project" as const, projectId: selection.projectId } : { kind: "instance" as const };
-    void Promise.resolve().then(() => sdk.experimental_productAnalytics.record({ events: [{
-      operationId, featureId: "plugin.memory", action, version: 1, scope, actorKind,
-      actorSessionId: null, surface: window.matchMedia("(max-width: 767px)").matches ? "compact" : "web",
-      mode: "production", stage: "opened", outcome: "none", errorCode: "none", timestamp: Date.now(), durationMs: null,
-    }] })).then(({ receipts }) => {
-      const receipt = receipts.find((entry) => entry.operationId === operationId && entry.featureId === "plugin.memory" && entry.action === action && entry.stage === "opened" && entry.scope.kind === scope.kind && (entry.scope.kind !== "project" || (scope.kind === "project" && entry.scope.projectId === scope.projectId)));
+    const timestamp = Date.now();
+    const surface = window.matchMedia("(max-width: 767px)").matches ? "compact" : "web";
+    declarations.current ??= Promise.resolve().then(() => rpc.call("memoryAnalytics"));
+    void declarations.current.then(async ({ actions }) => {
+      const identity = actions.find((entry) => entry.action === action);
+      if (!identity) { setGap(true); return; }
+      const { receipts } = await sdk.experimental_productAnalytics.record({ events: [{
+        operationId, ...identity, scope, actorKind, actorSessionId: null, surface,
+        mode: "production", stage: "opened", outcome: "none", errorCode: "none", timestamp, durationMs: null,
+      }] });
+      const receipt = receipts.find((entry) => entry.operationId === operationId && entry.featureId === identity.featureId && entry.action === identity.action && entry.stage === "opened" && entry.scope.kind === scope.kind && (entry.scope.kind !== "project" || (scope.kind === "project" && entry.scope.projectId === scope.projectId)));
       if (!receipt || (receipt.status !== "accepted" && receipt.status !== "duplicate")) setGap(true);
-    }).catch(() => setGap(true));
+    }).catch(() => { declarations.current = null; setGap(true); });
   };
   return { opened, gap };
 }
@@ -121,9 +128,9 @@ function TaskDraft({ selection, sources, memory, replacing, onSaved, onCancel }:
     const source = { kind: selected.kind, commentId: selected.commentId, revision: selected.revision, observedAt: Date.now(), quote };
     try {
       if (editing) {
-        await rpc.call("proposeReflection", { selection, changes: [{ id: memory.id, expectedVersion: memory.version, summary, details, classification, state, source, reason }] });
+        await rpc.call("proposeReflection", { ...selection, changes: [{ id: memory.id, expectedVersion: memory.version, summary, details, classification, state, source, reason }] });
       } else {
-        await rpc.call("createTaskMemory", { selection, draft: { name, summary, details, classification, source, reason,
+        await rpc.call("createTaskMemory", { ...selection, draft: { name, summary, details, classification, source, reason,
           replaces: replacing && memory ? { id: memory.id, version: memory.version } : null } });
       }
       await onSaved();
@@ -173,11 +180,12 @@ function ProposalReview({ proposal, pending, onDecide }: { proposal: ReflectionP
 function TaskMemories({ selection, threadId }: { selection: MemorySelection; threadId?: string }) {
   const rpc = useRpc<typeof memoryRpcContract>();
   const analytics = useLocalAnalytics();
-  const [data, setData] = useState<{ memories: Memory[]; proposals: ReflectionProposal[]; summary: string; generatedAt: number; sources: Sources } | null>(null);
+  const [data, setData] = useState<{ memories: Memory[]; page: PluginRpcResult<(typeof memoryRpcContract)["listMemories"]> | null; proposals: ReflectionProposal[]; summary: string; generatedAt: number; sources: Sources } | null>(null);
   const [draft, setDraft] = useState<{ memory: Memory | null; replacing: boolean } | null>(null);
   const [history, setHistory] = useState<PluginRpcResult<(typeof memoryRpcContract)["memoryHistory"]>["history"] | null>(null);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
+  const [offset, setOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -185,17 +193,19 @@ function TaskMemories({ selection, threadId }: { selection: MemorySelection; thr
   const [retry, setRetry] = useState(0);
   const load = useCallback(async () => {
     const [records, proposals, summary, sources, bindingState] = await Promise.all([
-      query ? rpc.call("searchMemories", { selection, query }) : rpc.call("listMemories", selection),
+      query
+        ? rpc.call("searchMemories", { ...selection, query }).then(({ memories }) => ({ memories, page: null }))
+        : rpc.call("listMemories", { ...selection, offset }).then((page) => ({ memories: page.memories, page })),
       rpc.call("listReflections", selection), rpc.call("taskSummary", selection), rpc.call("listMemorySources", selection),
       threadId && selection.projectId ? rpc.call("getTaskBindings", { projectId: selection.projectId, threadId }) : Promise.resolve(null),
     ]);
-    return { data: { memories: records.memories, proposals: proposals.proposals, summary: summary.summary, generatedAt: summary.generatedAt, sources }, bindings: bindingState };
-  }, [rpc, selection, query, threadId]);
+    return { data: { memories: records.memories, page: records.page, proposals: proposals.proposals, summary: summary.summary, generatedAt: summary.generatedAt, sources }, bindings: bindingState };
+  }, [rpc, selection, query, offset, threadId]);
   useEffect(() => {
     let active = true;
-    setLoading(true); setError(null); setData(null); setHistory(null);
+    setLoading(true); setError(null); setHistory(null);
     void load().then((result) => { if (active) { setData(result.data); setBindings(result.bindings); } })
-      .catch((failure: unknown) => { if (active) setError(message(failure)); })
+      .catch((failure: unknown) => { if (active) { setData(null); setError(message(failure)); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [load, retry]);
@@ -206,10 +216,11 @@ function TaskMemories({ selection, threadId }: { selection: MemorySelection; thr
     catch (failure) { setError(message(failure)); }
     finally { setPending(false); }
   };
-  if (loading) return <p role="status" className="text-sm text-muted-foreground">Loading scoped task memory and source revisions…</p>;
-  return <div className="space-y-4">
+  if (loading && data === null) return <p role="status" className="text-sm text-muted-foreground">Loading scoped task memory and source revisions…</p>;
+  return <div aria-busy={loading} className="space-y-4">
+    {loading ? <p role="status" className="text-sm text-muted-foreground">Loading scoped task memory and source revisions…</p> : null}
     {error ? <p role="alert" className="text-sm text-destructive">{error} <Button variant="ghost" size="sm" onClick={() => setRetry((value) => value + 1)}>Reload task memory</Button></p> : null}
-    {data ? <>
+    {data ? <fieldset disabled={loading || pending} className="min-w-0 space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-base font-medium">{data.sources.taskKey} · {selection.task?.context}</h2>
         <Button asChild size="sm" variant="outline"><a href={`/plugins/tasks/tasks/task/${encodeURIComponent(data.sources.taskKey)}`}>Open original task</a></Button>
@@ -227,7 +238,7 @@ function TaskMemories({ selection, threadId }: { selection: MemorySelection; thr
           void act(() => rpc.call("setTaskBindings", { projectId, threadId, expectedVersion: bindings.version, tasks }));
         }}>{bindings.tasks.some((entry) => entry.taskId === selection.task?.taskId && entry.context === selection.task?.context) ? "Detach this task/context" : "Bind this task/context to thread"}</Button>
       </div> : null}
-      <form className="flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); setQuery(search.trim()); }}><Input aria-label="Search scoped task memories" className="min-w-0 flex-1" value={search} maxLength={200} onChange={(event) => setSearch(event.target.value)} /><Button type="submit" variant="outline">Search task memory</Button></form>
+      <form className="flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); setOffset(0); setQuery(search.trim()); }}><Input aria-label="Search scoped task memories" className="min-w-0 flex-1" value={search} maxLength={200} onChange={(event) => setSearch(event.target.value)} /><Button type="submit" variant="outline">Search task memory</Button></form>
       <Button size="sm" disabled={draft !== null || pending} onClick={(event) => { analytics.opened("draft.open", selection, event); setDraft({ memory: null, replacing: false }); }}>Remember task fact</Button>
       {draft ? <TaskDraft selection={selection} sources={data.sources} memory={draft.memory} replacing={draft.replacing} onCancel={() => setDraft(null)} onSaved={async () => { await refresh(); setDraft(null); }} /> : null}
       {data.memories.length === 0 ? <p className="text-sm text-muted-foreground">{query ? "No memories match in this task/context. Clear the search to inspect all records." : "No task facts yet. Inspect an original, then remember an observation, decision or explicitly unverified assumption."}</p> : null}
@@ -236,12 +247,13 @@ function TaskMemories({ selection, threadId }: { selection: MemorySelection; thr
         <p className="break-words text-sm">{memory.summary}</p>
         <details><summary className="cursor-pointer text-sm">Details and provenance for {memory.name}</summary><div className="mt-2 space-y-2"><p className="whitespace-pre-wrap break-words text-sm">{memory.details}</p><p className="break-words text-xs text-muted-foreground">Source {memory.lineage?.source.kind} · revision {memory.lineage?.source.revision} · observed {memory.lineage ? new Date(memory.lineage.source.observedAt).toLocaleString() : ""}</p>{memory.lineage?.source.quote ? <blockquote className="break-words text-sm">{memory.lineage.source.quote}</blockquote> : null}</div></details>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="ghost" disabled={pending} onClick={() => void act(async () => { setHistory((await rpc.call("memoryHistory", { selection, name: memory.name })).history); })}>History of {memory.name}</Button>
+          <Button size="sm" variant="ghost" disabled={pending} onClick={() => void act(async () => { setHistory((await rpc.call("memoryHistory", { ...selection, name: memory.name })).history); })}>History of {memory.name}</Button>
           {memory.lineage?.state !== "replaced" ? <Button size="sm" variant="outline" disabled={pending || draft !== null} onClick={(event) => { analytics.opened("draft.open", selection, event); setDraft({ memory, replacing: false }); }}>Propose change to {memory.name}</Button> : null}
           {memory.lineage?.state === "current" ? <Button size="sm" variant="outline" disabled={pending || draft !== null} onClick={(event) => { analytics.opened("draft.open", selection, event); setDraft({ memory, replacing: true }); }}>Replace {memory.name}</Button> : null}
-          {[memory.lineage?.replaces, memory.lineage?.replacedBy].map((link, index) => link ? <Button key={index} size="sm" variant="ghost" disabled={pending} onClick={() => void act(async () => { setHistory((await rpc.call("memoryHistory", { selection, name: link.id })).history); })}>{index === 0 ? "Inspect replaced original" : "Inspect replacement"} v{link.version}</Button> : null)}
+          {[memory.lineage?.replaces, memory.lineage?.replacedBy].map((link, index) => link ? <Button key={index} size="sm" variant="ghost" disabled={pending} onClick={() => void act(async () => { setHistory((await rpc.call("memoryHistory", { ...selection, name: link.id })).history); })}>{index === 0 ? "Inspect replaced original" : "Inspect replacement"} v{link.version}</Button> : null)}
         </div>
       </li>)}</ul>
+      {data.page ? <MemoryPagination previousOffset={data.page.previousOffset} nextOffset={data.page.nextOffset} disabled={loading || pending || draft !== null} onPage={setOffset} /> : <p className="text-xs text-muted-foreground">Search shows ranked matches. Clear the search to browse every record.</p>}
       {history ? <section className="space-y-2 border-t border-border pt-4" aria-label="Memory version history"><h3 className="text-sm font-medium">Retained original revisions</h3>{history.map((entry) => <details key={`${entry.snapshot.id}:${entry.version}`}><summary className="cursor-pointer break-words text-sm">{entry.snapshot.name} v{entry.version} · {entry.action} · {new Date(entry.createdAt).toLocaleString()}</summary><p className="break-words text-sm">{entry.snapshot.summary}</p><p className="whitespace-pre-wrap break-words text-sm">{entry.snapshot.details}</p><p className="break-words text-xs text-muted-foreground">{entry.snapshot.lineage?.classification} · {entry.snapshot.lineage?.state} · source revision {entry.snapshot.lineage?.source.revision}</p></details>)}</section> : null}
       <section className="space-y-3" aria-label="Reflection proposals">
         <h2 className="text-base font-medium">Diff-first reflection</h2>
@@ -251,12 +263,22 @@ function TaskMemories({ selection, threadId }: { selection: MemorySelection; thr
             const details = event.currentTarget.parentElement;
             if (details instanceof HTMLDetailsElement && !details.open) analytics.opened("reflection.review", selection, event);
           }}>Review {proposal.state} reflection · {new Date(proposal.createdAt).toLocaleString()}</summary>
-          <ProposalReview proposal={proposal} pending={pending} onDecide={(decision) => void act(() => rpc.call("decideReflection", { selection, id: proposal.id, decision }))} />
+          <ProposalReview proposal={proposal} pending={pending} onDecide={(decision) => void act(() => rpc.call("decideReflection", { ...selection, id: proposal.id, decision }))} />
         </details>)}
       </section>
-    </> : null}
+    </fieldset> : null}
     {analytics.gap ? <p role="status" className="text-xs text-muted-foreground">Local action analytics delivery was not acknowledged.</p> : null}
   </div>;
+}
+
+export function MemoryPagination({ previousOffset, nextOffset, disabled, onPage }: {
+  previousOffset: number | null; nextOffset: number | null; disabled: boolean; onPage: (offset: number) => void;
+}) {
+  if (previousOffset === null && nextOffset === null) return null;
+  return <nav aria-label="Memory pages" className="flex flex-wrap justify-between gap-2">
+    <Button type="button" size="sm" variant="outline" disabled={disabled || previousOffset === null} onClick={() => { if (previousOffset !== null) onPage(previousOffset); }}>Previous memories</Button>
+    <Button type="button" size="sm" variant="outline" disabled={disabled || nextOffset === null} onClick={() => { if (nextOffset !== null) onPage(nextOffset); }}>Next memories</Button>
+  </nav>;
 }
 
 export function MemoryWorkspace({ general: General, threadId, initialTask }: { general: ComponentType<{ selection: MemorySelection }>; threadId?: string; initialTask?: InitialTask }) {

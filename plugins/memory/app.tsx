@@ -1,10 +1,10 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   definePluginApp,
   useRpc,
   type PluginRpcResult,
 } from "@get-bb/plugin-sdk/app";
-import { MemoryWorkspace } from "./memory-workspace.js";
+import { MemoryPagination, MemoryWorkspace } from "./memory-workspace.js";
 import type { MemorySelection } from "./lineage.js";
 import type { memoryRpcContract } from "./server.js";
 import { isMemoryKind, MEMORY_KINDS } from "./memory-kinds.js";
@@ -133,7 +133,7 @@ function MemoryEditor({
             setError(null);
             void rpc
               .call("updateMemory", {
-                selection,
+                ...selection,
                 id: draft.id,
                 expectedVersion: draft.version,
                 summary: draft.summary,
@@ -161,7 +161,9 @@ function MemoryEditor({
 
 function GeneralMemories({ selection }: { selection: MemorySelection }) {
   const rpc = useRpc<typeof memoryRpcContract>();
-  const [memories, setMemories] = useState<MemoryRecord[]>([]);
+  const [page, setPage] = useState<PluginRpcResult<(typeof memoryRpcContract)["listMemories"]> | null>(null);
+  const [offset, setOffset] = useState(0);
+  const request = useRef(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -169,37 +171,50 @@ function GeneralMemories({ selection }: { selection: MemorySelection }) {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    const current = ++request.current;
     setLoading(true);
     setError(null);
     try {
-      setMemories((await rpc.call("listMemories", selection)).memories);
+      const result = await rpc.call("listMemories", { ...selection, offset });
+      if (current !== request.current) return;
+      if (result.memories.length === 0 && result.previousOffset !== null) {
+        setOffset(result.previousOffset);
+        return;
+      }
+      setPage(result);
     } catch (loadError) {
-      setError(errorMessage(loadError));
+      if (current === request.current) setError(errorMessage(loadError));
     } finally {
-      setLoading(false);
+      if (current === request.current) setLoading(false);
     }
-  }, [rpc, selection]);
+  }, [rpc, selection, offset]);
 
   useEffect(() => {
     void load();
+    return () => { request.current += 1; };
   }, [load]);
 
-  if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading memories…</p>;
+  if (loading && page === null) {
+    return <p role="status" className="text-sm text-muted-foreground">Loading memories…</p>;
   }
+  if (page === null) {
+    return <div className="space-y-2"><p role="alert" className="text-sm text-destructive">{error}</p><Button variant="ghost" size="sm" onClick={() => void load()}>Retry memories</Button></div>;
+  }
+  const memories = page.memories;
 
   return (
-    <div className="space-y-4">
+    <div aria-busy={loading} className="space-y-4">
       <p className="text-sm text-muted-foreground">
         General notes only. Task/context records are excluded from this catalog.
         Global notes are explicitly shared across projects; project notes stay in the selected project.
       </p>
+      {loading ? <p role="status" className="text-sm text-muted-foreground">Loading memories…</p> : null}
       {error ? (
         <div>
         <p className="text-sm text-destructive" role="alert">
           {error}
         </p>
-        <Button variant="ghost" size="sm" onClick={() => void load()}>Retry memories</Button>
+        <Button variant="ghost" size="sm" disabled={loading || deletingId !== null} onClick={() => void load()}>Retry memories</Button>
         </div>
       ) : null}
       {memories.length === 0 ? (
@@ -248,6 +263,7 @@ function GeneralMemories({ selection }: { selection: MemorySelection }) {
                           variant="ghost"
                           size="sm"
                           aria-label={`Edit ${memory.name}`}
+                          disabled={loading || deletingId !== null}
                           onClick={() =>
                             setEditingId((current) =>
                               current === memory.id ? null : memory.id,
@@ -260,7 +276,7 @@ function GeneralMemories({ selection }: { selection: MemorySelection }) {
                           variant="ghost"
                           size="sm"
                           aria-label={confirmingId === memory.id ? `Confirm delete ${memory.name}` : `Delete ${memory.name}`}
-                          disabled={deletingId === memory.id}
+                          disabled={loading || deletingId !== null}
                           className="text-destructive hover:text-destructive"
                           onClick={() => {
                             if (confirmingId !== memory.id) {
@@ -272,19 +288,13 @@ function GeneralMemories({ selection }: { selection: MemorySelection }) {
                             void rpc
                               .call("deleteMemory", {
                                 id: memory.id,
-                                selection,
+                                ...selection,
                                 expectedVersion: memory.version,
                               })
-                              .then(() => {
+                              .then(async () => {
                                 setConfirmingId(null);
-                                setMemories((current) =>
-                                  current.filter(
-                                    (entry) => entry.id !== memory.id,
-                                  ),
-                                );
-                                setEditingId((current) =>
-                                  current === memory.id ? null : current,
-                                );
+                                setEditingId((current) => current === memory.id ? null : current);
+                                await load();
                               })
                               .catch((deleteError: unknown) =>
                                 setError(errorMessage(deleteError)),
@@ -306,11 +316,10 @@ function GeneralMemories({ selection }: { selection: MemorySelection }) {
                           memory={memory}
                           onCancel={() => setEditingId(null)}
                           onSaved={(updated) => {
-                            setMemories((current) =>
-                              current.map((entry) =>
-                                entry.id === updated.id ? updated : entry,
-                              ),
-                            );
+                            setPage((current) => current ? {
+                              ...current,
+                              memories: current.memories.map((entry) => entry.id === updated.id ? updated : entry),
+                            } : current);
                             setEditingId(null);
                           }}
                         />
@@ -323,6 +332,7 @@ function GeneralMemories({ selection }: { selection: MemorySelection }) {
           </table>
         </div>
       )}
+      <MemoryPagination previousOffset={page.previousOffset} nextOffset={page.nextOffset} disabled={loading || editingId !== null || deletingId !== null} onPage={(next) => { setConfirmingId(null); setOffset(next); }} />
     </div>
   );
 }

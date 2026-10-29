@@ -273,7 +273,7 @@ export interface FakePluginRegistrations {
   agentTools: FakeAgentToolRecord[];
   /** Provider from bb.agents.configure, or null when none registered. */
   agentConfigurationProvider:
-    | ((context: PluginAgentConfigurationContext) => PluginAgentConfiguration)
+    | ((context: PluginAgentConfigurationContext) => PluginAgentConfiguration | Promise<PluginAgentConfiguration>)
     | null;
   /** Provider from contributeInstructions, or null when none registered. */
   instructionProvider:
@@ -944,7 +944,7 @@ function createFakePluginHostInternal(
       | Promise<ExperimentalPluginProviderEnvHealth | null>
   >();
   let agentConfigurationProvider:
-    | ((context: PluginAgentConfigurationContext) => PluginAgentConfiguration)
+    | ((context: PluginAgentConfigurationContext) => PluginAgentConfiguration | Promise<PluginAgentConfiguration>)
     | null = null;
   let instructionProvider:
     | ((ctx: { threadId: string; projectId: string }) => string | null)
@@ -2105,11 +2105,13 @@ function createFakePluginHostInternal(
         validatePluginMetadata(context.pluginMetadata ?? {}),
       );
       try {
+        const value = await agentConfigurationProvider({ ...context, pluginMetadata });
+        assertLive();
         const normalized = normalizePluginAgentConfiguration({
           knownSkillIds: new Set(agentSkillIds),
           knownToolIds: new Set(agentTools.map((tool) => tool.name)),
           pluginId,
-          value: agentConfigurationProvider({ ...context, pluginMetadata }),
+          value,
         });
         const selectedTools = new Set(normalized.toolIds);
         return {

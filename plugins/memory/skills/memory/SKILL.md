@@ -39,9 +39,11 @@ Task selection never falls through to project/global notes, even when a name
 is absent. Other contexts, tasks and projects are excluded from ordinary reads,
 FTS search, history and mutations.
 
-The common instruction contributor supplies the current bounded summary to
-all runtimes. It includes classifications, source revisions, observation times
-and memory versions, not details or chronological tool history. `summary`
+Awaited `bb.agents.configure` supplies only the explicitly bound, currently
+eligible task summaries to all runtimes. General notes stay on the legacy
+contributor and are excluded from Core-context instructions. Summaries include
+classifications, source revisions, observation times and memory versions,
+not details or chronological tool history. `summary`
 returns the same single-task summary. The per-task budget is 3,000 characters;
 all injected task summaries and the general catalog together stay within
 3,900 characters. Multiple explicit bindings share that total budget. Use
@@ -65,6 +67,13 @@ With multiple bindings, always pass `--task` and `--context`, or explicitly
 select `--general`. Never select a most-recent binding. Detaching a binding does
 not delete memory or its history. Bound threads must use `--general` to write a
 general note; `add` does not silently move task content into a shared catalog.
+
+Eligibility is rechecked through native Tasks RPC whenever configuration is
+resolved. A task move, project relink/unlink or deletion withdraws its active
+summary; it never migrates or erases the retained Memory revisions. History,
+proposal inspection and explicit rejection remain scoped to the original Core
+project/task/context. Historical CLI selectors use the retained task key in
+that project; they do not infer a new project from a task's current location.
 
 ## Originals and evidence
 
@@ -144,6 +153,9 @@ Each change contains `id` (a scoped memory name is accepted),
 record changes and exposes actual before/after content and provenance.
 Empty/no-change proposals are rejected. The list returns the latest 100
 proposals; older returned IDs remain inspectable with `proposal`.
+Persisted proposal and replacement targets use canonical IDs. A newer note
+whose name happens to equal an ID cannot redirect an apply or replacement;
+an unavailable canonical target fails rather than resolving to that name.
 
 Only after a human/operator explicitly reviews the diff:
 
@@ -181,13 +193,34 @@ native Memory surfaces. The plugin's `--help` describes their limits.
 `history` accepts the task/context/general selectors and `--limit`, not a
 `--scope` flag. New task/reflection commands have no aliases.
 
+Catalog browsing is paginated: use `--limit` (1–100) and `--offset` (default 0)
+with the same explicit task/context/general selection. For example:
+
+```sh
+bb memory catalog --general --scope project --limit 100 --offset 100 --json
+```
+
+Native Memory settings, task pages and thread panels expose Previous memories
+and Next memories controls over the same scoped SQLite listing. FTS search
+returns up to 100 ranked matches; clear it to browse every active record.
+
 ## SDK and safety
 
 The typed `memoryRpcContract` uses the same store through native plugin RPC:
-explicit `{projectId,task}` selections, scoped get/search/history, bindings,
+explicit top-level `projectId` and `task` scope fields, scoped get/search/history, bindings,
 task summary, creation and reflection proposal/decision methods. A task value
 is `{taskId,context}`; explicit `null` means general notes. Settings RPC no
 longer provides an unscoped all-project memory read or ID-only mutation.
+`listMemories` takes `{projectId,task,offset}` and returns
+`{memories,total,previousOffset,nextOffset}`; `null` marks a page boundary.
+`memoryAnalytics` returns the shared collector's declared action identities.
+The UI sends those through `useSdk().experimental_productAnalytics.record`,
+never a guessed plugin namespace. These declarations cover local openings,
+not server-side write completion.
+Scoped mutation requests carry their Core `projectId` at the same top-level
+boundary Source38 already understands. Do not wrap requests in `selection`
+or add a second tracker to infer scope from nested task/context content.
+Persisted proposal selections are still `{projectId,task}` snapshots.
 
 Never persist credentials/auth, raw configuration paths, provider prompts,
 transcripts, tool/MCP payloads, sensitive raw data or large history dumps.

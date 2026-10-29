@@ -218,9 +218,11 @@ Without it, and in any state with no label — error, interrupted, or awaiting
 approval — rows use BB's standard `Running tool …` / `Ran tool …` wording and
 the plugin's branding glyph.
 
-`configure` and `contributeInstructions` are synchronous, may each be
-registered once per factory execution, and run whenever BB resolves a
-thread's configuration (`thread.start` and `turn.submit`), so keep them fast.
+`configure` may return its selection directly or return a promise. BB awaits
+the result before validating tools, skills and instructions; a rejection fails
+closed for that plugin. `contributeInstructions` remains synchronous. Each may
+be registered once per factory execution and runs whenever BB resolves a
+thread's configuration (`thread.start` and `turn.submit`), so keep work bounded.
 Prefer `skills/` for standing knowledge. Resolved tools and instructions take
 effect only when the provider session is next constructed; BB never
 hot-mutates a running session. A busy environment keeps its current staged
@@ -249,6 +251,13 @@ data-dir user instructions, then workspace instructions. Tool snippets above
 4096 characters reject the registration; each callback contribution is
 truncated to 4096 characters, and a throwing `contributeInstructions` is
 logged and contributes nothing.
+
+Threads bound to a Core execution context exclude legacy
+`contributeInstructions` and data-dir instructions. Explicit task/context
+instructions use `configure`, not a blanket exception to that isolation gate.
+Memory uses the same awaited configuration path to check live Tasks linkage
+before returning a task-only bounded summary; its general catalog stays on
+the legacy contributor.
 
 ### bb.experimental_aiServices — titles, commit messages, and voice
 

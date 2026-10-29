@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
-import { memorySelectionSchema } from "./lineage.js";
+import { memoryRpcContract } from "./server.js";
 
 const app = await loadPluginApp(() => import("./app"));
 const memory = {
@@ -11,6 +11,7 @@ const memory = {
   kind: "preference", tags: [], importance: 60, pinned: false, sourceThreadId: null,
   writeReason: "Explicit user preference", version: 1, createdAt: 1700000000000, updatedAt: 1700000000000,
 };
+const listed = (memories: Array<typeof memory>) => ({ memories, total: memories.length, previousOffset: null, nextOffset: null });
 const scopes = {
   listMemoryProjects: () => ({ projects: [{ id: "proj_personal", name: "Personal" }, { id: "proj_work", name: "Work" }] }),
   listMemoryTasks: () => ({ tasks: [] }),
@@ -19,14 +20,14 @@ afterEach(cleanup);
 
 describe("scoped memory settings", () => {
   it("hides the old scope immediately and ignores a late response after another project is selected", async () => {
-    let resolvePersonal!: (value: { memories: Array<typeof memory> }) => void;
-    const personal = new Promise<{ memories: Array<typeof memory> }>((resolve) => { resolvePersonal = resolve; });
+    let resolvePersonal!: (value: ReturnType<typeof listed>) => void;
+    const personal = new Promise<ReturnType<typeof listed>>((resolve) => { resolvePersonal = resolve; });
     const slot = renderSlot(app.settingsSections[0]!, {}, { rpc: {
       ...scopes,
       listMemories: (raw) => {
-        const selection = memorySelectionSchema.parse(raw);
+        const selection = memoryRpcContract.listMemories.input.parse(raw);
         if (selection.projectId === "proj_personal") return personal;
-        return { memories: [{ ...memory, name: selection.projectId === "proj_work" ? "work-note" : "global-note" }] };
+        return listed([{ ...memory, name: selection.projectId === "proj_work" ? "work-note" : "global-note" }]);
       },
     } });
     await slot.findByText("global-note");
@@ -41,7 +42,7 @@ describe("scoped memory settings", () => {
     fireEvent.click(slot.getByRole("button", { name: "Open memories" }));
     await slot.findByText("work-note");
     await act(async () => {
-      resolvePersonal({ memories: [{ ...memory, name: "private-personal-note" }] });
+      resolvePersonal(listed([{ ...memory, name: "private-personal-note" }]));
       await personal;
     });
     expect(slot.queryByText("private-personal-note")).toBeNull();
@@ -50,7 +51,7 @@ describe("scoped memory settings", () => {
 
   it("keeps a conflicting edit visible without replacing the stored summary", async () => {
     const slot = renderSlot(app.settingsSections[0]!, {}, { rpc: {
-      ...scopes, listMemories: () => ({ memories: [memory] }),
+      ...scopes, listMemories: () => listed([memory]),
       updateMemory: () => { throw new Error("Concurrent owner update; reload before saving."); },
     } });
     await slot.findByText("answer-style");
@@ -67,9 +68,10 @@ describe("scoped memory settings", () => {
   });
 
   it("retains a note until inline deletion is explicitly confirmed", async () => {
+    let retained = true;
     const slot = renderSlot(app.settingsSections[0]!, {}, { rpc: {
-      ...scopes, listMemories: () => ({ memories: [memory] }),
-      deleteMemory: () => ({ deleted: { id: memory.id, version: 2 } }),
+      ...scopes, listMemories: () => listed(retained ? [memory] : []),
+      deleteMemory: () => { retained = false; return { deleted: { id: memory.id, version: 2 } }; },
     } });
     await slot.findByText("answer-style");
     fireEvent.click(slot.getByRole("button", { name: "Delete answer-style" }));

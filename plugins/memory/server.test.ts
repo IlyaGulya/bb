@@ -366,20 +366,20 @@ describe("bb-plugin-memory", () => {
     const projectA = await addMemory(host, { scope: "project", projectId: "proj_a", name: "project-a-memory", summary: "Original project summary." });
     const projectB = await addMemory(host, { scope: "project", projectId: "proj_b", name: "project-b-memory", summary: "Other project summary." });
     const selection = { projectId: "proj_a", task: null };
-    const listed = await host.harness.callRpc("listMemories", selection);
+    const listed = await host.harness.callRpc("listMemories", { ...selection, offset: 0 });
     expect(listed).toMatchObject({ memories: [{ id: projectA.id }] });
-    await expect(host.harness.callRpc("deleteMemory", { selection, id: projectB.id, expectedVersion: 1 })).rejects.toThrow();
+    await expect(host.harness.callRpc("deleteMemory", { ...selection, id: projectB.id, expectedVersion: 1 })).rejects.toThrow();
     await expect(host.harness.callRpc("updateMemory", {
-      selection, id: projectB.id, expectedVersion: 1, summary: "Wrong scope", details: "Wrong scope", kind: "fact", tags: [], importance: 50, pinned: false,
+      ...selection, id: projectB.id, expectedVersion: 1, summary: "Wrong scope", details: "Wrong scope", kind: "fact", tags: [], importance: 50, pinned: false,
     })).rejects.toThrow();
     const updated = await host.harness.callRpc("updateMemory", {
-      selection, id: projectA.id, expectedVersion: 1, summary: "Edited from selected scope.", details: "Updated durable details.", kind: "decision", tags: ["settings"], importance: 75, pinned: true,
+      ...selection, id: projectA.id, expectedVersion: 1, summary: "Edited from selected scope.", details: "Updated durable details.", kind: "decision", tags: ["settings"], importance: 75, pinned: true,
     });
     expect(updated).toMatchObject({ memory: { summary: "Edited from selected scope.", version: 2, pinned: true } });
-    await expect(host.harness.callRpc("deleteMemory", { selection, id: projectA.id, expectedVersion: 1 })).rejects.toThrow();
-    await expect(host.harness.callRpc("deleteMemory", { selection, id: projectA.id, expectedVersion: 2 })).resolves.toEqual({ deleted: { id: projectA.id, version: 3 } });
-    expect(await host.harness.callRpc("listMemories", selection)).toEqual({ memories: [] });
-    expect(await host.harness.callRpc("listMemories", { projectId: "proj_b", task: null })).toMatchObject({ memories: [{ id: projectB.id, version: 1 }] });
+    await expect(host.harness.callRpc("deleteMemory", { ...selection, id: projectA.id, expectedVersion: 1 })).rejects.toThrow();
+    await expect(host.harness.callRpc("deleteMemory", { ...selection, id: projectA.id, expectedVersion: 2 })).resolves.toEqual({ deleted: { id: projectA.id, version: 3 } });
+    expect(await host.harness.callRpc("listMemories", { ...selection, offset: 0 })).toEqual({ memories: [], total: 0, previousOffset: null, nextOffset: null });
+    expect(await host.harness.callRpc("listMemories", { projectId: "proj_b", task: null, offset: 0 })).toMatchObject({ memories: [{ id: projectB.id, version: 1 }] });
   });
 
   it("rejects prompt-injection content, secret-like values, and duplicates", async () => {

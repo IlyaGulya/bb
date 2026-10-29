@@ -318,7 +318,7 @@ type PluginInstructionProvider = (ctx: {
 
 type PluginAgentConfigurationProvider = (
   context: PluginAgentConfigurationContext,
-) => PluginAgentConfiguration;
+) => PluginAgentConfiguration | Promise<PluginAgentConfiguration>;
 
 export type PluginProviderEnvResolver = (
   context: ExperimentalPluginProviderEnvContext,

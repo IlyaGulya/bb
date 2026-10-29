@@ -25,6 +25,7 @@ export async function createTaskMemoryFixture(
   });
   const memory = createFakePluginHost({
     pluginId: "memory",
+    agentSkillIds: ["memory"],
     sdk: {
       projects: {
         get: async ({ projectId: selected }) => {
@@ -85,7 +86,7 @@ export async function createTaskMemoryFixture(
     async remember(name: string, summary: string) {
       return memoryRpcContract.createTaskMemory.output.parse(
         await memory.harness.behavior.callRpc("createTaskMemory", {
-          selection,
+          ...selection,
           draft: draft(name, summary),
         }),
       ).memory;
