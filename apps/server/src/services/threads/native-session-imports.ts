@@ -110,7 +110,7 @@ export class NativeSessionImports {
     if (this.running.has(id)) return manifest;
     if (manifest.mode !== "archive" && manifest.source.revision !== selection.source.revision) throw new ApiError(409, "invalid_request", "An admitted or handed-off source cannot be rewritten. Its retained archive remains unchanged.");
     if (selection.source.sizeBytes < manifest.bytes) throw new ApiError(409, "invalid_request", "Native source is shorter than the committed archive; original data will not be overwritten.");
-    if (manifest.status === "ready" && manifest.source.revision === selection.source.revision && manifest.source.path === selection.source.path && JSON.stringify(manifest.source.artifactRoots) === JSON.stringify(selection.source.artifactRoots) && manifest.artifacts.every((entry) => entry.status === "ready")) return manifest;
+    if (manifest.status === "ready" && manifest.source.revision === selection.source.revision && posix.normalize(manifest.source.path) === posix.normalize(selection.source.path) && JSON.stringify(manifest.source.artifactRoots) === JSON.stringify(selection.source.artifactRoots) && manifest.artifacts.every((entry) => entry.status === "ready")) return manifest;
     manifest.attemptedSource = selection.source;
     manifest.status = "paused";
     manifest.error = null;
