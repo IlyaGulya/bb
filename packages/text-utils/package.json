@@ -18,6 +18,11 @@
       "source": "./src/markdown-plugins.ts",
       "types": "./src/markdown-plugins.ts",
       "default": "./src/markdown-plugins.ts"
+    },
+    "./markdown-html": {
+      "source": "./src/markdown-html.ts",
+      "types": "./src/markdown-html.ts",
+      "default": "./src/markdown-html.ts"
     }
   },
   "types": "./src/index.ts",
@@ -27,6 +32,8 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
+    "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "remark-parse": "^11.0.0",

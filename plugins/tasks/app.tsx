@@ -4,6 +4,8 @@ import { TasksSidebarAccessory } from "./shell/sidebar-accessory.js";
 import { TasksNavigationPanel } from "./shell/navigation-panel.js";
 import { TaskDirectiveCard, TaskEmbedPanel } from "./views/embed/index.js";
 import { TaskArtifactPanel } from "./views/detail/artifact-panel.js";
+import { markdownSelectionText } from "@bb/text-utils/markdown";
+import { discardArtifactDraft, stageArtifactDraft } from "./views/detail/artifact-draft.js";
 
 export default definePluginApp((app) => {
   app.slots.navPanel({
@@ -42,12 +44,17 @@ export default definePluginApp((app) => {
     title: "Save decision to task",
     icon: "Bookmark",
     run({ message, selectedText, openPanel }) {
-      const quote = selectedText ?? (message.text.length <= 4000 ? message.text : "");
+      const source = { sourceThreadId: message.threadId, eventSeq: message.experimental_messageSeq };
+      const quote = selectedText ?? markdownSelectionText(message.text);
+      const revision = stageArtifactDraft(source, quote.length <= 4000 ? quote : "");
       if (!openPanel({
         actionId: "save-artifact",
         title: "Save decision to task",
-        params: { sourceThreadId: message.threadId, eventSeq: message.experimental_messageSeq, quote: quote.length <= 4000 ? quote : "" },
-      })) throw new Error("This surface cannot open the source-retention panel");
+        params: source,
+      })) {
+        discardArtifactDraft(source, revision);
+        throw new Error("This surface cannot open the source-retention panel");
+      }
     },
   });
 });

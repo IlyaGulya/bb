@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useComposer, useRpc, type PluginThreadPanelProps } from "@get-bb/plugin-sdk/app";
+import { useComposer, useRpc, useSdk, type PluginThreadPanelProps } from "@get-bb/plugin-sdk/app";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,11 +11,12 @@ import { uploadAttachment } from "./attachments.js";
 import { ArtifactRegion } from "./artifact-region.js";
 import type { Attachment } from "../../shared/contract.js";
 import { artifactAnnotationSchema, type TaskArtifact, type TaskArtifactAnnotation, type TaskArtifactImage, type TaskArtifactRpcContract } from "../../shared/artifacts.js";
+import { markdownSelectionText } from "@bb/text-utils/markdown";
+import { useArtifactDraft, type ArtifactSourceIdentity } from "./artifact-draft.js";
 
 const sourceParams = z.object({
   sourceThreadId: z.string().startsWith("thr_"),
   eventSeq: z.number().int().nonnegative(),
-  quote: z.string().max(4000),
 }).strict();
 type Targets = { executionContextId: string; contextName: string; tasks: { id: string; key: string; title: string }[] };
 
@@ -23,7 +24,7 @@ export function artifactAgentReference(artifact: TaskArtifact): string {
   return `Read retained task artifact ${artifact.id} with bb_task_artifact_read before changing the UI. Inspect both its image and original-pixel coordinates. Do not launch another writer or change task acceptance.`;
 }
 
-function ArtifactPanelForm({ source }: { source: z.infer<typeof sourceParams> }) {
+function ArtifactPanelForm({ source, initialQuote }: { source: ArtifactSourceIdentity; initialQuote: string }) {
   const rpc = useRpc<TaskArtifactRpcContract>();
   const tasksRpc = useTasksRpc();
   const composer = useComposer();
@@ -39,7 +40,7 @@ function ArtifactPanelForm({ source }: { source: z.infer<typeof sourceParams> })
   const [imageId, setImageId] = useState("");
   const [imageLoading, setImageLoading] = useState(false);
   const [region, setRegion] = useState<TaskArtifactAnnotation["region"]>({ x: 0, y: 0, width: 1, height: 1 });
-  const [quote, setQuote] = useState(source.quote);
+  const [quote, setQuote] = useState(initialQuote);
   const [decision, setDecision] = useState("");
   const [comment, setComment] = useState("");
   const [confirmed, setConfirmed] = useState(false);
@@ -163,8 +164,36 @@ function ArtifactPanelForm({ source }: { source: z.infer<typeof sourceParams> })
   </form>;
 }
 
+function ArtifactPanelSource({ source }: { source: ArtifactSourceIdentity }) {
+  const draft = useArtifactDraft(source);
+  const sdk = useSdk();
+  const [loaded, setLoaded] = useState<(ArtifactSourceIdentity & { quote: string }) | null>(null);
+  const [sourceError, setSourceError] = useState(false);
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    if (draft !== null) return;
+    let cancelled = false;
+    setLoaded(null);
+    setSourceError(false);
+    sdk.threads.message({ threadId: source.sourceThreadId, seq: source.eventSeq, before: 0, after: 0 }).then(({ message }) => {
+      if (message.messageSeq !== source.eventSeq) throw new Error("Source message identity changed");
+      const text = markdownSelectionText(message.text);
+      if (!cancelled) setLoaded({ ...source, quote: text.length <= 4000 ? text : "" });
+    }).catch(() => { if (!cancelled) setSourceError(true); });
+    return () => { cancelled = true; };
+  }, [sdk, draft, source.sourceThreadId, source.eventSeq, retry]);
+  const quote = draft?.quote ?? (loaded?.sourceThreadId === source.sourceThreadId && loaded.eventSeq === source.eventSeq ? loaded.quote : null);
+  if (quote === null) return <div className="space-y-3 p-4">
+    {sourceError ? <>
+      <p role="alert" className="text-sm text-destructive">The source message could not load in this context. No quote has been retained.</p>
+      <Button type="button" variant="outline" onClick={() => setRetry(value => value + 1)}>Retry source</Button>
+    </> : <Skeleton className="h-24 w-full" aria-label="Loading source message" />}
+  </div>;
+  return <ArtifactPanelForm key={`${source.sourceThreadId}:${source.eventSeq}:${draft?.revision ?? "restored"}`} source={source} initialQuote={quote} />;
+}
+
 export function TaskArtifactPanel({ params }: PluginThreadPanelProps) {
   const parsed = sourceParams.safeParse(params);
   if (!parsed.success) return <p className="p-4 text-sm text-muted-foreground">Use Save decision to task on a source message or a selected passage to retain it here.</p>;
-  return <ArtifactPanelForm key={`${parsed.data.sourceThreadId}:${parsed.data.eventSeq}`} source={parsed.data} />;
+  return <ArtifactPanelSource key={`${parsed.data.sourceThreadId}:${parsed.data.eventSeq}`} source={parsed.data} />;
 }
