@@ -6,7 +6,7 @@ import { registerAttachments, saveAttachmentFromBytes } from "../attachments/ind
 import { registerTaskArtifacts } from "./index.js";
 import type { TaskArtifactCreate } from "../shared/artifacts.js";
 
-export const FAKE_SCREENSHOT = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/Qo3AAAAAElFTkSuQmCC", "base64");
+export const FAKE_SCREENSHOT = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVR4nGMQ0bABAADMAHm9FcOvAAAAAElFTkSuQmCC", "base64");
 export const FAKE_QUOTE = "Make the button readable.";
 
 export async function createArtifactFixture(database?: Database) {
