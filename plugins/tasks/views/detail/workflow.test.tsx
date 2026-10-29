@@ -13,6 +13,139 @@ import { seedWorkflowOwnership } from "../../workflow/ownership.test-fixtures.js
 import { workflowRpcContract } from "../../shared/workflow-contract.js";
 import { buildReviewStartSchema, type BuildReviewStart } from "../../workflow/remote-contract.js";
 import type { WorkflowSelection } from "../../shared/workflow-preparation.js";
+import { CompactViewportOverrideProvider } from "@/components/ui/hooks/use-compact-viewport";
+import { TaskWorkflowStore } from "../../workflow/store.js";
+
+function WorkflowRunHarness({ taskId, compact }: { taskId: string; compact: boolean }) {
+  return <CompactViewportOverrideProvider isCompactViewport={compact}><WorkflowHarness taskId={taskId} /></CompactViewportOverrideProvider>;
+}
+
+function workflowViewGate() {
+  let release!: () => void;
+  const promise = new Promise<void>(resolve => { release = resolve; });
+  return { promise, release };
+}
+
+async function workflowRunFixture() {
+  let withdrawn = false;
+  let holdAcknowledgement = false;
+  let rejectStart = false;
+  let holdSnapshot = false;
+  const acknowledged = workflowViewGate();
+  const releaseAcknowledgement = workflowViewGate();
+  const observed = workflowViewGate();
+  const snapshotEntered = workflowViewGate();
+  const releaseSnapshot = workflowViewGate();
+  const snapshotReturned = workflowViewGate();
+  const threads = new Map<string, ReturnType<typeof makeThreadResponse>>();
+  let serial = 0;
+  const metadata = new Map<string, object>();
+  const requests: BuildReviewStart[] = [];
+  const native = {
+    runId: "ui-native-run", contextStarted: true, status: "running" as const,
+    phase: "Build / platform smoke", error: null, result: null,
+    workers: [{ role: "writer" as const, threadId: "thr_ui_native_writer", callIndex: 1 }],
+    policyLimitations: [],
+  };
+  const host = createFakePluginHost({ pluginId: "tasks", sdk: {
+    hosts: { list: async () => [makeHostResponse({ id: "ui-host", name: "UI host" })] },
+    projects: { get: async () => ({ id: "proj_view", name: "Workflow view code" }) },
+    experimental_executionContexts: {
+      list: async () => withdrawn ? [] : [{ id: "ui-context", name: "UI context", enabled: true, projectIds: ["proj_view"] }],
+      getProjectDefaults: async () => ({ projectId: "proj_view", executionContextId: null, modelConnectionId: null }),
+    },
+    experimental_modelConnections: { list: async () => withdrawn ? [] : [{ id: "ui-account", name: "UI account", provider: "acp-omp", hostId: null, gateway: { allowedHostIds: ["ui-host"], accountPrefix: "personal-codex" }, enabled: true, revoked: false }] },
+    providers: { models: async () => ({ models: [{ id: "bb-cpa/personal-codex/gpt-6.1-sol", model: "bb-cpa/personal-codex/gpt-6.1-sol", displayName: "Sol 6.1", description: "Owned UI model", supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }], defaultReasoningEffort: "high", isDefault: true }], selectedOnlyModels: [], modelLoadError: null }) },
+    environments: {
+      get: async () => ({ id: "ui-environment", hostId: "ui-host", projectId: "proj_view", path: "/owned/ui-workflow", status: "ready", lifecycle: { phase: "active" }, hostLifecycle: "active" }),
+      status: async () => ({ outcome: "available", workspace: { checkout: { kind: "branch", branchName: "owned-ui", headSha: "a".repeat(40) }, workingTree: { hasUncommittedChanges: false } } }),
+    },
+    threads: {
+      get: async ({ threadId }) => { const thread = threads.get(threadId); if (!thread) throw new Error(`Unknown UI thread ${threadId}`); return thread; },
+      list: async () => [...threads.values()],
+      getPluginMetadata: async ({ threadId }) => metadata.get(threadId) ?? {},
+      spawn: async args => {
+        if (!args.preparationOnly) throw new Error("Only zero-turn preparation is permitted in this fixture");
+        const thread = makeThreadResponse({ id: `thr_ui_prepared_${++serial}`, projectId: "proj_view", environmentId: "ui-environment", originPluginId: "tasks" });
+        threads.set(thread.id, thread);
+        metadata.set(thread.id, args.pluginMetadata ?? {});
+        return thread;
+      },
+    },
+    plugins: { callRpc: async args => {
+      if (args.method === "startBuildReview") {
+        const request = buildReviewStartSchema.parse(args.input);
+        requests.push(request);
+        threads.set("thr_ui_native_writer", makeThreadResponse({ id: "thr_ui_native_writer", projectId: "proj_view", environmentId: "ui-environment", status: "active" }));
+        return { ...native, key: request.key };
+      }
+      const request = requests[0];
+      if (args.method !== "inspectBuildReview" || !request) throw new Error(`Unexpected UI native action ${args.method}`);
+      return { ...native, key: request.key };
+    } },
+  } });
+  hosts.push(host);
+  const store = createStore(host.bb);
+  const project = store.tasks.createProject({ name: "Workflow view tracker", prefix: "VIEW", color: "blue", linkedBbProjectId: "proj_view" });
+  const task = store.tasks.createTask({ projectId: project.id, title: "Post-start workflow view" });
+  const handlers = registerTaskWorkflows(host.bb, store, { background: false });
+  const role = { provider: "acp-omp", model: "bb-cpa/personal-codex/gpt-6.1-sol", executionContextId: "ui-context", modelConnectionId: "ui-account", reasoningLevel: "high", permissionMode: "full" as const, serviceTier: null, instructions: "Owned UI role" };
+  const selection: WorkflowSelection = { template: "development-review", hostId: "ui-host", baseBranch: "", writer: role, reviewer: { ...role, instructions: "Fresh reviewer" }, smokeCommands: ["owned-ui-check"], uiRequired: false };
+  const draft = await handlers.saveTaskWorkflowDraft({ taskId: task.id, revision: 0, selection });
+  await handlers.prepareTaskWorkflow({ taskId: task.id, revision: draft.revision });
+  const preparation = await handlers.getTaskWorkflowPreparation({ taskId: task.id });
+  if (preparation?.state !== "ready") throw new Error("UI fixture preparation did not become ready");
+  const launch = { taskId: task.id, preparationId: preparation.id };
+  const rpc = Object.fromEntries([...Object.keys(workflowSetupContract), ...Object.keys(workflowRpcContract)].map(method => [method, (input: unknown) => host.harness.callRpc(method, input)]));
+  function render(compact: boolean) {
+    return renderSlot({ component: WorkflowRunHarness }, { taskId: task.id, compact }, {
+      sdk: {
+        hosts: { list: host.bb.sdk.hosts.list },
+        projects: { get: host.bb.sdk.projects.get },
+        experimental_executionContexts: { list: host.bb.sdk.experimental_executionContexts.list, getProjectDefaults: host.bb.sdk.experimental_executionContexts.getProjectDefaults },
+        experimental_modelConnections: { list: host.bb.sdk.experimental_modelConnections.list },
+        providers: { models: host.bb.sdk.providers.models },
+        environments: { get: host.bb.sdk.environments.get, status: host.bb.sdk.environments.status },
+        threads: { get: host.bb.sdk.threads.get, list: host.bb.sdk.threads.list },
+        plugins: { callRpc: host.bb.sdk.plugins.callRpc },
+      },
+      rpc: {
+        ...rpc,
+        listMachines: async () => ({ machines: await host.bb.sdk.hosts.list() }),
+        launchTaskWorkflow: async input => {
+          if (rejectStart) throw new Error("Owned Start rejected before admission");
+          const run = await host.harness.callRpc("launchTaskWorkflow", input);
+          acknowledged.release();
+          if (holdAcknowledgement) await releaseAcknowledgement.promise;
+          return run;
+        },
+        taskWorkflows: async input => {
+          const result = workflowRpcContract.taskWorkflows.output.parse(await host.harness.callRpc("taskWorkflows", input));
+          if (holdSnapshot) {
+            holdSnapshot = false;
+            snapshotEntered.release();
+            await releaseSnapshot.promise;
+            snapshotReturned.release();
+          }
+          if (result.runs.some(run => run.native?.phase === native.phase)) observed.release();
+          return result;
+        },
+      },
+    });
+  }
+  return { store, task, handlers, launch, selection, requests, native, render, acknowledged: acknowledged.promise, observed: observed.promise, release: releaseAcknowledgement.release, hold: () => { holdAcknowledgement = true; }, withdraw: () => { withdrawn = true; }, reject: () => { rejectStart = true; }, holdSnapshot: () => { holdSnapshot = true; }, snapshotEntered: snapshotEntered.promise, snapshotReturned: snapshotReturned.promise, releaseSnapshot: releaseSnapshot.release };
+}
+
+function expectRunDetails(dialog: HTMLElement, phase: string) {
+  const details = within(dialog).getByRole("region", { name: "Workflow run details" });
+  expect(within(details).getByRole("article").textContent).toContain(phase);
+  expect(within(details).getByRole("button", { name: "Open writer" }).hasAttribute("disabled")).toBe(false);
+  expect(within(dialog).queryByRole("group", { name: "Writer" })).toBeNull();
+  expect(within(dialog).queryByRole("group", { name: "Independent reviewer" })).toBeNull();
+  expect(within(dialog).queryByRole("textbox", { name: /Required platform smoke commands/ })).toBeNull();
+  expect(within(dialog).queryByRole("button", { name: "Start workflow" })).toBeNull();
+  expect(within(dialog).queryByRole("button", { name: "Prepare workspace" })).toBeNull();
+}
 
 beforeEach(() => { vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 const hosts: Array<ReturnType<typeof createFakePluginHost>> = [];
@@ -179,4 +312,105 @@ it.each(["pending acknowledgement", "failed save"] as const)("first-writer retry
     release();
     if (saveStarted) await act(async () => { await finished; });
   }
+});
+
+it.each([false, true])("acknowledged Start closes setup and reopens run details without live catalogs (compact=%s)", async compact => {
+  const fixture = await workflowRunFixture();
+  const slot = fixture.render(compact);
+  const trigger = await slot.findByRole("button", { name: "Launch workflow" });
+  trigger.focus();
+  fireEvent.click(trigger);
+  const start = await slot.findByRole("button", { name: "Start workflow" });
+  await waitFor(() => expect(start.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(start);
+  await fixture.acknowledged;
+  await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
+  expect(document.activeElement).toBe(trigger);
+  fixture.withdraw();
+  fireEvent.click(await slot.findByRole("button", { name: "Workflow details" }));
+  const dialog = await slot.findByRole("dialog", { name: "Workflow details" });
+  expectRunDetails(dialog, fixture.native.phase);
+  expect(new WorkflowPreparationStore(fixture.store).savedDraft(fixture.task.id)?.selection).toEqual(fixture.selection);
+});
+
+it.each([false, true])("polling hands an open setup to run details before the Start response arrives (compact=%s)", async compact => {
+  const fixture = await workflowRunFixture();
+  fixture.hold();
+  const slot = fixture.render(compact);
+  try {
+    fireEvent.click(await slot.findByRole("button", { name: "Launch workflow" }));
+    const start = await slot.findByRole("button", { name: "Start workflow" });
+    await waitFor(() => expect(start.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(start);
+    await fixture.acknowledged;
+    fixture.withdraw();
+    await fixture.observed;
+    const dialog = await slot.findByRole("dialog", { name: "Workflow details" });
+    expectRunDetails(dialog, fixture.native.phase);
+    const request = fixture.requests[0];
+    if (!request) throw new Error("The owned native workflow was not admitted");
+    expect(new TaskWorkflowStore(fixture.store).get(request.group)).toMatchObject({ state: "running", native: { contextStarted: true } });
+    await act(async () => { fixture.release(); });
+    await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
+  } finally {
+    fixture.release();
+  }
+});
+
+it.each([false, true])("a delayed pre-start poll cannot restore setup after Start acknowledgement (compact=%s)", async compact => {
+  const fixture = await workflowRunFixture();
+  const slot = fixture.render(compact);
+  try {
+    const trigger = await slot.findByRole("button", { name: "Launch workflow" });
+    fireEvent.click(trigger);
+    const start = await slot.findByRole("button", { name: "Start workflow" });
+    await waitFor(() => expect(start.hasAttribute("disabled")).toBe(false));
+    fixture.holdSnapshot();
+    await fixture.snapshotEntered;
+    fireEvent.click(start);
+    await fixture.acknowledged;
+    await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
+    await act(async () => { fixture.releaseSnapshot(); await fixture.snapshotReturned; });
+    expect(slot.getByRole("button", { name: "Workflow details" })).toBe(trigger);
+    fireEvent.click(trigger);
+    expectRunDetails(await slot.findByRole("dialog", { name: "Workflow details" }), fixture.native.phase);
+  } finally {
+    fixture.releaseSnapshot();
+  }
+});
+
+it.each([
+  [false, "running"], [true, "running"], [false, "failed"], [true, "failed"],
+] as const)("reload retains immutable run details (compact=%s, state=%s)", async (compact, state) => {
+  const fixture = await workflowRunFixture();
+  const run = await fixture.handlers.launchTaskWorkflow(fixture.launch);
+  if (state === "failed") {
+    const request = fixture.requests[0];
+    if (!request) throw new Error("The owned native workflow was not admitted");
+    new TaskWorkflowStore(fixture.store).publish(run.id, { ...fixture.native, key: request.key, status: "failed", error: "Owned smoke failure after writer execution" });
+  }
+  fixture.withdraw();
+  const slot = fixture.render(compact);
+  fireEvent.click(await slot.findByRole("button", { name: "Workflow details" }));
+  const dialog = await slot.findByRole("dialog", { name: "Workflow details" });
+  expectRunDetails(dialog, fixture.native.phase);
+  expect(new WorkflowPreparationStore(fixture.store).savedDraft(fixture.task.id)?.selection).toEqual(fixture.selection);
+});
+
+it.each([false, true])("a true Start rejection preserves the open setup and saved selections (compact=%s)", async compact => {
+  const fixture = await workflowRunFixture();
+  fixture.reject();
+  const slot = fixture.render(compact);
+  fireEvent.click(await slot.findByRole("button", { name: "Launch workflow" }));
+  const dialog = await slot.findByRole("dialog", { name: "Launch workflow" });
+  const start = await within(dialog).findByRole("button", { name: "Start workflow" });
+  await waitFor(() => expect(start.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(start);
+  await waitFor(() => expect(within(dialog).getByRole("alert").textContent).toContain("Owned Start rejected before admission"));
+  expect(slot.getByRole("dialog", { name: "Launch workflow" })).toBe(dialog);
+  expect(within(dialog).getByRole("group", { name: "Writer" }).hasAttribute("disabled")).toBe(false);
+  expect((within(dialog).getByRole("textbox", { name: /Required platform smoke commands/ }) as HTMLTextAreaElement).value).toBe(fixture.selection.smokeCommands.join("\n"));
+  expect(new WorkflowPreparationStore(fixture.store).savedDraft(fixture.task.id)?.selection).toEqual(fixture.selection);
+  expect(fixture.store.database.prepare("SELECT id FROM task_workflow_runs WHERE task_id = ?").all(fixture.task.id)).toEqual([]);
+  expect(fixture.requests).toEqual([]);
 });
