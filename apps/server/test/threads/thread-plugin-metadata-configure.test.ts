@@ -11,7 +11,7 @@ import {
 } from "../../src/services/threads/thread-commands.js";
 import { createThreadFromRequest } from "../../src/services/threads/thread-create.js";
 import { waitForQueuedCommand } from "../helpers/commands.js";
-import { installDefaultEnvironmentProviders } from "../helpers/environment-provider.js";
+import { installDefaultEnvironmentProviders } from "../helpers/default-environment-provider.js";
 import { textInput } from "../helpers/prompt-input.js";
 import {
   seedEnvironment,

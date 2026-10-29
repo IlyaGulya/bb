@@ -1,4 +1,6 @@
-import { installDefaultEnvironmentProviders } from "./environment-provider.js";
+import type { ProductAnalyticsMode } from "@bb/server-contract";
+import { initializePrivateProductAnalytics } from "../../src/services/system/product-analytics.js";
+import { installDefaultEnvironmentProviders } from "./default-environment-provider.js";
 import { registerTestHarnessWarmup } from "./test-harness-warmup.js";
 import { setPluginEnvironmentProviderBridge } from "../../src/services/plugins/plugin-environment-provider-registry.js";
 import { clearAllThreadProvisionSchedules } from "../../src/services/threads/thread-startup-store.js";
@@ -92,6 +94,7 @@ export async function installTestBuiltinPlugin(
 }
 
 export type TestAppHarnessConfigOverrides = Partial<ServerRuntimeConfig> & {
+  productAnalyticsMode?: ProductAnalyticsMode;
   appUpdateService?: AppUpdateService;
   appVersionService?: AppVersionService;
   cliCommandService?: CliCommandService;
@@ -158,6 +161,7 @@ export async function createTestAppHarness(
 ): Promise<TestAppHarness> {
   const {
     appUpdateService,
+    productAnalyticsMode,
     appVersionService,
     cliCommandService,
     terminalAttachTimeoutMs = TEST_TERMINAL_RPC_TIMEOUT_MS,
@@ -336,6 +340,7 @@ export async function createTestAppHarness(
     sharedPorts,
     workspaceReadCaches,
   };
+  if (productAnalyticsMode !== undefined) initializePrivateProductAnalytics({ db, release: config.appVersion, mode: productAnalyticsMode, logger });
   const { app, pluginCatalogService, pluginService, serverMove } =
     createApp(deps);
   installDefaultEnvironmentProviders();

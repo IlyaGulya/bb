@@ -4,10 +4,8 @@ import type { PluginEnvironmentProviderValidateContext } from "@get-bb/plugin-sd
 import { describe, expect, it } from "vitest";
 import { createThreadFromRequest } from "../../src/services/threads/thread-create.js";
 import { DEFAULT_ENVIRONMENT_PROVIDER_ID } from "../../src/services/environments/environment-provider-ids.js";
-import {
-  checkoutProviderInputsSchema,
-  installFakeEnvironmentProvider,
-} from "../helpers/environment-provider.js";
+import { checkoutProviderInputsSchema } from "../helpers/default-environment-provider.js";
+import { installFakeEnvironmentProvider } from "../helpers/environment-provider.js";
 import {
   reportNextEnvironmentAttachSuccess,
   waitForQueuedCommand,

@@ -4,13 +4,31 @@ import { createNodeBbSdk, experimental_createProductAnalyticsFetch, type Experim
 import type { ProductAnalyticsEvent, ProductAnalyticsReportQuery } from "@bb/server-contract";
 import { getPrivateProductAnalytics } from "../../src/services/system/product-analytics.js";
 import { seedEnvironment, seedHostSession, seedProjectWithSource, seedThread, seedThreadRuntimeState } from "./seed.js";
-import { withTestHarness, type TestAppHarness } from "./test-app.js";
+import { createTestAppHarness, type TestAppHarness } from "./test-app.js";
 
 export function consumerSdk(harness: TestAppHarness, context: ExperimentalProductAnalyticsContext) {
   return createNodeBbSdk({
     baseUrl: "http://localhost",
     fetch: experimental_createProductAnalyticsFetch(context, (input, init) => harness.app.request(new Request(input, init))),
   });
+}
+
+export async function createAnalyticsConsumer() {
+  const harness = await createTestAppHarness({ productAnalyticsMode: "production", isDevelopment: false });
+  const collector = getPrivateProductAnalytics(harness.db);
+  try {
+    const { host, session } = seedHostSession(harness.deps);
+    const { project: work } = seedProjectWithSource(harness.deps, { hostId: host.id, name: "Work", path: "/owned/work" });
+    const { project: personal } = seedProjectWithSource(harness.deps, { hostId: host.id, name: "Personal", path: "/owned/personal" });
+    const environment = seedEnvironment(harness.deps, { hostId: host.id, projectId: work.id, status: "ready" });
+    const thread = seedThread(harness.deps, { projectId: work.id, environmentId: environment.id, status: "starting" });
+    seedThreadRuntimeState(harness.deps, { threadId: thread.id, environmentId: environment.id, providerThreadId: "owned-provider-thread" });
+    return { harness, collector, host, session, work, personal, environment, thread, async close() { collector.stop(); await harness.cleanup(); } };
+  } catch (error) {
+    collector.stop();
+    await harness.cleanup();
+    throw error;
+  }
 }
 
 export async function withAnalyticsConsumer<T>(run: (fixture: {
@@ -23,20 +41,12 @@ export async function withAnalyticsConsumer<T>(run: (fixture: {
   environment: ReturnType<typeof seedEnvironment>;
   thread: ReturnType<typeof seedThread>;
 }) => Promise<T>): Promise<T> {
-  return withTestHarness({ productAnalyticsMode: "production", isDevelopment: false }, async (harness) => {
-    const { host, session } = seedHostSession(harness.deps);
-    const { project: work } = seedProjectWithSource(harness.deps, { hostId: host.id, name: "Work", path: "/owned/work" });
-    const { project: personal } = seedProjectWithSource(harness.deps, { hostId: host.id, name: "Personal", path: "/owned/personal" });
-    const environment = seedEnvironment(harness.deps, { hostId: host.id, projectId: work.id, status: "ready" });
-    const thread = seedThread(harness.deps, { projectId: work.id, environmentId: environment.id, status: "starting" });
-    seedThreadRuntimeState(harness.deps, { threadId: thread.id, environmentId: environment.id, providerThreadId: "owned-provider-thread" });
-    const collector = getPrivateProductAnalytics(harness.db);
-    try {
-      return await run({ harness, collector, host, session, work, personal, environment, thread });
-    } finally {
-      collector.stop();
-    }
-  });
+  const fixture = await createAnalyticsConsumer();
+  try {
+    return await run(fixture);
+  } finally {
+    await fixture.close();
+  }
 }
 
 export function consumerReport(collector: ReturnType<typeof getPrivateProductAnalytics>, projectId?: string, mode: ProductAnalyticsReportQuery["mode"] = "production") {

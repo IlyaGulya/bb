@@ -30,7 +30,7 @@ import {
   reportQueuedCommandSuccess,
   waitForQueuedCommand,
 } from "../helpers/commands.js";
-import { defaultEnvironmentProviderRecords } from "../helpers/environment-provider.js";
+import { defaultEnvironmentProviderRecords } from "../helpers/default-environment-provider.js";
 import { textInput } from "../helpers/prompt-input.js";
 import {
   seedHostSession,

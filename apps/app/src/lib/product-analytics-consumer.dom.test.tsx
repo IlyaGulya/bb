@@ -12,7 +12,7 @@ import { useUpdateProject } from "@/hooks/mutations/project-mutations";
 import { useRpc } from "./plugin-sdk-hooks";
 import { createAppQueryClient } from "./query-client";
 import { productAnalyticsInput, setProductAnalyticsView } from "./product-analytics";
-import { consumerReport, installConsumerPlugin, withAnalyticsConsumer } from "../../../server/test/helpers/product-analytics-consumer.js";
+import { withBrowserAnalyticsConsumer } from "@/test/product-analytics-fixture";
 
 const contract = defineRpcContract({ rename: { input: z.object({ projectId: z.string(), name: z.string() }), output: z.object({ name: z.string() }) } });
 const pluginSource = `import { defineRpcContract } from "@get-bb/plugin-sdk";
@@ -36,13 +36,13 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); setProductAnalyticsView({ ki
 
 describe("analytics actual shared plugin useRpc", () => {
   it("carries captured browser provenance through the shared hook and scopes the real Core action to Work", async () => {
-    await withAnalyticsConsumer(async ({ harness, collector, work, personal }) => {
-      const { pluginId } = await installConsumerPlugin(harness, pluginSource);
+    await withBrowserAnalyticsConsumer({ pluginSource }, async ({ forward, report, work, personal, pluginId }) => {
+      if (pluginId === null) throw new Error("Owned RPC plugin was not installed");
       const requests: Request[] = [];
       vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
         const request = input instanceof Request ? new Request(input, init) : new Request(new URL(String(input), "http://localhost"), init);
         requests.push(request.clone());
-        return harness.app.request(request);
+        return forward(request);
       });
       setProductAnalyticsView({ kind: "project", projectId: work.id }, "web");
       render(<PluginContext.Provider value={pluginId}><RpcConsumer projectId={work.id} /></PluginContext.Provider>);
@@ -54,24 +54,24 @@ describe("analytics actual shared plugin useRpc", () => {
       expect(request?.headers.get(headers.actor)).toBe("unknown");
       expect(request?.headers.get(headers.surface)).toBe("web");
       expect(request?.headers.get(headers.operation)).toMatch(/^[0-9a-f-]{36}$/);
-      const report = consumerReport(collector, work.id, "test");
-      expect(report.rows.find((row) => row.featureId === `plugin.${pluginId}` && row.action === "rpc.rename")).toMatchObject({ attempts: 1, successes: 1, human: 0, unknown: 1 });
-      expect(report.rows.find((row) => row.featureId === "core.projects" && row.action === "update")).toMatchObject({ attempts: 1, successes: 1, human: 0, unknown: 1 });
-      for (const projectId of [personal.id, undefined]) expect(consumerReport(collector, projectId, "test").rows.find((row) => row.featureId === "core.projects" && row.action === "update")).toMatchObject({ attempts: 0, successes: 0 });
+      const result = await report(work.id);
+      expect(result.rows.find((row) => row.featureId === `plugin.${pluginId}` && row.action === "rpc.rename")).toMatchObject({ attempts: 1, successes: 1, human: 0, unknown: 1 });
+      expect(result.rows.find((row) => row.featureId === "core.projects" && row.action === "update")).toMatchObject({ attempts: 1, successes: 1, human: 0, unknown: 1 });
+      for (const projectId of [personal.id, undefined]) expect((await report(projectId)).rows.find((row) => row.featureId === "core.projects" && row.action === "update")).toMatchObject({ attempts: 0, successes: 0 });
     });
   });
 });
 
 describe("analytics TanStack asynchronous action provenance", () => {
   it("retains click scope and one operation through asynchronous onMutate and a lost-response retry", async () => {
-    await withAnalyticsConsumer(async ({ harness, collector, work, personal }) => {
+    await withBrowserAnalyticsConsumer({}, async ({ forward, report, work, personal }) => {
       const requests: Request[] = [];
       let loseFirstResponse = true;
       vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
         const request = input instanceof Request ? new Request(input, init) : new Request(new URL(String(input), "http://localhost"), init);
         const isUpdate = request.method === "PATCH" && new URL(request.url).pathname === `/api/v1/projects/${work.id}`;
         if (isUpdate) requests.push(request.clone());
-        const result = await harness.app.request(request);
+        const result = await forward(request);
         if (isUpdate && loseFirstResponse) { loseFirstResponse = false; throw new TypeError("Failed to fetch"); }
         return result;
       });
@@ -86,8 +86,8 @@ describe("analytics TanStack asynchronous action provenance", () => {
         expect(requests.map((request) => request.headers.get(headers.intent))).toEqual(["use", "use"]);
         expect(requests[0]?.headers.get(headers.operation)).toMatch(/^[0-9a-f-]{36}$/);
         expect(requests[1]?.headers.get(headers.operation)).toBe(requests[0]?.headers.get(headers.operation));
-        expect(consumerReport(collector, work.id, "test").rows.find((row) => row.featureId === "core.projects" && row.action === "update")).toMatchObject({ attempts: 1, successes: 1, human: 0, unknown: 1 });
-        expect(consumerReport(collector, personal.id, "test").rows.find((row) => row.featureId === "core.projects" && row.action === "update")).toMatchObject({ attempts: 0, successes: 0 });
+        expect((await report(work.id)).rows.find((row) => row.featureId === "core.projects" && row.action === "update")).toMatchObject({ attempts: 1, successes: 1, human: 0, unknown: 1 });
+        expect((await report(personal.id)).rows.find((row) => row.featureId === "core.projects" && row.action === "update")).toMatchObject({ attempts: 0, successes: 0 });
       } finally {
         queryClient.clear();
       }
