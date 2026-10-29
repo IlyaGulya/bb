@@ -42,8 +42,28 @@ UPDATE task_workflow_runs SET video_lineage_json = (
 WHERE published_revision = revision AND state IN ('in_review', 'accepted')
   AND json_type(view_json, '$.native.result.build.uiEvidence') = 'array';`;
 
+export const taskWorkflowUnverifiableVideoOriginsMigration = `
+UPDATE task_workflow_runs SET video_lineage_json = (
+  SELECT COALESCE(json_group_array(json(entry)), '[]') FROM (
+    SELECT value AS entry FROM json_each(task_workflow_runs.video_lineage_json)
+    UNION ALL
+    SELECT json_object('attachmentId', attachment.id, 'recording', NULL) AS entry
+    FROM attachments AS attachment
+    WHERE (
+      attachment.task_id = task_workflow_runs.task_id
+      OR attachment.comment_id IN (SELECT id FROM comments WHERE task_id = task_workflow_runs.task_id)
+    ) AND NOT EXISTS (
+      SELECT 1 FROM task_workflow_runs AS known JOIN json_each(known.video_lineage_json) AS lineage
+      WHERE known.task_id = task_workflow_runs.task_id
+        AND (json_extract(lineage.value, '$.attachmentId') = attachment.id
+          OR json_extract(lineage.value, '$.recording.sourceAttachmentId') = attachment.id)
+    )
+  )
+)
+WHERE published_revision > 0 AND revision > 1;`;
+
 const videoLineageSchema = uiEvidenceSchema.options[2].pick({ attachmentId: true, recording: true });
-const videoLineagesSchema = z.array(videoLineageSchema);
+const videoLineagesSchema = z.array(videoLineageSchema.extend({ recording: videoLineageSchema.shape.recording.nullable() }));
 type RecordingClaim = z.infer<typeof videoLineageSchema>["recording"];
 
 function assertSameRecordingRun(previous: RecordingClaim, next: RecordingClaim): void {
@@ -62,7 +82,7 @@ export class TaskWorkflowStore {
     if (!build.uiEvidence.some(evidence => evidence.kind === "video")) return;
     const versions = new Map<string, RecordingClaim>();
     const originals = new Map<string, RecordingClaim>();
-    const recorded = this.store.database.prepare<[string, string, string, string, string], { attachment_id: string; recording_json: string }>(`
+    const recorded = this.store.database.prepare<[string, string, string, string, string], { attachment_id: string; recording_json: string | null }>(`
       SELECT json_extract(lineage.value, '$.attachmentId') AS attachment_id,
         json_extract(lineage.value, '$.recording') AS recording_json
       FROM task_workflow_runs AS workflow JOIN json_each(workflow.video_lineage_json) AS lineage
@@ -83,6 +103,8 @@ export class TaskWorkflowStore {
       if (previousOriginal) assertSameRecordingOriginal(previousOriginal, recording);
       else originals.set(attachmentId, recording);
       for (const row of recorded.iterate(taskId, attachmentId, recording.sourceAttachmentId, attachmentId, recording.sourceAttachmentId)) {
+        if (row.recording_json === null)
+          throw new Error("Recording origin is unverifiable after a pre-upgrade Return. Keep the historical result and attach a fresh recording instead of relabelling an old attachment.");
         const previous = videoLineageSchema.shape.recording.parse(JSON.parse(row.recording_json));
         assertSameRecordingRun(previous, recording);
         if (row.attachment_id === attachmentId) assertSameRecordingOriginal(previous, recording);

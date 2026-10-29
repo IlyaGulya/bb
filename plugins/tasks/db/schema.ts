@@ -1,6 +1,6 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { repositoryMigrations } from "../repositories/store.js";
-import { taskWorkflowMigration, taskWorkflowVideoLineageMigration } from "../workflow/store.js";
+import { taskWorkflowMigration, taskWorkflowVideoLineageMigration, taskWorkflowUnverifiableVideoOriginsMigration } from "../workflow/store.js";
 import { workflowPreparationMigration } from "../workflow/preparation-store.js";
 import { taskArtifactMigration } from "../artifacts/store.js";
 import { routingMigration } from "../routing/store.js";
@@ -378,6 +378,7 @@ const MIGRATIONS = [
   `,
   workflowPreparationMigration,
   taskWorkflowVideoLineageMigration,
+  taskWorkflowUnverifiableVideoOriginsMigration,
   taskArtifactMigration,
   routingMigration,
 ] as const;

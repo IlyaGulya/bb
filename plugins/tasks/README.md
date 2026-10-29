@@ -368,10 +368,15 @@ WebM reuse Tasks storage and its 25 MiB limit. Ownership, availability, containe
 structure and reviewed-commit metadata are checked before review/publication/Accept.
 Published recording claims are retained separately from the current result through
 Return; a reused attachment cannot change its recorded commit/run or original/editing
-binding. Upgrade backfill covers only currently retained published results, not
-metadata already discarded by earlier Returns. These are consistency checks on
-claims, not authenticated capture provenance, decoder support or real-scenario
-proof. Actual playback and independent inspection remain required.
+binding. The lineage backfill retains current published bindings. An appended
+origin-checkpoint migration also covers databases that already applied that backfill.
+For previously published, Returned workflows, existing task/comment attachments
+without retained bindings are marked unverifiable and blocked from new video evidence,
+whether used as the delivered clip or its original. Old publications remain readable;
+fresh post-upgrade attachments remain eligible. Historical commit/run claims are not
+invented or inferred from comment text. These are consistency checks on claims, not
+authenticated capture provenance, decoder support or real-scenario proof. Actual
+playback and independent inspection remain required.
 
 The task attachment and result controls use one responsive in-task HTML video
 player, native controls, no autoplay, separate download, and explicit

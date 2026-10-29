@@ -615,10 +615,12 @@ sourceAttachmentId,transformation}}`; `transformation:null` means the attached
 file is its own unedited original. Video entries do not accept arbitrary URLs.
 Task ownership, accessible files, container structure, reviewed commit and
 consistency with previously published recording/original/editing claims are gates.
-Claims retained through Return are not authenticated capture provenance; metadata
-already discarded before the lineage upgrade cannot be reconstructed. Structural
-validation is not decoder or real-demo proof. Independently play and inspect the
-actual clip. The in-task player has
+Claims retained through Return are not authenticated capture provenance. On upgrading
+an already published-and-Returned workflow, old attachments without retained bindings
+cannot be reused as new video evidence or its original. Keep the old publication
+readable and attach a fresh post-upgrade recording; never
+invent historical commit/run claims. Structural validation is not decoder or
+real-demo proof. Independently play and inspect the actual clip. The in-task player has
 native controls, no autoplay, and a separate file download. Close/Esc releases
 playback; a loading/unsupported/error state is not successful evidence.
 

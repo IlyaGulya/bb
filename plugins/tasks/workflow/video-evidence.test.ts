@@ -7,7 +7,7 @@ import { registerAttachments, saveAttachmentFromBytes } from "../attachments/ind
 import { registerTaskWorkflows } from "./index.js";
 import { buildEvidenceSchema, taskBuildEvidenceContract, type BuildReviewResult, type BuildReviewStart } from "../../workflows/src/build-review-contract.js";
 import type { TaskWorkflow } from "../shared/workflow-contract.js";
-import { TaskWorkflowStore, taskWorkflowVideoLineageMigration } from "./store.js";
+import { TaskWorkflowStore, taskWorkflowVideoLineageMigration, taskWorkflowUnverifiableVideoOriginsMigration } from "./store.js";
 
 const hosts: FakePluginHost[] = [];
 afterEach(async () => { for (const host of hosts.splice(0)) await host.harness.dispose(); });
@@ -142,6 +142,7 @@ describe("video-required task artifact admission", () => {
     const { request } = publishRecordingLineage(fixture, recorded);
     fixture.store.database.exec("ALTER TABLE task_workflow_runs DROP COLUMN video_lineage_json");
     fixture.store.database.exec(taskWorkflowVideoLineageMigration);
+    fixture.store.database.exec(taskWorkflowUnverifiableVideoOriginsMigration);
     const reopened = new TaskWorkflowStore(fixture.store);
     reopened.return(request.group, 1, "Retain the published original across upgrade");
     expect(await fixture.validate(recorded)).toEqual({ verified: true });
@@ -152,6 +153,43 @@ describe("video-required task artifact admission", () => {
       uiEvidence: [{ ...evidence, recording: { ...evidence.recording, runId: "unrelated-upgrade-run" } }],
     });
     await expect(fixture.validate(substituted)).rejects.toThrow();
+    expect(reopened.get(request.group).revision).toBe(2);
+    expect(fixture.store.tasks.getTask(fixture.task.id)?.status).toBe("in_progress");
+  });
+
+  it("rejects relabelling a recording Returned before the lineage upgrade while admitting a fresh recording", async () => {
+    const fixture = setup();
+    const bytes = await readFile(fixtureUrl);
+    const original = await saveAttachmentFromBytes(fixture.store.tasks, bytes, { taskId: fixture.task.id, fileName: "published-before-upgrade.mp4" });
+    const recorded = fixture.withVideo(original.id);
+    const { workflows, request, native } = publishRecordingLineage(fixture, recorded);
+    const publication = fixture.store.tasks.listComments(fixture.task.id).find(comment => comment.kind === "agent");
+    if (!publication) throw new Error("Expected retained published result");
+    fixture.store.database.exec("ALTER TABLE task_workflow_runs DROP COLUMN video_lineage_json");
+    const returned = workflows.return(request.group, 1, "Show the real C2 result after upgrading");
+    expect(returned.revision).toBe(2);
+    expect(returned.native).toBeNull();
+    fixture.store.database.exec(taskWorkflowVideoLineageMigration);
+    fixture.store.database.exec(taskWorkflowUnverifiableVideoOriginsMigration);
+    const reopened = new TaskWorkflowStore(fixture.store);
+    const runId = "wfr_after_upgrade_c2";
+    reopened.save({ ...returned, state: "running", native: { ...native, runId, key: reopened.request(request.group).key, status: "running", result: null } });
+    const freshAttachment = await saveAttachmentFromBytes(fixture.store.tasks, bytes, { taskId: fixture.task.id, fileName: "fresh-after-upgrade-c2.mp4" });
+    const fresh = fixture.withVideo(freshAttachment.id);
+    const freshEvidence = fresh.uiEvidence[0]!;
+    if (freshEvidence.kind !== "video") throw new Error("Expected fresh video fixture");
+    fresh.commit = "b".repeat(40);
+    freshEvidence.recording.commit = fresh.commit;
+    freshEvidence.recording.runId = runId;
+    expect(await fixture.validate(fresh)).toEqual({ verified: true });
+    expect(fixture.store.tasks.listComments(fixture.task.id).find(comment => comment.id === publication.id)?.body).toBe(publication.body);
+    const originalEvidence = recorded.uiEvidence[0]!;
+    if (originalEvidence.kind !== "video") throw new Error("Expected original video fixture");
+    const relabelled = buildEvidenceSchema.parse({
+      ...fresh,
+      uiEvidence: [{ ...originalEvidence, recording: { ...originalEvidence.recording, commit: fresh.commit, runId } }],
+    });
+    await expect(fixture.validate(relabelled)).rejects.toThrow();
     expect(reopened.get(request.group).revision).toBe(2);
     expect(fixture.store.tasks.getTask(fixture.task.id)?.status).toBe("in_progress");
   });
