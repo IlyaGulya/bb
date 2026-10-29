@@ -135,7 +135,7 @@ export function taskArtifactHandlers(bb: BbPluginApi, store: TasksApiStore) {
       const { thread, context } = await threadScope(input.source.threadId);
       if (thread.projectId !== projectId || context.id !== input.executionContextId) throw unavailable();
       const { message } = await bb.sdk.threads.message({ threadId: thread.id, seq: input.source.eventSeq, before: 0, after: 0 });
-      if (message.messageSeq !== input.source.eventSeq || !markdownSelectionText(message.text).includes(input.source.quote)) throw new Error("Select a bounded quote from the actual source message");
+      if (message.messageSeq !== input.source.eventSeq || !markdownSelectionText(message.text, message.role).includes(input.source.quote)) throw new Error("Select a bounded quote from the actual source message");
       const artifact: TaskArtifact = {
         id: input.artifactId,
         taskId: input.taskId,

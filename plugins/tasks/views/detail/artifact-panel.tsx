@@ -175,11 +175,17 @@ function ArtifactPanelSource({ source }: { source: ArtifactSourceIdentity }) {
     let cancelled = false;
     setLoaded(null);
     setSourceError(false);
-    sdk.threads.message({ threadId: source.sourceThreadId, seq: source.eventSeq, before: 0, after: 0 }).then(({ message }) => {
-      if (message.messageSeq !== source.eventSeq) throw new Error("Source message identity changed");
-      const text = markdownSelectionText(message.text);
-      if (!cancelled) setLoaded({ ...source, quote: text.length <= 4000 ? text : "" });
-    }).catch(() => { if (!cancelled) setSourceError(true); });
+    async function loadSource() {
+      try {
+        const { message } = await sdk.threads.message({ threadId: source.sourceThreadId, seq: source.eventSeq, before: 0, after: 0 });
+        if (message.messageSeq !== source.eventSeq) throw new Error("Source message identity changed");
+        const text = markdownSelectionText(message.text, message.role);
+        if (!cancelled) setLoaded({ ...source, quote: text.length <= 4000 ? text : "" });
+      } catch {
+        if (!cancelled) setSourceError(true);
+      }
+    }
+    void loadSource();
     return () => { cancelled = true; };
   }, [sdk, draft, source.sourceThreadId, source.eventSeq, retry]);
   const quote = draft?.quote ?? (loaded?.sourceThreadId === source.sourceThreadId && loaded.eventSeq === source.eventSeq ? loaded.quote : null);

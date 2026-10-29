@@ -45,7 +45,7 @@ export default definePluginApp((app) => {
     icon: "Bookmark",
     run({ message, selectedText, openPanel }) {
       const source = { sourceThreadId: message.threadId, eventSeq: message.experimental_messageSeq };
-      const quote = selectedText ?? markdownSelectionText(message.text);
+      const quote = selectedText ?? markdownSelectionText(message.text, message.role);
       const revision = stageArtifactDraft(source, quote.length <= 4000 ? quote : "");
       if (!openPanel({
         actionId: "save-artifact",
