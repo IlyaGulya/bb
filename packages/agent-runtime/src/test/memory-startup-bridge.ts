@@ -31,6 +31,8 @@ export class MemoryBridge extends ChildProcess {
   stopped = false;
   stopRequested = false;
   stopGate: Promise<void> | null = null;
+  stopResultGate: Promise<void> | null = null;
+  discardMode: "success" | "reject" | "timeout" = "success";
   treeTermination: "confirmed" | "unverified" = "confirmed";
   private buffered = "";
   private turn = 0;
@@ -41,6 +43,7 @@ export class MemoryBridge extends ChildProcess {
     await this.stopGate;
     this.stopped = this.treeTermination === "confirmed";
     this.finish();
+    if (this.stopResultGate) await this.stopResultGate;
     return { treeTermination: this.treeTermination };
   };
 
@@ -147,6 +150,12 @@ export class MemoryBridge extends ChildProcess {
     if (request.method === "turn/steer" && this.replaceOnFullSteer && request.params?.options?.permissionMode === "full") {
       if (!threadId) throw new Error("Fixture replacement requires a thread id");
       this.phase(threadId, "hook");
+      return;
+    }
+    if (request.method === "thread/discard" && this.discardMode !== "success") {
+      if (this.discardMode === "reject") {
+        this.writeRpcMessage({ id: request.id, error: { code: -32603, message: "Synthetic discard failure" } });
+      }
       return;
     }
     this.reply(request);

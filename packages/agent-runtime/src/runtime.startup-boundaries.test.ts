@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clientTurnRequestIdSchema, executionContextSnapshotSchema, type ThreadEvent } from "@bb/domain";
 import { spawnManagedProcess } from "@bb/process-utils";
+import { createDeferredPromise } from "@bb/test-helpers";
 import { createAgentRuntime } from "./runtime.js";
 import type { AgentRuntime, AgentRuntimeBridgeLaunch, AgentRuntimeExecutionOptions } from "./types.js";
 import { MemoryBridge } from "./test/memory-startup-bridge.js";
@@ -339,5 +340,50 @@ describe("bounded startup consumer boundaries without subprocesses", () => {
     replacement.completeTurn("same-thread");
     await vi.advanceTimersByTimeAsync(0);
     expect(f.runtime.getActiveTurnId("same-thread")).toBeNull();
+  });
+
+  it.each(["success", "reject", "timeout"] as const)("does not acknowledge parent stop before completed rewind cleanup after %s discard", async (discardMode) => {
+    const f = setup();
+    f.first.readyOnConstruction = false;
+    const leaseId = "completed-parent-stop-lease";
+    const cleanup = createDeferredPromise<void>();
+    try {
+      const preparation = observe(prepareRewind(f.runtime, leaseId));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await preparation).toMatchObject({ status: "fulfilled" });
+      expect(f.runtime.hasThread("same-thread")).toBe(true);
+      f.first.discardMode = discardMode;
+      f.first.stopGate = cleanup.promise;
+      let acknowledged = false;
+      const stopping = observe(f.runtime.stopThread({ threadId: "same-thread" })).then((result) => {
+        acknowledged = result.status === "fulfilled";
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(discardMode === "timeout" ? 30_000 : 0);
+      expect(f.first.requests.some((request) => request.method === "thread/discard")).toBe(true);
+      expect.soft(acknowledged).toBe(false);
+      expect(f.first.stopped).toBe(false);
+      cleanup.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      const stopped = await stopping;
+      if (discardMode === "success") expect(stopped).toMatchObject({ status: "fulfilled", value: { providerCheckpointId: null } });
+      if (stopped.status === "fulfilled" || f.first.stopped) {
+        expect.soft(f.first.stopped).toBe(true);
+        expect.soft(f.runtime.hasThread("same-thread")).toBe(false);
+      } else {
+        expect(f.runtime.hasThread("same-thread")).toBe(true);
+        const diagnostic = f.events.filter((event) => event.type === "system/operation" && event.operation === "provider_startup").at(-1);
+        if (diagnostic?.type !== "system/operation") throw new Error("Parent stop did not publish a cleanup blocker");
+        expect(diagnostic.metadata).toMatchObject({ retryBlocked: true });
+      }
+      expect(f.first.requests.filter((request) => request.method === "turn/start" || request.method === "turn/steer")).toEqual([]);
+    } finally {
+      cleanup.resolve();
+      f.first.discardMode = "success";
+      await f.runtime.discardThreadRewind({ leaseId }).catch(() => undefined);
+      await f.runtime.shutdown().catch(() => undefined);
+      const index = runtimes.indexOf(f.runtime);
+      if (index !== -1) runtimes.splice(index, 1);
+    }
   });
 });
