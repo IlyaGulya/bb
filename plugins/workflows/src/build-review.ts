@@ -14,12 +14,39 @@ import {
   buildReviewResultSchema,
   buildReviewStartSchema,
   buildReviewRpcContract,
+  uiEvidenceSchema,
   type BuildReviewStart,
 } from "./build-review-contract.js";
 
 const string = { type: "string", minLength: 1 };
 const strings = { type: "array", items: string };
-const buildSchema = z.toJSONSchema(buildEvidenceSchema, { target: "draft-7" });
+const workerEvidenceSchema = z.object({
+  kind: z.enum(uiEvidenceSchema.options.map(option => option.shape.kind.value)),
+  description: uiEvidenceSchema.options[0].shape.description,
+  location: uiEvidenceSchema.options[0].shape.location.optional(),
+  attachmentId: uiEvidenceSchema.options[2].shape.attachmentId.optional(),
+  recording: uiEvidenceSchema.options[2].shape.recording.optional(),
+}).strict();
+const workerBuildEvidenceSchema = buildEvidenceSchema.extend({ uiEvidence: z.array(workerEvidenceSchema) });
+
+function emitWorkerSchema(schema: z.ZodType) {
+  return z.toJSONSchema(schema, {
+    target: "openapi-3.0",
+    io: "input",
+    cycles: "throw",
+    reused: "inline",
+    override({ zodSchema, jsonSchema }) {
+      if (zodSchema === buildEvidenceSchema.shape.commit) {
+        delete jsonSchema.pattern;
+        jsonSchema.minLength = 40;
+        jsonSchema.maxLength = 64;
+      }
+    },
+  });
+}
+
+const buildSchema = emitWorkerSchema(workerBuildEvidenceSchema);
+const fixSchema = emitWorkerSchema(workerBuildEvidenceSchema.required({ regressionCommand: true }));
 const reviewSchema = {
   type: "object",
   additionalProperties: false,
@@ -54,7 +81,6 @@ export function buildReviewSource(input: BuildReviewStart): string {
     });
   if (input.template === "bugfix") {
     const reproductionSchema = { type: "object", additionalProperties: false, required: ["summary", "command", "exitCode", "output"], properties: { summary: string, command: string, exitCode: { type: "integer" }, output: string } };
-    const fixSchema = z.toJSONSchema(buildEvidenceSchema.extend({ regressionCommand: z.string().trim().min(1).max(100000) }), { target: "draft-7" });
     return `export const meta = { name: "task-bugfix-review", description: "Real reproduction, retained writer fix and regression, platform smoke, independent review", phases: [{title:"Reproduce"},{title:"Fix, regression and platform smoke"},{title:"Independent review"}] };
 phase("Reproduce");
 const reproduction = await agent((args.previousReproduction ? "This is a human Return in the SAME retained writer session. Preserve the original genuine failing-before command, nonzero exit code and exact output below; do not pretend the already-fixed bug must fail again. Re-plan the requested changes in summary, retaining the original reproduction fields unchanged. Original evidence: " + JSON.stringify(args.previousReproduction) : "Reproduce the reported bug in this owned workspace BEFORE changing implementation. Run the real failing command and record its exact command, nonzero exit code, observed output and concise root-cause/repair plan. Do not claim a reproduction from source inspection alone. If this cannot be reproduced, stop honestly.") + " Task: " + args.task + "\\nHuman feedback: " + args.feedback, ${options("writer", reproductionSchema)});

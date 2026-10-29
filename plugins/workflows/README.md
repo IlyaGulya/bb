@@ -178,7 +178,15 @@ video demos do not replace the requested platform smoke. New explicitly
 classified UI/interactive work uses `evidencePolicy:{version:1,requirement:"video"}`;
 legacy `uiRequired` still accepts screenshot/preview and saved results stay readable.
 `technical` requires technical smoke only; explicit `ui` permits screenshot/preview.
-The generated worker JSON Schema and Tasks bridge use one canonical contract.
+Worker output schemas are structural projections of the canonical Zod evidence
+fields into the existing safe workflow schema subset, not raw draft-schema
+documents. They use bounded commit lengths, enum evidence kinds, and optional
+per-kind fields without regexes, references, or schema combinators. Nullable
+editing disclosure uses the subset's supported `nullable` keyword. Full canonical
+Zod validation still enforces hexadecimal commits, strict per-kind fields and
+required video/legacy evidence semantics after the writer and before independent
+review and successful completion. The Tasks bridge uses that same full contract;
+the generic workflow schema validator and its security limits are unchanged.
 Video entries reference task-owned attachments with exact commit/run/scenario,
 original attachment and truthful editing disclosure, never arbitrary URLs or
 local paths. Safe recording unavailability is a blocker, not a screenshot fallback.
