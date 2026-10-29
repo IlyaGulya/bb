@@ -1,5 +1,5 @@
 import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { classifyStoredProviderThreadClaim, createProject, getLatestThreadSequence, getThreadPluginMetadata, insertEvents, noopNotifier } from "@bb/db";
 import { NATIVE_HISTORY_OWNER, type JsonValue } from "@bb/domain";
@@ -71,6 +71,30 @@ describe("reviewed native archive boundaries", () => {
     const candidate = await saved.imports.settle((await saved.imports.start({ ...saved.selection, projectId: other.id, source: await saved.discover(saved.leafRoot) })).id);
     expect(candidate.status).toBe("ready");
     expect(classifyStoredProviderThreadClaim(saved.db, { threadId: candidate.threadId!, providerThreadId: saved.sessionId })).toBe("foreign");
+  });
+
+  it("deduplicates pathname aliases and preserves their Core writer claim", async () => {
+    const saved = await createNativeArchiveFixture();
+    const first = await saved.imports.settle((await saved.imports.start(saved.selection)).id);
+    expect(first.status).toBe("ready");
+    const canonicalRepeat = await saved.imports.settle((await saved.imports.start(saved.selection)).id);
+    expect(canonicalRepeat).toMatchObject({ id: first.id, threadId: first.threadId, sha256: first.sha256 });
+    insertEvents(saved.db, noopNotifier, [{ threadId: first.threadId!, providerThreadId: saved.sessionId, scope: { kind: "thread" }, sequence: getLatestThreadSequence(saved.db, { threadId: first.threadId! }) + 1, type: "thread/identity", itemId: null, itemKind: null, parentToolCallId: null, createdAt: 1, data: JSON.stringify({ providerThreadId: saved.sessionId }) }]);
+    const other = createProject(saved.db, noopNotifier, { name: "Path alias destination", source: { type: "local_path", hostId: saved.host.id, path: saved.cwd } }).project;
+    const canonicalCandidate = await saved.imports.settle((await saved.imports.start({ ...saved.selection, projectId: other.id })).id);
+    expect(canonicalCandidate.status).toBe("ready");
+    expect(classifyStoredProviderThreadClaim(saved.db, { threadId: canonicalCandidate.threadId!, providerThreadId: saved.sessionId })).toBe("foreign");
+    const source = { ...saved.source, path: `${saved.leafRoot}/./${basename(saved.path)}` };
+    const candidate = await saved.imports.settle((await saved.imports.start({ ...saved.selection, projectId: other.id, source })).id);
+    const claim = classifyStoredProviderThreadClaim(saved.db, { threadId: candidate.threadId!, providerThreadId: saved.sessionId });
+    const repeated = await saved.imports.settle((await saved.imports.start({ ...saved.selection, source })).id);
+    expect({
+      repeated: { status: repeated.status, id: repeated.id, threadId: repeated.threadId, sha256: repeated.sha256 },
+      candidate: { status: candidate.status, id: candidate.id, threadId: candidate.threadId, claim },
+    }).toEqual({
+      repeated: { status: "ready", id: first.id, threadId: first.threadId, sha256: first.sha256 },
+      candidate: { status: "ready", id: canonicalCandidate.id, threadId: canonicalCandidate.threadId, claim: "foreign" },
+    });
   });
 
   it("retains committed manifest and Core provenance after rejecting a changed source prefix", async () => {

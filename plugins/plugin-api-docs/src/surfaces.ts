@@ -1298,6 +1298,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Page and search full retained native records, stream original JSONL and referenced artifacts, and inspect source identities, branches, checksums and recoverable import progress",
           "Retain canonical OMP blob:sha256 image references from native image positions, including saved images and snapcompact frames; select their blob directory explicitly as an artifact root, with no file authority from ordinary text or tool arguments",
           "Native image display-sidecar hardlinks require whole-record image authority, verified canonical content hash and positive image-format identification; generic hardlinks remain forbidden and every chunk retains confined-path and file-revision checks",
+          "All artifact authority requires complete native JSONL records, never record-shaped fragments in tool arguments; POSIX pathname aliases share import/writer identities without weakening host path or file-descriptor confinement",
           "Keep full native history and state separate from next-turn model context; Core timeline values are bounded display previews",
           "Request exclusive same-identity native admission separately without a prompt; unsupported ownership or original receipt adoption refuses rather than inventing an identity or account binding",
           "Explicitly create a different handoff dialogue with user-supplied next-turn context and an archive link; no imported tool, hook or configuration is executed by archiving",

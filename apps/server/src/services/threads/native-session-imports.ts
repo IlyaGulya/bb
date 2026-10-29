@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, open, readFile, rename, type FileHandle } from "node:fs/promises";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -27,10 +27,10 @@ export interface NativeImportDependencies {
   read(hostId: string, input: NativeRead, signal: AbortSignal): Promise<NativeChunk>;
 }
 export function nativeImportIdentity(selection: NativeImportSelection): string {
-  return hash(JSON.stringify([selection.hostId, selection.source.engine, selection.source.path, selection.source.sessionId, selection.projectId]));
+  return hash(JSON.stringify([selection.hostId, selection.source.engine, posix.normalize(selection.source.path), selection.source.sessionId, selection.projectId]));
 }
 export function nativeWriterNamespace(manifest: NativeImportManifest): string {
-  return hash(JSON.stringify([manifest.hostId, manifest.source.engine, manifest.source.path, manifest.source.sessionId]));
+  return hash(JSON.stringify([manifest.hostId, manifest.source.engine, posix.normalize(manifest.source.path), manifest.source.sessionId]));
 }
 async function writeAll(file: FileHandle, bytes: Buffer, offset: number): Promise<void> {
   let written = 0;
