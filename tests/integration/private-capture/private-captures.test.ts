@@ -13,13 +13,13 @@ import { captureObjectDigest } from "@bb/process-utils";
 import {
   acceptCaptureChunk, captureArtifact, createPrivateCapture, downloadCaptureArtifact,
   stageCaptureManifest, syncPrivateCapture,
-} from "../../src/services/private-captures.js";
-import { createTestAppHarness, type TestAppHarness } from "../helpers/test-app.js";
-import { exchangeHostCapture, startHostCaptureOutbox } from "../../../host-daemon/src/private-capture.js";
+} from "../../../apps/server/src/services/private-captures.js";
+import { createTestAppHarness, type TestAppHarness } from "../../../apps/server/test/helpers/test-app.js";
+import { exchangeHostCapture, startHostCaptureOutbox } from "../../../apps/host-daemon/src/private-capture.js";
 import {
   captureArtifactFixture, captureSessionFixture, orderedCaptureArtifacts,
   writeCaptureArtifactFixture, writeCaptureSessionFixture,
-} from "../../../host-daemon/test/private-capture-fixtures.js";
+} from "../../../apps/host-daemon/test/private-capture-fixtures.js";
 
 describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("private capture Core consumer boundaries", () => {
   let harness: TestAppHarness;

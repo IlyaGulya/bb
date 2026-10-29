@@ -2,6 +2,10 @@
 
 ## AgentOS fork — unreleased
 
+- Make the private capture CLI error return explicit and place the unchanged
+  five real-wire Core cases in a dedicated shared-worker integration project.
+  Keep Server's compiler scope, all assertions and durable privacy behavior
+  unchanged; compiler/placement after-verification remains parent-owned.
 - Admit the existing `capture.exchange` result in the successful host RPC
   response union so the real Core consumer can receive artifacts and propagate
   durable privacy dispositions. Keep all authored assertions and controls;

@@ -228,15 +228,36 @@ from receiving the artifact. The narrow amendment adds only
 `onlineRpcResponseSuccessSchemaFor("capture.exchange")` to the existing union.
 It completes the unactivated protocol-245 contract without changing payload
 fields, assertions, fixtures, controls, committed ACKs or durable privacy
-disposition/cleanup. The amendment has not been executed or qualified here.
+disposition/cleanup. Parent subsequently reports Main `3631086` passed all five
+unchanged Core privacy/receipt cases with that wire fix (artifact6382).
 
-This agent has run no build, typecheck, test, lint, formatter, install, runtime
-smoke, browser, network/model/auth/business probe or capture activation for this
-amendment. Parent's results are accepted without rerunning them. There is no
-after-pass, READY or full-acceptance claim for the amendment. Parent separately
-owns Drizzle 0147 snapshot composition, including 0146 analytics and `prevId`;
-that composition is not changed here. Full Tasks acceptance and its native,
-offline-ACK and privacy matrix remain unchanged.
+Parent's composed typecheck (artifact6397) reported 13 tasks PASS / 2 FAIL:
+CLI `readPrivateFile` needed an explicit error-path return, and the Core consumer
+suite imported host source/fixtures outside Server's existing compiler root.
+The bounded compiler amendment returns the existing `never` error helper and
+moves the complete suite, with only relative import changes, to
+`tests/integration/private-capture/private-captures.test.ts`. All five cases,
+assertions, controls and real host/Core paths are preserved. Host fixture code
+is unchanged. The existing integration package already has a repository-wide
+compiler root and the necessary cross-app dependencies; Server's `rootDir` and
+include list are unchanged. Its dedicated `@bb/integration-tests:private-capture`
+project uses `sharedWorkerProjects` without the fake suite's global cleanup.
+
+After parent composition, the relocated suite can be selected with this
+unexecuted command:
+
+```sh
+pnpm exec turbo run test --filter=@bb/integration-tests -- --project=@bb/integration-tests:private-capture private-capture/private-captures.test.ts
+```
+
+This agent has run no checks, builds, installs or runtime execution for the
+compiler/placement amendment, and no network/model/auth/business probes or
+capture activation. Parent's reported results are accepted without rerunning
+them. Parent owns source38 composition and after-verification of this amendment;
+no new passing result, READY or full acceptance is claimed here. Drizzle 0147
+snapshot composition, including 0146 analytics and `prevId`, remains outside
+this amendment. Full Tasks acceptance and its native, offline-ACK and privacy
+matrix remain unchanged.
 
 After ordered source38/source40 integration and source review, parent owns:
 

@@ -1,4 +1,7 @@
-import { defineWorkspaceTestConfig } from "../../vitest.shared.js";
+import {
+  defineWorkspaceTestConfig,
+  sharedWorkerProjects,
+} from "../../vitest.shared.js";
 
 const parsedTimeoutScale = Number(process.env.BB_TEST_TIMEOUT_SCALE ?? 1);
 const timeoutScale =
@@ -36,6 +39,11 @@ export default defineWorkspaceTestConfig({
           include: ["native-roots-golden/**/*.test.ts"],
         },
       },
+      ...sharedWorkerProjects({
+        pkgDir: __dirname,
+        name: "@bb/integration-tests:private-capture",
+        include: ["private-capture/**/*.test.ts"],
+      }),
     ],
   },
 });
