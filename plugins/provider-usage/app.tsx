@@ -923,6 +923,10 @@ export function ProviderUsageStatusContent({
 }
 
 const usageChangeSchema = z.object({ changes: z.array(z.string()) });
+const executionChangeSchema = z.object({
+  id: z.optional(z.string()),
+  changes: z.array(z.string()),
+});
 
 export function SelectedThreadUsage({
   threadId,
@@ -938,10 +942,20 @@ export function SelectedThreadUsage({
 }) {
   const rpc = useRpc<typeof providerUsageRpcContract>();
   const connectionState = useRealtimeConnectionState();
+  const sidebar = experimental_useSidebarThreads();
+  const selectedThread = sidebar.threads.find((thread) => thread.id === threadId);
+  const environmentId = selectedThread?.environment?.id;
+  const hostId = selectedThread?.host?.id ?? threadMachineId;
+  const hostStatus = sidebar.experimental_hosts.find((host) => host.id === hostId)?.status;
+  const routeKey = JSON.stringify([
+    threadId, selectedThread?.projectId, selectedThread?.providerId,
+    environmentId, selectedThread?.environment?.path, hostId, hostStatus,
+  ]);
   const [browseAll, setBrowseAll] = useState(false);
   const [generation, setGeneration] = useState(0);
   const [loaded, setLoaded] = useState<{
     generation: number;
+    routeKey: string;
     value: ThreadUsage;
   } | null>(null);
   const [failed, setFailed] = useState(false);
@@ -961,6 +975,21 @@ export function SelectedThreadUsage({
       change === "model-connections-changed" || change === "execution-contexts-changed",
     )) invalidate();
   });
+  useRealtime("thread:changed", (payload) => {
+    const parsed = executionChangeSchema.safeParse(payload);
+    if (parsed.success && (parsed.data.id === undefined || parsed.data.id === threadId) &&
+      parsed.data.changes.some((change) => change === "environment-changed" || change === "thread-deleted")) invalidate();
+  });
+  useRealtime("environment:changed", (payload) => {
+    const parsed = executionChangeSchema.safeParse(payload);
+    if (parsed.success && (environmentId == null || parsed.data.id === undefined || parsed.data.id === environmentId) &&
+      parsed.data.changes.some((change) => change === "metadata-changed" || change === "status-changed" || change === "environment-deleted")) invalidate();
+  });
+  useRealtime("host:changed", (payload) => {
+    const parsed = executionChangeSchema.safeParse(payload);
+    if (parsed.success && (hostId === null || parsed.data.id === undefined || parsed.data.id === hostId) &&
+      parsed.data.changes.some((change) => change === "host-connected" || change === "host-disconnected")) invalidate();
+  });
   useEffect(() => {
     if (previousConnectionState.current !== connectionState) invalidate();
     previousConnectionState.current = connectionState;
@@ -977,7 +1006,7 @@ export function SelectedThreadUsage({
         if (disposed || request !== sequence.current) return;
         if (value.threadId !== threadId)
           throw new Error("Usage response belongs to another thread");
-        setLoaded({ generation, value });
+        setLoaded({ generation, routeKey, value });
         setFailed(false);
       } catch {
         if (disposed || request !== sequence.current) return;
@@ -997,8 +1026,8 @@ export function SelectedThreadUsage({
       window.clearInterval(timer);
       window.removeEventListener("focus", refresh);
     };
-  }, [rpc, threadId, generation, browseAll, connectionState, invalidate]);
-  const admitted = loaded?.generation === generation &&
+  }, [rpc, threadId, routeKey, generation, browseAll, connectionState, invalidate]);
+  const admitted = loaded?.generation === generation && loaded.routeKey === routeKey &&
     loaded.value.threadId === threadId && connectionState === "connected"
     ? loaded.value
     : null;

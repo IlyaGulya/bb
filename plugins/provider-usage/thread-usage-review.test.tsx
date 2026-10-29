@@ -1,11 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  createFakePluginHost,
-  makeHostResponse,
-  makeThreadResponse,
-} from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import type { ExecutionContext, ModelConnection } from "@get-bb/plugin-sdk/app";
 import plugin from "./server.js";
@@ -143,40 +139,22 @@ function consumerFixture({
     pluginId: "bb--provider-usage",
     sdk: {
       experimental_executionContexts: {
-        getThreadBinding: async ({ threadId }) => ({
-          threadId,
-          createdAt: 1,
-          executionContext: frozenContext,
-          modelConnection: connection,
-        }),
-        get: async ({ id }) => {
-          if (frozenContext === null || id !== frozenContext.id || state.context === "deleted")
-            throw Object.assign(new Error("Context missing"), { status: 404 });
-          if (state.context === "unavailable") throw new Error("Context lookup unavailable");
-          return { ...frozenContext, enabled: state.context !== "disabled" };
-        },
-      },
-      experimental_modelConnections: {
-        get: async ({ id }) => {
-          if (id !== connection.id) throw new Error("Unrelated connection requested");
-          return connection;
-        },
-      },
-      threads: {
-        get: async ({ threadId }) => makeThreadResponse({
-          id: threadId,
-          projectId: "project-review-owned",
-          providerId: connection.provider,
-          environmentId: "environment-review-owned",
-        }),
-      },
-      environments: {
-        get: async () => ({ id: "environment-review-owned", hostId: HOST_ID }),
-      },
-      hosts: {
-        get: async ({ hostId }) => {
-          if (hostId !== HOST_ID) throw new Error("Unrelated host requested");
-          return makeHostResponse({ id: HOST_ID, name: "Review machine", status: "connected" });
+        getThreadEligibility: async ({ threadId }) => {
+          if (scoped && state.context === "unavailable") throw new Error("Current Core eligibility unavailable");
+          const executionContext = frozenContext === null || state.context === "deleted" ? null
+            : { ...frozenContext, enabled: state.context !== "disabled" };
+          const issue = frozenContext !== null && executionContext === null
+            ? { code: "execution_context_not_found", message: "Current context missing" }
+            : executionContext !== null && !executionContext.enabled
+              ? { code: "execution_context_disabled", message: "Current context disabled" } : null;
+          return {
+            thread: { id: threadId, projectId: "project-review-owned", providerId: connection.provider, environmentId: "environment-review-owned" },
+            binding: { threadId, createdAt: 1, executionContext: frozenContext, modelConnection: connection },
+            modelConnection: connection, executionContext,
+            host: { id: HOST_ID, name: "Review machine", status: "connected" },
+            available: issue === null, issue,
+            generation: JSON.stringify([threadId, connection, executionContext, issue]),
+          };
         },
       },
       providers: {

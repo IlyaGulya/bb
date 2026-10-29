@@ -21,16 +21,16 @@ function unknownUsage(threadId: string): ThreadUsage {
 
 export function createThreadUsageReader(bb: BbPluginApi) {
   const inspect = async (threadId: string) => {
+    const observation = await bb.sdk.experimental_executionContexts.getThreadEligibility({ threadId });
+    const { binding, thread, host, modelConnection: current, executionContext: contextDefinition } = observation;
     const result = unknownUsage(threadId);
-    const [binding, thread] = await Promise.all([
-      bb.sdk.experimental_executionContexts.getThreadBinding({ threadId }),
-      bb.sdk.threads.get({ threadId }),
-    ]);
+    const key = observation.generation;
     result.bindingCreatedAt = binding?.createdAt ?? null;
+    result.host = host === null ? null : { id: host.id, name: host.name };
     const connection = binding?.modelConnection;
     if (!connection) {
       result.reason = "This thread has no frozen model connection. Browse all accounts for host-local maintenance observations.";
-      return { result, key: "unbound", qualified: false };
+      return { result, key, qualified: false };
     }
     result.connection = {
       id: connection.id,
@@ -40,95 +40,33 @@ export function createThreadUsageReader(bb: BbPluginApi) {
       kind: connection.gateway === null ? "native" : "gateway",
       definition: "unknown",
     };
-    const frozenContext = binding?.executionContext ?? null;
-    const environment = thread.environmentId === null
-      ? null
-      : await bb.sdk.environments.get({ environmentId: thread.environmentId }).catch(() => null);
-    const host = environment === null
-      ? null
-      : await bb.sdk.hosts.get({ hostId: environment.hostId }).catch(() => null);
-    result.host = host === null ? null : { id: host.id, name: host.name };
-    if (host !== null) {
-      const providers = await bb.sdk.providers.list({ hostId: host.id }).catch(() => []);
-      result.connection.providerName = providers.find((provider) => provider.id === connection.provider)?.displayName ?? connection.provider;
-    }
-    const [definition, contextDefinition] = await Promise.all([
-      bb.sdk.experimental_modelConnections.get({ id: connection.id }).then(
-        (value) => ({ kind: "found" as const, value }),
-        (cause: unknown) => ({
-          kind: cause instanceof Error && "status" in cause && cause.status === 404
-            ? "missing" as const
-            : "unknown" as const,
-        }),
-      ),
-      frozenContext === null
-        ? { kind: "unscoped" as const }
-        : bb.sdk.experimental_executionContexts.get({ id: frozenContext.id }).then(
-            (value) => ({ kind: "found" as const, value }),
-            (cause: unknown) => ({
-              kind: cause instanceof Error && "status" in cause && cause.status === 404
-                ? "missing" as const
-                : "unknown" as const,
-            }),
-          ),
-    ]);
-    if (definition.kind !== "found") {
-      result.connection.definition = definition.kind;
-      result.state = definition.kind;
-      result.reason = definition.kind === "missing"
+    if (current === null) {
+      const missing = observation.issue?.code === "model_connection_not_found";
+      result.connection.definition = missing ? "missing" : "unknown";
+      result.state = result.connection.definition;
+      result.reason = missing
         ? "The current connection definition was removed. The frozen binding has not been replaced."
         : "The current connection definition could not be verified. No quota was attributed.";
-      return { result, key: definition.kind, qualified: false };
+      return { result, key, qualified: false };
     }
-    const current = definition.value;
     result.connection.definition = current.revoked || connection.revoked
       ? "revoked"
       : !current.enabled || !connection.enabled
         ? "disabled"
         : JSON.stringify(current) === JSON.stringify(connection) ? "active" : "changed";
-    if (contextDefinition.kind === "missing" || contextDefinition.kind === "unknown") {
-      result.state = contextDefinition.kind;
-      result.reason = contextDefinition.kind === "missing"
-        ? "The execution context referenced by the frozen binding was removed. No quota was attributed."
-        : "The current execution context could not be verified. No quota was attributed.";
-      return { result, key: "context-unavailable", qualified: false };
-    }
-    if (contextDefinition.kind === "found") {
-      if (!contextDefinition.value.enabled) {
-        result.state = "disabled";
-        result.reason = "The frozen binding's execution context is currently disabled. Usage is not collected.";
-        return { result, key: "context-disabled", qualified: false };
-      }
-      if (!contextDefinition.value.projectIds.includes(thread.projectId)) {
-        result.reason = "The current execution context does not permit this thread's project. No quota was attributed.";
-        return { result, key: "context-project-unavailable", qualified: false };
-      }
-    }
-    const contextPolicy = contextDefinition.kind === "found" ? {
-      id: contextDefinition.value.id,
-      enabled: contextDefinition.value.enabled,
-      projectIds: contextDefinition.value.projectIds,
-      updatedAt: contextDefinition.value.updatedAt,
-    } : null;
-    const key = JSON.stringify([binding, thread.projectId, thread.providerId, thread.environmentId, environment?.hostId, current, contextPolicy, host?.status]);
     if (result.connection.definition === "revoked" || result.connection.definition === "disabled") {
       result.state = result.connection.definition;
       result.reason = `This model connection is ${result.state}. The frozen binding remains unchanged; usage is not collected.`;
       return { result, key, qualified: false };
     }
-    if (environment === null || host === null) {
-      result.reason = "The thread's actual execution machine could not be verified. No host-default fallback was selected.";
+    if (binding?.executionContext && contextDefinition === null) {
+      result.state = "missing";
+      result.reason = "The execution context referenced by the frozen binding was removed. No quota was attributed.";
       return { result, key, qualified: false };
     }
-    if (thread.providerId !== connection.provider || current.provider !== connection.provider) {
-      result.reason = "The thread provider and frozen/current connection providers do not match. No quota was attributed.";
-      return { result, key, qualified: false };
-    }
-    const authorizesHost = (value: NonNullable<typeof connection>) => value.gateway === null
-      ? value.hostId === host.id
-      : value.gateway.allowedHostIds.includes(host.id);
-    if (!authorizesHost(connection) || !authorizesHost(current)) {
-      result.reason = "The actual execution machine is not authorized by the frozen and current connection definitions.";
+    if (contextDefinition !== null && !contextDefinition.enabled) {
+      result.state = "disabled";
+      result.reason = "The frozen binding's execution context is currently disabled. Usage is not collected.";
       return { result, key, qualified: false };
     }
     if (connection.gateway !== null) {
@@ -151,9 +89,13 @@ export function createThreadUsageReader(bb: BbPluginApi) {
       result.reason = "The frozen native MCP profile does not use the host-default Claude account source. Its quota association is not proven.";
       return { result, key, qualified: false };
     }
-    if (host.status !== "connected") {
-      result.state = "stale";
-      result.reason = "The execution machine is disconnected. Current selected-source usage is unavailable.";
+    if (!observation.available) {
+      result.state = observation.issue?.code === "execution_host_disconnected" ? "stale" : "unknown";
+      result.reason = observation.issue?.message ?? "Current Core execution eligibility could not be verified. No quota was attributed.";
+      return { result, key, qualified: false };
+    }
+    if (host === null || thread.providerId !== connection.provider) {
+      result.reason = "The thread's actual execution machine and frozen provider could not be verified. No fallback was selected.";
       return { result, key, qualified: false };
     }
     return { result, key, qualified: true };
@@ -243,6 +185,10 @@ export function createThreadUsageReader(bb: BbPluginApi) {
       result.usage = null;
     }
     try {
+      if (result.connection !== null) {
+        const providers = await bb.sdk.providers.list({ hostId: selectedHostId }).catch(() => []);
+        result.connection.providerName = providers.find((provider) => provider.id === result.connection?.providerId)?.displayName ?? result.connection.providerId;
+      }
       const changed = await recheck(input.threadId, initial.key);
       if (changed !== null) return changed;
     } catch {

@@ -221,6 +221,19 @@ export function registerExecutionContextCommands(
     .addHelpText("after", CONTEXT_HELP);
 
   context
+    .command("thread-eligibility <thread-id>")
+    .description("Observe current Core execution eligibility without replacing the frozen binding or probing credentials")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (threadId: string, opts: JsonOutputOptions) => {
+        print(
+          opts,
+          await createCliBbSdk(getUrl()).experimental_executionContexts.getThreadEligibility({ threadId }),
+        );
+      }),
+    );
+
+  context
     .command("mcp-inspect")
     .description(
       "Inspect host MCP configuration static validity; authentication is not checked",

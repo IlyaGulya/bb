@@ -12,6 +12,7 @@ import type {
   ModelConnection,
   ProjectContextDefaults,
   ThreadExecutionBinding,
+  ThreadExecutionEligibility,
 } from "@bb/domain";
 import {
   createExecutionContextRequestSchema,
@@ -94,6 +95,12 @@ export const executionContextRoutes = {
       method: "get",
       request: noRequest<IdInput>(),
       response: jsonResponse<ThreadExecutionBinding | null>(),
+    }),
+    getThreadEligibility: defineRoute({
+      path: "/execution-contexts/thread-eligibility/:id",
+      method: "get",
+      request: noRequest<IdInput>(),
+      response: jsonResponse<ThreadExecutionEligibility>(),
     }),
   },
   modelConnections: {

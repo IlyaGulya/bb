@@ -5,6 +5,7 @@ import {
   modelConnectionSchema,
   projectContextDefaultsSchema,
   threadExecutionBindingSchema,
+  threadExecutionEligibilitySchema,
   type CreateExecutionContextRequest,
   type UpdateExecutionContextRequest,
   type CreateModelConnectionRequest,
@@ -17,6 +18,7 @@ import type {
   ModelConnection,
   ProjectContextDefaults,
   ThreadExecutionBinding,
+  ThreadExecutionEligibility,
 } from "@bb/domain";
 import { signalRequestArgs, type CreateSdkAreaArgs } from "./common.js";
 
@@ -39,6 +41,9 @@ export interface ExecutionContextsArea {
   getThreadBinding(args: {
     threadId: string;
   }): Promise<ThreadExecutionBinding | null>;
+  getThreadEligibility(args: {
+    threadId: string;
+  }): Promise<ThreadExecutionEligibility>;
 }
 export interface ModelConnectionsArea {
   list(args?: ContextListArgs): Promise<ModelConnection[]>;
@@ -105,6 +110,15 @@ export function createExecutionContextsArea({
       return threadExecutionBindingSchema.nullable().parse(
         await transport.readJson(
           api["thread-binding"][":id"].$get({
+            param: { id: input.threadId },
+          }),
+        ),
+      );
+    },
+    async getThreadEligibility(input) {
+      return threadExecutionEligibilitySchema.parse(
+        await transport.readJson(
+          api["thread-eligibility"][":id"].$get({
             param: { id: input.threadId },
           }),
         ),

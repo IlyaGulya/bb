@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createFakePluginHost, makeHostResponse } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import type { ModelConnection } from "@get-bb/plugin-sdk/app";
 import plugin from "./server.js";
 import { threadUsageSchema } from "./thread-usage-schema.js";
@@ -82,25 +82,38 @@ function fixture(connection = nativeConnection()) {
     pluginId: "provider-usage",
     sdk: {
       experimental_executionContexts: {
-        getThreadBinding: async ({ threadId }) => state.bound ? ({
-          threadId,
-          createdAt: 20,
-          modelConnection: state.frozen,
-          executionContext: state.nativeMcpConfigDir === null ? null : {
-            nativeMcpProfile: { configDir: state.nativeMcpConfigDir },
-          },
-        }) : null,
-      },
-      experimental_modelConnections: {
-        get: async () => {
-          if (state.missing) throw Object.assign(new Error("Missing"), { status: 404 });
-          if (state.definitionUnavailable) throw new Error("Disconnected");
-          return state.current;
+        getThreadEligibility: async ({ threadId }) => {
+          const executionContext = state.nativeMcpConfigDir === null ? null : {
+            id: "context-owned", name: "Owned context", enabled: true,
+            projectIds: ["project-owned"], instructions: "", skillRoots: [], commandRoots: [],
+            pluginRoots: [], settingsPaths: [], mcpServers: [], hooksPath: null,
+            autoMemory: false, gitIdentity: null, defaultModelConnectionId: null,
+            nativeMcpProfile: { configDir: state.nativeMcpConfigDir }, createdAt: 1, updatedAt: 1,
+          };
+          const binding = state.bound ? {
+            threadId, createdAt: 20, modelConnection: state.frozen, executionContext,
+          } : null;
+          const current = state.missing || state.definitionUnavailable ? null
+            : state.current.id === state.frozen.id ? state.current : state.frozen;
+          const authorizesHost = (value: ModelConnection) => value.gateway === null
+            ? value.hostId === state.hostId : value.gateway.allowedHostIds.includes(state.hostId);
+          const issue = state.missing ? { code: "model_connection_not_found", message: "Missing connection" }
+            : state.definitionUnavailable ? { code: "model_connection_unavailable", message: "Current connection unavailable" }
+            : current?.revoked || state.frozen.revoked ? { code: "model_connection_revoked", message: "Revoked connection" }
+            : !current?.enabled || !state.frozen.enabled ? { code: "model_connection_disabled", message: "Disabled connection" }
+            : !state.connected ? { code: "execution_host_disconnected", message: "Execution host disconnected" }
+            : state.providerId !== state.frozen.provider || current.provider !== state.frozen.provider ||
+              !authorizesHost(state.frozen) || !authorizesHost(current)
+              ? { code: "model_connection_host_unavailable", message: "Execution route does not authorize this connection" } : null;
+          return {
+            thread: { id: threadId, projectId: "project-owned", providerId: state.providerId, environmentId: "environment-owned" },
+            binding, modelConnection: current, executionContext,
+            host: { id: state.hostId, name: "Owned machine", status: state.connected ? "connected" : "disconnected" },
+            available: issue === null, issue,
+            generation: JSON.stringify([binding, current, state.hostId, state.providerId, state.connected, issue]),
+          };
         },
       },
-      threads: { get: async () => ({ environmentId: "environment-owned", providerId: state.providerId }) },
-      environments: { get: async () => ({ id: "environment-owned", hostId: state.hostId }) },
-      hosts: { get: async () => makeHostResponse({ id: state.hostId, name: "Owned machine", status: state.connected ? "connected" : "disconnected" }) },
       providers: { list: async () => [{ id: "claude-code", displayName: "Claude Code" }] },
       plugins: {
         experimental_discoverRpc: async () => [

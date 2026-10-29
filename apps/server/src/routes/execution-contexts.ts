@@ -19,6 +19,7 @@ import {
   deleteConnectionDefinition,
   deleteContextDefinition,
   inspectExecutionContextMcp,
+  observeThreadExecutionEligibility,
   requireExecutionContext,
   requireModelConnection,
   updateExecutionContextDefinition,
@@ -73,6 +74,9 @@ export function registerExecutionContextRoutes(app: Hono, deps: AppDeps): void {
       );
     return context.json(getThreadExecutionBinding(deps.db, threadId));
   });
+  get(contexts.getThreadEligibility, (context) =>
+    context.json(observeThreadExecutionEligibility(deps, context.req.param("id"))),
+  );
   get(connections.list, (context) =>
     context.json(listModelConnections(deps.db)),
   );

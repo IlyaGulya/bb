@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  createFakePluginHost,
-  makeHostResponse,
-  makeThreadResponse,
-} from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import type { ModelConnection } from "@get-bb/plugin-sdk/app";
 import plugin from "./server.js";
 import { threadUsageSchema, type ThreadUsage } from "./thread-usage-schema.js";
@@ -82,39 +78,15 @@ function closingFenceFixture() {
     pluginId: "bb--provider-usage",
     sdk: {
       experimental_executionContexts: {
-        getThreadBinding: async ({ threadId }) => ({
-          threadId,
-          createdAt: 1,
-          executionContext: null,
-          modelConnection: structuredClone(connection),
+        getThreadEligibility: async ({ threadId }) => ({
+          thread: { id: threadId, projectId: PROJECT_ID, providerId: "claude-code", environmentId: route.environmentId },
+          binding: { threadId, createdAt: 1, executionContext: null, modelConnection: structuredClone(connection) },
+          modelConnection: structuredClone(connection), executionContext: null,
+          host: { id: HOST_ID, name: "Closing machine", status: route.hostStatus },
+          available: route.hostStatus === "connected",
+          issue: route.hostStatus === "connected" ? null : { code: "execution_host_disconnected", message: "Execution host disconnected" },
+          generation: JSON.stringify([connection, route.environmentId, route.hostStatus]),
         }),
-      },
-      experimental_modelConnections: {
-        get: async ({ id }) => {
-          if (id !== connection.id) throw new Error("Unrelated connection requested");
-          return structuredClone(connection);
-        },
-      },
-      threads: {
-        get: async ({ threadId }) => makeThreadResponse({
-          id: threadId,
-          projectId: PROJECT_ID,
-          environmentId: route.environmentId,
-          providerId: "claude-code",
-        }),
-      },
-      environments: {
-        get: async ({ environmentId }) => {
-          if (environmentId !== ORIGINAL_ENVIRONMENT_ID && environmentId !== REPLACEMENT_ENVIRONMENT_ID)
-            throw new Error("Unrelated environment requested");
-          return { id: environmentId, projectId: PROJECT_ID, hostId: HOST_ID };
-        },
-      },
-      hosts: {
-        get: async ({ hostId }) => {
-          if (hostId !== HOST_ID) throw new Error("Unrelated host requested");
-          return makeHostResponse({ id: HOST_ID, name: "Closing machine", status: route.hostStatus });
-        },
       },
       providers: {
         list: async () => {

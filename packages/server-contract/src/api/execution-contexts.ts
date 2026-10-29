@@ -109,6 +109,7 @@ export {
   modelConnectionSchema,
   projectContextDefaultsSchema,
   threadExecutionBindingSchema,
+  threadExecutionEligibilitySchema,
 } from "@bb/domain";
 export type {
   ExecutionContext,
@@ -119,4 +120,5 @@ export type {
   ModelConnection,
   ProjectContextDefaults,
   ThreadExecutionBinding,
+  ThreadExecutionEligibility,
 } from "@bb/domain";

@@ -217,6 +217,27 @@ export type ThreadExecutionBinding = z.infer<
   typeof threadExecutionBindingSchema
 >;
 
+export const threadExecutionEligibilitySchema = z.object({
+  thread: z.object({
+    id: idSchema,
+    projectId: idSchema,
+    providerId: idSchema,
+    environmentId: idSchema.nullable(),
+  }).strict(),
+  binding: threadExecutionBindingSchema.nullable(),
+  modelConnection: modelConnectionSchema.nullable(),
+  executionContext: executionContextSchema.nullable(),
+  host: z.object({
+    id: idSchema,
+    name: z.string(),
+    status: z.enum(["connected", "disconnected"]),
+  }).strict().nullable(),
+  available: z.boolean(),
+  issue: z.object({ code: z.string(), message: z.string() }).strict().nullable(),
+  generation: z.string().min(1),
+}).strict();
+export type ThreadExecutionEligibility = z.infer<typeof threadExecutionEligibilitySchema>;
+
 export const MCP_INSPECTION_MAX_FILES = 16;
 export const MCP_INSPECTION_MAX_FILE_BYTES = 1024 * 1024;
 export const MCP_INSPECTION_MAX_SERVERS = 250;
