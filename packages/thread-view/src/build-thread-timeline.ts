@@ -77,6 +77,7 @@ import { buildTimelineErrorDisplay } from "./error-display.js";
 interface ThreadTimelineFromEventsBaseOptions {
   completedTurnDisplay: CompletedTurnDisplay;
   includeDiagnosticOperations: boolean;
+  preservePendingToolActivity?: boolean;
   isLatestPage: boolean;
   providerId?: string;
   providerDisplayName?: string;
@@ -1165,6 +1166,7 @@ export function buildThreadTimelineFromEvents(
   const projectionOptions = {
     acceptedClientRequestContext: args.acceptedClientRequestContext,
     includeDiagnosticOperations: args.options.includeDiagnosticOperations,
+    preservePendingToolActivity: args.options.preservePendingToolActivity,
     providerDisplayName: args.options.providerDisplayName,
     threadStatus: args.options.threadStatus,
     threadName: args.options.threadName,
