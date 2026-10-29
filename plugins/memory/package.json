@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Provider-independent durable memory for agents. We recommend disabling provider-native memory when using this plugin.",
+  "description": "Provider-independent task/context decision lineage and explicit general notes in native Memory storage.",
   "license": "MIT",
   "homepage": "https://github.com/get-bb/bb#readme",
   "bugs": {
@@ -18,6 +18,10 @@
     "dist",
     "server.ts",
     "app.tsx",
+    "memory-kinds.ts",
+    "lineage.ts",
+    "tasks-consumer.ts",
+    "memory-workspace.tsx",
     "skills",
     "README.md"
   ],
@@ -27,7 +31,7 @@
   },
   "bb": {
     "name": "Memory",
-    "description": "Provider-independent durable memory for agents. We recommend disabling provider-native memory when using this plugin.",
+    "description": "Provider-independent task/context decision lineage and explicit general notes in native Memory storage.",
     "branding": {
       "icon": "Brain"
     },

@@ -858,9 +858,13 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Give agents native tools that work like bb's built-in ones",
           "Choose per thread which tools and skills are available",
           "Add instructions to the system prompt when a session starts",
+          "Return a configuration directly or as a promise from bb.agents.configure. Core awaits it before validation; rejected or invalid selections fail closed for that plugin. Memory uses this path to check live task linkage and supply task-only instructions without opening the legacy general-instruction gate for Core-context threads.",
         ],
         apiSymbols: [
           "PluginAgents",
+          "PluginAgents.configure",
+          "PluginAgentConfiguration",
+          "PluginAgentConfigurationContext",
           "PluginAgentToolContext",
           "PluginRowPresentation",
           "PluginRowLabels",

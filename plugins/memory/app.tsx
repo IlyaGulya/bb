@@ -1,9 +1,11 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   definePluginApp,
   useRpc,
   type PluginRpcResult,
 } from "@get-bb/plugin-sdk/app";
+import { MemoryPagination, MemoryWorkspace } from "./memory-workspace.js";
+import type { MemorySelection } from "./lineage.js";
 import type { memoryRpcContract } from "./server.js";
 import { isMemoryKind, MEMORY_KINDS } from "./memory-kinds.js";
 import { Button } from "@/components/ui/button";
@@ -21,10 +23,12 @@ function errorMessage(error: unknown): string {
 
 function MemoryEditor({
   memory,
+  selection,
   onCancel,
   onSaved,
 }: {
   memory: MemoryRecord;
+  selection: MemorySelection;
   onCancel: () => void;
   onSaved: (memory: MemoryRecord) => void;
 }) {
@@ -129,6 +133,7 @@ function MemoryEditor({
             setError(null);
             void rpc
               .call("updateMemory", {
+                ...selection,
                 id: draft.id,
                 expectedVersion: draft.version,
                 summary: draft.summary,
@@ -154,45 +159,63 @@ function MemoryEditor({
   );
 }
 
-function MemorySettings() {
+function GeneralMemories({ selection }: { selection: MemorySelection }) {
   const rpc = useRpc<typeof memoryRpcContract>();
-  const [memories, setMemories] = useState<MemoryRecord[]>([]);
+  const [page, setPage] = useState<PluginRpcResult<(typeof memoryRpcContract)["listMemories"]> | null>(null);
+  const [offset, setOffset] = useState(0);
+  const request = useRef(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    const current = ++request.current;
     setLoading(true);
     setError(null);
     try {
-      setMemories((await rpc.call("listMemories")).memories);
+      const result = await rpc.call("listMemories", { ...selection, offset });
+      if (current !== request.current) return;
+      if (result.memories.length === 0 && result.previousOffset !== null) {
+        setOffset(result.previousOffset);
+        return;
+      }
+      setPage(result);
     } catch (loadError) {
-      setError(errorMessage(loadError));
+      if (current === request.current) setError(errorMessage(loadError));
     } finally {
-      setLoading(false);
+      if (current === request.current) setLoading(false);
     }
-  }, [rpc]);
+  }, [rpc, selection, offset]);
 
   useEffect(() => {
     void load();
+    return () => { request.current += 1; };
   }, [load]);
 
-  if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading memories…</p>;
+  if (loading && page === null) {
+    return <p role="status" className="text-sm text-muted-foreground">Loading memories…</p>;
   }
+  if (page === null) {
+    return <div className="space-y-2"><p role="alert" className="text-sm text-destructive">{error}</p><Button variant="ghost" size="sm" onClick={() => void load()}>Retry memories</Button></div>;
+  }
+  const memories = page.memories;
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-md border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
-        This plugin shares memory across providers. We recommend disabling
-        provider-native memory under Settings → Providers to avoid duplicate or
-        conflicting stores.
-      </div>
+    <div aria-busy={loading} className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        General notes only. Task/context records are excluded from this catalog.
+        Global notes are explicitly shared across projects; project notes stay in the selected project.
+      </p>
+      {loading ? <p role="status" className="text-sm text-muted-foreground">Loading memories…</p> : null}
       {error ? (
+        <div>
         <p className="text-sm text-destructive" role="alert">
           {error}
         </p>
+        <Button variant="ghost" size="sm" disabled={loading || deletingId !== null} onClick={() => void load()}>Retry memories</Button>
+        </div>
       ) : null}
       {memories.length === 0 ? (
         <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
@@ -216,7 +239,7 @@ function MemorySettings() {
                   <tr className="align-top">
                     <td className="min-w-0 px-3 py-3">
                       <div className="truncate font-medium text-foreground">
-                        {memory.pinned ? "📌 " : ""}
+                        {memory.pinned ? "Pinned · " : ""}
                         {memory.name}
                       </div>
                       <div className="mt-1 line-clamp-2 break-words text-muted-foreground">
@@ -233,20 +256,14 @@ function MemorySettings() {
                     </td>
                     <td className="px-3 py-3 text-muted-foreground">
                       <div>{memory.scope}</div>
-                      {memory.projectId ? (
-                        <div
-                          className="mt-1 max-w-36 truncate text-xs"
-                          title={memory.projectId}
-                        >
-                          {memory.projectId}
-                        </div>
-                      ) : null}
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex flex-col items-end gap-1">
                         <Button
                           variant="ghost"
                           size="sm"
+                          aria-label={`Edit ${memory.name}`}
+                          disabled={loading || deletingId !== null}
                           onClick={() =>
                             setEditingId((current) =>
                               current === memory.id ? null : memory.id,
@@ -258,12 +275,12 @@ function MemorySettings() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          disabled={deletingId === memory.id}
+                          aria-label={confirmingId === memory.id ? `Confirm delete ${memory.name}` : `Delete ${memory.name}`}
+                          disabled={loading || deletingId !== null}
                           className="text-destructive hover:text-destructive"
                           onClick={() => {
-                            if (
-                              !window.confirm(`Delete memory “${memory.name}”?`)
-                            ) {
+                            if (confirmingId !== memory.id) {
+                              setConfirmingId(memory.id);
                               return;
                             }
                             setDeletingId(memory.id);
@@ -271,17 +288,13 @@ function MemorySettings() {
                             void rpc
                               .call("deleteMemory", {
                                 id: memory.id,
+                                ...selection,
                                 expectedVersion: memory.version,
                               })
-                              .then(() => {
-                                setMemories((current) =>
-                                  current.filter(
-                                    (entry) => entry.id !== memory.id,
-                                  ),
-                                );
-                                setEditingId((current) =>
-                                  current === memory.id ? null : current,
-                                );
+                              .then(async () => {
+                                setConfirmingId(null);
+                                setEditingId((current) => current === memory.id ? null : current);
+                                await load();
                               })
                               .catch((deleteError: unknown) =>
                                 setError(errorMessage(deleteError)),
@@ -289,8 +302,9 @@ function MemorySettings() {
                               .finally(() => setDeletingId(null));
                           }}
                         >
-                          {deletingId === memory.id ? "Deleting…" : "Delete"}
+                          {deletingId === memory.id ? "Deleting…" : confirmingId === memory.id ? `Confirm delete ${memory.name}` : "Delete"}
                         </Button>
+                        {confirmingId === memory.id ? <Button variant="ghost" size="sm" disabled={deletingId === memory.id} onClick={() => setConfirmingId(null)}>Keep {memory.name}</Button> : null}
                       </div>
                     </td>
                   </tr>
@@ -298,14 +312,14 @@ function MemorySettings() {
                     <tr>
                       <td colSpan={3} className="bg-muted/10 p-3">
                         <MemoryEditor
+                          selection={selection}
                           memory={memory}
                           onCancel={() => setEditingId(null)}
                           onSaved={(updated) => {
-                            setMemories((current) =>
-                              current.map((entry) =>
-                                entry.id === updated.id ? updated : entry,
-                              ),
-                            );
+                            setPage((current) => current ? {
+                              ...current,
+                              memories: current.memories.map((entry) => entry.id === updated.id ? updated : entry),
+                            } : current);
                             setEditingId(null);
                           }}
                         />
@@ -318,16 +332,59 @@ function MemorySettings() {
           </table>
         </div>
       )}
+      <MemoryPagination previousOffset={page.previousOffset} nextOffset={page.nextOffset} disabled={loading || editingId !== null || deletingId !== null} onPage={(next) => { setConfirmingId(null); setOffset(next); }} />
     </div>
   );
 }
 
+function MemorySettings() {
+  return <MemoryWorkspace general={GeneralMemories} />;
+}
+
+function MemoryThreadPanel({ threadId }: { threadId: string }) {
+  return <MemoryWorkspace general={GeneralMemories} threadId={threadId} />;
+}
+
+function MemoryPage({ subPath }: { subPath: string }) {
+  const rpc = useRpc<typeof memoryRpcContract>();
+  const taskKey = /^\/?task\/([^/]+)\/?$/.exec(subPath)?.[1] ?? null;
+  type Resolved = PluginRpcResult<(typeof memoryRpcContract)["resolveMemoryTask"]>;
+  const [page, setPage] = useState<{ key: string; result: Resolved } | { key: string; error: string } | null>(null);
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    if (!taskKey) return;
+    let active = true;
+    setPage(null);
+    void rpc.call("resolveMemoryTask", { taskKey }).then((result) => {
+      if (active) setPage({ key: taskKey, result });
+    }).catch((failure: unknown) => { if (active) setPage({ key: taskKey, error: errorMessage(failure) }); });
+    return () => { active = false; };
+  }, [rpc, taskKey, retry]);
+  if (!taskKey) return subPath && subPath !== "/" ? <p role="alert" className="text-sm text-destructive">Invalid task memory address. Open Memory and select a named task.</p> : <MemorySettings />;
+  if (!page || page.key !== taskKey) return <p role="status" className="text-sm text-muted-foreground">Resolving the selected task's project…</p>;
+  if ("error" in page) return <div className="space-y-3"><p role="alert" className="text-sm text-destructive">{page.error}</p><Button variant="outline" onClick={() => setRetry((value) => value + 1)}>Retry task memory</Button></div>;
+  return <MemoryWorkspace key={page.result.task.id} general={GeneralMemories} initialTask={page.result} />;
+}
+
 export default definePluginApp((app) => {
+  app.slots.navPanel({
+    id: "memory",
+    title: "Memory",
+    icon: "Brain",
+    path: "memory",
+    component: MemoryPage,
+  });
+  app.slots.threadPanelAction({
+    id: "task-memory",
+    title: "Task memory",
+    icon: "Brain",
+    component: MemoryThreadPanel,
+  });
   app.slots.settingsSection({
     id: "memory",
     title: "Memory",
     description:
-      "Review and manage provider-independent global and project memories.",
+      "Review explicit task/context lineage or general provider-independent memories.",
     component: MemorySettings,
   });
 });

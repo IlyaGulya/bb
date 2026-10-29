@@ -1,11 +1,14 @@
 import { defineConfig } from "vitest/config";
+import { sharedWorkerProjects } from "../../vitest.shared.js";
 
 export default defineConfig({
   resolve: { tsconfigPaths: true },
   test: {
     silent: "passed-only",
-    name: "bb-plugin-memory",
-    include: ["**/*.test.ts", "**/*.test.tsx"],
-    exclude: ["node_modules/**"],
+    projects: sharedWorkerProjects({
+      pkgDir: import.meta.dirname,
+      name: "bb-plugin-memory",
+      include: ["**/*.test.ts", "**/*.test.tsx"],
+    }),
   },
 });

@@ -208,6 +208,67 @@ describe("plugin bb.sdk bind gate", () => {
     await rm(workDir, { recursive: true, force: true });
   });
 
+  it.each(["disable", "reload"] as const)("withdraws an earlier generation while a later provider is pending during %s", async (retirement) => {
+    const earlierId = "aaa-memory-scope";
+    const laterId = "zzz-later-scope";
+    for (const id of [earlierId, laterId]) {
+      const entry = await service.installPath(await writePlugin(workDir, {
+        name: `bb-plugin-${id}`, serverSource: "export default function plugin() {}",
+      }));
+      expect(entry.status, entry.statusDetail ?? "").toBe("running");
+    }
+    const earlier = requireApi(service, earlierId);
+    earlier.agents.registerTool({ name: "retired_scope_lookup", description: "Bound task evidence", parameters: z.object({}), execute: () => "Owned task evidence" });
+    earlier.agents.configure(() => ({ tools: ["retired_scope_lookup"], skills: ["bound-memory"], instructions: "Earlier bound task summary" }));
+    let release!: () => void;
+    let entered!: () => void;
+    let blocked = false;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const reached = new Promise<void>((resolve) => { entered = resolve; });
+    const later = requireApi(service, laterId);
+    later.agents.registerTool({ name: "live_scope_lookup", description: "Live later evidence", parameters: z.object({}), execute: () => "Later owned evidence" });
+    later.agents.configure(async () => {
+      if (blocked) { entered(); await gate; }
+      return { tools: ["live_scope_lookup"], skills: ["live-memory"], instructions: "Live later summary" };
+    });
+    const resolve = () => service.resolveAgentConfiguration({
+      context: agentConfigurationContext("thr_generation_review"),
+      skillIdsByPlugin: new Map([[earlierId, ["bound-memory", "replacement-memory"]], [laterId, ["live-memory"]]]),
+    });
+    const control = await resolve();
+    expect(control.tools.map((tool) => tool.tool.name)).toEqual(["retired_scope_lookup", "live_scope_lookup"]);
+    expect([...(control.selectedSkillIdsByPlugin.get(earlierId) ?? [])]).toEqual(["bound-memory"]);
+    expect(control.dynamicInstructions).toEqual([
+      { pluginId: earlierId, text: "Earlier bound task summary" }, { pluginId: laterId, text: "Live later summary" },
+    ]);
+    blocked = true;
+    const pending = resolve();
+    try {
+      await reached;
+      if (retirement === "disable") {
+        await service.setEnabled(earlierId, false);
+      } else {
+        await service.reload(earlierId);
+        requireApi(service, earlierId).agents.configure(() => ({ tools: [], skills: ["replacement-memory"], instructions: "Replacement generation summary" }));
+      }
+      release();
+      const result = await pending;
+      expect(result.tools.map((tool) => tool.tool.name)).toEqual(["live_scope_lookup"]);
+      expect([...(result.selectedSkillIdsByPlugin.get(earlierId) ?? [])]).toEqual([]);
+      expect([...(result.selectedSkillIdsByPlugin.get(laterId) ?? [])]).toEqual(["live-memory"]);
+      expect(result.dynamicInstructions).toEqual([{ pluginId: laterId, text: "Live later summary" }]);
+      const next = await resolve();
+      expect(next.tools.map((tool) => tool.tool.name)).toEqual(["live_scope_lookup"]);
+      expect([...(next.selectedSkillIdsByPlugin.get(earlierId) ?? [])]).toEqual(retirement === "reload" ? ["replacement-memory"] : []);
+      expect(next.dynamicInstructions).toEqual(retirement === "reload" ? [
+        { pluginId: earlierId, text: "Replacement generation summary" }, { pluginId: laterId, text: "Live later summary" },
+      ] : [{ pluginId: laterId, text: "Live later summary" }]);
+    } finally {
+      release();
+      await pending;
+    }
+  });
+
   it("throws a descriptive error before bindSdk and resolves after", async () => {
     const rootDir = await writePlugin(workDir, {
       name: "bb-plugin-gate",

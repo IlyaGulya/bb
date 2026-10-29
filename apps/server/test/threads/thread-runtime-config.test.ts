@@ -8,12 +8,14 @@ import {
   saveModelConnection,
   setExperiments,
   setThreadExecutionOverride,
+  saveExecutionContext,
 } from "@bb/db";
 import {
   defaultExperiments,
   encodeClientTurnRequestIdNumber,
   normalizeProviderNativeRoots,
   modelConnectionSchema,
+  executionContextSchema,
 } from "@bb/domain";
 import { validatePluginProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
 import type { PluginAgentConfigurationContext } from "@get-bb/plugin-sdk";
@@ -21,7 +23,7 @@ import { buildPluginProviderRegistration } from "../../src/services/providers/pl
 import type { DiscoveredSkill } from "@bb/host-daemon-contract";
 import { setPluginAgentContributions } from "../../src/services/plugins/plugin-agent-contributions.js";
 import { readSkillTreeManifest } from "../../src/services/skills/injected-skills.js";
-import type { PluginAgentToolContribution } from "../../src/services/plugins/plugin-service.js";
+import type { PluginAgentToolContribution, PluginService } from "../../src/services/plugins/plugin-service.js";
 import { resolveThreadRuntimeCommandConfig } from "../../src/services/threads/thread-runtime-config.js";
 import {
   buildExecutionOptions,
@@ -52,6 +54,7 @@ import {
 import type { TestAppHarness } from "../helpers/test-app.js";
 import { textInput } from "../helpers/prompt-input.js";
 import { withTestHarness } from "../helpers/test-app.js";
+import { createTaskMemoryFixture } from "../helpers/task-memory.js";
 
 interface WriteRuntimeSkillArgs {
   name: string;
@@ -1705,8 +1708,20 @@ describe("thread runtime config", () => {
           projectId: string;
         }) => string | null;
       }>;
+      memory?: Awaited<ReturnType<typeof createTaskMemoryFixture>>["memory"];
     }): void {
+      const memory = args.memory;
       setPluginAgentContributions({
+        ...(memory ? {
+          async resolveAgentConfiguration({ context }: Parameters<PluginService["resolveAgentConfiguration"]>[0]) {
+            const configured = await memory.harness.behavior.resolveAgentConfiguration({ ...context, pluginMetadata: {} });
+            return {
+              tools: args.tools ?? [],
+              selectedSkillIdsByPlugin: new Map<string, ReadonlySet<string>>(),
+              dynamicInstructions: configured.instructions === null ? [] : [{ pluginId: "memory", text: configured.instructions }],
+            };
+          },
+        } : {}),
         listSkillRootContributions: () => [],
         listAgentTools: () => args.tools ?? [],
         listInstructionContributions: () => args.instructions ?? [],
@@ -1721,6 +1736,67 @@ describe("thread runtime config", () => {
         }),
       });
     }
+
+    it("keeps explicitly bound task evidence available to Core-context runtimes without importing general instructions", async () => {
+      await withTestHarness(async (harness) => {
+        const { host } = seedHostSession(harness.deps);
+        const workspacePath = path.join(harness.config.dataDir, "owned-task-memory");
+        await mkdir(workspacePath, { recursive: true });
+        const { project } = seedProjectWithSource(harness.deps, { hostId: host.id, path: workspacePath });
+        const environment = seedEnvironment(harness.deps, { hostId: host.id, projectId: project.id, path: workspacePath });
+        const context = saveExecutionContext(harness.db, executionContextSchema.parse({
+          id: "owned-memory-context", name: "Owned isolated context", projectIds: [project.id],
+          instructions: "Preserve this context's instruction isolation.", autoMemory: false,
+          createdAt: 1, updatedAt: 1,
+        }));
+        const fixture = await createTaskMemoryFixture(harness, project.id);
+        try {
+          const fact = await fixture.remember("sqlite-choice", "Owned decision: keep the existing SQLite store.");
+          const generalMarker = "Unrelated general preference: use terse prose.";
+          const unrelatedMarker = "Unrelated plugin instruction outside this context.";
+          const general = await fixture.memory.harness.runCli([
+            "add", "--general", "--scope", "global", "--name", "general-preference",
+            "--summary", generalMarker, "--details", "An explicitly shared general preference.",
+            "--reason", "Owned positive control",
+          ]);
+          expect(general.exitCode, general.stderr).toBe(0);
+          const provider = fixture.memory.harness.registrations.instructionProvider;
+          if (!provider) throw new Error("Memory has no instruction contribution");
+          stubContributions({ memory: fixture.memory, instructions: [
+            { pluginId: "memory", provider },
+            { pluginId: "unrelated", provider: () => unrelatedMarker },
+          ] });
+          const unscoped = seedThread(harness.deps, { projectId: project.id, environmentId: environment.id, providerId: "acp-omp" });
+          await fixture.bind(unscoped.id);
+          const positive = await resolveThreadRuntimeCommandConfig(harness.deps, { thread: unscoped, environment, model: "synthetic-model" });
+          expect(positive.instructions).toContain(fact.summary);
+          expect(positive.instructions).toContain(generalMarker);
+          expect(positive.instructions).toContain(unrelatedMarker);
+          const isolated = [];
+          for (const providerId of ["acp-omp", "claude-code"]) {
+            const thread = seedThread(harness.deps, { projectId: project.id, environmentId: environment.id, providerId });
+            persistThreadExecutionBinding(harness.db, thread.id, resolveThreadExecutionBinding(harness.db, {
+              projectId: project.id, hostId: host.id, provider: providerId, executionContextId: context.id,
+            }));
+            await fixture.bind(thread.id);
+            const runtime = await resolveThreadRuntimeCommandConfig(harness.deps, { thread, environment, model: "synthetic-model" });
+            expect(runtime.instructions).not.toContain(generalMarker);
+            expect(runtime.instructions).not.toContain(unrelatedMarker);
+            isolated.push(runtime.instructions);
+          }
+          const unbound = seedThread(harness.deps, { projectId: project.id, environmentId: environment.id, providerId: "claude-code" });
+          persistThreadExecutionBinding(harness.db, unbound.id, resolveThreadExecutionBinding(harness.db, {
+            projectId: project.id, hostId: host.id, provider: "claude-code", executionContextId: context.id,
+          }));
+          const withoutBinding = await resolveThreadRuntimeCommandConfig(harness.deps, { thread: unbound, environment, model: "synthetic-model" });
+          expect(withoutBinding.instructions).not.toContain(fact.summary);
+          expect(withoutBinding.instructions).not.toContain(generalMarker);
+          for (const instructions of isolated) expect(instructions).toContain(fact.summary);
+        } finally {
+          await fixture.dispose();
+        }
+      });
+    });
 
     it("appends attributed plugin instructions after tool snippets and before data-dir instructions", async () => {
       await withTestHarness(async (harness) => {
