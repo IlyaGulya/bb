@@ -86,6 +86,7 @@ Raw logs may contain sensitive prompts and tool results; keep them outside Git.
 - `bb execution-context`
 - `bb execution-context list`
 - `bb execution-context show`
+- `bb execution-context thread-eligibility`
 - `bb execution-context mcp-inspect`
 - `bb execution-context create`
 - `bb execution-context update`

@@ -1,4 +1,61 @@
 import type { UsageMeasurement } from "./usage-source-contract.js";
+import type { ProviderUsage } from "./usage-schema.js";
+import type { ThreadUsage } from "./thread-usage-schema.js";
+
+export const THREAD_USAGE_MAX_AGE_MS = 60_000;
+
+export function withThreadUsageFreshness(value: ThreadUsage, now: number): ThreadUsage {
+  if (value.usage?.status !== "ok") return value;
+  if (value.observedAt === null || !Number.isFinite(value.observedAt) ||
+    value.observedAt < 0 || !Number.isFinite(now) || value.observedAt > now) {
+    return {
+      ...value,
+      state: "unknown",
+      observedAt: null,
+      usage: null,
+      reason: "The source did not provide a valid observation time. Quota and plan cannot be attributed as current.",
+    };
+  }
+  if (value.state !== "stale" && now - value.observedAt >= THREAD_USAGE_MAX_AGE_MS) {
+    return {
+      ...value,
+      state: "stale",
+      reason: "The last selected-source observation reached its one-minute freshness deadline; current quota is unknown.",
+    };
+  }
+  return value;
+}
+
+export function normalizedUsage(
+  usage: UsageMeasurement["usage"] | undefined,
+): ProviderUsage | null {
+  if (usage === undefined) return null;
+  switch (usage.status) {
+    case "ok":
+      return {
+        status: "ok",
+        accountEmail: usage.accountEmail || null,
+        planLabel: usage.planLabel || null,
+        windows: usage.windows.map((window) => ({
+          label: window.label,
+          usedPercent: window.usedPercent,
+          resetsAt: window.resetsAt || null,
+          cost: window.cost ?? null,
+        })),
+      };
+    case "not_installed":
+      return { status: "not_installed" };
+    case "unauthenticated":
+      return { status: "unauthenticated" };
+    case "expired":
+      return { status: "expired" };
+    case "error":
+      return {
+        status: "error",
+        message: usage.message || "Usage could not be collected.",
+      };
+  }
+}
 
 export function normalizeUsageMeasurement(
   measurement: UsageMeasurement,

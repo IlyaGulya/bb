@@ -56,7 +56,12 @@ import {
 import { BbHttpError, sdk } from "@/lib/sdk";
 import { getPluginBoundSdk } from "@/lib/plugin-bound-sdk";
 import { useSystemProviders } from "@/hooks/queries/system-queries";
-import { useSystemRealtimeSubscription } from "@/hooks/useRealtimeSubscription";
+import {
+  useEnvironmentListRealtimeSubscription,
+  useHostListRealtimeSubscription,
+  useSystemRealtimeSubscription,
+  useThreadDetailRealtimeSubscription,
+} from "@/hooks/useRealtimeSubscription";
 import { useSystemEnvironmentProviders } from "@/hooks/queries/environment-provider-queries";
 import { requestComposerFocus } from "@/lib/composer-focus-requests";
 import { setComposerTextEffect } from "@/lib/composer-text-effects";
@@ -251,6 +256,10 @@ export function useRealtime(
   handler: (payload: unknown) => void,
 ): void {
   const pluginId = usePluginId();
+  const { threadId } = useRouteState();
+  useThreadDetailRealtimeSubscription(threadId, { enabled: channel === "thread:changed" });
+  useEnvironmentListRealtimeSubscription({ enabled: channel === "environment:changed" });
+  useHostListRealtimeSubscription({ enabled: channel === "host:changed" });
   useSystemRealtimeSubscription({ enabled: channel === "system:changed" });
   const handlerRef = useRef(handler);
   useEffect(() => {
@@ -265,11 +274,14 @@ export function useRealtime(
     [pluginId, channel],
   );
   useEffect(() => {
-    if (channel !== "system:changed") return;
-    return wsManager.onChanged(message => {
-      if (message.entity === "system") handlerRef.current(message);
+    if (channel !== "system:changed" && channel !== "thread:changed" &&
+      channel !== "environment:changed" && channel !== "host:changed") return;
+    return wsManager.onChanged((message) => {
+      if (`${message.entity}:changed` !== channel) return;
+      if (message.entity === "thread" && message.id !== threadId) return;
+      handlerRef.current(message);
     });
-  }, [channel]);
+  }, [channel, threadId]);
 }
 
 export function useRealtimeConnectionState(): PluginRealtimeConnectionState {

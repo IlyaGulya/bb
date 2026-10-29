@@ -1,12 +1,12 @@
 import {
   normalizeUsageMeasurement,
+  normalizedUsage,
   selectUsageResources,
 } from "./usage-normalization.js";
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
-import { z } from "zod/mini";
+import { z } from "zod";
 import {
   usageSnapshotSchema,
-  type ProviderUsage,
   type UsageMachine,
   type UsageProvider,
   type UsageSnapshot,
@@ -20,6 +20,8 @@ import {
   usageSourceRpcContract,
   type UsageResource as Resource,
 } from "./usage-source-contract.js";
+import { createThreadUsageReader } from "./thread-usage.js";
+import { threadUsageInputSchema, threadUsageSchema } from "./thread-usage-schema.js";
 
 interface SourceResult {
   pluginId: string;
@@ -41,6 +43,12 @@ export const providerUsageRpcContract = defineRpcContract({
     }),
     output: usageSnapshotSchema,
   },
+  getThreadUsage: {
+    input: threadUsageInputSchema,
+    output: threadUsageSchema,
+    experimental_description:
+      "Read usage for a thread's frozen effective model connection. Only proven source associations may be measured; unknown or unsupported connections never fall back to host or pooled accounts. Does not change execution routing.",
+  },
 });
 
 export type UsageRequest = z.infer<
@@ -57,37 +65,6 @@ function normalizedTint(
     return null;
   }
   return { light: tint.light.trim(), dark: tint.dark.trim() };
-}
-
-function normalizedUsage(
-  usage: Resource["usage"] | undefined,
-): ProviderUsage | null {
-  if (usage === undefined) return null;
-  switch (usage.status) {
-    case "ok":
-      return {
-        status: "ok",
-        accountEmail: usage.accountEmail || null,
-        planLabel: usage.planLabel || null,
-        windows: usage.windows.map((window) => ({
-          label: window.label,
-          usedPercent: window.usedPercent,
-          resetsAt: window.resetsAt || null,
-          cost: window.cost ?? null,
-        })),
-      };
-    case "not_installed":
-      return { status: "not_installed" };
-    case "unauthenticated":
-      return { status: "unauthenticated" };
-    case "expired":
-      return { status: "expired" };
-    case "error":
-      return {
-        status: "error",
-        message: usage.message || "Usage could not be collected.",
-      };
-  }
 }
 
 type Provider = Awaited<
@@ -372,7 +349,11 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
       );
     return { machines };
   };
-  bb.rpc.register(providerUsageRpcContract, { getUsage: readUsage });
+  bb.rpc.register(
+    providerUsageRpcContract,
+    { getUsage: readUsage, getThreadUsage: createThreadUsageReader(bb) },
+    { experimental_discoverable: true },
+  );
   const markDirty = () => {
     for (const value of measurements.values()) value.loadedAt = 0;
   };

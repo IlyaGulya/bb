@@ -1,12 +1,14 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   deleteExecutionContext,
   deleteModelConnection,
   getExecutionContext,
+  getEnvironment,
   getHost,
   getModelConnection,
   getProject,
   getProjectContextDefaults,
+  getThreadExecutionBinding,
   isSqliteForeignKeyConstraint,
   saveExecutionContext,
   saveModelConnection,
@@ -25,6 +27,7 @@ import {
   type ModelConnection,
   type ProjectContextDefaults,
   type ResolvedThreadExecutionBinding,
+  type ThreadExecutionEligibility,
 } from "@bb/domain";
 import type {
   ParsedCreateExecutionContextRequest,
@@ -35,6 +38,7 @@ import type {
 import { ApiError } from "../errors.js";
 import type { WorkSessionDeps } from "../types.js";
 import { callHostOnlineRpc } from "./hosts/online-rpc.js";
+import { getNonDestroyedHostWithStatus, requirePublicThread } from "./lib/entity-lookup.js";
 
 export async function inspectExecutionContextMcp(
   deps: WorkSessionDeps,
@@ -318,6 +322,55 @@ export function assertThreadExecutionBindingAvailable(
         `Execution context ${current.name} is disabled; enable it before continuing this thread`,
       );
   }
+}
+
+export function observeThreadExecutionEligibility(
+  deps: Pick<WorkSessionDeps, "db" | "hub">,
+  threadId: string,
+): ThreadExecutionEligibility {
+  return deps.db.transaction(() => {
+    const thread = requirePublicThread(deps.db, threadId);
+    const binding = getThreadExecutionBinding(deps.db, threadId);
+    const environment = thread.environmentId === null
+      ? null : getEnvironment(deps.db, thread.environmentId);
+    const host = environment === null
+      ? null : getNonDestroyedHostWithStatus(deps, environment.hostId);
+    const modelConnection = binding?.modelConnection === null || binding === null
+      ? null : getModelConnection(deps.db, binding.modelConnection.id);
+    const executionContext = binding?.executionContext === null || binding === null
+      ? null : getExecutionContext(deps.db, binding.executionContext.id);
+    let issue: ThreadExecutionEligibility["issue"] = null;
+    try {
+      requireProject(deps.db, thread.projectId);
+      assertThreadExecutionBindingAvailable(deps.db, binding, environment?.hostId, thread.providerId);
+      if (executionContext !== null) requireEnabledContext(executionContext, thread.projectId);
+      if (environment === null || environment.projectId !== thread.projectId || environment.status !== "ready")
+        throw new ApiError(409, "thread_environment_unavailable", "The thread's current execution environment is unavailable.");
+      if (host === null || host.lifecycle.phase !== "active")
+        throw new ApiError(409, "execution_host_unavailable", "The thread's current execution host is unavailable.");
+      if (host.status !== "connected")
+        throw new ApiError(409, "execution_host_disconnected", "The execution host has no active connected daemon session.");
+    } catch (cause) {
+      if (!(cause instanceof ApiError)) throw cause;
+      issue = { code: cause.body.code, message: cause.body.message };
+    }
+    const routing = {
+      id: thread.id,
+      projectId: thread.projectId,
+      providerId: thread.providerId,
+      environmentId: thread.environmentId,
+    };
+    const currentHost = host === null ? null : { id: host.id, name: host.name, status: host.status };
+    const generation = createHash("sha256").update(JSON.stringify([
+      routing, binding, modelConnection, executionContext,
+      environment === null ? null : [environment.id, environment.projectId, environment.hostId, environment.path, environment.status],
+      currentHost, host?.lifecycle.phase, environment === null ? null : deps.hub.getDaemonSessionIdForHost(environment.hostId), issue,
+    ])).digest("hex");
+    return {
+      thread: routing, binding, modelConnection, executionContext,
+      host: currentHost, available: issue === null, issue, generation,
+    };
+  });
 }
 
 function validateContextDefinition(

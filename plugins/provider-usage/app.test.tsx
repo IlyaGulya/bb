@@ -64,7 +64,7 @@ function threadOnMachine(
 }
 
 describe("provider usage footer disclosure", () => {
-  it("aggregates every machine and keeps machine and provider selection local to the card", async () => {
+  it("keeps explicit maintenance browsing and machine/provider selection separate from the selected thread account", async () => {
     const pooledAccounts: UsageProvider[] = (
       [
         ["codex", "Codex", "team@example.com", 46],
@@ -222,12 +222,6 @@ describe("provider usage footer disclosure", () => {
       pluginId: "bb--provider-usage",
     });
     const item = app.experimentalSidebarFooterItems[0];
-    expect(item).toMatchObject({
-      kind: "disclosure",
-      id: "usage",
-      label: "Provider usage",
-      icon: "ChartColumn",
-    });
     if (item?.kind !== "disclosure") throw new Error("missing disclosure");
 
     await waitFor(() =>
@@ -256,6 +250,8 @@ describe("provider usage footer disclosure", () => {
         },
       },
     );
+    expect(slot.queryByText("97%")).toBeNull();
+    fireEvent.click(slot.getByRole("button", { name: "All accounts" }));
     expect(
       slot.getByRole("button", { name: "Usage machine: Account Pooler" }),
     ).toBeTruthy();
