@@ -77,6 +77,13 @@ internal `Error.cause`, not as serialized metadata or transcript content. Public
 failure messages remain generic. Daemon protocol 245 carries the enriched
 startup diagnostic.
 
+At the host RPC logging boundary, recognized startup failures are projected to
+the command type and allowlisted error code instead of passing the error object
+to Pino. This applies in every environment: Pino's cause-aware serializer can
+traverse even non-enumerable causes. The original error and cause are not
+mutated; known stage details remain in the existing startup diagnostic. Other
+error logging policy is unchanged.
+
 ## Project preparation and transfer API
 
 The core SDK exposes these methods under `BbSdk.projects`. Each input also
