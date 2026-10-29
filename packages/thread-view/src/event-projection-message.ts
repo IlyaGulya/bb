@@ -519,6 +519,7 @@ export type EventProjectionMessage =
 
 export interface BuildEventProjectionMessagesOptions {
   includeDiagnosticOperations?: boolean;
+  preservePendingToolActivity?: boolean;
   threadStatus?: Thread["status"];
   threadName: string;
   providerDisplayName?: string;

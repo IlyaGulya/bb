@@ -9,10 +9,6 @@ const INLINE_CHARS = 16 * 1024;
 function historyTurnId(importId: string, ordinal: number): string {
   return `native:${importId}:record:${ordinal}`;
 }
-function historyItemId(importId: string, ordinal: number, id: string): string {
-  const prefix = `native:${importId}:`;
-  return id.startsWith(`${prefix}tool:`) ? `${prefix}${ordinal}:${id.slice(prefix.length)}` : id;
-}
 export function nativeHistoryEvents(args: {
   importId: string; threadId: string; sessionId: string; ordinal: number;
   sequence: number; record: NativeHistoryRecord; fallbackTimestamp: number; recordSha256: string;
@@ -81,7 +77,6 @@ export function decodeNativeHistoryRows(db: DbConnection, rows: readonly StoredE
   if (!rows.some(isHistoryCandidate)) return emptyHistory;
   const decoded = new Map<string, ThreadEventWithMeta>();
   const owners = new Map<string, z.infer<typeof historyOwnerSchema> | null>();
-  const parents = new Map<string, string>();
   for (const row of rows) {
     if (!isHistoryCandidate(row)) continue;
     let owner = owners.get(row.threadId);
@@ -108,12 +103,8 @@ export function decodeNativeHistoryRows(db: DbConnection, rows: readonly StoredE
       if (!item || row.itemId !== item.id || row.itemKind !== item.type || (item.parentToolCallId ?? null) !== row.parentToolCallId) continue;
       if (!item.id.startsWith(`${prefix}${provenance.ordinal}:`) && !(item.type === "toolCall" && item.id.startsWith(`${prefix}tool:`))) continue;
     } else if (legacy || row.itemId !== null || row.parentToolCallId !== null || provenance.eventCount < 3) continue;
-    const id = item === undefined ? null : historyItemId(owner.importId, provenance.ordinal, item.id);
-    if (item && row.type === "item/started") parents.set(item.id, id!);
-    const parent = row.parentToolCallId === null ? null : parents.get(row.parentToolCallId) ?? row.parentToolCallId;
-    const data = item === undefined ? payload : { ...payload, item: { ...item, id: id!, ...(parent === null ? {} : { parentToolCallId: parent }) } };
     decoded.set(row.id, {
-      event: parseStoredThreadEvent({ type: row.type, data, threadId: row.threadId, providerThreadId: row.providerThreadId, scope: turnScope(turnId) }),
+      event: parseStoredThreadEvent({ type: row.type, data: payload, threadId: row.threadId, providerThreadId: row.providerThreadId, scope: turnScope(turnId) }),
       meta: { id: row.id, seq: row.sequence, createdAt: row.createdAt },
     });
   }
@@ -129,12 +120,12 @@ export function buildTimelineWithNativeHistory(
   const frames = new Map<string, { first: ThreadEventWithMeta; last: ThreadEventWithMeta; items: ThreadEventWithMeta[] }>();
   for (const entry of args.events) {
     if (!native.has(entry.meta.id) || entry.event.scope.kind !== "turn") continue;
-    const turnId = entry.event.scope.turnId;
+    const turnId = `native-history:${entry.event.threadId}`;
     let frame = frames.get(turnId);
     if (!frame) { frame = { first: entry, last: entry, items: [] }; frames.set(turnId, frame); }
     if (entry.meta.seq < frame.first.meta.seq) frame.first = entry;
     if (entry.meta.seq > frame.last.meta.seq) frame.last = entry;
-    if (entry.event.type === "item/started" || entry.event.type === "item/completed") frame.items.push(entry);
+    if (entry.event.type === "item/started" || entry.event.type === "item/completed") frame.items.push({ ...entry, event: { ...entry.event, scope: turnScope(turnId) } });
   }
   const events: ThreadEventWithMeta[] = [];
   for (const [turnId, frame] of frames) {
@@ -145,7 +136,7 @@ export function buildTimelineWithNativeHistory(
     });
     events.push(boundary("turn/started", frame.first), ...frame.items, boundary("turn/completed", frame.last));
   }
-  const historical = buildThreadTimelineFromEvents({ ...args, events, headStateEvents: [], contextWindowEvents: [], acceptedClientRequestContext: { acceptedClientRequestEvents: [], rejectedClientRequestEvents: [] }, options: { ...args.options, includeNestedRows: true } });
+  const historical = buildThreadTimelineFromEvents({ ...args, events, headStateEvents: [], contextWindowEvents: [], acceptedClientRequestContext: { acceptedClientRequestEvents: [], rejectedClientRequestEvents: [] }, options: { ...args.options, includeNestedRows: true, preservePendingToolActivity: true } });
   const rows = mapTimelineRowTree(historical.rows.flatMap((row) => row.kind === "turn" ? row.children ?? [] : [row]), (row) => ({ ...row, turnId: null }));
   return { ...timeline, rows: [...timeline.rows, ...rows].sort((left, right) => left.sourceSeqStart - right.sourceSeqStart || left.sourceSeqEnd - right.sourceSeqEnd) };
 }

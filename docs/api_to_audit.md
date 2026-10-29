@@ -83,6 +83,16 @@ and versioned provenance. These are Core display identities, not newly allocated
 native sessions or provider executions. Raw native IDs, records/state, ordering,
 original bytes and artifact proofs remain unchanged; tool argument inheritance
 uses the existing stored call identity across record frames.
+Stored item IDs and parent references remain the logical call identities across
+record frames. Public event reads return those same identities independently of
+ascending/descending order, page contents or singleton selection. Rendering
+correlates selected native items in one closed read-only scope per Core archive,
+so a later result completes its original call instead of producing a second card.
+This view scope does not alter stored record scopes, identities or sequences.
+Historical snapshots preserve pending tool observations when no result is selected;
+the current thread being idle is not evidence of a historical interruption. This
+explicit projection policy leaves ordinary idle-tool finalization and strict
+validation unchanged and does not report historical tools as current execution.
 
 Existing archives with the older thread-scoped item events are repaired on read,
 not reset or reimported. Timeline, conversation outline/message and public event

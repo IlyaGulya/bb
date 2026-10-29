@@ -200,9 +200,8 @@ function finalizePendingMessages(args: FinalizeProjectionMessagesArgs): void {
 
   flushPendingToolActivityOutput(args.state);
   flushPendingFileEditOutput(args.state);
-  interruptPendingToolActivity(args.state, {
-    completedAt: args.state.threadInterruptedAt,
-  });
+  if (args.options?.preservePendingToolActivity) flushActiveToolCell(args.state);
+  else interruptPendingToolActivity(args.state, { completedAt: args.state.threadInterruptedAt });
 
   for (const fileEdits of args.state.fileEditsByCallId.values()) {
     for (const fileEdit of fileEdits) {

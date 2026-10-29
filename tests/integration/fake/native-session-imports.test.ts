@@ -5,18 +5,21 @@ import { join } from "node:path";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { createProject, events, getLatestThreadSequence, getThread, insertEvents, noopNotifier, upsertHost } from "@bb/db";
+import { createProject, events, getLatestThreadSequence, getThread, insertEvents, noopNotifier, upsertHost, type DbConnection } from "@bb/db";
 import { createMigratedConnection } from "@bb/db/testing";
-import { threadEventItemSchema, type JsonValue } from "@bb/domain";
+import { threadEventItemSchema, turnScope, type JsonValue, type ThreadEventRow } from "@bb/domain";
 import type { NativeEngine, NativeRead } from "@bb/host-daemon-contract";
 import { threadTimelineResponseSchema, timelineRowChildren, type TimelineRow } from "@bb/server-contract";
 import { discoverNativeSessions, readNativeSession } from "../../../apps/host-daemon/src/command-handlers/native-sessions.js";
 import { NativeSessionImports } from "../../../apps/server/src/services/threads/native-session-imports.js";
 import { buildThreadTimelineWithProfile } from "../../../apps/server/src/services/threads/timeline.js";
+import { findThreadEvent, listThreadEventRows } from "../../../apps/server/src/services/threads/thread-data.js";
+import { createNativeArchiveFixture, disposeNativeArchiveFixtures, nativeHeader } from "./helpers/native-session-import.js";
 
 const checksum = (bytes: string | Buffer) => createHash("sha256").update(bytes).digest("hex");
 const fixtures: { dispose(): Promise<void> }[] = [];
 afterEach(async () => { for (const fixture of fixtures.splice(0)) await fixture.dispose(); });
+afterEach(disposeNativeArchiveFixtures);
 
 function savedRecords(engine: NativeEngine, output: string): JsonValue[] {
   const timestamp = "2026-01-02T03:04:05.000Z";
@@ -208,5 +211,112 @@ describe("durable native session imports", () => {
     expect(Buffer.from(await (await imports.download(ready.id, "native")).arrayBuffer())).toEqual(Buffer.from(saved.original));
     insertEvents(saved.db, noopNotifier, [{ threadId: thread.id, sequence: getLatestThreadSequence(saved.db, { threadId: thread.id }) + 1, scope: { kind: "thread" }, type: "item/completed", providerThreadId: saved.selection.source.sessionId, itemId: "unrelated-invalid-item", itemKind: "agentMessage", parentToolCallId: null, data: JSON.stringify({ item: { type: "agentMessage", id: "unrelated-invalid-item", text: "Not imported history" } }) }]);
     expect(read).toThrow("item/completed requires turn scope but received thread scope");
+  });
+});
+
+describe("native historical tool correlation", () => {
+  function seedLegacy(db: DbConnection, threadId: string): void {
+    const payloadSchema = z.object({ providerThreadId: z.string(), item: threadEventItemSchema, nativeImportRecord: z.object({ importId: z.string(), ordinal: z.number(), sha256: z.string(), eventCount: z.number() }) });
+    const rows = db.select().from(events).where(eq(events.threadId, threadId)).all();
+    for (const row of rows) {
+      if (row.type !== "item/started" && row.type !== "item/completed") continue;
+      const payload = payloadSchema.parse(JSON.parse(row.data));
+      db.update(events).set({ scopeKind: "thread", turnId: null, data: JSON.stringify({ ...payload, nativeImportRecord: { ...payload.nativeImportRecord, eventCount: payload.nativeImportRecord.eventCount - 2 } }) }).where(eq(events.id, row.id)).run();
+    }
+    db.delete(events).where(and(eq(events.threadId, threadId), inArray(events.type, ["turn/started", "turn/completed"]))).run();
+  }
+  function readHistory(db: DbConnection, threadId: string, maxSeq = getLatestThreadSequence(db, { threadId })) {
+    const thread = getThread(db, threadId);
+    if (!thread) throw new Error("Imported Core thread is missing.");
+    return threadTimelineResponseSchema.parse(buildThreadTimelineWithProfile(db, thread, {
+      completedTurnDisplay: "collapse", deferContent: false, eventBudget: 1_000_000,
+      includeClearedContextHistory: false, includeDiagnosticOperations: false, includeNestedRows: true,
+      maxInlineOutputChars: 32_000, maxSeq, page: { kind: "latest", segmentLimit: 100 },
+    }).response);
+  }
+  function flatten(rows: readonly TimelineRow[]): TimelineRow[] {
+    return rows.flatMap((row) => [row, ...flatten(timelineRowChildren(row) ?? [])]);
+  }
+
+  it.each([
+    { engine: "omp", legacy: false }, { engine: "omp", legacy: true },
+    { engine: "claude", legacy: false }, { engine: "claude", legacy: true },
+    { engine: "codex", legacy: false }, { engine: "codex", legacy: true },
+  ] as const)("correlates successful $engine calls across records without an interrupted duplicate, legacy=$legacy", async ({ engine, legacy }) => {
+    const saved = await fixture(engine);
+    const imports = saved.service();
+    const ready = await imports.settle((await imports.start(saved.selection)).id);
+    expect(ready.status).toBe("ready");
+    if (ready.threadId === null) throw new Error("Archive has no Core thread.");
+    if (legacy) seedLegacy(saved.db, ready.threadId);
+    const before = saved.db.select().from(events).where(eq(events.threadId, ready.threadId)).orderBy(events.sequence).all();
+    const callId = before.find((row) => row.type === "item/started" && row.itemKind === "toolCall")?.itemId;
+    if (!callId) throw new Error("Native call fixture was not projected.");
+    const timeline = readHistory(saved.db, ready.threadId);
+    const work = flatten(timeline.rows).filter((row) => row.kind === "work");
+    expect(work.filter((row) => "callId" in row && row.callId === callId)).toEqual([
+      expect.objectContaining({ workKind: "tool", toolName: "bash", status: "completed", output: "Saved tool result", toolArgs: { command: "never-execute-imported-command" } }),
+    ]);
+    expect(work.filter((row) => row.status === "interrupted")).toEqual([]);
+    expect(saved.db.select().from(events).where(eq(events.threadId, ready.threadId)).orderBy(events.sequence).all()).toEqual(before);
+  });
+
+  it("preserves an unresolved historical snapshot without changing ordinary idle tool finalization", async () => {
+    const saved = await fixture("omp");
+    const imports = saved.service();
+    const ready = await imports.settle((await imports.start(saved.selection)).id);
+    if (ready.threadId === null) throw new Error("Archive has no Core thread.");
+    const records = await imports.records({ importId: ready.id, after: 0, limit: 100, query: "" });
+    const callRecord = records.records.find((record) => record.nativeId === "assistant-a");
+    if (!callRecord) throw new Error("Native call record is missing.");
+    const callId = saved.db.select().from(events).where(and(eq(events.threadId, ready.threadId), eq(events.type, "item/started"), eq(events.itemKind, "toolCall"))).get()?.itemId;
+    if (!callId) throw new Error("Native call fixture was not projected.");
+    const snapshot = readHistory(saved.db, ready.threadId, callRecord.sourceSeqEnd - 1);
+    expect(flatten(snapshot.rows).filter((row) => row.kind === "work" && "callId" in row && row.callId === callId)).toEqual([
+      expect.objectContaining({ status: "pending", output: "" }),
+    ]);
+    expect(snapshot.activeThinking).toBeNull();
+    expect(snapshot.activeBackgroundCommands).toEqual([]);
+    const sequence = getLatestThreadSequence(saved.db, { threadId: ready.threadId });
+    insertEvents(saved.db, noopNotifier, [
+      { threadId: ready.threadId, sequence: sequence + 1, scope: turnScope("ordinary-control-turn"), type: "turn/started", providerThreadId: saved.selection.source.sessionId, itemId: null, itemKind: null, parentToolCallId: null, data: "{}" },
+      { threadId: ready.threadId, sequence: sequence + 2, scope: turnScope("ordinary-control-turn"), type: "item/started", providerThreadId: saved.selection.source.sessionId, itemId: "ordinary-control-call", itemKind: "toolCall", parentToolCallId: null, data: JSON.stringify({ item: { type: "toolCall", id: "ordinary-control-call", tool: "bash", status: "pending" } }) },
+      { threadId: ready.threadId, sequence: sequence + 3, scope: turnScope("ordinary-control-turn"), type: "turn/completed", providerThreadId: saved.selection.source.sessionId, itemId: null, itemKind: null, parentToolCallId: null, data: JSON.stringify({ status: "completed" }) },
+    ]);
+    expect(flatten(readHistory(saved.db, ready.threadId).rows).filter((row) => row.kind === "work" && "callId" in row && row.callId === "ordinary-control-call")).toEqual([
+      expect.objectContaining({ status: "interrupted" }),
+    ]);
+  });
+
+  it.each([false, true])("keeps parent and item identities stable across ordered, paged and singleton event reads, legacy=%s", async (legacy) => {
+    const saved = await createNativeArchiveFixture({ records: (id, cwd): JsonValue[] => [
+      nativeHeader("omp", id, cwd),
+      { type: "message", id: "parent-start", message: { role: "assistant", content: [{ type: "toolCall", id: "parent", name: "bash", arguments: { command: "never-execute-parent" } }] } },
+      { type: "message", id: "child-start", parent_tool_use_id: "parent", message: { role: "assistant", content: [{ type: "toolCall", id: "child", name: "bash", arguments: { command: "never-execute-child" } }] } },
+      { type: "message", id: "child-result", parent_tool_use_id: "parent", message: { role: "toolResult", toolCallId: "child", toolName: "bash", content: [{ type: "text", text: "Child result" }] } },
+      { type: "message", id: "parent-result", message: { role: "toolResult", toolCallId: "parent", toolName: "bash", content: [{ type: "text", text: "Parent result" }] } },
+    ] });
+    const ready = await saved.imports.settle((await saved.imports.start(saved.selection)).id);
+    if (ready.threadId === null) throw new Error("Archive has no Core thread.");
+    if (legacy) seedLegacy(saved.db, ready.threadId);
+    const before = saved.db.select().from(events).where(eq(events.threadId, ready.threadId)).orderBy(events.sequence).all();
+    const parent = before.find((row) => row.type === "item/started" && row.parentToolCallId === null);
+    const child = before.find((row) => row.type === "item/started" && row.parentToolCallId === parent?.itemId);
+    if (!parent?.itemId || !child?.itemId) throw new Error("Parented native call fixture is missing.");
+    function identity(row: ThreadEventRow | null | undefined) {
+      if (!row || (row.type !== "item/started" && row.type !== "item/completed")) throw new Error("Expected a native item event.");
+      return { itemId: row.data.item.id, parentId: row.data.item.parentToolCallId ?? null, scope: row.scope };
+    }
+    const ascending = listThreadEventRows(saved.db, { threadId: ready.threadId, order: "asc", types: ["item/started", "item/completed"] });
+    const descending = listThreadEventRows(saved.db, { threadId: ready.threadId, order: "desc", types: ["item/started", "item/completed"] });
+    const paged = listThreadEventRows(saved.db, { threadId: ready.threadId, afterSeq: child.sequence - 1, beforeSeq: child.sequence + 1, limit: 1, order: "asc", types: ["item/started"] });
+    const singleton = findThreadEvent(saved.db, { threadId: ready.threadId, afterSeq: child.sequence - 1, type: "item/started" });
+    const expected = identity(ascending.find((row) => row.id === child.id));
+    expect(expected).toMatchObject({ itemId: child.itemId, parentId: parent.itemId });
+    expect(identity(ascending.find((row) => row.id === parent.id)).itemId).toBe(parent.itemId);
+    expect(identity(descending.find((row) => row.id === child.id))).toEqual(expected);
+    expect(identity(paged[0])).toEqual(expected);
+    expect(identity(singleton)).toEqual(expected);
+    expect(saved.db.select().from(events).where(eq(events.threadId, ready.threadId)).orderBy(events.sequence).all()).toEqual(before);
   });
 });

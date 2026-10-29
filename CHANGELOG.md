@@ -75,6 +75,10 @@
   legacy thread-scoped import events. Emit valid closed historical display frames
   for new records and adapt proven owned legacy rows read-only, without relaxing
   normal validation, resetting archives, rewriting native bytes or starting a writer.
+- Correlate imported tool starts/results across native records without invented
+  interruption cards. Keep stored item/parent identities stable across paginated,
+  descending and singleton reads, and preserve unresolved historical snapshots
+  without changing ordinary tool finalization or starting native execution.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact
