@@ -10,7 +10,7 @@ import { initializePrivateProductAnalytics } from "../../src/services/system/pro
 import { observeAnalyticsTurn } from "../../src/services/system/product-analytics-turns.js";
 import { internalAuthHeaders } from "../helpers/commands.js";
 import { consumerReport, consumerSdk, withAnalyticsConsumer } from "../helpers/product-analytics-consumer.js";
-import { seedThread, seedThreadRuntimeState } from "../helpers/seed.js";
+import { seedThread, seedThreadIdentity, seedThreadRuntimeState } from "../helpers/seed.js";
 
 describe("analytics native explicit smoke mode", () => {
   it("keeps a smoke request and its native turn out of production across collector restart", async () => {
@@ -46,7 +46,7 @@ describe("analytics queued native restart provenance", () => {
       const scenarios = (["production", "smoke"] as const).map((mode) => {
         const thread = seedThread(harness.deps, { projectId: work.id, environmentId: environment.id, status: "active" });
         const providerThreadId = `owned-queued-${mode}-provider`;
-        seedThreadRuntimeState(harness.deps, { threadId: thread.id, environmentId: environment.id, providerThreadId });
+        seedThreadIdentity(harness.deps, { threadId: thread.id, environmentId: environment.id, providerThreadId });
         return { mode, thread, providerThreadId, privatePrompt: `owned queued ${mode} prompt excluded from analytics` };
       });
       for (const { mode, thread, privatePrompt } of scenarios) {
