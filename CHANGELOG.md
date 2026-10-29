@@ -117,6 +117,9 @@
   literal HTML, use sanitized assistant HTML, and keep visible line/block
   boundaries in action prefill, restored panels and server verification. Reject
   fabricated joined phrases while retaining the original raw-source hash.
+- Retain original startup exceptions as internal, non-enumerable causes and
+  record the last known coordinator stage in safe startup diagnostics without
+  exposing raw exception fields or changing generic public failure messages.
 - Keep bounded startup cleanup ownership through expected bridge exit and persist
   unverified-stop blockers across reopen. Confirm owned cleanup before
   acknowledging failed prepared-rewind disposal, and refuse new work through
