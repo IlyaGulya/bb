@@ -77,7 +77,7 @@ export async function withArtifactActionPanel(
       message: {
         id: "synthetic-source-message",
         threadId: "thr_work_source",
-        role: "assistant",
+        role: source.role,
         text: options.text,
         sourceSeqEnd: 11,
         experimental_messageSeq: 7,

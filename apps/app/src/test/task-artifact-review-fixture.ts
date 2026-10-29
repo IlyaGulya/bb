@@ -41,7 +41,7 @@ function executionContext(id: string, name: string, projectIds: string[]): Execu
   };
 }
 
-type ThreadFact = { projectId: string; contextId: string; text: string };
+type ThreadFact = { projectId: string; contextId: string; role: "user" | "assistant"; text: string };
 
 export async function createTaskArtifactReviewFixture() {
   const directory = await mkdtemp(join(tmpdir(), "bb-task-artifact-review-"));
@@ -50,12 +50,12 @@ export async function createTaskArtifactReviewFixture() {
     ["context_personal", executionContext("context_personal", "Personal", ["proj_personal", "proj_shared"])],
   ]);
   const threads = new Map<string, ThreadFact>([
-    ["thr_work_source", { projectId: "proj_work", contextId: "context_work", text: REVIEW_SOURCE }],
-    ["thr_work_reader", { projectId: "proj_work", contextId: "context_work", text: REVIEW_SOURCE }],
-    ["thr_personal_reader", { projectId: "proj_personal", contextId: "context_personal", text: REVIEW_SOURCE }],
-    ["thr_shared_work_source", { projectId: "proj_shared", contextId: "context_work", text: REVIEW_SOURCE }],
-    ["thr_shared_work_reader", { projectId: "proj_shared", contextId: "context_work", text: REVIEW_SOURCE }],
-    ["thr_shared_personal_reader", { projectId: "proj_shared", contextId: "context_personal", text: REVIEW_SOURCE }],
+    ["thr_work_source", { projectId: "proj_work", contextId: "context_work", role: "assistant", text: REVIEW_SOURCE }],
+    ["thr_work_reader", { projectId: "proj_work", contextId: "context_work", role: "assistant", text: REVIEW_SOURCE }],
+    ["thr_personal_reader", { projectId: "proj_personal", contextId: "context_personal", role: "assistant", text: REVIEW_SOURCE }],
+    ["thr_shared_work_source", { projectId: "proj_shared", contextId: "context_work", role: "assistant", text: REVIEW_SOURCE }],
+    ["thr_shared_work_reader", { projectId: "proj_shared", contextId: "context_work", role: "assistant", text: REVIEW_SOURCE }],
+    ["thr_shared_personal_reader", { projectId: "proj_shared", contextId: "context_personal", role: "assistant", text: REVIEW_SOURCE }],
   ]);
   const fact = (threadId: string) => {
     const value = threads.get(threadId);
@@ -74,7 +74,7 @@ export async function createTaskArtifactReviewFixture() {
         get: ({ threadId }) => makeThreadResponse({ id: threadId, projectId: fact(threadId).projectId, title: "Synthetic source decision", environmentId: null }),
         message: ({ threadId, seq }) => {
           if (seq !== 7) throw new Error("Unknown synthetic message anchor");
-          return { message: { messageSeq: 7, sourceSeqStart: 7, sourceSeqEnd: 11, role: "assistant", text: fact(threadId).text }, before: [], after: [] };
+          return { message: { messageSeq: 7, sourceSeqStart: 7, sourceSeqEnd: 11, role: fact(threadId).role, text: fact(threadId).text }, before: [], after: [] };
         },
       },
       experimental_executionContexts: {
