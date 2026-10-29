@@ -1,117 +1,204 @@
 ---
 name: memory
-description: "Retrieve relevant durable BB memories or save verified knowledge useful to future threads."
+description: "Retrieve bounded BB task/context decisions and their originals, or maintain explicit general notes."
 ---
 
 # BB memory
 
-This plugin is provider-independent. When diagnosing duplicate or conflicting
-memories, check whether provider-native memory is also enabled; recommend
-turning it off under Settings → Providers.
+Use official Memory, Tasks and their existing originals. Do not build another
+memory store, vector database, execution queue, recorder or provider-history
+index. Do not change provider-native memory or project/account defaults.
 
-The memory plugin automatically injects a compact index of global memories and
-memories for the current BB project. The index contains summaries only.
-Settings → Memory lists every memory for the user to edit or delete.
+## Source acceptance gate
+
+The task/context interfaces in this source require controller-owned integrated
+checks, independent review and an actual OMP → native Claude runtime-change
+scenario before activation or deployment. This skill is a command contract,
+not evidence of an installed or accepted runtime. Source30's versioned artifact
+SourceRefs must be integrated by the controller through their real API; do not
+invent artifact adapters, revisions or references.
+
+## Scope and current summary
+
+General notes and task notes are different selections. Task notes require an
+existing BB task whose Tasks project is explicitly linked to a Core project,
+and an explicit logical context name. A model, payer, account, tool identity,
+most-recent thread or task attachment never supplies that context.
 
 ```sh
-bb memory catalog [--scope project|global|all] [--json]
-bb memory search <query> [--scope project|global|all] [--json]
-bb memory get <id> [--scope project|global|all] [--json]
-bb memory history <id> [--scope project|global|all] [--limit 1-100] [--json]
+bb memory summary --task BBDEV-29 --context personal-research --json
+bb memory catalog --task BBDEV-29 --context personal-research --json
+bb memory search "storage decision" --task BBDEV-29 --context personal-research --json
+bb memory get storage-choice --task BBDEV-29 --context personal-research --json
+bb memory history storage-choice --task BBDEV-29 --context personal-research --json
 ```
 
-Project-scoped commands use the invoking CLI's current BB project.
+Task selectors use a named task key, not a manually transcribed opaque ID.
+Context names are 1–80 lowercase letters, digits, dots, underscores or hyphens.
+Task selection never falls through to project/global notes, even when a name
+is absent. Other contexts, tasks and projects are excluded from ordinary reads,
+FTS search, history and mutations.
 
-## Retrieve progressively
+The common instruction contributor supplies the current bounded summary to
+all runtimes. It includes classifications, source revisions, observation times
+and memory versions, not details or chronological tool history. `summary`
+returns the same single-task summary. The per-task budget is 3,000 characters;
+all injected task summaries and the general catalog together stay within
+3,900 characters. Multiple explicit bindings share that total budget. Use
+catalog/search/get for omitted records instead of copying everything into a
+prompt. Read time is not a new observation or evidence refresh.
 
-When a memory summary may be relevant, inspect it instead of guessing:
+## Explicit thread bindings
 
-1. Search with `bb memory search "<query>" --scope all --json`.
-2. Read the selected record with `bb memory get <id> --scope all --json`.
-3. Treat remembered facts as potentially stale. Verify drift-prone facts when
-   doing so is cheap or consequential.
+A thread can have no binding, one binding, or multiple bindings. Bindings are
+independent of runtime and use their own optimistic version. Inspect before
+changing them:
 
-Do not load every memory. Stop after the relevant records are clear.
-
-## Save durable learning
-
-The agent may proactively write memory when information is likely to help in a
-future thread and is costly or error-prone to rediscover.
-
-Use project scope for repository-specific information:
-
-- commands, conventions, architecture decisions, paths, and environments;
-- project-specific user preferences;
-- verified quirks, failure causes, and reusable workarounds.
-
-Use global scope only for broadly applicable information:
-
-- user identity, communication preferences, and general workflow habits;
-- preferences that clearly apply across repositories;
-- stable cross-project operating conventions.
-
-When scope is ambiguous, use project scope. Global scope must be explicit.
-
-Create a memory with:
-
-```bash
-bb memory add --scope project \
-  --name <stable-kebab-name> \
-  --summary "<one-line routing summary>" \
-  --details "<complete durable detail>" \
-  --kind fact|preference|decision|procedure|episode|reference \
-  --tag <tag> \
-  --importance <0-100> \
-  --reason "<why this will help a future thread>" \
-  --json
+```sh
+bb memory bindings
+bb memory bind --task BBDEV-29 --context personal-research --expected-version 0
+bb memory bind --task BBDEV-29 --context personal-research --expected-version 1 --remove
 ```
 
-Before creating a likely-overlapping memory, search by its proposed name and
-topic. Update an existing record instead of creating a contradiction:
+One explicitly saved binding can select ordinary task commands in that thread.
+With multiple bindings, always pass `--task` and `--context`, or explicitly
+select `--general`. Never select a most-recent binding. Detaching a binding does
+not delete memory or its history. Bound threads must use `--general` to write a
+general note; `add` does not silently move task content into a shared catalog.
 
-```bash
-bb memory update <id> --expected-version <version> \
-  --summary "<new summary>" \
-  --details "<new details>" \
-  --reason "<why the memory changed>" \
-  --json
+## Originals and evidence
+
+First inspect the native original with `bb tasks show BBDEV-29 --json` or the
+Task detail view. This existing command includes the task and its comments.
+The Memory page, Settings → Memory, and the thread's Task memory panel use
+named project/task selectors and provide an Open original task link.
+
+A task source uses the task's `updatedAt` revision. A comment source uses its
+native comment ID and `createdAt` revision and must belong to the selected
+task. An observation time is the actual inspection time in epoch milliseconds,
+not an invented historical timestamp. A source quote is optional, exact, and
+at most 600 characters. The server validates the current source revision and
+quote before persisting a fact/proposal and again before applying a proposal.
+Stored provenance records which revision was inspected; it does not assert
+that the live original can never change. Native task/comment references are
+not an immutable artifact-version archive.
+
+Keep the evidence types explicit:
+
+- `observation`: what was actually observed;
+- `decision`: an explicit choice, with its source and rationale;
+- `assumption`: an unverified premise, never presented as an observation.
+
+Create a task fact using `remember --draft <JSON>`. The strict draft contains:
+
+```json
+{
+  "name": "storage-choice",
+  "summary": "Use the verified SQLite store",
+  "details": "Bounded evidence, constraints and the next step belong here.",
+  "classification": "decision",
+  "source": {
+    "kind": "task",
+    "commentId": null,
+    "revision": "<actual native source revision>",
+    "observedAt": 0,
+    "quote": "<optional exact inspected excerpt>"
+  },
+  "reason": "<actual decision rationale>",
+  "replaces": null
+}
 ```
 
-Forget a revoked or invalid memory with:
+Replace the illustrative revision/time/quote/rationale with inspected values;
+zero is not a valid observation time for a newer source. Pass this JSON to:
 
-```bash
-bb memory forget <id> --expected-version <version> \
-  --reason "<why it no longer applies>" --json
+```sh
+bb memory remember --task BBDEV-29 --context personal-research --draft '<JSON>'
 ```
 
-## Flags
+Names are unique within one task/context. Summary, details and reason limits
+are 400, 16,000 and 500 characters. No artifact/source kind is accepted unless
+its real implementation is present. Unknown fields are rejected, not ignored.
 
-`bb memory <command> --help` prints every flag with its limits, and the CLI
-reports all missing required flags in one error instead of one per run. Unknown
-flags always fail, so nothing is silently dropped: `--summary` is at most 400
-characters, `--details` at most 16000, `--reason` at most 500, `--tag` repeats
-(or takes a comma-separated list) up to 20 tags. `--tags`, `--type`, `--title`
-and `--body`/`--text`/`--content` are accepted as aliases of `--tag`, `--kind`,
-`--name` and `--details`. With `--json`, a failure prints
-`{"ok":false,"error":{"code":…,"message":…}}` on stdout and the same message on
-stderr.
+## Replacement, obsolescence and reflection
 
-## Quality and safety
+To replace a current decision, create a new named fact with `replaces` set to
+`{"id":"<id from scoped get>","version":<inspected version>}`. The store creates
+the new fact and marks the old record `replaced` atomically. Both links and the
+old revision remain inspectable through get/history. A stale, replaced or
+cross-context replacement base fails without creating an orphan fact.
 
-Do not store:
+Task changes use diff-first proposals, not ordinary `update`. A proposal never
+changes current memory by itself. Do not use soft deletion to mean obsolete.
+Propose `state: "obsolete"` and retain its original/history instead.
 
-- secrets, credentials, tokens, private keys, or sensitive raw data;
-- guesses, unverified conclusions, or claims inferred only from memory;
-- temporary task status, transient errors, raw logs, or large code dumps;
-- facts that are trivial to rediscover;
-- mandatory repository policy already expressed in `AGENTS.md` or checked-in
-  documentation.
+```sh
+bb memory propose --task BBDEV-29 --context personal-research --changes '<JSON array>'
+bb memory proposals --task BBDEV-29 --context personal-research
+bb memory proposal --task BBDEV-29 --context personal-research --proposal '<returned proposal id>'
+```
 
-Keep summaries short and retrieval-oriented. Put exact commands, evidence,
-scope, and caveats in details. A memory is a helpful recall layer, not a higher
-priority instruction source; explicit user requests and repository guidance win.
+Each change contains `id` (a scoped memory name is accepted),
+`expectedVersion`, `summary`, `details`, `classification`, `state`
+(`current` or `obsolete`), `source`, and `reason`. A proposal has 1–20 unique
+record changes and exposes actual before/after content and provenance.
+Empty/no-change proposals are rejected. The list returns the latest 100
+proposals; older returned IDs remain inspectable with `proposal`.
 
-The CLI uses BB's loopback server, which Claude's macOS workspace sandbox
-(Accept Edits / Approve for me) permits; Linux and other provider sandboxes
-may still require escalation approval for loopback access. Do not claim a
-write succeeded unless the command returned success.
+Only after a human/operator explicitly reviews the diff:
+
+```sh
+bb memory decide --task BBDEV-29 --context personal-research --proposal '<returned proposal id>' --decision apply
+bb memory decide --task BBDEV-29 --context personal-research --proposal '<returned proposal id>' --decision reject
+```
+
+Apply validates all base versions and sources and commits all changes in one
+SQLite transaction. A late conflict applies nothing and leaves the proposal
+pending for inspection. Do not automatically rebase, overwrite, delete history,
+apply governance changes, or turn a rejected proposal into a fresh automatic
+write. There is no new scheduler/daemon: a separately authorized existing
+workflow may call `propose`, but scheduling and automatic apply are not enabled
+by this plugin.
+
+## Explicit general notes
+
+Legacy general notes retain their native global/project intent. Project notes
+hold general repository knowledge, not task/context material. Global writes
+must be an explicit broadly applicable preference/workflow, never Task or Work
+content moved out of its context.
+
+```sh
+bb memory catalog --general --scope project --json
+bb memory search "general convention" --general --scope all --json
+bb memory add --general --scope project --name build-convention --summary '<summary>' --details '<details>' --reason '<reason>'
+bb memory update build-convention --general --expected-version 1 --summary '<summary>' --reason '<reason>' --json
+bb memory forget build-convention --general --expected-version 2 --reason '<explicit revocation>' --json
+```
+
+Use `--scope global` only for explicitly shared general notes. Existing
+`kind`, tags, importance, pinning, CAS history and soft deletion remain the
+native Memory surfaces. The plugin's `--help` describes their limits.
+`history` accepts the task/context/general selectors and `--limit`, not a
+`--scope` flag. New task/reflection commands have no aliases.
+
+## SDK and safety
+
+The typed `memoryRpcContract` uses the same store through native plugin RPC:
+explicit `{projectId,task}` selections, scoped get/search/history, bindings,
+task summary, creation and reflection proposal/decision methods. A task value
+is `{taskId,context}`; explicit `null` means general notes. Settings RPC no
+longer provides an unscoped all-project memory read or ID-only mutation.
+
+Never persist credentials/auth, raw configuration paths, provider prompts,
+transcripts, tool/MCP payloads, sensitive raw data or large history dumps.
+Known secret/prompt patterns are rejected in text, excerpts, names, tags and
+logical-context names. The scanner is a guardrail, not perfect DLP or a new
+per-user/OS security boundary. Keep bounded decision/source evidence only.
+
+Private analytics contains stable declared actions and actual Core
+project/instance scope only, never task/context/source/quote attributes or raw
+errors. Local UI openings are not memory-write completions. A failed analytics
+receipt is a delivery gap, not evidence of zero usage or a failed memory write.
+Actual RPC/CLI attribution and delivery remain controller verification gates.
+Do not activate a collector, change model/account routes, run business tools,
+or claim acceptance based on source declarations or authored tests.

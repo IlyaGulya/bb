@@ -18,6 +18,9 @@
     "dist",
     "server.ts",
     "app.tsx",
+    "memory-kinds.ts",
+    "lineage.ts",
+    "memory-workspace.tsx",
     "skills",
     "README.md"
   ],

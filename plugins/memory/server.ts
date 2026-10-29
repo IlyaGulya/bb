@@ -8,6 +8,13 @@ import {
 } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { isMemoryKind, MEMORY_KINDS, type MemoryKind } from "./memory-kinds.js";
+import { tasksRpcContract } from "../tasks/shared/contract.js";
+import {
+  bindingStateSchema, lineageSchema, memorySelectionSchema,
+  reflectionChangeSchema, reflectionProposalSchema, taskMemoryDraftSchema,
+  taskScopeSchema, type MemoryLineage, type MemorySelection,
+  type ReflectionChange, type ReflectionProposal, type TaskScope,
+} from "./lineage.js";
 
 const CATALOG_MAX_CHARS = 3_900;
 const DEFAULT_RESULT_LIMIT = 20;
@@ -23,6 +30,8 @@ interface MemoryRecord {
   id: string;
   scope: MemoryScope;
   projectId: string | null;
+  task: TaskScope | null;
+  lineage: MemoryLineage | null;
   name: string;
   summary: string;
   details: string;
@@ -43,6 +52,8 @@ const memoryRecordSchema: z.ZodType<MemoryRecord> = z
     id: z.string(),
     scope: z.enum(["global", "project"]),
     projectId: z.string().nullable(),
+    task: taskScopeSchema.nullable(),
+    lineage: lineageSchema.nullable(),
     name: z.string(),
     summary: z.string(),
     details: z.string(),
@@ -61,6 +72,7 @@ const memoryRecordSchema: z.ZodType<MemoryRecord> = z
 const memoryUpdateInputSchema = z
   .object({
     id: z.string(),
+    selection: memorySelectionSchema,
     expectedVersion: z.number().int().positive(),
     summary: z.string(),
     details: z.string(),
@@ -73,8 +85,76 @@ const memoryUpdateInputSchema = z
 
 export const memoryRpcContract = defineRpcContract({
   listMemories: {
-    input: z.null(),
+    input: memorySelectionSchema,
     output: z.object({ memories: z.array(memoryRecordSchema) }).strict(),
+  },
+  listMemoryProjects: {
+    input: z.null(),
+    output: z.object({ projects: z.array(z.object({ id: z.string(), name: z.string() }).strict()) }).strict(),
+  },
+  listMemoryTasks: {
+    input: z.object({ projectId: z.string().startsWith("proj_"), search: z.string().max(200) }).strict(),
+    output: z.object({ tasks: z.array(z.object({ id: z.string(), key: z.string(), title: z.string(), revision: z.string() }).strict()) }).strict(),
+  },
+  resolveMemoryTask: {
+    input: z.object({ taskKey: z.string().min(1).max(80) }).strict(),
+    output: z.object({ projectId: z.string().startsWith("proj_"), task: z.object({
+      id: z.string(), key: z.string(), title: z.string(), revision: z.string(),
+    }).strict() }).strict(),
+  },
+  listMemorySources: {
+    input: memorySelectionSchema,
+    output: z.object({ taskKey: z.string(), sources: z.array(z.object({
+      kind: z.enum(["task", "comment"]), commentId: z.string().nullable(), revision: z.string(), label: z.string(),
+    }).strict()) }).strict(),
+  },
+  threadMemoryState: {
+    input: z.object({ threadId: z.string().startsWith("thr_") }).strict(),
+    output: z.object({ projectId: z.string(), bindings: bindingStateSchema }).strict(),
+  },
+  searchMemories: {
+    input: z.object({ selection: memorySelectionSchema, query: z.string().min(1).max(200) }).strict(),
+    output: z.object({ memories: z.array(memoryRecordSchema) }).strict(),
+  },
+  getMemory: {
+    input: z.object({ selection: memorySelectionSchema, name: z.string() }).strict(),
+    output: z.object({ memory: memoryRecordSchema.nullable() }).strict(),
+  },
+  memoryHistory: {
+    input: z.object({ selection: memorySelectionSchema, name: z.string() }).strict(),
+    output: z.object({ history: z.array(z.object({ version: z.number(), action: z.string(), snapshot: memoryRecordSchema, createdAt: z.number() }).strict()) }).strict(),
+  },
+  taskSummary: {
+    input: memorySelectionSchema,
+    output: z.object({ summary: z.string(), generatedAt: z.number() }).strict(),
+  },
+  createTaskMemory: {
+    input: z.object({ selection: memorySelectionSchema, draft: taskMemoryDraftSchema }).strict(),
+    output: z.object({ memory: memoryRecordSchema }).strict(),
+  },
+  getTaskBindings: {
+    input: z.object({ projectId: z.string().startsWith("proj_"), threadId: z.string().startsWith("thr_") }).strict(),
+    output: bindingStateSchema,
+  },
+  setTaskBindings: {
+    input: z.object({ projectId: z.string().startsWith("proj_"), threadId: z.string().startsWith("thr_"), expectedVersion: z.number().int().nonnegative(), tasks: z.array(taskScopeSchema).max(20) }).strict(),
+    output: bindingStateSchema,
+  },
+  proposeReflection: {
+    input: z.object({ selection: memorySelectionSchema, changes: z.array(reflectionChangeSchema).min(1).max(20) }).strict(),
+    output: reflectionProposalSchema,
+  },
+  listReflections: {
+    input: memorySelectionSchema,
+    output: z.object({ proposals: z.array(reflectionProposalSchema) }).strict(),
+  },
+  getReflection: {
+    input: z.object({ selection: memorySelectionSchema, id: z.string() }).strict(),
+    output: reflectionProposalSchema,
+  },
+  decideReflection: {
+    input: z.object({ selection: memorySelectionSchema, id: z.string(), decision: z.enum(["apply", "reject"]) }).strict(),
+    output: reflectionProposalSchema,
   },
   updateMemory: {
     input: memoryUpdateInputSchema,
@@ -84,6 +164,7 @@ export const memoryRpcContract = defineRpcContract({
     input: z
       .object({
         id: z.string(),
+        selection: memorySelectionSchema,
         expectedVersion: z.number().int().positive(),
       })
       .strict(),
@@ -105,6 +186,8 @@ type MemorySummary = Omit<
 interface MemoryCreate {
   scope: MemoryScope;
   projectId: string | null;
+  task: TaskScope | null;
+  lineage: MemoryLineage | null;
   name: string;
   summary: string;
   details: string;
@@ -118,6 +201,7 @@ interface MemoryCreate {
 
 interface MemoryUpdate {
   expectedVersion: number;
+  lineage?: MemoryLineage;
   summary?: string;
   details?: string;
   kind?: MemoryKind;
@@ -155,6 +239,10 @@ function parseMemoryRow(row: unknown): MemoryRecord {
     id: String(row.id),
     scope,
     projectId: typeof row.project_id === "string" ? row.project_id : null,
+    task: typeof row.task_id === "string"
+      ? taskScopeSchema.parse({ taskId: row.task_id, context: row.context_name }) : null,
+    lineage: typeof row.lineage_json === "string"
+      ? lineageSchema.parse(JSON.parse(row.lineage_json)) : null,
     name: String(row.name),
     summary: String(row.summary),
     details: String(row.details),
@@ -176,6 +264,8 @@ function toMemorySummary(memory: MemoryRecord): MemorySummary {
     id: memory.id,
     scope: memory.scope,
     projectId: memory.projectId,
+    task: memory.task,
+    lineage: memory.lineage,
     name: memory.name,
     summary: memory.summary,
     kind: memory.kind,
@@ -191,8 +281,9 @@ function createMemoryId(): string {
   return `mem_${randomBytes(8).toString("base64url").toLowerCase()}`;
 }
 
-function scopeKey(scope: MemoryScope, projectId: string | null): string {
-  return scope === "global" ? "global" : `project:${projectId ?? "missing"}`;
+function scopeKey(scope: MemoryScope, projectId: string | null, task: TaskScope | null): string {
+  return task ? `task:${projectId}:${task.taskId}:${task.context}`
+    : scope === "global" ? "global" : `project:${projectId ?? "missing"}`;
 }
 
 function normalizeOneLine(value: string): string {
@@ -225,6 +316,15 @@ function unsafeMemoryReason(value: string): string | null {
   if (/\b[A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_KEY)\s*=\s*\S+/u.test(value)) {
     return "contains a credential assignment";
   }
+  if (/(?:authorization|proxy-authorization)\s*[:=]\s*["']?(?:bearer|basic)\s+\S+/iu.test(value) || /(?:set-cookie|cookie)\s*:\s*\S+/iu.test(value)) {
+    return "contains authentication headers";
+  }
+  if (/["']?(?:access_token|refresh_token|client_secret|api_key|password)["']?\s*[:=]\s*["']?[^\s"',}]+/iu.test(value)) {
+    return "contains a credential field";
+  }
+  if (/(?:^|[\s/\\])\.(?:claude|codex|omp|aws|ssh)[/\\](?:[^\s]*[/\\])?(?:auth|credentials|config|settings|id_rsa|id_ed25519)[^\s]*/iu.test(value)) {
+    return "contains a private authentication or provider configuration path";
+  }
   return null;
 }
 
@@ -241,6 +341,8 @@ function validateText(label: string, value: string, maxChars: number): string {
 
 function validateName(value: string): string {
   const normalized = value.trim().toLowerCase();
+  const unsafe = unsafeMemoryReason(normalized);
+  if (unsafe) throw new CliError(`name ${unsafe}; memory was not written`);
   if (!NAME_PATTERN.test(normalized)) {
     throw new CliError(
       "name must be 1-80 lowercase letters, digits, dots, underscores, or hyphens",
@@ -253,6 +355,8 @@ function validateTags(values: string[]): string[] {
   const tags = [...new Set(values.map((tag) => tag.trim().toLowerCase()))];
   if (tags.length > 20) throw new CliError("at most 20 tags are allowed");
   for (const tag of tags) {
+    const unsafe = unsafeMemoryReason(tag);
+    if (unsafe) throw new CliError(`tag ${unsafe}; memory was not written`);
     if (!TAG_PATTERN.test(tag)) {
       throw new CliError(
         `invalid tag "${tag}"; use lowercase letters, digits, dots, underscores, or hyphens`,
@@ -278,23 +382,20 @@ function writeScope(
 function scopeSql(
   scope: ReadScope,
   projectId: string | undefined,
+  task: TaskScope | null = null,
 ): { sql: string; params: string[] } {
-  if (scope === "global") {
-    return { sql: "m.scope = 'global'", params: [] };
+  if (task) {
+    if (!projectId || scope === "global") throw new CliError("Task memory requires project scope");
+    return { sql: "m.scope = 'project' AND m.project_id = ? AND m.task_id = ? AND m.context_name = ?",
+      params: [projectId, task.taskId, task.context] };
   }
+  if (scope === "global") return { sql: "m.scope = 'global' AND m.task_id IS NULL", params: [] };
   if (scope === "project") {
-    if (!projectId)
-      throw new CliError("project scope requires a BB project context");
-    return {
-      sql: "m.scope = 'project' AND m.project_id = ?",
-      params: [projectId],
-    };
+    if (!projectId) throw new CliError("project scope requires a BB project context");
+    return { sql: "m.scope = 'project' AND m.project_id = ? AND m.task_id IS NULL", params: [projectId] };
   }
-  if (!projectId) return { sql: "m.scope = 'global'", params: [] };
-  return {
-    sql: "(m.scope = 'global' OR (m.scope = 'project' AND m.project_id = ?))",
-    params: [projectId],
-  };
+  if (!projectId) return { sql: "m.scope = 'global' AND m.task_id IS NULL", params: [] };
+  return { sql: "(m.scope = 'global' OR (m.scope = 'project' AND m.project_id = ?)) AND m.task_id IS NULL", params: [projectId] };
 }
 
 function searchExpression(query: string): string {
@@ -312,6 +413,8 @@ function memorySnapshot(memory: MemoryRecord): Record<string, unknown> {
     id: memory.id,
     scope: memory.scope,
     projectId: memory.projectId,
+    task: memory.task,
+    lineage: memory.lineage,
     name: memory.name,
     summary: memory.summary,
     details: memory.details,
@@ -337,6 +440,8 @@ class MemoryStore {
       id,
       scope: input.scope,
       projectId: input.projectId,
+      task: input.task,
+      lineage: input.lineage,
       name: validateName(input.name),
       summary: validateText("summary", input.summary, 400),
       details: validateText("details", input.details, 16_000),
@@ -357,13 +462,13 @@ class MemoryStore {
             `INSERT INTO memories (
                id, scope, scope_key, project_id, name, summary, details, kind,
                tags_json, importance, pinned, source_thread_id, write_reason,
-               version, created_at, updated_at, deleted_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+               version, created_at, updated_at, task_id, context_name, lineage_json, deleted_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
           )
           .run(
             record.id,
             record.scope,
-            scopeKey(record.scope, record.projectId),
+            scopeKey(record.scope, record.projectId, record.task),
             record.projectId,
             record.name,
             record.summary,
@@ -377,6 +482,9 @@ class MemoryStore {
             record.version,
             record.createdAt,
             record.updatedAt,
+            record.task?.taskId ?? null,
+            record.task?.context ?? null,
+            record.lineage ? JSON.stringify(record.lineage) : null,
           );
         this.insertHistory(
           record,
@@ -403,9 +511,11 @@ class MemoryStore {
     id: string,
     input: MemoryUpdate,
     ctxProjectId: string | undefined,
+    task: TaskScope | null = null,
+    readScope: ReadScope = "all",
   ): MemoryRecord {
     return this.db.transaction(() => {
-      const current = this.get(id, "all", ctxProjectId, false);
+      const current = this.get(id, readScope, ctxProjectId, false, task);
       if (!current)
         throw new CliError(`memory "${id}" was not found in the current scope`);
       if (current.version !== input.expectedVersion) {
@@ -428,6 +538,7 @@ class MemoryStore {
           input.tags === undefined ? current.tags : validateTags(input.tags),
         importance: input.importance ?? current.importance,
         pinned: input.pinned ?? current.pinned,
+        lineage: input.lineage ?? current.lineage,
         sourceThreadId: input.sourceThreadId,
         writeReason: validateText("reason", input.writeReason, 500),
         version: current.version + 1,
@@ -437,7 +548,7 @@ class MemoryStore {
         .prepare(
           `UPDATE memories SET
              summary = ?, details = ?, kind = ?, tags_json = ?, importance = ?,
-             pinned = ?, source_thread_id = ?, write_reason = ?, version = ?, updated_at = ?
+             pinned = ?, source_thread_id = ?, write_reason = ?, version = ?, updated_at = ?, lineage_json = ?
            WHERE id = ? AND version = ? AND deleted_at IS NULL`,
         )
         .run(
@@ -451,6 +562,7 @@ class MemoryStore {
           updated.writeReason,
           updated.version,
           updated.updatedAt,
+          updated.lineage ? JSON.stringify(updated.lineage) : null,
           updated.id,
           current.version,
         );
@@ -472,9 +584,11 @@ class MemoryStore {
     reason: string,
     sourceThreadId: string | null,
     ctxProjectId: string | undefined,
+    task: TaskScope | null = null,
+    readScope: ReadScope = "all",
   ): MemoryRecord {
     return this.db.transaction(() => {
-      const current = this.get(id, "all", ctxProjectId, false);
+      const current = this.get(id, readScope, ctxProjectId, false, task);
       if (!current)
         throw new CliError(`memory "${id}" was not found in the current scope`);
       if (current.version !== expectedVersion) {
@@ -517,8 +631,9 @@ class MemoryStore {
     scope: ReadScope,
     projectId: string | undefined,
     touch = true,
+    task: TaskScope | null = null,
   ): MemoryRecord | null {
-    const scoped = scopeSql(scope, projectId);
+    const scoped = scopeSql(scope, projectId, task);
     const row: unknown = this.db
       .prepare(
         `SELECT m.* FROM memories m
@@ -541,15 +656,18 @@ class MemoryStore {
     scope: ReadScope,
     projectId: string | undefined,
     limit: number,
+    task: TaskScope | null = null,
+    currentOnly = false,
   ): {
     memories: MemoryRecord[];
     total: number;
   } {
-    const scoped = scopeSql(scope, projectId);
+    const scoped = scopeSql(scope, projectId, task);
+    const lifecycleSql = currentOnly ? " AND json_extract(m.lineage_json, '$.state') = 'current'" : "";
     const rows: unknown[] = this.db
       .prepare(
         `SELECT m.* FROM memories m
-         WHERE m.deleted_at IS NULL AND ${scoped.sql}
+         WHERE m.deleted_at IS NULL AND ${scoped.sql}${lifecycleSql}
          ORDER BY m.pinned DESC,
            CASE WHEN m.scope = 'project' THEN 0 ELSE 1 END,
            m.importance DESC, COALESCE(m.last_accessed_at, 0) DESC,
@@ -560,39 +678,22 @@ class MemoryStore {
     const countRow: unknown = this.db
       .prepare(
         `SELECT COUNT(*) AS count FROM memories m
-         WHERE m.deleted_at IS NULL AND ${scoped.sql}`,
+         WHERE m.deleted_at IS NULL AND ${scoped.sql}${lifecycleSql}`,
       )
       .get(...scoped.params);
     const total = isRecord(countRow) ? Number(countRow.count) : 0;
     return { memories: rows.map(parseMemoryRow), total };
   }
 
-  listAll(): MemoryRecord[] {
-    const rows: unknown[] = this.db
-      .prepare(
-        `SELECT * FROM memories
-         WHERE deleted_at IS NULL
-         ORDER BY pinned DESC, scope ASC, project_id ASC, importance DESC,
-           updated_at DESC, name ASC`,
-      )
-      .all();
-    return rows.map(parseMemoryRow);
-  }
-
-  getAdmin(id: string): MemoryRecord | null {
-    const row: unknown = this.db
-      .prepare("SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL")
-      .get(id);
-    return row === undefined ? null : parseMemoryRow(row);
-  }
 
   search(
     query: string,
     scope: ReadScope,
     projectId: string | undefined,
     limit: number,
+    task: TaskScope | null = null,
   ): MemoryRecord[] {
-    const scoped = scopeSql(scope, projectId);
+    const scoped = scopeSql(scope, projectId, task);
     const rows: unknown[] = this.db
       .prepare(
         `SELECT m.* FROM memories_fts f
@@ -605,19 +706,122 @@ class MemoryStore {
     return rows.map(parseMemoryRow);
   }
 
-  history(id: string, projectId: string | undefined, limit: number): unknown[] {
-    const scoped = scopeSql("all", projectId);
+  history(id: string, projectId: string | undefined, limit: number, task: TaskScope | null = null, readScope: ReadScope = "all"): unknown[] {
+    const scoped = scopeSql(readScope, projectId, task);
     return this.db
       .prepare(
         `SELECT h.version, h.action, h.snapshot_json, h.source_thread_id,
            h.write_reason, h.created_at
          FROM memory_history h
-         JOIN memories m ON m.id = h.memory_id
-         WHERE h.memory_id = ? AND ${scoped.sql}
+         WHERE h.memory_id = (SELECT m.id FROM memories m
+           WHERE (m.id = ? OR m.name = ?) AND ${scoped.sql}
+           ORDER BY CASE WHEN m.scope = 'project' THEN 0 ELSE 1 END, m.updated_at DESC LIMIT 1)
          ORDER BY h.version DESC
          LIMIT ?`,
       )
-      .all(id, ...scoped.params, limit);
+      .all(id, id, ...scoped.params, limit);
+  }
+
+  bindings(projectId: string, threadId: string) {
+    const row: unknown = this.db.prepare("SELECT version, tasks_json FROM memory_task_bindings WHERE project_id = ? AND thread_id = ?").get(projectId, threadId);
+    return isRecord(row) ? bindingStateSchema.parse({ version: row.version, tasks: JSON.parse(String(row.tasks_json)) }) : { version: 0, tasks: [] };
+  }
+
+  setBindings(projectId: string, threadId: string, expectedVersion: number, tasks: TaskScope[]) {
+    if (new Set(tasks.map((task) => `${task.taskId}:${task.context}`)).size !== tasks.length)
+      throw new CliError("Duplicate task/context bindings are not allowed");
+    return this.db.transaction(() => {
+      const current = this.bindings(projectId, threadId);
+      if (current.version !== expectedVersion) throw new CliError("Task bindings changed; reload before saving");
+      const next = bindingStateSchema.parse({ version: current.version + 1, tasks });
+      if (current.version === 0) {
+        this.db.prepare("INSERT INTO memory_task_bindings(project_id, thread_id, version, tasks_json) VALUES (?, ?, ?, ?)")
+          .run(projectId, threadId, next.version, JSON.stringify(next.tasks));
+      } else {
+        const result = this.db.prepare("UPDATE memory_task_bindings SET version = ?, tasks_json = ? WHERE project_id = ? AND thread_id = ? AND version = ?")
+          .run(next.version, JSON.stringify(next.tasks), projectId, threadId, expectedVersion);
+        if (result.changes !== 1) throw new CliError("Task bindings changed; reload before saving");
+      }
+      return next;
+    })();
+  }
+
+  addTask(input: MemoryCreate): MemoryRecord {
+    if (!input.task || !input.lineage || input.scope !== "project" || !input.projectId)
+      throw new CliError("Task memory requires explicit project, task, context and provenance");
+    return this.db.transaction(() => {
+      const link = input.lineage?.replaces;
+      const prior = link ? this.get(link.id, "project", input.projectId ?? undefined, false, input.task) : null;
+      if (link && (!prior || prior.version !== link.version || prior.lineage?.state !== "current"))
+        throw new CliError("Replacement base changed or is outside this task/context");
+      const record = this.add(input);
+      if (prior?.lineage) this.update(prior.id, {
+        expectedVersion: prior.version, lineage: { ...prior.lineage, state: "replaced", replacedBy: { id: record.id, version: record.version } },
+        sourceThreadId: input.sourceThreadId, writeReason: input.writeReason,
+      }, input.projectId ?? undefined, input.task);
+      return record;
+    })();
+  }
+
+  propose(selection: MemorySelection, changes: ReflectionChange[]): ReflectionProposal {
+    if (!selection.task || !selection.projectId) throw new CliError("Reflection requires explicit task/context scope");
+    return this.db.transaction(() => {
+      const seen = new Set<string>();
+      const diffs = changes.map((change) => {
+        const after = { ...change, summary: validateText("summary", change.summary, 400),
+          details: validateText("details", change.details, 16000), reason: validateText("reason", change.reason, 500) };
+        const before = this.get(after.id, "project", selection.projectId ?? undefined, false, selection.task);
+        if (!before?.lineage || before.lineage.state === "replaced") throw new CliError("Reflection base is unavailable or replaced");
+        if (seen.has(before.id)) throw new CliError("Reflection cannot change a record twice");
+        seen.add(before.id);
+        if (before.version !== after.expectedVersion) throw new CliError("Reflection base version conflict");
+        if (before.summary === after.summary && before.details === after.details &&
+          before.lineage.classification === after.classification && before.lineage.state === after.state &&
+          JSON.stringify(before.lineage.source) === JSON.stringify(after.source)) throw new CliError("Reflection must propose an actual change");
+        return { before: { id: before.id, version: before.version, summary: before.summary, details: before.details, lineage: before.lineage }, after: { ...after, id: before.id } };
+      });
+      const proposal = reflectionProposalSchema.parse({ id: `reflection_${randomBytes(8).toString("hex")}`, selection, state: "pending", createdAt: Date.now(), decidedAt: null, diffs });
+      this.db.prepare("INSERT INTO memory_reflections(id, project_id, task_id, context_name, proposal_json) VALUES (?, ?, ?, ?, ?)")
+        .run(proposal.id, selection.projectId, selection.task.taskId, selection.task.context, JSON.stringify(proposal));
+      return proposal;
+    })();
+  }
+
+  proposals(selection: MemorySelection): ReflectionProposal[] {
+    if (!selection.task || !selection.projectId) return [];
+    return this.db.prepare("SELECT proposal_json FROM memory_reflections WHERE project_id = ? AND task_id = ? AND context_name = ? ORDER BY rowid DESC LIMIT 100")
+      .all(selection.projectId, selection.task.taskId, selection.task.context).map((row: unknown) => {
+        if (!isRecord(row)) throw new CliError("Invalid reflection storage row");
+        return reflectionProposalSchema.parse(JSON.parse(String(row.proposal_json)));
+      });
+  }
+
+  proposal(selection: MemorySelection, id: string): ReflectionProposal {
+    if (!selection.task || !selection.projectId) throw new CliError("Reflection requires explicit task/context scope");
+    const row: unknown = this.db.prepare("SELECT proposal_json FROM memory_reflections WHERE id = ? AND project_id = ? AND task_id = ? AND context_name = ?")
+      .get(id, selection.projectId, selection.task.taskId, selection.task.context);
+    if (!isRecord(row)) throw new CliError("Reflection was not found in this task/context");
+    return reflectionProposalSchema.parse(JSON.parse(String(row.proposal_json)));
+  }
+
+  decide(selection: MemorySelection, id: string, decision: "apply" | "reject", threadId: string | null): ReflectionProposal {
+    return this.db.transaction(() => {
+      const proposal = this.proposal(selection, id);
+      if (proposal.state !== "pending") throw new CliError("Reflection already has an explicit decision");
+      if (decision === "apply") for (const diff of proposal.diffs) {
+        const current = this.get(diff.before.id, "project", selection.projectId ?? undefined, false, selection.task);
+        if (!current?.lineage || current.version !== diff.before.version) throw new CliError("Reflection base version conflict; nothing applied");
+        const after = diff.after;
+        this.update(current.id, { expectedVersion: diff.before.version, summary: after.summary, details: after.details,
+          kind: after.classification === "decision" ? "decision" : "fact",
+          lineage: { ...current.lineage, classification: after.classification, state: after.state, source: after.source },
+          sourceThreadId: threadId, writeReason: after.reason,
+        }, selection.projectId ?? undefined, selection.task);
+      }
+      const decided: ReflectionProposal = { ...proposal, state: decision === "apply" ? "applied" : "rejected", decidedAt: Date.now() };
+      this.db.prepare("UPDATE memory_reflections SET proposal_json = ? WHERE id = ?").run(JSON.stringify(decided), id);
+      return decided;
+    })();
   }
 
   private insertHistory(
@@ -651,6 +855,11 @@ function displayMemory(memory: MemoryRecord, includeDetails: boolean): string {
     `  ${memory.summary}`,
     `  importance=${memory.importance} pinned=${memory.pinned}${tags}`,
   ];
+  if (memory.task && memory.lineage) {
+    const lineage = memory.lineage;
+    lines.push(`  task=${lineage.taskKey} context=${memory.task.context} ${lineage.classification}/${lineage.state}`,
+      `  source=${lineage.source.kind}@${lineage.source.revision} observed=${new Date(lineage.source.observedAt).toISOString()}`);
+  }
   if (includeDetails) {
     lines.push(
       "",
@@ -663,7 +872,7 @@ function displayMemory(memory: MemoryRecord, includeDetails: boolean): string {
   return lines.join("\n");
 }
 
-function renderCatalog(store: MemoryStore, projectId: string): string {
+function renderCatalog(store: MemoryStore, projectId: string | undefined, maxChars = CATALOG_MAX_CHARS): string {
   const { memories, total } = store.list("all", projectId, MAX_RESULT_LIMIT);
   const header = [
     "Memory index",
@@ -680,7 +889,7 @@ function renderCatalog(store: MemoryStore, projectId: string): string {
     const pin = memory.pinned ? "; pinned" : "";
     const line = `- ${memory.id} [${memory.scope}/${memory.kind}${pin}${tags}] ${memory.name}: ${normalizeOneLine(memory.summary)}`;
     const candidate = `${header}${[...lines, line].join("\n")}`;
-    if (candidate.length > CATALOG_MAX_CHARS) break;
+    if (candidate.length > maxChars) break;
     lines.push(line);
   }
   let finalLines = lines;
@@ -692,13 +901,34 @@ function renderCatalog(store: MemoryStore, projectId: string): string {
         ? `\nShowing ${finalShown} of ${total}; run \`bb memory catalog --scope all --json\` for the rest.`
         : "";
     if (
-      `${header}${finalLines.join("\n")}${footer}`.length <= CATALOG_MAX_CHARS
+      `${header}${finalLines.join("\n")}${footer}`.length <= maxChars
     ) {
       break;
     }
     finalLines = finalLines.slice(0, -1);
   }
   return `${header}${finalLines.join("\n")}${footer}`;
+}
+
+function renderTaskSummary(store: MemoryStore, selection: MemorySelection, maxChars = 3000): string {
+  if (!selection.task || !selection.projectId) throw new CliError("Select a task and logical context");
+  const { memories, total } = store.list("project", selection.projectId, MAX_RESULT_LIMIT, selection.task, true);
+  const taskKey = memories[0]?.lineage?.taskKey ?? selection.task.taskId;
+  const header = `Task memory: ${taskKey}; project=${selection.projectId}; context=${selection.task.context}\nEvidence may be stale. Assumptions are not observations. Open originals and revision history before changing a decision.\n`;
+  const footer = `\nRead more: bb memory catalog --task ${taskKey} --context ${selection.task.context} --json`;
+  const lines: string[] = [];
+  let length = header.length + footer.length;
+  if (length > maxChars) return `Task summary omitted for budget; ${taskKey}/${selection.task.context}. Use bb memory summary with explicit --task and --context.`.slice(0, maxChars);
+  for (const memory of memories) {
+    const lineage = memory.lineage;
+    if (!lineage) continue;
+    const source = lineage.source;
+    const line = `- ${memory.name} v${memory.version} [${lineage.classification}] ${normalizeOneLine(memory.summary)}\n  source=${source.kind}:${source.commentId ?? taskKey}@${source.revision}; observed=${new Date(source.observedAt).toISOString()}; memoryUpdated=${new Date(memory.updatedAt).toISOString()}`;
+    if (length + line.length + 1 > maxChars) break;
+    lines.push(line);
+    length += line.length + 1;
+  }
+  return `${header}${lines.join("\n")}${lines.length === 0 && total === 0 ? "No current task memories." : ""}${footer}`;
 }
 
 const SCOPE_DESCRIPTION = "Which memories to read";
@@ -767,52 +997,230 @@ export default async function plugin(bb: BbPluginApi) {
      CREATE TRIGGER IF NOT EXISTS memories_fts_delete AFTER DELETE ON memories BEGIN
        DELETE FROM memories_fts WHERE memory_id = old.id;
      END;`,
+    `ALTER TABLE memories ADD COLUMN task_id TEXT;
+     ALTER TABLE memories ADD COLUMN context_name TEXT;
+     ALTER TABLE memories ADD COLUMN lineage_json TEXT;
+     CREATE INDEX memories_task_context ON memories(project_id, task_id, context_name, deleted_at);
+     CREATE TABLE memory_task_bindings (
+       project_id TEXT NOT NULL, thread_id TEXT NOT NULL, version INTEGER NOT NULL,
+       tasks_json TEXT NOT NULL, PRIMARY KEY(project_id, thread_id)
+     );
+     CREATE TABLE memory_reflections (
+       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, task_id TEXT NOT NULL,
+       context_name TEXT NOT NULL, proposal_json TEXT NOT NULL
+     );
+     CREATE INDEX memory_reflections_scope ON memory_reflections(project_id, task_id, context_name);`,
   ]);
   const store = new MemoryStore(db);
 
+
+  async function taskFor(selection: MemorySelection) {
+    if (!selection.projectId || !selection.task) throw new CliError("Select an explicit project, task and logical context");
+    validateName(selection.task.context);
+    const { task } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "getTask", input: { taskId: selection.task.taskId }, outputSchema: tasksRpcContract.getTask.output });
+    const { projects } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listProjects", input: {}, outputSchema: tasksRpcContract.listProjects.output });
+    if (!task || !projects.some((project) => project.id === task.projectId && project.linkedBbProjectId === selection.projectId))
+      throw new CliError("Task is not linked to the selected Core project");
+    await bb.sdk.projects.get({ projectId: selection.projectId });
+    return task;
+  }
+
+  async function validateSelection(selection: MemorySelection) {
+    if (selection.task) await taskFor(selection);
+    return selection;
+  }
+
+  async function validateSource(selection: MemorySelection, source: MemoryLineage["source"]) {
+    const task = await taskFor(selection);
+    let revision = task.updatedAt;
+    let text = `${task.title}\n${task.description}`;
+    if (source.kind === "comment") {
+      const { comments } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listComments", input: { taskId: task.id }, outputSchema: tasksRpcContract.listComments.output });
+      const comment = comments.find((entry) => entry.id === source.commentId);
+      if (!comment) throw new CliError("Source comment does not belong to this task");
+      revision = comment.createdAt;
+      text = comment.body;
+    }
+    if (source.revision !== revision) throw new CliError("Source revision changed; inspect the original before proposing");
+    if (source.observedAt < Date.parse(revision) || source.observedAt > Date.now())
+      throw new CliError("Observation time must follow the source revision and not be in the future");
+    if (source.quote && !text.includes(source.quote)) throw new CliError("Source quote must be an exact bounded excerpt of the selected original");
+    if (source.quote) validateText("source quote", source.quote, 600);
+    return task;
+  }
+
+  async function createTaskMemory(selection: MemorySelection, draft: z.infer<typeof taskMemoryDraftSchema>, threadId: string | null) {
+    const task = await validateSource(selection, draft.source);
+    return store.addTask({ scope: "project", projectId: selection.projectId, task: selection.task,
+      lineage: { taskKey: task.key, classification: draft.classification, state: "current", source: draft.source, replaces: draft.replaces, replacedBy: null },
+      name: draft.name, summary: draft.summary, details: draft.details,
+      kind: draft.classification === "decision" ? "decision" : "fact", tags: [], importance: 50, pinned: false,
+      sourceThreadId: threadId, writeReason: draft.reason,
+    });
+  }
+
+  async function validateThread(projectId: string, threadId: string) {
+    const thread = await bb.sdk.threads.get({ threadId });
+    if (thread.projectId !== projectId) throw new CliError("Thread does not belong to this Core project");
+  }
+
+  async function proposeReflection(selection: MemorySelection, changes: ReflectionChange[]) {
+    for (const change of changes) await validateSource(selection, change.source);
+    return store.propose(selection, changes);
+  }
+
+  async function decideReflection(selection: MemorySelection, id: string, decision: "apply" | "reject", threadId: string | null) {
+    await validateSelection(selection);
+    const proposal = store.proposal(selection, id);
+    if (decision === "apply") for (const diff of proposal.diffs) await validateSource(selection, diff.after.source);
+    return store.decide(selection, id, decision, threadId);
+  }
+
+  for (const action of ["scope.select", "draft.open", "reflection.review"]) {
+    bb.experimental_productAnalytics.declareAction({ action, surfaces: ["web", "compact", "mobile", "desktop"], completionSource: "client" });
+  }
+
+  async function resolveTaskKey(taskKey: string) {
+    const { task } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "getTaskByKey", input: { taskKey }, outputSchema: tasksRpcContract.getTaskByKey.output });
+    const { projects } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listProjects", input: {}, outputSchema: tasksRpcContract.listProjects.output });
+    const project = projects.find((entry) => entry.id === task?.projectId);
+    if (!task || !project?.linkedBbProjectId) throw new CliError("Task requires an explicit link to a Core project before using shared memory");
+    await bb.sdk.projects.get({ projectId: project.linkedBbProjectId });
+    return { projectId: project.linkedBbProjectId, task: { id: task.id, key: task.key, title: task.title, revision: task.updatedAt } };
+  }
+
   bb.rpc.register(memoryRpcContract, {
-    listMemories() {
-      return { memories: store.listAll() };
+    async resolveMemoryTask({ taskKey }) {
+      return resolveTaskKey(taskKey);
     },
-    updateMemory(input) {
-      const { id } = input;
-      const current = store.getAdmin(id);
-      if (!current) throw new Error(`memory "${id}" was not found`);
-      const memory = store.update(
-        id,
-        {
-          expectedVersion: input.expectedVersion,
-          summary: input.summary,
-          details: input.details,
-          kind: input.kind,
-          tags: input.tags,
-          importance: input.importance,
-          pinned: input.pinned,
-          sourceThreadId: null,
-          writeReason: "Edited in Memory settings",
-        },
-        current.projectId ?? undefined,
-      );
-      return { memory };
+    async listMemoryProjects() {
+      return { projects: (await bb.sdk.projects.list({ includePersonal: true })).map((project) => ({ id: project.id, name: project.name })) };
     },
-    deleteMemory(input) {
-      const { id } = input;
-      const current = store.getAdmin(id);
-      if (!current) throw new Error(`memory "${id}" was not found`);
-      const memory = store.forget(
-        id,
-        input.expectedVersion,
-        "Deleted in Memory settings",
-        null,
-        current.projectId ?? undefined,
-      );
+    async listMemorySources(selection) {
+      const task = await taskFor(selection);
+      const { comments } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listComments", input: { taskId: task.id }, outputSchema: tasksRpcContract.listComments.output });
+      return { taskKey: task.key, sources: [
+        { kind: "task" as const, commentId: null, revision: task.updatedAt, label: `${task.key} · task revision ${task.updatedAt}` },
+        ...comments.map((comment) => ({ kind: "comment" as const, commentId: comment.id, revision: comment.createdAt,
+          label: `${comment.authorName} · comment ${comment.createdAt}` })),
+      ] };
+    },
+    async threadMemoryState({ threadId }) {
+      const thread = await bb.sdk.threads.get({ threadId });
+      return { projectId: thread.projectId, bindings: store.bindings(thread.projectId, threadId) };
+    },
+    async searchMemories({ selection, query }) {
+      await validateSelection(selection);
+      return { memories: store.search(query, selection.projectId ? "project" : "global", selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task) };
+    },
+    async listMemoryTasks({ projectId, search }) {
+      await bb.sdk.projects.get({ projectId });
+      const { projects } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listProjects", input: {}, outputSchema: tasksRpcContract.listProjects.output });
+      const tasks = [];
+      for (const project of projects) {
+        if (project.linkedBbProjectId !== projectId) continue;
+        const page = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listTasks", input: { projectId: project.id, search, limit: 20 }, outputSchema: tasksRpcContract.listTasks.output });
+        for (const task of page.tasks) tasks.push({ id: task.id, key: task.key, title: task.title, revision: task.updatedAt });
+      }
+      return { tasks };
+    },
+    async listMemories(selection) {
+      await validateSelection(selection);
+      return { memories: store.list(selection.projectId ? "project" : "global", selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task).memories };
+    },
+    async getMemory({ selection, name }) {
+      await validateSelection(selection);
+      return { memory: store.get(name, selection.projectId ? "project" : "global", selection.projectId ?? undefined, true, selection.task) };
+    },
+    async memoryHistory({ selection, name }) {
+      await validateSelection(selection);
+      return { history: store.history(name, selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task, selection.projectId ? "project" : "global").map((row) => {
+        if (!isRecord(row)) throw new CliError("Invalid memory history row");
+        const snapshot = JSON.parse(String(row.snapshot_json));
+        return { version: Number(row.version), action: String(row.action), createdAt: Number(row.created_at),
+          snapshot: memoryRecordSchema.parse({ task: null, lineage: null, ...snapshot }) };
+      }) };
+    },
+    async taskSummary(selection) {
+      await validateSelection(selection);
+      return { summary: selection.task ? renderTaskSummary(store, selection) : renderCatalog(store, selection.projectId ?? undefined), generatedAt: Date.now() };
+    },
+    async createTaskMemory({ selection, draft }) {
+      return { memory: await createTaskMemory(selection, draft, null) };
+    },
+    async getTaskBindings({ projectId, threadId }) {
+      await validateThread(projectId, threadId);
+      return store.bindings(projectId, threadId);
+    },
+    async setTaskBindings({ projectId, threadId, expectedVersion, tasks }) {
+      await validateThread(projectId, threadId);
+      for (const task of tasks) await taskFor({ projectId, task });
+      return store.setBindings(projectId, threadId, expectedVersion, tasks);
+    },
+    async proposeReflection({ selection, changes }) { return proposeReflection(selection, changes); },
+    async listReflections(selection) {
+      await validateSelection(selection);
+      return { proposals: store.proposals(selection) };
+    },
+    async getReflection({ selection, id }) {
+      await validateSelection(selection);
+      return store.proposal(selection, id);
+    },
+    async decideReflection({ selection, id, decision }) { return decideReflection(selection, id, decision, null); },
+    async updateMemory(input) {
+      await validateSelection(input.selection);
+      if (input.selection.task) throw new CliError("Task changes require a reviewed reflection or explicit replacement");
+      return { memory: store.update(input.id, { expectedVersion: input.expectedVersion, summary: input.summary,
+        details: input.details, kind: input.kind, tags: input.tags, importance: input.importance, pinned: input.pinned,
+        sourceThreadId: null, writeReason: "Edited in Memory settings",
+      }, input.selection.projectId ?? undefined, null, input.selection.projectId ? "project" : "global") };
+    },
+    async deleteMemory(input) {
+      await validateSelection(input.selection);
+      const memory = store.forget(input.id, input.expectedVersion, "Explicitly deleted in Memory settings", null,
+        input.selection.projectId ?? undefined, input.selection.task, input.selection.projectId ? "project" : "global");
       return { deleted: { id: memory.id, version: memory.version } };
     },
   });
 
-  bb.agents.contributeInstructions(({ projectId }) =>
-    renderCatalog(store, projectId),
-  );
+  bb.agents.contributeInstructions(({ projectId, threadId }) => {
+    const bindings = store.bindings(projectId, threadId).tasks;
+    if (bindings.length === 0) return renderCatalog(store, projectId);
+    const summaries: string[] = [];
+    let remaining = 3000;
+    for (const task of bindings) {
+      const summary = renderTaskSummary(store, { projectId, task }, Math.min(remaining, Math.floor(3000 / bindings.length)));
+      if (summary.length > remaining) break;
+      summaries.push(summary);
+      remaining -= summary.length + 2;
+    }
+    return `${summaries.join("\n\n")}\n\n${renderCatalog(store, projectId, 800)}`;
+  });
+
+  const taskOptions = {
+    task: { type: "string", description: "Explicit BB task key, for example BBDEV-29" },
+    context: { type: "string", description: "Logical context name, independent of provider or payer" },
+    general: { type: "boolean", description: "Explicitly select general notes, not a thread task binding" },
+  } as const;
+
+  async function cliSelection(ctx: { projectId?: string; threadId?: string }, options: { task?: string; context?: string; general: boolean }): Promise<MemorySelection> {
+    const projectId = ctx.projectId ?? null;
+    if (options.general) {
+      if (options.task || options.context) throw new CliError("--general cannot be combined with --task or --context");
+      return { projectId, task: null };
+    }
+    if (options.task || options.context) {
+      if (!options.task || !options.context || !projectId) throw new CliError("--task and --context require each other and a Core project");
+      const resolved = await resolveTaskKey(options.task);
+      if (resolved.projectId !== projectId) throw new CliError("Task is not linked to the current Core project");
+      validateName(options.context);
+      return memorySelectionSchema.parse({ projectId, task: { taskId: resolved.task.id, context: options.context } });
+    }
+    const bindings = ctx.threadId && projectId ? store.bindings(projectId, ctx.threadId).tasks : [];
+    if (bindings.length > 1) throw new CliError("This thread has multiple explicit bindings; select --task and --context, or --general");
+    const task = bindings[0] ?? null;
+    return validateSelection({ projectId, task });
+  }
 
   bb.cli.register(
     defineCli({
@@ -821,10 +1229,105 @@ export default async function plugin(bb: BbPluginApi) {
       description:
         "Memories are summaries first: search or list, then read one in full.\nProject scope holds repository facts; global scope holds durable user preferences.",
       commands: {
+        summary: cliCommand({
+          summary: "Read the same bounded current task summary used by every runtime",
+          options: { ...taskOptions, json: { type: "boolean", description: "Emit JSON" } },
+          async run(input, ctx) {
+            const selection = await cliSelection(ctx, input.options);
+            const summary = selection.task ? renderTaskSummary(store, selection) : renderCatalog(store, ctx.projectId);
+            return { exitCode: 0, stdout: input.options.json ? jsonOutput({ selection, summary, generatedAt: Date.now() }) : summary };
+          },
+        }),
+        bindings: cliCommand({
+          summary: "Inspect this thread's explicit task/context bindings",
+          async run(_input, ctx) {
+            if (!ctx.projectId || !ctx.threadId) throw new CliError("Bindings require a project thread");
+            await validateThread(ctx.projectId, ctx.threadId);
+            return { exitCode: 0, stdout: jsonOutput(store.bindings(ctx.projectId, ctx.threadId)) };
+          },
+        }),
+        bind: cliCommand({
+          summary: "Explicitly attach or detach one task/context for provider-independent summaries",
+          options: {
+            task: { type: "string", required: true, description: "BB task key" },
+            context: { type: "string", required: true, description: "Logical context name" },
+            "expected-version": { type: "integer", min: 0, max: MAX_EXPECTED_VERSION, required: true, description: "Bindings version from memory bindings" },
+            remove: { type: "boolean", description: "Detach this binding without deleting memory" },
+          },
+          async run(input, ctx) {
+            if (!ctx.projectId || !ctx.threadId) throw new CliError("Bindings require a project thread");
+            await validateThread(ctx.projectId, ctx.threadId);
+            const selection = await cliSelection(ctx, { ...input.options, general: false });
+            if (!selection.task) throw new CliError("Select a task/context");
+            const task = selection.task;
+            const current = store.bindings(ctx.projectId, ctx.threadId);
+            const tasks = input.options.remove
+              ? current.tasks.filter((entry) => entry.taskId !== task.taskId || entry.context !== task.context)
+              : [...current.tasks, task];
+            return { exitCode: 0, stdout: jsonOutput(store.setBindings(ctx.projectId, ctx.threadId, input.options["expected-version"], tasks)) };
+          },
+        }),
+        remember: cliCommand({
+          summary: "Save an observation, decision or assumption with explicit task/context and native source revision",
+          options: {
+            ...taskOptions,
+            draft: { type: "string", required: true, description: "JSON {name,summary,details,classification,source:{kind,commentId,revision,observedAt,quote},reason,replaces}; replaces is null or {id,version}" },
+          },
+          async run(input, ctx) {
+            const selection = await cliSelection(ctx, input.options);
+            const draft = taskMemoryDraftSchema.parse(JSON.parse(input.options.draft));
+            return { exitCode: 0, stdout: jsonOutput({ memory: await createTaskMemory(selection, draft, ctx.threadId ?? null) }) };
+          },
+        }),
+        propose: cliCommand({
+          summary: "Persist a reviewable content/provenance diff without changing memories",
+          options: {
+            ...taskOptions,
+            changes: { type: "string", required: true, description: "JSON array of {id,expectedVersion,summary,details,classification,state,source,reason}; id accepts a memory name" },
+          },
+          async run(input, ctx) {
+            const selection = await cliSelection(ctx, input.options);
+            const changes = z.array(reflectionChangeSchema).min(1).max(20).parse(JSON.parse(input.options.changes));
+            return { exitCode: 0, stdout: jsonOutput(await proposeReflection(selection, changes)) };
+          },
+        }),
+        proposals: cliCommand({
+          summary: "Inspect pending and decided reflection diffs in one task/context",
+          options: { ...taskOptions },
+          async run(input, ctx) {
+            const selection = await cliSelection(ctx, input.options);
+            if (!selection.task) throw new CliError("Select a task/context");
+            return { exitCode: 0, stdout: jsonOutput({ proposals: store.proposals(selection) }) };
+          },
+        }),
+        proposal: cliCommand({
+          summary: "Inspect one retained reflection by the identifier returned when proposed",
+          options: {
+            ...taskOptions,
+            proposal: { type: "string", required: true, description: "Retained proposal identifier" },
+          },
+          async run(input, ctx) {
+            const selection = await cliSelection(ctx, input.options);
+            return { exitCode: 0, stdout: jsonOutput(store.proposal(selection, input.options.proposal)) };
+          },
+        }),
+        decide: cliCommand({
+          summary: "Explicitly apply or reject one reviewed reflection; stale bases apply nothing",
+          options: {
+            ...taskOptions,
+            proposal: { type: "string", required: true, description: "Proposal identifier returned by memory proposals" },
+            decision: { type: "enum", values: ["apply", "reject"], required: true, description: "Explicit operator decision" },
+          },
+          async run(input, ctx) {
+            const selection = await cliSelection(ctx, input.options);
+            return { exitCode: 0, stdout: jsonOutput(await decideReflection(selection, input.options.proposal, input.options.decision, ctx.threadId ?? null)) };
+          },
+        }),
         catalog: cliCommand({
           summary: "List compact memory summaries",
           aliases: ["list"],
           options: {
+            ...taskOptions,
             scope: {
               type: "enum",
               values: READ_SCOPES,
@@ -843,9 +1346,10 @@ export default async function plugin(bb: BbPluginApi) {
               description: "Emit machine-readable JSON",
             },
           },
-          run(input, ctx) {
+          async run(input, ctx) {
             const { scope, limit } = input.options;
-            const result = store.list(scope, ctx.projectId, limit);
+            const selection = await cliSelection(ctx, input.options);
+            const result = store.list(scope, ctx.projectId, limit, selection.task);
             return {
               exitCode: 0,
               stdout: input.options.json
@@ -872,6 +1376,7 @@ export default async function plugin(bb: BbPluginApi) {
             },
           ],
           options: {
+            ...taskOptions,
             scope: {
               type: "enum",
               values: READ_SCOPES,
@@ -890,11 +1395,12 @@ export default async function plugin(bb: BbPluginApi) {
               description: "Emit machine-readable JSON",
             },
           },
-          run(input, ctx) {
+          async run(input, ctx) {
             const query = input.positionals.query.join(" ").trim();
             if (!query) throw new CliError("search requires a query");
             const { scope, limit } = input.options;
-            const memories = store.search(query, scope, ctx.projectId, limit);
+            const selection = await cliSelection(ctx, input.options);
+            const memories = store.search(query, scope, ctx.projectId, limit, selection.task);
             return {
               exitCode: 0,
               stdout: input.options.json
@@ -920,6 +1426,7 @@ export default async function plugin(bb: BbPluginApi) {
             },
           ],
           options: {
+            ...taskOptions,
             scope: {
               type: "enum",
               values: READ_SCOPES,
@@ -931,12 +1438,15 @@ export default async function plugin(bb: BbPluginApi) {
               description: "Emit machine-readable JSON",
             },
           },
-          run(input, ctx) {
+          async run(input, ctx) {
+            const selection = await cliSelection(ctx, input.options);
             const idOrName = input.positionals["id-or-name"];
             const memory = store.get(
               idOrName,
               input.options.scope,
               ctx.projectId,
+              true,
+              selection.task,
             );
             if (!memory) {
               throw new CliError(
@@ -956,6 +1466,7 @@ export default async function plugin(bb: BbPluginApi) {
           unexpectedPositionalHint:
             "memory text belongs in --details <TEXT>, not a bare argument",
           options: {
+            ...taskOptions,
             scope: {
               type: "enum",
               values: ["project", "global"],
@@ -1023,9 +1534,13 @@ export default async function plugin(bb: BbPluginApi) {
               description: "Emit machine-readable JSON",
             },
           },
-          run(input, ctx) {
+          async run(input, ctx) {
+            const selection = await cliSelection(ctx, input.options);
+            if (selection.task) throw new CliError("Use memory remember for task facts with explicit provenance; --general opts into general notes");
             const memory = store.add({
               ...writeScope(input.options.scope, ctx.projectId),
+              task: null,
+              lineage: null,
               name: input.options.name,
               summary: input.options.summary,
               details: input.options.details,
@@ -1063,6 +1578,7 @@ export default async function plugin(bb: BbPluginApi) {
             },
           ],
           options: {
+            ...taskOptions,
             "expected-version": {
               type: "integer",
               min: 1,
@@ -1118,7 +1634,9 @@ export default async function plugin(bb: BbPluginApi) {
               description: "Emit machine-readable JSON",
             },
           },
-          run(input, ctx) {
+          async run(input, ctx) {
+            const selection = await cliSelection(ctx, input.options);
+            if (selection.task) throw new CliError("Task updates require memory propose or an explicit replacement through memory remember");
             const tags = input.options.tag;
             const memory = store.update(
               input.positionals.id,
@@ -1152,6 +1670,7 @@ export default async function plugin(bb: BbPluginApi) {
             { name: "id", description: "Memory id", required: true },
           ],
           options: {
+            ...taskOptions,
             "expected-version": {
               type: "integer",
               min: 1,
@@ -1170,13 +1689,15 @@ export default async function plugin(bb: BbPluginApi) {
               description: "Emit machine-readable JSON",
             },
           },
-          run(input, ctx) {
+          async run(input, ctx) {
+            const selection = await cliSelection(ctx, input.options);
             const memory = store.forget(
               input.positionals.id,
               input.options["expected-version"],
               input.options.reason,
               ctx.threadId ?? null,
               ctx.projectId,
+              selection.task,
             );
             return {
               exitCode: 0,
@@ -1195,6 +1716,7 @@ export default async function plugin(bb: BbPluginApi) {
             { name: "id", description: "Memory id", required: true },
           ],
           options: {
+            ...taskOptions,
             limit: {
               type: "integer",
               min: 1,
@@ -1207,12 +1729,14 @@ export default async function plugin(bb: BbPluginApi) {
               description: "Emit machine-readable JSON",
             },
           },
-          run(input, ctx) {
+          async run(input, ctx) {
+            const selection = await cliSelection(ctx, input.options);
             const id = input.positionals.id;
             const history = store.history(
               id,
               ctx.projectId,
               input.options.limit,
+              selection.task,
             );
             if (history.length === 0) {
               throw new CliError(`memory history for "${id}" was not found`);

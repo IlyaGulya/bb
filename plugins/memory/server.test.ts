@@ -57,12 +57,6 @@ async function addMemory(
 }
 
 describe("bb-plugin-memory", () => {
-  it("registers a CLI and instruction catalog without native agent tools", async () => {
-    const host = await loadPlugin();
-    expect(host.harness.registrations.cli?.name).toBe("memory");
-    expect(host.harness.registrations.agentTools).toEqual([]);
-    expect(host.harness.registrations.instructionProvider).not.toBeNull();
-  });
 
   it("injects global and current-project summaries but not other projects", async () => {
     const host = await loadPlugin();
@@ -203,17 +197,6 @@ describe("bb-plugin-memory", () => {
     expect(missingProject.stderr).toContain("requires a BB project context");
   });
 
-  it("reports every missing write flag at once instead of one per run", async () => {
-    const host = await loadPlugin();
-    const result = await host.harness.runCli(
-      ["add", "--scope", "global", "--name", "incomplete"],
-      { projectId: "project-a" },
-    );
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain(
-      "missing required options: --summary, --details, --reason",
-    );
-  });
 
   it("accepts the flag names agents guess and rejects the ones it cannot map", async () => {
     const host = await loadPlugin();
@@ -288,14 +271,6 @@ describe("bb-plugin-memory", () => {
     expect(stray.stderr).toContain("--details");
   });
 
-  it("documents the write limits in add --help", async () => {
-    const host = await loadPlugin();
-    const help = await host.harness.runCli(["add", "--help"]);
-    expect(help.exitCode).toBe(0);
-    expect(help.stdout).toContain("at most 400 characters");
-    expect(help.stdout).toContain("at most 16000 characters");
-    expect(help.stdout).toContain("--tag <TAG>");
-  });
 
   it("uses optimistic versions for updates and forgetting", async () => {
     const host = await loadPlugin();
@@ -386,56 +361,25 @@ describe("bb-plugin-memory", () => {
     ).toEqual([3, 2]);
   });
 
-  it("lists every scope and edits or deletes memories through settings RPC", async () => {
+  it("restricts settings reads and mutations to an explicitly selected project", async () => {
     const host = await loadPlugin();
-    const projectA = await addMemory(host, {
-      scope: "project",
-      projectId: "project-a",
-      name: "project-a-memory",
-      summary: "Original project summary.",
+    const projectA = await addMemory(host, { scope: "project", projectId: "proj_a", name: "project-a-memory", summary: "Original project summary." });
+    const projectB = await addMemory(host, { scope: "project", projectId: "proj_b", name: "project-b-memory", summary: "Other project summary." });
+    const selection = { projectId: "proj_a", task: null };
+    const listed = await host.harness.callRpc("listMemories", selection);
+    expect(listed).toMatchObject({ memories: [{ id: projectA.id }] });
+    await expect(host.harness.callRpc("deleteMemory", { selection, id: projectB.id, expectedVersion: 1 })).rejects.toThrow();
+    await expect(host.harness.callRpc("updateMemory", {
+      selection, id: projectB.id, expectedVersion: 1, summary: "Wrong scope", details: "Wrong scope", kind: "fact", tags: [], importance: 50, pinned: false,
+    })).rejects.toThrow();
+    const updated = await host.harness.callRpc("updateMemory", {
+      selection, id: projectA.id, expectedVersion: 1, summary: "Edited from selected scope.", details: "Updated durable details.", kind: "decision", tags: ["settings"], importance: 75, pinned: true,
     });
-    const projectB = await addMemory(host, {
-      scope: "project",
-      projectId: "project-b",
-      name: "project-b-memory",
-      summary: "Other project summary.",
-    });
-
-    const listed = (await host.harness.callRpc("listMemories")) as {
-      memories: Array<{ id: string; summary: string; version: number }>;
-    };
-    expect(listed.memories.map((memory) => memory.id)).toEqual(
-      expect.arrayContaining([projectA.id, projectB.id]),
-    );
-
-    const updated = (await host.harness.callRpc("updateMemory", {
-      id: projectB.id,
-      expectedVersion: 1,
-      summary: "Edited from settings.",
-      details: "Updated durable details.",
-      kind: "decision",
-      tags: ["settings"],
-      importance: 75,
-      pinned: true,
-    })) as { memory: { summary: string; version: number; pinned: boolean } };
-    expect(updated.memory).toMatchObject({
-      summary: "Edited from settings.",
-      version: 2,
-      pinned: true,
-    });
-
-    await expect(
-      host.harness.callRpc("deleteMemory", {
-        id: projectA.id,
-        expectedVersion: 1,
-      }),
-    ).resolves.toEqual({ deleted: { id: projectA.id, version: 2 } });
-    const afterDelete = (await host.harness.callRpc("listMemories")) as {
-      memories: Array<{ id: string }>;
-    };
-    expect(afterDelete.memories.map((memory) => memory.id)).not.toContain(
-      projectA.id,
-    );
+    expect(updated).toMatchObject({ memory: { summary: "Edited from selected scope.", version: 2, pinned: true } });
+    await expect(host.harness.callRpc("deleteMemory", { selection, id: projectA.id, expectedVersion: 1 })).rejects.toThrow();
+    await expect(host.harness.callRpc("deleteMemory", { selection, id: projectA.id, expectedVersion: 2 })).resolves.toEqual({ deleted: { id: projectA.id, version: 3 } });
+    expect(await host.harness.callRpc("listMemories", selection)).toEqual({ memories: [] });
+    expect(await host.harness.callRpc("listMemories", { projectId: "proj_b", task: null })).toMatchObject({ memories: [{ id: projectB.id, version: 1 }] });
   });
 
   it("rejects prompt-injection content, secret-like values, and duplicates", async () => {

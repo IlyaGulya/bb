@@ -35,6 +35,7 @@ import { TaskWorkflowPanel } from "./workflow.js";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 
 interface DetailViewProps {
   taskKey: string;
@@ -423,6 +424,15 @@ function TaskDetail({ task }: { task: Task }) {
             task={task}
             onSave={(title) => void updateTask({ title })}
           />
+          {project?.linkedBbProjectId ? (
+            <div className="mb-4">
+              <Button asChild size="sm" variant="outline">
+                <a href={`/plugins/memory/memory/task/${encodeURIComponent(task.key)}`}>
+                  Task memory · choose logical context
+                </a>
+              </Button>
+            </div>
+          ) : null}
 
           <InlineProperties
             task={task}
