@@ -10,7 +10,7 @@ Run a script that fans work out to many agent threads, pipelines their results, 
 
 ## How it works
 
-A workflow is a JavaScript file. It runs in a sandbox with no file, shell, network, or clock access. Calls to `agent(...)` start normal bb worker threads with their usual tools and permissions. Scripts can pipeline stages, run parallel barriers, and request a JSON Schema for a worker's output. Successful calls are cached, so a resumed or restarted run replays them and continues live from the first change.
+A workflow is JavaScript running in a sandbox without file, shell, network or clock access. `agent(...)` starts normal bb workers with their usual tools and permissions. Scripts can pipeline stages, use parallel barriers and request JSON Schema output. Cached successful calls replay across restarts; execution resumes from the first change.
 
 Worker threads stay hidden from the sidebar but remain directly inspectable. Ordinary retired workers are archived; Task build/review workers and journals remain pinned until explicit acceptance or deletion cleanup.
 
