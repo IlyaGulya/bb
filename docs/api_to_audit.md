@@ -31,6 +31,22 @@ archive retains original bytes, source identities, parent links and native state
 OMP and Claude external takeover currently refuse because these adapters cannot
 prove external ownership and original scoped receipts; no receipt is fabricated.
 
+Artifact authority comes from structured native attachment/checkpoint fields,
+not arbitrary message text or tool arguments. Separate authentication/configuration
+files are excluded. Reads traverse no-follow directory descriptors and validate
+the opened file and native recorded workspace/size; hosts without confined
+descriptor traversal refuse rather than falling back to pathname reads.
+
+Import and writer identities use the canonical session file, not the selected
+discovery root. `attemptedSource` records an uncommitted candidate separately;
+rejected prefixes do not replace the committed source or Core provenance.
+Admission waits for native resume acknowledgement, persists execution under the
+`native/session/admitted` source, and distinguishes unclaimed refusals from
+uncertain ownership. Only an unclaimed, never-accepted binding may be replaced.
+Ordinary queued/scheduled writes remain blocked until admission. Handoff recovery
+uses a request fingerprint and durable accepted input, not allocation existence;
+deleted allocations cannot be reported as completed dialogues.
+
 **Before stabilization.** Prove large multi-chunk imports, cancellation and crash
 recovery, prefix/checksum rejection, duplicate-free reimport, full-value search
 and streaming artifact retrieval. Exercise SDK/CLI and desktop/compact controls

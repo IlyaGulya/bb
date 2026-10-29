@@ -1,3 +1,4 @@
+import { assertNativeHistoryWritable } from "./native-history-guard.js";
 import { requestQueuedMachineReadiness } from "./queued-message-dispatch.js";
 import {
   cancelPreparingMachinePause,
@@ -307,6 +308,7 @@ async function runDispatchAttempt(
   reattempted: boolean,
 ): Promise<DispatchAttemptOutcome> {
   const { thread } = args;
+  assertNativeHistoryWritable(deps.db, thread.id);
   let { payload } = args;
   // A stopping thread is writable HERE and nowhere upstream: the checkpoint
   // below turns it into a core wait, which is a truthful "not yet" the row can

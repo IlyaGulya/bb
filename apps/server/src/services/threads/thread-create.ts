@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { requestThreadStorageDeletion } from "./thread-lifecycle.js";
 import { seedThreadSessionOptionSelections } from "./thread-session-options.js";
 import { assertEnvironmentPathAvailable } from "../environments/path-admission.js";
@@ -6,6 +7,10 @@ import {
   getEnvironment,
   getThread,
   getThreadExecutionBinding,
+  getLastStoredTurnRequestEvent,
+  persistThreadExecutionBinding,
+  queuedThreadMessages,
+  setThreadStartupContext,
 } from "@bb/db";
 import {
   describeSessionOptionConflict,
@@ -458,29 +463,12 @@ function requireLiveSourceThread(
   return sourceThread;
 }
 
-/**
- * Creates the thread row and hands its first message to the dispatch
- * checkpoint.
- *
- * This is the whole of thread creation's dispatch story now, and it replaced a
- * pair of near-identical functions — one that provisioned immediately and one
- * that queued the first turn — whose only real difference was
- * whether anything was allowed to run yet. That is a question the checkpoint
- * answers, so asking it here as well meant two code paths that had to be kept
- * in agreement about forks, execution defaults, telemetry and cleanup.
- *
- * The row inserts `pending`: created, with its provider resolved, and nothing
- * provisioned. Creation itself is unhooked — it is a cheap row — and admission
- * happens at the first message's attempt. A cleared attempt moves the thread
- * to `starting` and provisions with the message riding along; a queued one
- * leaves the thread exactly where it is, with the start context recorded so a
- * later drain (or a later server) can start it.
- */
 async function createPendingThreadAndAttemptFirstDispatch(
   deps: ThreadCreateDeps,
   args: CreateProvisioningThreadArgs & {
     environmentIntent: ThreadProvisionEnvironmentIntent;
     sendAt: number | undefined;
+    recoverPendingThreadId?: string;
   },
 ) {
   const environment =
@@ -511,11 +499,20 @@ async function createPendingThreadAndAttemptFirstDispatch(
   );
   if (placementHostId !== null)
     requireEnvironmentPlacementHost(deps, placementHostId);
-  const thread = createThreadRecord(deps, {
-    request: args.request,
-    environmentId: args.environmentId,
-    startupContext: JSON.stringify({ kind: "pending", ...startContext }),
-  });
+  let recoveredAccepted = false;
+  const thread = args.recoverPendingThreadId === undefined
+    ? createThreadRecord(deps, { request: args.request, environmentId: args.environmentId, startupContext: JSON.stringify({ kind: "pending", ...startContext }) })
+    : deps.db.transaction((tx) => {
+        const existing = getThread(tx, args.recoverPendingThreadId!);
+        if (!existing || existing.deletedAt !== null || existing.archivedAt !== null || existing.projectId !== args.request.projectId || existing.providerId !== args.request.providerId || existing.environmentId !== args.environmentId || existing.originPluginId !== args.request.originPluginId) throw new ApiError(409, "invalid_request", "Allocated thread no longer matches this creation request.");
+        recoveredAccepted = getLastStoredTurnRequestEvent(tx, existing.id) !== null || tx.select({ id: queuedThreadMessages.id }).from(queuedThreadMessages).where(eq(queuedThreadMessages.threadId, existing.id)).limit(1).get() !== undefined;
+        if (recoveredAccepted) return existing;
+        if (existing.status !== "pending") throw new ApiError(409, "invalid_request", "Only an unaccepted pending allocation can recover its first input.");
+        if (!getThreadExecutionBinding(tx, existing.id)) persistThreadExecutionBinding(tx, existing.id, args.request.executionBinding);
+        setThreadStartupContext(tx, { threadId: existing.id, startupContext: JSON.stringify({ kind: "pending", ...startContext }) });
+        return existing;
+      }, { behavior: "immediate" });
+  if (recoveredAccepted) return getThreadSafe(deps, thread.id);
   let execution: Awaited<ReturnType<typeof buildExecutionOptions>>;
   try {
     seedThreadSessionOptionSelections(deps, {
@@ -635,8 +632,11 @@ export async function createThreadFromRequest(
   options: {
     providerInput?: ThreadCreateServiceRequestInput["input"];
     forkSourceEnvironmentId?: string;
+    recoverPendingThreadId?: string;
   } = {},
 ) {
+  const recovered = options.recoverPendingThreadId === undefined ? null : getThread(deps.db, options.recoverPendingThreadId);
+  if (options.recoverPendingThreadId !== undefined && (!recovered || recovered.deletedAt !== null || recovered.archivedAt !== null || recovered.projectId !== rawRequestInput.projectId || rawRequestInput.origin !== "plugin" || recovered.originPluginId !== rawRequestInput.originPluginId || recovered.originKind !== null)) throw new ApiError(409, "invalid_request", "The pending allocation cannot be recovered by this creation request.");
   const project = requirePublicProjectForThreadCreate(
     deps,
     rawRequestInput.projectId,
@@ -793,7 +793,9 @@ export async function createThreadFromRequest(
       "Forking preserves the native session's context and model connection. Start a new thread to select a different binding.",
     );
   }
-  const executionBinding =
+  const recoveryBinding = recovered === null ? null : getThreadExecutionBinding(deps.db, recovered.id);
+  if (recoveryBinding && ((requestInput.executionContextId ?? null) !== (recoveryBinding.executionContext?.id ?? null) || (requestInput.modelConnectionId ?? null) !== (recoveryBinding.modelConnection?.id ?? null))) throw new ApiError(409, "invalid_request", "Recovering allocated input preserves its selected context and account.");
+  const executionBinding = recoveryBinding ?? (
     originKind === "fork"
       ? sourceBinding === null
         ? null
@@ -814,7 +816,7 @@ export async function createThreadFromRequest(
           ...(requestInput.modelConnectionId === undefined
             ? {}
             : { modelConnectionId: requestInput.modelConnectionId }),
-        });
+        }));
   if (sourceBinding !== null) {
     assertThreadExecutionBindingAvailable(
       deps.db,
@@ -1020,6 +1022,7 @@ export async function createThreadFromRequest(
   const thread = await createPendingThreadAndAttemptFirstDispatch(deps, {
     ...createArgs,
     sendAt: request.sendAt,
+    ...(options.recoverPendingThreadId === undefined ? {} : { recoverPendingThreadId: options.recoverPendingThreadId }),
   });
   deps.telemetry.capture({
     name: "thread_created",

@@ -1,4 +1,4 @@
-import { threadEventItemSchema, type NativeHistoryRecord, type ThreadEventItem } from "@bb/domain";
+import { threadEventItemSchema, type NativeHistoryRecord, type PromptInput, type ThreadEventItem } from "@bb/domain";
 import type { InsertEventInput } from "@bb/db";
 
 const INLINE_CHARS = 16 * 1024;
@@ -16,7 +16,10 @@ export function nativeHistoryEvents(args: {
     const previous = part.kind === "tool-result" ? args.toolContext(id) : null;
     const argumentText = part.arguments === null ? null : JSON.stringify(part.arguments);
     const argumentsValue = argumentText !== null && argumentText.length > INLINE_CHARS ? { nativeArgumentsPreview: bounded(argumentText) } : part.arguments ?? previous?.arguments;
-    if (part.kind === "user") item = { type: "userMessage", id, content: [{ type: "text", text: bounded(part.text), mentions: [] }] };
+    if (part.kind === "user") {
+      const input: Extract<PromptInput, { type: "text" }> = { type: "text", text: bounded(part.text), mentions: [] };
+      item = { type: "userMessage", id, content: [input] };
+    }
     else if (part.kind === "assistant") item = { type: "agentMessage", id, text: bounded(part.text) };
     else if (part.kind === "reasoning") item = { type: "reasoning", id, summary: [], content: [bounded(part.text)] };
     else item = {

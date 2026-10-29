@@ -36,6 +36,7 @@ export const nativeImportManifestSchema = z.object({
   hostId: z.string(),
   projectId: z.string(),
   source: nativeSessionSourceSchema,
+  attemptedSource: nativeSessionSourceSchema.nullable(),
   threadId: z.string().nullable(),
   status: z.enum(["paused", "importing", "ready", "cancelled", "failed"]),
   mode: z.enum(["archive", "native-admitted", "new-handoff"]),

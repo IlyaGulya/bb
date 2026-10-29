@@ -9,6 +9,14 @@
   Keep archive-only, provider-controlled native admission and a separately
   requested new handoff dialogue distinct; unsupported external ownership or
   missing original receipts refuse without starting a second writer.
+- Restrict native archive artifact authority to structured native records and
+  exclude separate credential/configuration files. Confine reads through
+  directory descriptors and revalidate recorded workspace/size. Coordinate
+  overlapping-root claims by canonical session file; retain rejected candidate
+  provenance separately. Gate admission on completed native ownership, persist
+  selected execution, recover unaccepted refused selections and block historical
+  queue/schedule writes. Recover handoffs by durable input acceptance, not merely
+  an allocated or deleted thread.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact

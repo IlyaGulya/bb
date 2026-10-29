@@ -22,6 +22,9 @@ afterEach(async () => { for (const dispose of cleanup.splice(0)) await dispose()
 const textInput = (text: string) => [{ type: "text", text, mentions: [] }].map((input) => promptInputSchema.parse(input));
 async function fixture() {
   const harness = await createTestAppHarness();
+  const provider = harness.deps.providerRegistry.get("codex");
+  if (!provider) throw new Error("Synthetic Codex provider missing");
+  provider.info = { ...provider.info, experimental_executionBindings: { contexts: false, gatewayConnections: false, ...provider.info.experimental_executionBindings, nativeConnections: true } };
   let imports: NativeSessionImports | null = null;
   cleanup.push(async () => { try { await imports?.dispose(); } finally { await harness.cleanup(); } });
   const { host } = seedHostSession(harness.deps);
@@ -52,7 +55,7 @@ async function completeAdmission(saved: Awaited<ReturnType<typeof fixture>>, inp
     if (next.manifest === null) throw new Error("Admission completed without a result");
     return next.manifest;
   }
-  await reportQueuedCommandSuccess(saved.harness, next.queued, result);
+  await reportQueuedCommandSuccess(saved.harness, next.queued, result.admitted ? result : { ...result, ownership: "unclaimed" });
   return pending;
 }
 function acceptedHandoffs(harness: TestAppHarness, threadId: string, selectedText: string): string[] {

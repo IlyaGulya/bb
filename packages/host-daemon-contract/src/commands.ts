@@ -1441,7 +1441,7 @@ export const hostDaemonCommandRegistry = {
     }).strict(),
     resultSchema: z.discriminatedUnion("admitted", [
       z.object({ admitted: z.literal(true), providerThreadId: z.string() }).strict(),
-      z.object({ admitted: z.literal(false), reason: z.string() }).strict(),
+      z.object({ admitted: z.literal(false), ownership: z.enum(["unclaimed", "uncertain"]), reason: z.string() }).strict(),
     ]),
     transport: "onlineRpc", retryable: false, flushEventsBeforeResult: true, envLane: "read",
   }),

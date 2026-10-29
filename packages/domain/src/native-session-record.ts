@@ -62,6 +62,35 @@ export function nativeArtifactReferences(value: NativeRecordObject): string[] {
   }
   return [...references];
 }
+function structuredNativeArtifacts(record: NativeRecordObject, body: NativeRecordObject, type: string): string[] {
+  const references = new Set<string>();
+  const add = (value: JsonValue | undefined) => {
+    if (typeof value === "string" && value.length) references.add(value.startsWith("blob://") ? value.slice(7) : value);
+  };
+  const descriptor = (value: JsonValue | undefined) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    for (const key of ["path", "filePath", "blobPath", "artifactPath", "blobId", "checkpointPath", "statePath"]) add(value[key]);
+    for (const key of ["blob", "attachment", "artifact"]) {
+      const child = value[key];
+      if (typeof child === "string") add(child);
+      else if (child && typeof child === "object" && !Array.isArray(child)) { add(child.path); add(child.filePath); }
+    }
+  };
+  if (["checkpoint", "branch_checkpoint", "branch-checkpoint", "compacted", "compaction"].includes(type) || (type === "system" && record.subtype === "compact_boundary")) {
+    descriptor(record);
+    descriptor(record.payload);
+  }
+  descriptor(record.checkpoint);
+  if (Array.isArray(record.attachments)) for (const attachment of record.attachments) descriptor(attachment);
+  if (Array.isArray(body.content)) for (const value of body.content) {
+    const block = object(value);
+    if (["image", "image_url", "input_image", "document", "file", "attachment", "artifact"].includes(String(block.type))) {
+      descriptor(block);
+      descriptor(block.source);
+    }
+  }
+  return [...references];
+}
 export function parseNativeHistoryRecord(input: unknown, ordinal: number): NativeHistoryRecord {
   const record = objectSchema.parse(input);
   const payload = object(record.payload);
@@ -111,5 +140,5 @@ export function parseNativeHistoryRecord(input: unknown, ordinal: number): Nativ
   return { id, parentId, timestamp: Number.isFinite(parsedTime) ? parsedTime : null, type,
     sessionId: type === "session" || type === "session_meta" ? string(header.id) : string(record.sessionId) ?? string(record.session_id),
     cwd: string(header.cwd), title: string(record.title) ?? string(record.summary),
-    parts, artifacts: nativeArtifactReferences(record), state: record };
+    parts, artifacts: structuredNativeArtifacts(record, body, type), state: record };
 }

@@ -27,10 +27,10 @@ export interface NativeImportDependencies {
   read(hostId: string, input: NativeRead, signal: AbortSignal): Promise<NativeChunk>;
 }
 export function nativeImportIdentity(selection: NativeImportSelection): string {
-  return hash(JSON.stringify([selection.hostId, selection.source.engine, selection.source.rootPath, selection.source.sessionId, selection.projectId]));
+  return hash(JSON.stringify([selection.hostId, selection.source.engine, selection.source.path, selection.source.sessionId, selection.projectId]));
 }
 export function nativeWriterNamespace(manifest: NativeImportManifest): string {
-  return hash(JSON.stringify([manifest.hostId, manifest.source.engine, manifest.source.rootPath, manifest.source.sessionId]));
+  return hash(JSON.stringify([manifest.hostId, manifest.source.engine, manifest.source.path, manifest.source.sessionId]));
 }
 async function writeAll(file: FileHandle, bytes: Buffer, offset: number): Promise<void> {
   let written = 0;
@@ -75,7 +75,7 @@ export class NativeSessionImports {
       patchThreadPluginMetadata(this.deps.db, { threadId: manifest.threadId, pluginId: NATIVE_HISTORY_OWNER, remove: [], set: {
         importId: manifest.id, mode: manifest.mode, importStatus: manifest.status,
         nativeSessionId: manifest.source.sessionId, sourceHostId: manifest.hostId,
-        source: manifest.source,
+        source: manifest.source, attemptedSource: manifest.attemptedSource,
         nativeNamespace: nativeWriterNamespace(manifest), reason: manifest.reason,
       } });
     }
@@ -101,7 +101,7 @@ export class NativeSessionImports {
     try { manifest = await this.get(id); }
     catch (error) {
       if (!(error instanceof ApiError && error.status === 404)) throw error;
-      manifest = { version: 1, id, ...selection, threadId: null, status: "paused", mode: "archive", continuationThreadId: null,
+      manifest = { version: 1, id, ...selection, attemptedSource: null, threadId: null, status: "paused", mode: "archive", continuationThreadId: null,
         reason: "Archive only. Native continuation requires a separate provider-controlled exclusive admission; no agent was started.",
         error: null, bytes: 0, records: 0, nextSequence: 1, sha256: null, boundaryBytes: 0, boundarySha256: null,
         createdAt: Date.now(), updatedAt: Date.now(), artifacts: [] };
@@ -111,7 +111,7 @@ export class NativeSessionImports {
     if (manifest.mode !== "archive" && manifest.source.revision !== selection.source.revision) throw new ApiError(409, "invalid_request", "An admitted or handed-off source cannot be rewritten. Its retained archive remains unchanged.");
     if (selection.source.sizeBytes < manifest.bytes) throw new ApiError(409, "invalid_request", "Native source is shorter than the committed archive; original data will not be overwritten.");
     if (manifest.status === "ready" && manifest.source.revision === selection.source.revision && manifest.source.path === selection.source.path && JSON.stringify(manifest.source.artifactRoots) === JSON.stringify(selection.source.artifactRoots) && manifest.artifacts.every((entry) => entry.status === "ready")) return manifest;
-    manifest.source = selection.source;
+    manifest.attemptedSource = selection.source;
     manifest.status = "paused";
     manifest.error = null;
     await this.save(manifest);
@@ -153,7 +153,9 @@ export class NativeSessionImports {
   }
   private async read(manifest: NativeImportManifest, offset: number, length: number, signal: AbortSignal, artifact: NativeRead["artifact"] = null): Promise<NativeChunk> {
     signal.throwIfAborted();
-    const result = await this.deps.read(manifest.hostId, { source: manifest.source, offset, length, artifact }, signal);
+    const source = manifest.attemptedSource ?? manifest.source;
+    const result = await this.deps.read(manifest.hostId, { source, offset, length, artifact }, signal);
+    if (artifact === null && (result.sizeBytes !== source.sizeBytes || result.revision !== source.revision)) throw new Error("Native source returned a different authoritative boundary.");
     const bytes = Buffer.from(result.content, "base64");
     if (result.offset !== offset || bytes.length > length || hash(bytes) !== result.sha256 || (!bytes.length && offset < result.sizeBytes)) throw new Error("Native transfer checksum, offset or progress validation failed.");
     return result;
@@ -178,6 +180,11 @@ export class NativeSessionImports {
         }
       } finally { await file.close(); }
       if (digest.copy().digest("hex") !== manifest.boundarySha256) throw new Error("Committed native archive checksum mismatch.");
+    }
+    if (manifest.attemptedSource !== null) {
+      manifest.source = manifest.attemptedSource;
+      manifest.attemptedSource = null;
+      await this.save(manifest);
     }
     for (const artifact of manifest.artifacts.filter((entry) => entry.status === "unavailable")) {
       const record = nativeImportRecordSchema.parse(JSON.parse(await readFile(join(directory, "records", `${artifact.recordOrdinal}.json`), "utf8")));

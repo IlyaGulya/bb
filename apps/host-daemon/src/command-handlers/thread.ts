@@ -1,4 +1,4 @@
-import { assertImportedNativeIdentity, nativeImportResumeOptions } from "./native-session-admission.js";
+import { resumeImportedNativeSession } from "./native-session-admission.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AgentRuntimeBridgeLaunch } from "@bb/agent-runtime";
@@ -189,10 +189,7 @@ async function resumeThreadRuntimeIfMissing(
 ): Promise<void> {
   const { command, entry, options } = args;
   const { resumeContext } = command;
-  if (entry.runtime.hasThread(command.threadId)) {
-    if (resumeContext.nativeImport) await assertImportedNativeIdentity(entry.runtime, command.threadId, resumeContext.nativeImport.sessionId);
-    return;
-  }
+  if (!resumeContext.nativeImport && entry.runtime.hasThread(command.threadId)) return;
   if (!resumeContext.providerThreadId) {
     throw new CommandDispatchError(
       "unknown_thread_runtime",
@@ -203,7 +200,7 @@ async function resumeThreadRuntimeIfMissing(
     command.resumeContext.bridgeLaunch ?? command.bridgeLaunch,
     options,
   );
-  await entry.runtime.resumeThread({
+  const resume = {
     bridgeLaunch,
     skillRoots: entry.skillRoots,
     environmentId: command.environmentId,
@@ -212,12 +209,13 @@ async function resumeThreadRuntimeIfMissing(
     providerThreadId: resumeContext.providerThreadId,
     providerId: resumeContext.providerId,
     contributedEnv: resumeContext.contributedEnv,
-    options: resumeContext.nativeImport ? nativeImportResumeOptions(command.options, resumeContext.nativeImport) : command.options,
+    options: command.options,
     instructions: resumeContext.instructions,
     dynamicTools: resumeContext.dynamicTools,
     instructionMode: resumeContext.instructionMode,
-  });
-  if (resumeContext.nativeImport) await assertImportedNativeIdentity(entry.runtime, command.threadId, resumeContext.nativeImport.sessionId);
+  };
+  if (resumeContext.nativeImport) await resumeImportedNativeSession(entry.runtime, resume, resumeContext.nativeImport, "admitted-resume");
+  else await entry.runtime.resumeThread(resume);
 }
 
 export async function startThread(

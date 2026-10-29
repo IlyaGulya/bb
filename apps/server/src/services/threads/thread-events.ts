@@ -21,6 +21,7 @@ import {
   isStandaloneBuiltinCompactCommand,
   parseStoredThreadEvent,
   systemErrorEventDataSchema,
+  recordedThreadExecutionOptionsSchema,
   threadScope,
   turnRequestEventDataSchema,
   WORKSPACE_PROVISIONING_STEP_KEYS,
@@ -919,5 +920,8 @@ export function getLastExecutionOptions(
 ): RecordedThreadExecutionOptions | null {
   const row = getLastStoredTurnRequestEvent(deps.db, threadId);
 
+  const metadata = nativeHistoryMetadata(deps.db, threadId);
+  const admitted = metadata?.admittedExecution === undefined ? null : recordedThreadExecutionOptionsSchema.parse(metadata.admittedExecution);
+  if (admitted && (!row || (admitted.seq !== undefined && row.sequence <= admitted.seq))) return admitted;
   return row ? parseStoredTurnRequestEvent(row).execution : null;
 }

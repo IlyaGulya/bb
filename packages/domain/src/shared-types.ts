@@ -476,6 +476,7 @@ const threadExecutionSourceSchema = z.enum([
   "client/thread/start",
   "client/turn/requested",
   "client/turn/start",
+  "native/session/admitted",
 ]);
 export type ThreadExecutionSource = z.infer<typeof threadExecutionSourceSchema>;
 
