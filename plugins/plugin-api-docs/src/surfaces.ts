@@ -1301,6 +1301,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "All artifact authority requires complete native JSONL records, never record-shaped fragments in tool arguments; POSIX pathname aliases share import/writer identities without weakening host path or file-descriptor confinement",
           "Retain OMP numeric artifact://N tool-result spill footers as unique result-specific logs in the selected JSONL session-stem directory under an explicit artifact root; original and older tool logs are supported without cwd/neighbor fallback or changing native headers",
           "Keep full native history and state separate from next-turn model context; Core timeline values are bounded display previews",
+          "Open current and already-retained owned archives as Core conversation previews using closed historical display frames; legacy event scopes are adapted read-only without resetting history, changing native identity or starting provider execution",
           "Request exclusive same-identity native admission separately without a prompt; unsupported ownership or original receipt adoption refuses rather than inventing an identity or account binding",
           "Explicitly create a different handoff dialogue with user-supplied next-turn context and an archive link; no imported tool, hook or configuration is executed by archiving",
         ],

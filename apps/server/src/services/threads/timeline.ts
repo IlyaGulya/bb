@@ -23,7 +23,6 @@ import {
   type TimelineContentCursor,
 } from "./timeline-snapshot.js";
 import {
-  buildThreadTimelineFromEvents,
   THREAD_TIMELINE_EXCLUDED_EVENT_TYPES,
   buildThreadTimelineTurnDetailsFromEvents,
   compactThreadTimelineSummaryEvents,
@@ -113,6 +112,7 @@ import { roundDurationMs } from "@bb/process-utils";
 import { runEventLoopWorkSync } from "../system/event-loop-work.js";
 import { parseStoredEvent } from "./thread-data.js";
 import { decodeStoredEventRowCached } from "./stored-event-decode-cache.js";
+import { buildTimelineWithNativeHistory, decodeNativeHistoryRows } from "./native-history-projection.js";
 import {
   selectTimelineWindowStart,
   forgetLatestTimelineSelections,
@@ -1367,12 +1367,13 @@ function buildThreadTimelineInternal(
   profile.eventDataBytes = byteLengthOfStoredEventRows(rawEventRows);
   profile.eventRowCount = rawEventRows.length;
   profile.selectionStrategy = eventSelection.strategy;
+  const nativeHistory = decodeNativeHistoryRows(db, rawEventRows);
   const decodedRawEvents = measureThreadTimelineStage(
     profile,
     "event-json-decode",
     () =>
       rawEventRows.map((row) =>
-        withRowMeta(row, decodeStoredEventRowCached(db, row)),
+        nativeHistory.get(row.id) ?? withRowMeta(row, decodeStoredEventRowCached(db, row)),
       ),
   );
   const headStateEvents = measureThreadTimelineStage(
@@ -1433,7 +1434,7 @@ function buildThreadTimelineInternal(
     profile,
     "thread-view-projection",
     () =>
-      buildThreadTimelineFromEvents({
+      buildTimelineWithNativeHistory({
         acceptedClientRequestContext,
         contextWindowEvents,
         headStateEvents,
@@ -1443,7 +1444,7 @@ function buildThreadTimelineInternal(
           includeNestedRows,
           providerId: thread.providerId,
         },
-      }),
+      }, nativeHistory),
   );
   const projectedTimelineRows = orderTimelineRowsUsingContext(
     timeline.rows.filter(
@@ -1595,7 +1596,7 @@ interface LoadThreadConversationOutlineOptions extends BuildThreadConversationOu
 }
 
 const CONVERSATION_OUTLINE_PREVIEW_MAX_LENGTH = 200;
-const CONVERSATION_OUTLINE_PROJECTION_VERSION = 2;
+const CONVERSATION_OUTLINE_PROJECTION_VERSION = 3;
 const conversationOutlineItemsSchema =
   threadConversationOutlineItemSchema.array();
 
@@ -1680,8 +1681,9 @@ function buildThreadConversationRows(
       ),
       threadId: thread.id,
     });
+    const nativeHistory = decodeNativeHistoryRows(db, rawEventRows);
     const decodedRawEvents = rawEventRows.map((row) =>
-      toThreadEventWithMeta(row),
+      nativeHistory.get(row.id) ?? toThreadEventWithMeta(row),
     );
     const decodedEvents = compactThreadTimelineSummaryEvents(decodedRawEvents);
     const clientRequestContextRows = selectClientRequestContextRows(db, {
@@ -1696,7 +1698,7 @@ function buildThreadConversationRows(
         (row) => toThreadEventWithMeta(row),
       ),
     };
-    const timeline = buildThreadTimelineFromEvents({
+    const timeline = buildTimelineWithNativeHistory({
       acceptedClientRequestContext,
       contextWindowEvents: [],
       events: decodedEvents,
@@ -1711,7 +1713,7 @@ function buildThreadConversationRows(
         threadStatus: thread.status,
         workspaceRoot: resolveThreadWorkspaceRoot(db, thread),
       },
-    });
+    }, nativeHistory);
     const conversationRows: TimelineConversationRow[] = [];
     collectConversationRows(timeline.rows, conversationRows);
     return conversationRows;
@@ -1734,8 +1736,9 @@ function selectThreadConversationOutline(
     sequenceStart,
     threadId: thread.id,
   });
+  const nativeHistory = decodeNativeHistoryRows(db, rawEventRows);
   const decodedRawEvents = rawEventRows.map((row) =>
-    toThreadEventWithMeta(row),
+    nativeHistory.get(row.id) ?? toThreadEventWithMeta(row),
   );
   const decodedEvents = compactThreadTimelineSummaryEvents(
     decodedRawEvents,
@@ -1760,7 +1763,7 @@ function selectThreadConversationOutline(
   return {
     events: decodedRawEvents,
     project: () => {
-      const timeline = buildThreadTimelineFromEvents({
+      const timeline = buildTimelineWithNativeHistory({
         acceptedClientRequestContext,
         contextWindowEvents: [],
         events: decodedEvents,
@@ -1775,7 +1778,7 @@ function selectThreadConversationOutline(
           threadStatus: thread.status,
           workspaceRoot: resolveThreadWorkspaceRoot(db, thread),
         },
-      });
+      }, nativeHistory);
       const items: ReturnType<ConversationOutlineSelection["project"]> = [];
       for (const row of timeline.rows) {
         if (row.kind !== "conversation") {

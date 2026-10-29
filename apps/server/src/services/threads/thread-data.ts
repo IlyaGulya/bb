@@ -17,6 +17,7 @@ import type {
   ThreadEventType,
 } from "@bb/domain";
 import { ApiError } from "../../errors.js";
+import { decodeNativeHistoryRows } from "./native-history-projection.js";
 
 const THREAD_EVENT_RESPONSE_DATA_BYTE_LIMIT = 8 * 1024 * 1024;
 
@@ -98,14 +99,14 @@ export function parseStoredEvent(row: StoredEventRow): ThreadEvent {
   });
 }
 
-function parseStoredEventRow(row: StoredEventRow): ThreadEventRow {
+function parseStoredEventRow(row: StoredEventRow, event: ThreadEvent): ThreadEventRow {
   return buildThreadEventRow({
     id: row.id,
-    scope: parseStoredEventScope(row),
+    scope: event.scope,
     threadId: row.threadId,
     seq: row.sequence,
     createdAt: row.createdAt,
-    event: parseStoredEvent(row),
+    event,
   });
 }
 
@@ -141,9 +142,9 @@ export function listThreadEventRows(
     threadId: args.threadId,
     types: args.types,
   });
-  return hydrateRawThreadEventRows(db, rows).map((row) =>
-    parseStoredEventRow(row),
-  );
+  const hydrated = hydrateRawThreadEventRows(db, rows);
+  const native = decodeNativeHistoryRows(db, hydrated);
+  return hydrated.map((row) => parseStoredEventRow(row, native.get(row.id)?.event ?? parseStoredEvent(row)));
 }
 
 export function findThreadEvent(
@@ -159,7 +160,9 @@ export function findThreadEvent(
     return null;
   }
   const [hydrated] = hydrateRawThreadEventRows(db, [row]);
-  return parseStoredEventRow(hydrated ?? row);
+  const selected = hydrated ?? row;
+  const native = decodeNativeHistoryRows(db, [selected]);
+  return parseStoredEventRow(selected, native.get(selected.id)?.event ?? parseStoredEvent(selected));
 }
 
 export function getLastThreadOutput(

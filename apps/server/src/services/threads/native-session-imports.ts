@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, open, readFile, rename, type FileHandle } from "node:fs/promises";
 import { join, posix } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   createThread, events as storedEvents, getLatestThreadSequence, getThread, insertEvents, noopNotifier, patchThreadPluginMetadata, threadPluginMetadata,
@@ -219,7 +219,7 @@ export class NativeSessionImports {
       const projected = record ? nativeHistoryEvents({ importId: manifest.id, threadId: manifest.threadId!, sessionId: manifest.source.sessionId,
         ordinal, sequence: 0, record, recordSha256: hash(line), fallbackTimestamp: manifest.source.modifiedAt,
         toolContext: (itemId) => {
-          const previous = this.deps.db.select({ data: storedEvents.data }).from(storedEvents).where(and(eq(storedEvents.threadId, manifest.threadId!), eq(storedEvents.itemId, itemId), eq(storedEvents.type, "item/started"))).orderBy(storedEvents.sequence).limit(1).get();
+          const previous = this.deps.db.select({ data: storedEvents.data }).from(storedEvents).where(and(eq(storedEvents.threadId, manifest.threadId!), eq(storedEvents.type, "item/started"), eq(storedEvents.itemId, itemId), sql`json_extract(${storedEvents.data}, '$.nativeImportRecord.importId') = ${manifest.id}`, sql`json_extract(${storedEvents.data}, '$.nativeImportRecord.ordinal') < ${ordinal}`)).orderBy(desc(storedEvents.sequence)).limit(1).get();
           if (!previous) return null;
           const item = z.object({ item: threadEventItemSchema }).parse(JSON.parse(previous.data)).item;
           return item.type === "toolCall" ? item : null;
@@ -227,15 +227,19 @@ export class NativeSessionImports {
       }) : [];
       const { start, eventCount } = this.deps.db.transaction(() => {
         const first = projected[0];
-        const recovered = first ? this.deps.db.select({ sequence: storedEvents.sequence, sha256: sql<string>`json_extract(${storedEvents.data}, '$.nativeImportRecord.sha256')`, count: sql<number>`json_extract(${storedEvents.data}, '$.nativeImportRecord.eventCount')` }).from(storedEvents).where(and(eq(storedEvents.threadId, manifest.threadId!), eq(storedEvents.itemId, first.itemId!), sql`json_extract(${storedEvents.data}, '$.nativeImportRecord.importId') = ${manifest.id}`, sql`json_extract(${storedEvents.data}, '$.nativeImportRecord.ordinal') = ${ordinal}`)).limit(1).get() : undefined;
-        if (recovered && (recovered.sha256 !== hash(line) || recovered.count !== projected.length)) throw new Error("A staged native record changed after Core projection. Existing history was retained; refusing to replace its committed events.");
+        const recoveryFields = { sequence: storedEvents.sequence, sha256: sql<string>`json_extract(${storedEvents.data}, '$.nativeImportRecord.sha256')`, count: sql<number>`json_extract(${storedEvents.data}, '$.nativeImportRecord.eventCount')`, version: sql<number | null>`json_extract(${storedEvents.data}, '$.nativeImportRecord.projectionVersion')` };
+        let recovered = first?.scope.kind === "turn" ? this.deps.db.select(recoveryFields).from(storedEvents).where(and(eq(storedEvents.threadId, manifest.threadId!), eq(storedEvents.turnId, first.scope.turnId), eq(storedEvents.type, "turn/started"), sql`json_extract(${storedEvents.data}, '$.nativeImportRecord.importId') = ${manifest.id}`, sql`json_extract(${storedEvents.data}, '$.nativeImportRecord.ordinal') = ${ordinal}`)).limit(1).get() : undefined;
+        const firstItem = projected[1];
+        if (!recovered && firstItem?.itemId != null) recovered = this.deps.db.select(recoveryFields).from(storedEvents).where(and(eq(storedEvents.threadId, manifest.threadId!), eq(storedEvents.scopeKind, "thread"), eq(storedEvents.itemId, firstItem.itemId), sql`json_extract(${storedEvents.data}, '$.nativeImportRecord.importId') = ${manifest.id}`, sql`json_extract(${storedEvents.data}, '$.nativeImportRecord.ordinal') = ${ordinal}`, sql`json_extract(${storedEvents.data}, '$.nativeImportRecord.projectionVersion') IS NULL`)).orderBy(storedEvents.sequence).limit(1).get();
+        const legacy = recovered !== undefined && recovered.version === null;
+        if (recovered && (recovered.sha256 !== hash(line) || recovered.count !== (legacy ? record?.parts.length : projected.length) || (!legacy && recovered.version !== 2))) throw new Error("A staged native record changed after Core projection. Existing history was retained; refusing to replace its committed events.");
         const start = recovered?.sequence ?? Math.max(manifest.nextSequence, getLatestThreadSequence(this.deps.db, { threadId: manifest.threadId! }) + 1);
         const prepared = projected.map((event, index) => ({ ...event, sequence: start + index }));
         let inserted = 0;
-        for (let index = 0; index < prepared.length; index += 100) inserted += insertEvents(this.deps.db, noopNotifier, prepared.slice(index, index + 100)).insertedCount;
+        if (!legacy) for (let index = 0; index < prepared.length; index += 100) inserted += insertEvents(this.deps.db, noopNotifier, prepared.slice(index, index + 100)).insertedCount;
         if (inserted !== (recovered ? 0 : prepared.length)) throw new Error("Native history collided with unrelated Core sequences; no record was silently skipped.");
-        if (record) upsertThreadSearchSegments(this.deps.db, { segments: record.parts.flatMap((part, index) => part.kind === "user" || part.kind === "assistant" ? [{ threadId: manifest.threadId!, sourceKind: part.kind === "user" ? "user_message" as const : "assistant_message" as const, sourceKey: `native:${ordinal}:${index}`, sourceSeq: start + index, text: part.text }] : []) });
-        return { start, eventCount: prepared.length };
+        if (record) upsertThreadSearchSegments(this.deps.db, { segments: record.parts.flatMap((part, index) => part.kind === "user" || part.kind === "assistant" ? [{ threadId: manifest.threadId!, sourceKind: part.kind === "user" ? "user_message" as const : "assistant_message" as const, sourceKey: `native:${ordinal}:${index}`, sourceSeq: start + (legacy ? 0 : 1) + index, text: part.text }] : []) });
+        return { start, eventCount: legacy && recovered ? recovered.count : prepared.length };
       }, { behavior: "immediate" });
       if (eventCount) this.deps.hub.notifyThread(manifest.threadId!, ["events-appended"], { timelineSequence: getLatestThreadSequence(this.deps.db, { threadId: manifest.threadId! }) });
       const metadata: NativeImportRecord = { ordinal, offset: manifest.bytes, length: line.length, sha256: hash(line),
