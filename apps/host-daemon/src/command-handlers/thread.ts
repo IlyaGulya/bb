@@ -112,7 +112,7 @@ async function requireSupportedProviderCliForThreadStart({
     }),
     async () => {
       const bridgeLaunch = await resolveRuntimeBridgeLaunch(
-        command.bridgeLaunch.capture ? { ...command.bridgeLaunch, capture: undefined } : command.bridgeLaunch,
+        command.bridgeLaunch,
         options,
       );
       return options.providerInstallationStatus({

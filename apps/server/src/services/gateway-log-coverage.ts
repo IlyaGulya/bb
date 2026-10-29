@@ -46,19 +46,19 @@ export function gatewayLogCoverage(args: {
         source: "bypass-network",
         state: "uninstrumented",
         representation: "unknown",
-        reason: "CPA does not observe direct-provider, browser or other bypass traffic. No MITM, CA, process capture, HTTP/3, gRPC, WebSocket, pinning or application-encryption coverage has been established.",
+        reason: "This endpoint qualifies no traffic population beyond files admitted by the existing CPA endpoint/thread guard. Inspect the actual CPA transport and correlation contract before declaring any other traffic captured or missing; no additional network path is installed.",
       },
       {
         source: "standalone",
         state: "uninstrumented",
         representation: "unknown",
-        reason: "Standalone OMP, Claude Code and Codex need explicit capture/session identity and a later authorized binding. No process is associated by timestamps, model account or filesystem discovery.",
+        reason: "The current reader requires an exact inbound BB thread header and frozen endpoint. A standalone CPA correlation must be evidenced by that existing owner; this inspection neither discovers processes nor infers a CPA capability gap.",
       },
       {
         source: "stdio-mcp",
         state: "uninstrumented",
         representation: "unknown",
-        reason: "CPA model logs may contain MCP schemas or replayed results but do not independently observe stdio MCP calls, inputs, results or approvals. Native instrumentation must establish those records.",
+        reason: "Review actual CPA request/response artifacts for tool schemas, calls and results before identifying an omission. This endpoint adds no independent MCP observer and makes no global claim that CPA lacks a channel.",
       },
       {
         source: "local-tools",

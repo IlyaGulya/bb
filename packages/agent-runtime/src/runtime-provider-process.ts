@@ -109,7 +109,6 @@ interface SpawnProviderArgs {
   adapter: BridgeProtocolAdapter;
   processKey: string;
   providerId: string;
-  processCapture: AgentRuntimeBridgeLaunch["processCapture"];
 }
 
 interface ProviderProcessExitStatus {
@@ -183,7 +182,6 @@ export class RuntimeProviderProcessManager {
         adapter,
         processKey: args.processKey,
         providerId: args.providerId,
-        processCapture: args.bridgeLaunch.processCapture,
       });
 
       try {
@@ -387,8 +385,8 @@ export class RuntimeProviderProcessManager {
     }
 
     const managed = spawnManagedProcess({
-      command: args.processCapture?.command ?? processConfig.command,
-      args: args.processCapture ? [...args.processCapture.args, processConfig.command, ...processConfig.args] : processConfig.args,
+      command: processConfig.command,
+      args: processConfig.args,
       cwd: this.args.workspacePath,
       env,
     });

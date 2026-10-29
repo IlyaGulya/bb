@@ -118,7 +118,6 @@ export interface AgentRuntimeBridgeLaunch {
   };
   providerOptions: JsonObject;
   envPassthrough: readonly string[];
-  processCapture?: { captureId: string; command: string; args: string[] };
 }
 
 export interface EnsureProviderArgs {

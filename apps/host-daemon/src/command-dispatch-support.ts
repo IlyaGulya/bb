@@ -1,4 +1,3 @@
-import { exchangeHostCapture } from "./private-capture.js";
 import type { DesktopBrowserBroker } from "./desktop-browser-broker.js";
 import {
   CompetingTurnError,
@@ -170,15 +169,6 @@ export async function resolveRuntimeBridgeLaunch(
     byteLength: bridgeLaunch.source.byteLength,
     logger: options.logger,
   });
-  let processCapture: AgentRuntimeBridgeLaunch["processCapture"];
-  if (bridgeLaunch.capture) {
-    const session = bridgeLaunch.capture;
-    if (session.policy.process?.native !== "stdio") throw new CommandDispatchError("capture_scope_denied", "BB process capture requires the native stdio profile.");
-    const result = await exchangeHostCapture(options.dataDir, { type: "capture.exchange", session, leaseUntil: Math.min(session.expiresAt, Date.now() + session.policy.offlineLeaseSeconds * 1000), ack: null, poll: false });
-    const prefix = result.status.process?.launchPrefix;
-    if (!prefix?.[0]) throw new CommandDispatchError("capture_source_unavailable", "Process capture preparation did not return a launch prefix.");
-    processCapture = { captureId: session.id, command: prefix[0], args: prefix.slice(1) };
-  }
   return {
     pluginId: bridgeLaunch.pluginId,
     dataDir,
@@ -190,7 +180,6 @@ export async function resolveRuntimeBridgeLaunch(
     capabilities,
     providerOptions,
     envPassthrough,
-    ...(processCapture ? { processCapture } : {}),
   };
 }
 

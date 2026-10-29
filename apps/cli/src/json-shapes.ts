@@ -4,7 +4,6 @@ export const JSON_SHAPE_BY_COMMAND_PATH: Readonly<Record<string, string>> = {
   "captures show": "{session, lastSyncAt, lastAckAt, gap, gapCount, storedBytes, committedChunks, pendingBytes, pendingChunks, host: CaptureOutboxStatus | null, hostEnabled: boolean | null, links, coverage, outcome}",
   "captures stop": "CaptureView (accepted stop; disconnected host is bounded by its admission lease)",
   "captures sync": "CaptureView (one bounded data flush, not a lossless/full-coverage claim)",
-  "captures process": "{captureId, hostId, process: {phase, requiredMitmproxy, launchPrefix, mcpPrefix, hookCommand, rootPid, processSessionId, pendingSourceBytes, openRecords, exitCode, droppedSourceBytes, prerequisite}, coverage} (preparation only; execute argv solely on the selected host; null source loss is unknown)",
   "captures link": "CaptureView with same-context owner-association links; original scope/provenance stays immutable; reuse opaque --operation UUID on retry",
   "captures artifacts": "[{manifest, completedAt, rejectedAt, committedSequences, outcome}] (bare scoped page, no raw bodies; source correlations can be null)",
   "captures inspect": "{manifest, completedAt, rejectedAt, committedSequences, outcome}; with --preview-bytes: {artifactId, raw, encoding, truncated, previewBytes, sizeBytes, storedSha256}",

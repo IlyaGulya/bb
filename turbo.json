@@ -847,12 +847,6 @@
         "$TURBO_ROOT$/vitest*.ts"
       ]
     },
-    "@bb/integration-tests#test:capture-process": {
-      "dependsOn": ["//#ensure-native-modules", "topo"],
-      "cache": false,
-      "outputs": [],
-      "passThroughEnv": ["BB_CAPTURE_PYTHON", "BB_CAPTURE_MITMDUMP", "BB_PRIVATE_CAPTURE_HOST_KEY_REF", "BB_PRIVATE_CAPTURE_EPHEMERAL_DIR"]
-    },
     "@bb/integration-tests#e2e:mobile-backend": {
       "cache": false,
       "persistent": true,

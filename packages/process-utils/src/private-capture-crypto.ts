@@ -111,7 +111,7 @@ export function encryptCaptureBytes(key: Uint8Array, context: Pick<CaptureCipher
   }
   return output;
 }
-export function decryptCaptureBytes(key: Uint8Array, context: Pick<CaptureCipherContext, "role" | "scopeDigest" | "objectId">, ciphertext: Buffer, maxBytes: number, interrupted = false): Buffer {
+export function decryptCaptureBytes(key: Uint8Array, context: Pick<CaptureCipherContext, "role" | "scopeDigest" | "objectId">, ciphertext: Buffer, maxBytes: number): Buffer {
   try {
     if (!ciphertext.subarray(0, magic.length).equals(magic)) throw new CaptureStorageError("integrity");
     const pieces: Buffer[] = [];
@@ -137,16 +137,15 @@ export function decryptCaptureBytes(key: Uint8Array, context: Pick<CaptureCipher
       pieces.push(pending);
       total += size;
     }
-    if (!interrupted) throw new CaptureStorageError("integrity");
-    return Buffer.concat(pieces, total);
+    throw new CaptureStorageError("integrity");
   } catch (error) {
     if (error instanceof CaptureStorageError) throw error;
     throw new CaptureStorageError("integrity");
   }
 }
-export async function captureReadEncrypted(directory: string, name: string, maxBytes: number, context: CaptureCipherContext, interrupted = false, maxCiphertextBytes = captureEncryptedSize(maxBytes)): Promise<Buffer> {
-  const ciphertext = await captureReadPrivate(directory, name, maxCiphertextBytes);
-  return decryptCaptureBytes(await captureEncryptionKey(context.dataDir, context.role, context.scopeDigest), context, ciphertext, maxBytes, interrupted);
+export async function captureReadEncrypted(directory: string, name: string, maxBytes: number, context: CaptureCipherContext): Promise<Buffer> {
+  const ciphertext = await captureReadPrivate(directory, name, captureEncryptedSize(maxBytes));
+  return decryptCaptureBytes(await captureEncryptionKey(context.dataDir, context.role, context.scopeDigest), context, ciphertext, maxBytes);
 }
 export async function captureWriteEncrypted(directory: string, name: string, bytes: Uint8Array, context: CaptureCipherContext): Promise<void> {
   const key = await captureEncryptionKey(context.dataDir, context.role, context.scopeDigest);

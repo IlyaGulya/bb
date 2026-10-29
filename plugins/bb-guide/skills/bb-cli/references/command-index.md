@@ -10,16 +10,15 @@ This index lists every command path that the core CLI registers, including alias
 - `bb captures show`
 - `bb captures stop`
 - `bb captures sync`
-- `bb captures process`
 - `bb captures link`
 - `bb captures artifacts`
 - `bb captures inspect`
 - `bb captures import`
 - `bb captures download`
 
-Read the thread-inspection guide for explicit project/context consent,
-encrypted private body storage and operator key references, process preparation,
-independent source gaps, offline ACKs and reviewed evidence imports.
+Read the thread-inspection guide for CPA-only network capture, explicit scoped
+consent, encrypted body storage/key references, committed ACK/replay and reviewed
+semantic evidence. There is no separate network runner or activation command.
 
 ## gateway-logs
 

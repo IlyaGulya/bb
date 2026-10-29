@@ -16,7 +16,7 @@ import {
   type CaptureGap, type CaptureManifest, type CaptureScope, type CaptureSession,
 } from "@bb/domain";
 import type { CaptureArtifactQuery, CaptureArtifactView, CaptureCreate, CaptureLinkRequest, CaptureListQuery, CaptureView, CapturePreview, CapturePreviewQuery } from "@bb/server-contract";
-import type { CaptureRejection, HostDaemonBridgeLaunch } from "@bb/host-daemon-contract";
+import type { CaptureRejection } from "@bb/host-daemon-contract";
 import {
   CaptureStorageError, captureDecodeBase64, captureObjectDigest, capturePreparePayload,
   capturePrivateDirectory, captureReadEncrypted, captureSha256, captureWriteEncrypted, captureCipherContext,
@@ -96,6 +96,7 @@ export function createPrivateCapture(deps: CaptureDeps, input: CaptureCreate): C
   const { id, policy, ...subject } = input;
   authorizeCaptureScope(deps.db, subject);
   if (!getHost(deps.db, subject.hostId)) fail("host_not_found", 404);
+  if (policy.cpaLogs && subject.threadId === null) fail("cpa_thread_header_required");
   if ((subject.runId !== null || subject.nativeSessionId !== null) && (policy.cpaLogs || policy.bridgeRecorder)) fail("run_wire_correlation_unavailable");
   if (subject.threadId !== null) {
     const thread = getThread(deps.db, subject.threadId);
@@ -106,7 +107,6 @@ export function createPrivateCapture(deps: CaptureDeps, input: CaptureCreate): C
       if (!evidence) fail("subject_mismatch");
     }
   } else if (subject.runId !== null || subject.modelConnectionId !== null) fail("standalone_unverified_binding");
-  if (policy.process && subject.threadId !== null && (policy.process.native !== "stdio" || subject.runId !== null || subject.nativeSessionId !== null)) fail("process_scope_unavailable", 409);
   const session = captureSessionSchema.parse({ id, subject, policy, enabled: true, createdAt: now, expiresAt: now + policy.retentionHours * 3600000 });
   authorizeSubject(deps.db, session, true);
   deps.db.transaction(() => {
@@ -121,25 +121,14 @@ export function createPrivateCapture(deps: CaptureDeps, input: CaptureCreate): C
   }, { behavior: "immediate" });
   return { ...getPrivateCapture(deps, session.id, subject), outcome: "accepted" };
 }
-export function withThreadProcessCapture(deps: CaptureDeps, threadId: string, hostId: string, launch: HostDaemonBridgeLaunch): HostDaemonBridgeLaunch {
-  const selected = deps.db.select().from(sessions).where(and(eq(sessions.threadId, threadId), eq(sessions.hostId, hostId), eq(sessions.enabled, true), gt(sessions.expiresAt, Date.now()), sql`json_type(${sessions.session}, '$.policy.process') = 'object'`)).limit(2).all();
-  if (selected.length > 1) fail("ambiguous_process_capture", 409);
-  const candidate = selected[0];
-  if (!candidate) return launch;
-  const row = requireCapture(deps, candidate.id, candidate.session.subject, true);
-  if (row.session.policy.process?.native !== "stdio" || row.session.subject.runId !== null || row.session.subject.nativeSessionId !== null) fail("process_scope_unavailable", 409);
-  return { ...launch, capture: row.session };
-}
 export function getPrivateCapture(deps: CaptureDeps, id: string, scope: CaptureScope): CaptureView {
   const row = requireCapture(deps, id, scope);
   const expected = deps.db.select({ bytes: sql<number>`coalesce(sum(json_extract(${artifacts.manifest}, '$.storedBytes')), 0)`, chunks: sql<number>`coalesce(sum(json_array_length(${artifacts.manifest}, '$.chunks')), 0)` }).from(artifacts).where(and(eq(artifacts.captureId, id), sql`${artifacts.rejectedAt} is null`)).get()!;
-  const sources = deps.db.selectDistinct({ source: sql<CaptureManifest["source"]>`json_extract(${artifacts.manifest}, '$.source')` }).from(artifacts).where(and(eq(artifacts.captureId, id), sql`${artifacts.completedAt} is not null`)).all();
+  const sources = deps.db.selectDistinct({ source: sql<CaptureManifest["source"]>`json_extract(${artifacts.manifest}, '$.source')` }).from(artifacts).where(and(eq(artifacts.captureId, id), sql`${artifacts.completedAt} is not null`, sql`${artifacts.rejectedAt} is null`)).all();
   const totals = deps.db.select({ bytes: sql<number>`coalesce(sum(${chunks.bytes}), 0)`, count: count() }).from(chunks).where(eq(chunks.captureId, id)).get()!;
   const expectedBytes = expected.bytes;
   const expectedChunks = expected.chunks;
   const has = (source: CaptureManifest["source"]) => sources.some(item => item.source === source);
-  const processEvidence = deps.db.selectDistinct({ source: sql<string>`json_extract(${artifacts.manifest}, '$.source')`, transport: sql<string>`json_extract(${artifacts.manifest}, '$.transport')`, role: sql<string>`json_extract(${artifacts.manifest}, '$.process.role')` }).from(artifacts).where(and(eq(artifacts.captureId, id), sql`${artifacts.completedAt} is not null`, sql`${artifacts.rejectedAt} is null`, sql`json_type(${artifacts.manifest}, '$.process') = 'object'`)).all();
-  const observed = (source: string, transport?: string, role = "body") => processEvidence.some(item => item.source === source && item.role === role && (transport === undefined || item.transport === transport));
   const effectiveGap = sweepFailures.has(deps.db) ? "storage_unavailable" : row.gap;
   return {
     session: row.session, lastSyncAt: row.lastSyncAt, lastAckAt: row.lastAckAt,
@@ -151,15 +140,13 @@ export function getPrivateCapture(deps: CaptureDeps, id: string, scope: CaptureS
     links: deps.db.select({ threadId: links.threadId, runId: links.runId, createdAt: links.createdAt }).from(links).where(eq(links.captureId, id)).orderBy(asc(links.linkId)).all().map(link => ({ ...link, provenance: "owner-association" as const })),
     outcome: !row.enabled ? "accepted" : effectiveGap !== "none" ? "failed" : row.lastSyncAt === null || totals.count === 0 || expectedChunks > totals.count || row.hostStatus?.pendingChunks ? "accepted" : "succeeded",
     coverage: [
-      { source: "cpa-request-log", state: has("cpa-request-log") ? "captured" : "uninstrumented", evidence: "Retained source-file evidence only; stream loss, bypass, pinning and unsupported transports are not certified." },
-      { source: "bridge-recorder", state: has("bridge-recorder") ? "captured" : "uninstrumented", evidence: "Only enrolled host/thread recorder lanes; existing recorder must already be explicitly enabled. Process-wide unknown-scope lanes are excluded. Oversized and unterminated lines are gaps." },
-      { source: "native-events", state: has("native-events") ? "metadata-only" : "uninstrumented", evidence: "Persisted actual Core normalized native events, including available tools/approvals/results; not provider HTTP or independent stdio MCP wire." },
-      { source: "native-transcript", state: "uninstrumented", evidence: "No provider auth home or native transcript discovery. Owner imports retain supplied-evidence provenance, not automatic native capture." },
-      { source: "stdio-mcp", state: observed("mcp-stdio") ? "captured" : "uninstrumented", evidence: "Only independently wrapped selected MCP server stdin/stdout; configure the returned mcpPrefix in that runtime's per-process MCP configuration. Schemas and replayed model tool results do not count. Unwrapped servers remain gaps." },
-      { source: "local-tools", state: observed("native-hook") ? "captured" : observed("process-stdio") ? "metadata-only" : "uninstrumented", evidence: "Native hook bodies or source-native OMP/Codex tool events, not a filesystem-syscall audit. Generic process stdio is retained separately and is not automatically independent tool evidence. Unsupported native versions/configurations remain gaps." },
-      ...(["http", "sse", "websocket"] as const).map(transport => ({ source: `process-network-${transport}`, state: observed("mitmproxy", transport) ? "captured" as const : observed("mitmproxy", transport, "metadata") ? "metadata-only" as const : "uninstrumented" as const, evidence: "Selected process integration only. Streaming callbacks forward original bytes without whole-body forwarding buffers; private artifacts separately retain source/stored hashes and complete/interrupted state. Retained evidence is not proof of all traffic or every stream being complete." })),
-      { source: "bypass-network", state: "uninstrumented", evidence: "Explicit proxy covers cooperating clients only. Optional local-pid requires the real OS helper and qualification of PID/descendant/container scope. Ignored proxies, unsupported protocols, certificate pinning, application encryption and unavailable provider reasoning remain visible limitations; no patching or TLS verification bypass." },
-      { source: "standalone", state: row.session.subject.threadId === null && (has("owner-import") || processEvidence.length > 0) ? "captured" : "uninstrumented", evidence: "Own explicit capture/process identity and selected wrapper only. Terminal/cmux/tmux placement does not instrument unrelated or already-running processes. Owner-import and process-observed provenance stay distinct." },
+      { source: "cpa-request-log", state: has("cpa-request-log") ? "captured" : "uninstrumented", evidence: "Existing CPA is the only network capture owner. Completed artifacts retain every admitted settled native file byte after declared redaction, with source/stored hashes and committed chunk receipts. A finalized file and its ACK do not by themselves qualify live transport, retry or session completeness; no CPA capability is inferred absent." },
+      { source: "bridge-recorder", state: has("bridge-recorder") ? "captured" : "uninstrumented", evidence: "Optional already-enabled native semantic source; no recorder is enabled by capture. Existing host/thread lanes retain their actual process/sequence evidence, not a substitute network transport or proof that CPA omits the same content." },
+      { source: "native-events", state: has("native-events") ? "metadata-only" : "uninstrumented", evidence: "Optional actual Core normalized events and retained tool/approval/result provenance. Availability is observed from those events; it does not establish an omission from CPA. No new native hooks or wrappers are installed." },
+      { source: "native-transcript", state: "uninstrumented", evidence: "This reader performs no transcript discovery. Reviewed imports remain supplied evidence; no conclusion about CPA transcript or reasoning content follows." },
+      { source: "stdio-mcp", state: "uninstrumented", evidence: "No independent MCP instrumentation is added. Evaluate actual CPA request/response artifacts and native semantic provenance before claiming a missing tool channel." },
+      { source: "local-tools", state: has("native-events") ? "metadata-only" : "uninstrumented", evidence: "Existing normalized semantic provenance only. Tool schemas, arguments and returned results already present in CPA remain in the complete CPA file; no unverified missing-channel claim or extra capture mechanism." },
+      { source: "standalone", state: row.session.subject.threadId === null && has("owner-import") ? "captured" : "uninstrumented", evidence: "Reviewed standalone evidence may be explicitly associated without rewriting origin. Automatic CPA ingestion currently requires the exact inbound BB thread header and frozen endpoint; a separate native CPA correlation contract must be evidenced before extending that guard." },
     ],
   };
 }
@@ -208,7 +195,6 @@ export function stageCaptureManifest(deps: CaptureDeps, scope: CaptureScope, man
   if (captureObjectDigest(fields) !== artifactId) fail("integrity");
   if (!adapter && manifest.source !== "owner-import") fail("source_authority", 403);
   const row = requireCapture(deps, manifest.captureId, scope, true);
-  if (["mitmproxy", "native-hook", "process-stdio", "mcp-stdio"].includes(manifest.source) && (!adapter || !row.session.policy.process || !manifest.process || manifest.hostId !== row.hostId)) fail("source_authority", 403);
   try {
   deps.db.transaction(() => {
     const current = requireCapture(deps, manifest.captureId, scope, true);
@@ -316,23 +302,21 @@ async function completeCaptureArtifact(deps: CaptureDeps, session: CaptureSessio
   if (artifact.completedAt !== null || artifact.committedSequences.length !== artifact.manifest.chunks.length) return;
   const hash = createHash("sha256");
   const root = await directory(deps, session, artifactId);
-  const audit = artifact.manifest.source === "owner-import" || artifact.manifest.process ? Buffer.allocUnsafe(artifact.manifest.storedBytes) : null;
+  const audit = Buffer.allocUnsafe(artifact.manifest.storedBytes);
   let offset = 0;
   for (const chunk of artifact.manifest.chunks) {
     requireCapture(deps, session.id, scope, true);
     const bytes = await captureReadEncrypted(root, `${chunk.sequence}.chunk`, CAPTURE_CHUNK_BYTES, captureCipherContext(deps.config.dataDir, "core", session, `${artifactId}/${chunk.sequence}.chunk`));
     if (captureSha256(bytes) !== chunk.sha256) fail("integrity");
     if (bytes.length !== chunk.bytes) fail("integrity");
-    if (audit) audit.set(bytes, offset);
+    audit.set(bytes, offset);
     offset += bytes.length;
     hash.update(bytes);
   }
   if (hash.digest("hex") !== artifact.manifest.storedSha256) fail("integrity");
   let rejected = false;
-  if (audit) {
-    try { rejected = captureContainsPrivateKey(audit) || captureHasUnredactedAuth(audit, true) || (artifact.manifest.representation !== "binary" && captureSha256(redactCapturePayload(audit).bytes) !== artifact.manifest.storedSha256); }
-    catch { rejected = true; }
-  }
+  try { rejected = captureContainsPrivateKey(audit) || captureHasUnredactedAuth(audit, true) || (artifact.manifest.representation !== "binary" && captureSha256(redactCapturePayload(audit).bytes) !== artifact.manifest.storedSha256); }
+  catch { rejected = true; }
   if (rejected) {
     deps.db.update(artifacts).set({ rejectedAt: Date.now() }).where(and(eq(artifacts.captureId, session.id), eq(artifacts.artifactId, artifactId))).run();
     gap(deps, session.id, "privacy_rejected");
@@ -470,11 +454,12 @@ export function syncPrivateCapture(deps: WorkSessionDeps, id: string, scope: Cap
 async function syncOne(deps: WorkSessionDeps, id: string, scope: CaptureScope): Promise<CaptureView> {
   let row = requireCapture(deps, id, scope, true);
   try {
+    if (row.enabled) deps.db.update(sessions).set({ gap: "none" }).where(eq(sessions.id, id)).run();
     await archiveCoreSources(deps, row);
     row = requireCapture(deps, id, scope, true);
     let ack: CaptureAck | null = null;
     let rejection: CaptureRejection | undefined;
-    if (row.session.policy.bridgeRecorder || row.session.policy.nativeExports.length > 0 || row.session.policy.process) {
+    if (row.session.policy.bridgeRecorder || row.session.policy.nativeExports.length > 0) {
       for (let index = 0; index <= 8; index += 1) {
         row = requireCapture(deps, id, scope, true);
         const result = await callHostOnlineRpc(deps, { hostId: row.hostId, timeoutMs: 15000, command: { type: "capture.exchange", session: row.session, leaseUntil: Math.min(row.expiresAt, Date.now() + row.session.policy.offlineLeaseSeconds * 1000), ack, rejection, poll: row.enabled && index < 8 } });
@@ -485,7 +470,7 @@ async function syncOne(deps: WorkSessionDeps, id: string, scope: CaptureScope): 
         if (result.status.gap !== "none") gap(deps, id, result.status.gap);
         if (!result.manifest || !result.chunk) break;
         if (result.manifest.captureId !== id || result.chunk.captureId !== id || result.chunk.artifactId !== result.manifest.artifactId ||
-            !["bridge-recorder", "owner-import", "mitmproxy", "native-hook", "process-stdio", "mcp-stdio"].includes(result.manifest.source)) fail("integrity");
+            !["bridge-recorder", "owner-import"].includes(result.manifest.source)) fail("integrity");
         stageCaptureManifest(deps, scope, result.manifest, true);
         try { ack = await acceptCaptureChunk(deps, scope, result.chunk); }
         catch (error) {

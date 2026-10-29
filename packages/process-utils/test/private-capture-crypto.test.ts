@@ -30,17 +30,6 @@ describe("authenticated capture ciphertext", () => {
     expect(() => decryptCaptureBytes(key, context, Buffer.concat([ciphertext, Buffer.from([0])]), body.length)).toThrow("integrity");
   });
 
-  it("recovers only authenticated prefix frames for explicitly interrupted streams", () => {
-    const key = randomBytes(32);
-    const body = Buffer.concat([Buffer.alloc(65536, 65), Buffer.alloc(1000, 66)]);
-    const ciphertext = encryptCaptureBytes(key, context, body);
-    const cut = ciphertext.subarray(0, 6 + 65536 + 32 + 32 + 100);
-    expect(decryptCaptureBytes(key, context, cut, body.length, true)).toEqual(body.subarray(0, 65536));
-    expect(() => decryptCaptureBytes(key, context, cut, body.length)).toThrow("integrity");
-    const changed = Buffer.from(cut);
-    changed[50] = changed[50]! ^ 1;
-    expect(() => decryptCaptureBytes(key, context, changed, body.length, true)).toThrow("integrity");
-  });
 
   it.skipIf(process.platform !== "linux" && process.platform !== "darwin")("persists ciphertext through atomic private writes without a plaintext fallback", async () => {
     const root = await mkdtemp(join(tmpdir(), "bb-capture-encryption-"));

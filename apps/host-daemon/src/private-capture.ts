@@ -1,4 +1,3 @@
-import { prepareCaptureProcess, ingestCaptureProcess } from "./private-capture-process.js";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, opendir, realpath, rm } from "node:fs/promises";
@@ -87,11 +86,6 @@ class HostCaptureOutbox {
     const state = await this.readState(directory);
     state.leaseUntil = Math.min(command.leaseUntil, session.expiresAt, Date.now() + session.policy.offlineLeaseSeconds * 1000);
     await this.saveState(directory, state);
-    const processStatus = await prepareCaptureProcess(this.dataDir, session, state.leaseUntil);
-    if (processStatus) {
-      state.status.process = processStatus;
-      if (processStatus.phase !== "prepared" && processStatus.phase !== "running" && processStatus.phase !== "exited") state.status.gap = processStatus.phase === "dependency_unavailable" ? "source_unavailable" : processStatus.phase;
-    }
     if (this.failures.has(session.id)) state.status.gap = this.failures.get(session.id)!;
     const artifacts = await this.artifactNames(session.id);
     if (command.rejection) {
@@ -147,11 +141,6 @@ class HostCaptureOutbox {
           await this.expireSession(directory, session);
         } else {
           const state = await this.readState(directory);
-          const processStatus = await prepareCaptureProcess(this.dataDir, session, state.leaseUntil);
-          if (processStatus) {
-            state.status.process = processStatus;
-            if (processStatus.phase !== "prepared" && processStatus.phase !== "running" && processStatus.phase !== "exited") state.status.gap = processStatus.phase === "dependency_unavailable" ? "source_unavailable" : processStatus.phase;
-          }
           await this.inspectArtifacts(session, state, false);
           if (session.enabled && Date.now() < state.leaseUntil && Date.now() >= state.nextScanAt) await this.scan(session, state);
           await this.saveState(directory, state);
@@ -164,8 +153,6 @@ class HostCaptureOutbox {
     let discarded = 0;
     let accountingGap = false;
     const outbox = join(directory, "outbox");
-    try { if (session.policy.process) await prepareCaptureProcess(this.dataDir, { ...session, enabled: false }, 0); }
-    catch { accountingGap = true; }
     try {
       if (await optionalStat(outbox)) {
         for (const artifactId of await this.artifactNames(session.id)) {
@@ -178,7 +165,6 @@ class HostCaptureOutbox {
     } catch { accountingGap = true; }
     finally {
       await rm(outbox, { recursive: true, force: true });
-      await rm(join(directory, "sources"), { recursive: true, force: true });
       await captureSyncDirectory(directory);
     }
     const state = await this.readState(directory);
@@ -285,12 +271,6 @@ class HostCaptureOutbox {
   private async scan(session: CaptureSession, state: z.infer<typeof stateSchema>): Promise<void> {
     if (!session.enabled || Date.now() >= session.expiresAt || Date.now() >= state.leaseUntil) return;
     state.nextScanAt = Date.now() + session.policy.syncIntervalSeconds * 1000;
-    if (session.policy.process) {
-      try {
-        const gap = await ingestCaptureProcess(this.dataDir, session, (manifest, bytes) => this.spool(session, manifest, bytes));
-        if (gap !== "none") state.status.gap = gap;
-      } catch (error) { state.status.gap = sourceGap(error); }
-    }
     await this.scanExports(session, state);
     if (!session.policy.bridgeRecorder) return;
     const root = process.env.BB_PROVIDER_BRIDGE_RECORD_DIR;
@@ -412,8 +392,6 @@ class HostCaptureOutbox {
     let hostBytes = 0;
     let sessionBytes = 0;
     for (const id of await names(root, uuidPattern, MAX_HOST_SESSIONS)) {
-      const sources = join(root, id, "sources");
-      if (await optionalStat(sources)) hostBytes += await this.retainedBytes(sources);
       for (const artifact of await this.artifactNames(id)) {
         const artifactDir = await capturePrivateDirectory(this.dataDir, "host", id, "outbox", artifact);
         const retained = await this.retainedBytes(artifactDir);

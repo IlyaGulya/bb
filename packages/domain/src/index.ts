@@ -1,4 +1,3 @@
-export * from "./private-capture-process.js";
 export * from "./private-capture-redaction.js";
 export * from "./private-capture.js";
 export * from "./execution-contexts.js";

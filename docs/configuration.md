@@ -1556,26 +1556,22 @@ remain for a further 24 hours. Stop denies new Core intake immediately; an
 offline host stops collection by lease expiry. Existing provider logging and
 its source-file retention remain separate. No opening of a drawer or inspection
 command activates capture. The unactivated source is not full-capture/privacy
-certification or authorization to enable MITM, a CA or network probing.
+certification or authorization to change CPA, runtime, auth or account settings.
 
-An optional per-registration `policy.process` selects an absolute Python >=3.12
-with cryptography, pinned mitmproxy 12.3.1 or an explicit absolute `mitmdump`
-standalone path, explicit-proxy/local-pid networking, process-local CA trust and
-native stdio/Claude hooks/terminal operation. CLI `captures process` and SDK
-sync/get return scoped argv prefixes; they do not execute them. No global proxy,
-CA, auth home, SDK, provider configuration or shared MCP setting is changed.
-An explicit standalone binary still needs the separate wrapper Python/crypto;
-its bundled Python is not assumed to be an executable general interpreter.
+CPA is the only network capture/data path. `cpaLogs` reads finalized native
+files using the frozen connection's `BB_CPA_LOG_DIRS` mapping and exact inbound
+thread-header guard. A CPA registration must name its actual thread. No process
+policy, runtime launch override, wrapper, Python dependency or second proxy is
+accepted. Existing native events/bridge lanes and reviewed exports are optional
+semantic/supplied evidence, not proof that CPA lacks a channel.
 
-Managed host/Core payload files, process records and decompression scratch use
-authenticated AES-256-GCM before disk writes. Service-side key references are
-separate from capture policy and data scope:
+Managed host/Core body files use scope/object/role-authenticated AES-256-GCM
+before private atomic disk writes. Key references are service-side, not policy:
 
 | Variable | Owner and meaning |
 | --- | --- |
-| `BB_PRIVATE_CAPTURE_HOST_KEY_REF` | Host-only dedicated key reference; required for body spooling/reading and process capture. |
-| `BB_PRIVATE_CAPTURE_CORE_KEY_REF` | Core-only dedicated key reference; required for body receipt/decryption/download. |
-| `BB_PRIVATE_CAPTURE_EPHEMERAL_DIR` | Process CA/private proxy runtime root; Linux defaults to `/dev/shm` and requires ramfs or tmpfs with no active swap. Mac defaults to its private runtime root on the parent-confirmed FileVault machine. |
+| `BB_PRIVATE_CAPTURE_CORE_KEY_REF` | Core-only protected key reference for receipt, replay, preview and download; required by CPA ingestion. |
+| `BB_PRIVATE_CAPTURE_HOST_KEY_REF` | Host-only protected key reference for separately enrolled host semantic/export outbox data; not required by CPA-only Core ingestion. |
 
 References are `keychain:<service>:<account>` on macOS, or
 `memory-file:/absolute/path` on Linux. The existing dedicated item/file must hold
@@ -1594,10 +1590,5 @@ Existing source logs/event DB and intentional plaintext exports need their own
 proven protection. This source is not a claim that the unencrypted Linux volume,
 old sources, transport, OS key restore or the full native matrix is qualified.
 
-Maintainer-only `test:capture-process` is explicitly invoked, not a default test
-project. `BB_CAPTURE_PYTHON` and optional `BB_CAPTURE_MITMDUMP` select temporary
-parent-owned executables for that synthetic suite; they are not product runtime
-defaults. It additionally requires the host operator key reference and appropriate
-ephemeral storage. It must not receive provider auth or real business payloads.
 
 

@@ -91,21 +91,13 @@ export function registerPrivateCapturesCommands(program: Command, getUrl: () => 
         output(options, await api[operation === "show" ? "get" : operation]({ ...scope(options), captureId }));
       }));
   }
-  scoped(captures.command("process <captureId>").description("Prepare scoped process/MCP/hook argv on the selected host; does not launch a process, proxy or CA"))
-    .option("--json", "Print scoped process status and argv prefixes")
-    .action(action(async (captureId: string, options: Options) => {
-      const value = await createCliBbSdk(getUrl()).experimental_privateCaptures.sync({ ...scope(options), captureId });
-      if (!value.session.policy.process) invalid("This immutable capture has no process integration policy. Create an explicitly opted-in capture.");
-      if (!value.host?.process) invalid("The selected host has not prepared process capture. Inspect the capture gap and host availability.");
-      output(options, { captureId, hostId: value.session.subject.hostId, process: value.host.process, coverage: value.coverage });
-    }));
   scoped(captures.command("link <captureId>").description("Associate owned standalone evidence with a same-context Core thread/run without rewriting its origin"))
     .requiredOption("--thread <id>", "Existing Core thread in the exact project/context")
     .requiredOption("--operation <uuid>", "Opaque logical association UUID; reuse on retry")
     .option("--run <id>", "Existing turn/run in that thread") .option("--json", "Print association metadata")
     .action(action(async (captureId: string, options: Options) => output(options, await createCliBbSdk(getUrl()).experimental_privateCaptures.link({ ...scope(options), captureId, threadId: options.thread!, runId: options.run ?? null, operationId: options.operation! }))));
   scoped(captures.command("artifacts <captureId>").description("Index raw, normalized and supplied evidence separately; no payloads printed"))
-    .option("--source <kind>", "cpa-request-log, bridge-recorder, native-events, native-transcript, owner-import, mitmproxy, native-hook, process-stdio or mcp-stdio")
+    .option("--source <kind>", "cpa-request-log, bridge-recorder, native-events, native-transcript or owner-import")
     .option("--destination <url>", "Exact source-reported destination, not an inferred provider")
     .option("--host <id>", "Known source machine, not the capture's selected machine")
     .option("--run <id>", "Actual source-reported Core turn/run")
