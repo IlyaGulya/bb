@@ -56,7 +56,7 @@ export function mediaTime(timestampMs, capture, durationMs) {
 
 export function validateCapture(input, video) {
   object(input, ["version", "original", "originalSha256", "title", "scenario", "runId", "applicationRevision", "helperRevision", "safeSelectors", "capture", "clicks", "changes", "holds", "voiceover"], "input");
-  requireValue(input.version === 2, "Unsupported capture version; use digest-only receipt v2");
+  requireValue(input.version === 3, "Unsupported capture version; use Eval-owned digest-only receipt v3");
   for (const key of ["original", "scenario", "runId", "title"]) text(input[key], key, key === "original" ? 4096 : 160);
   text(input.title, "title", 64);
   requireValue(/^[a-f0-9]{64}$/.test(input.originalSha256), "originalSha256 is required");
@@ -65,11 +65,15 @@ export function validateCapture(input, video) {
   for (const selector of input.safeSelectors) text(selector, "approved selector", 1000);
   requireValue(new Set(input.safeSelectors).size === input.safeSelectors.length, "Approved selectors must be unique");
   const capture = input.capture;
-  object(capture, ["recorder", "viewport", "frameTimestampsMs", "startedAtBoundsMs", "stoppedAtBoundsMs", "timingToleranceMs", "adapterSha256", "observation"], "capture");
+  object(capture, ["recorder", "ownership", "viewport", "frameTimestampsMs", "startedAtBoundsMs", "stoppedAtBoundsMs", "timingToleranceMs", "adapterSha256", "observation"], "capture");
   requireValue(capture.observation === "ephemeral-hmac-sha256", "Only ephemeral keyed-digest observations are accepted");
-  object(capture.recorder, ["name", "version", "fps", "durationMs", "frames", "bytes", "cursor"], "recorder");
+  object(capture.ownership, ["version", "lifetime", "ownerGeneration", "leaseId", "targetId", "created", "ownsPage"], "native ownership");
+  requireValue(capture.ownership.version === 1 && capture.ownership.lifetime === "eval" && capture.ownership.created === true && capture.ownership.ownsPage === true, "Capture requires native Eval ownership of a newly created page");
+  for (const key of ["ownerGeneration", "leaseId", "targetId"]) requireValue(typeof capture.ownership[key] === "string" && capture.ownership[key].trim().length > 0, `Native ownership ${key} is required`);
+  object(capture.recorder, ["name", "version", "sourceRevision", "fps", "durationMs", "frames", "bytes", "cursor"], "recorder");
   text(capture.recorder.name, "recorder name");
   text(capture.recorder.version, "recorder version");
+  requireValue(shaPattern.test(capture.recorder.sourceRevision), "Native recorder sourceRevision must be a full Git SHA from the verified runtime binding");
   requireValue(capture.recorder.cursor === true, "The original must contain the recorder's real cursor/click overlay");
   number(capture.recorder.fps, 1, 60, "fps");
   number(capture.recorder.durationMs, 1, 3600000, "recording duration");
@@ -223,13 +227,14 @@ export async function renderDemo(inputPath, outputDirectory) {
   requireValue(Math.abs(Number(resultVideo.duration) * 1000 - video.durationMs) <= input.capture.timingToleranceMs, "Postprocessing changed video duration");
   const artifact = async (name) => ({ path: name, sha256: await hashFile(path.join(out, name)), bytes: (await fs.stat(path.join(out, name))).size });
   const manifest = {
-    version: 2,
+    version: 3,
     scenario: input.scenario,
     runId: input.runId,
     applicationRevision: input.applicationRevision,
     helperRevision: input.helperRevision,
     rendererSha256: await hashFile(ownPath),
     adapterSha256: input.capture.adapterSha256,
+    capture: { recorder: input.capture.recorder, ownership: input.capture.ownership },
     createdAt: new Date().toISOString(),
     edits: { playbackRate: 1, cuts: [], insertedHolds: [], recordedReadabilityHolds: input.holds, captionBandPixels: band, changeAccents: "2px outline of observed changed element; no simulated clicks or states" },
     timing: { originTimestampMs: input.capture.frameTimestampsMs[0], method: "OMP CDP timestamps relative to first recorded frame; concat 25Hz quantization then CFR", toleranceMs: input.capture.timingToleranceMs, changes: changes.map((change) => ({ caption: change.caption, startMs: mediaTime(change.timestampMs, input.capture, video.durationMs), endMs: mediaTime(change.untilTimestampMs, input.capture, video.durationMs), rect: change.after.rect })), clicks: input.clicks.map((click) => ({ ...click, mediaMs: mediaTime(click.timestampMs, input.capture, video.durationMs) })) },

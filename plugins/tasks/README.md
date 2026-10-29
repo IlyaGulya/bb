@@ -23,6 +23,10 @@ worker/CLI/SDK resource access, genuine action clocks, original/final provenance
 optional approved local narration, visual verification and existing attachments.
 It adds no recording service, server encoding API, analytics transport, or Task
 video schema.
+Capture requires qualified native JavaScript Eval lifetime protocol v1, explicit
+Eval-owned new-page acknowledgement and the executing SDK's source revision.
+Older SDKs/session-owned captures are refused; default browser session lifetime
+is unchanged. Local receipt/manifest v3 retains this ownership/source provenance.
 
 ## Quick start
 

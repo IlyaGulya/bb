@@ -12,10 +12,14 @@ Tasks already ships its complete `skills` directory in the plugin package and
 stages skill trees on workers. Resolve `scripts/capture-demo.mjs` and
 `scripts/render-demo.mjs` relative to this skill's installed SKILL.md, not a
 checkout path. No npm package, install, cloud account, or extra service is needed.
-Prerequisites: the existing OMP Chromium/CDP recorder, Node (or Bun), and installed
-FFmpeg/ffprobe with libx264 and libass. The capture adapter targets the inspected
-OMP 18.13.3 CDP recorder contract, not Tern/cmux or a replacement frame source.
-It fails rather than inventing timing when that contract differs.
+Prerequisites: a supported native JavaScript Eval with browser lifetime protocol
+v1, the existing OMP Chromium/CDP recorder, Node (or Bun), and installed
+FFmpeg/ffprobe with libx264 and libass. The reviewed native lifetime contract is
+source `d9f1f7b772180ba76788e946a7653e0d4bf77dd4`; a staged SDK is not an active
+worker binding. The parent must qualify the executing SDK before capture.
+The adapter retains the inspected CDP recorder/frame-clock contract, not
+Tern/cmux or a replacement frame source. It fails on unsupported SDKs or clock
+contracts rather than falling back to session lifetime or inventing timing.
 
 From CLI, discover the actual Tasks skill ID, then fetch its resources:
 
@@ -46,12 +50,24 @@ independently; a helper commit is not the app revision or a deployment claim.
 Keep the scenario in one document; SPA state changes are supported, document
 navigation is not. Use a fresh, nonexistent owned capture directory.
 
-Import `captureDemo` from the installed capture resource **outside** `tab.run`.
-This programmatic entry point opens a uniquely named owned tab, runs the scenario,
-finishes its capture, and always closes that owned tab in an outer `finally`.
-The close is a fresh browser operation, not a saved run-scoped facade. A cancelled
-run cannot safely call its old `tab`, `page`, or CDP session again. Never adopt a
-parent/assessor/user tab or attempt to repair revoked facades with retries.
+Import `captureDemo` from the installed capture resource **outside** `tab.run`,
+and acquire and record within the same owning JavaScript Eval invocation.
+It requires `browser.capabilities()` with `version:1`,
+`evalLifetime.supported:true`, and `evalLifetime.receiptVersion:1` before opening
+anything. It explicitly opens a uniquely named tab with `lifetime:"eval"` and
+checks the returned native `tab.ownership` before starting capture. Missing or
+incompatible capabilities/ownership are failures, never a session-lifetime
+fallback. Ordinary `browser.open` still defaults to session lifetime.
+
+Native ownership registers the owning Eval's cleanup before returning the tab.
+That native drain handles completion, throw, cancellation and whole-context reset
+independently of the revoked caller. The adapter's outer `finally` still closes
+the original receipt-bound handle during ordinary execution; it is not the
+whole-Eval cancellation guarantee. Never adopt a parent/assessor/user tab,
+reconstruct the handle with `browser.tab(name)`, bulk-close tabs, or repair
+revoked `tab`, `page`, or CDP facades with retries. Native cleanup failures or
+unconfirmed stops fail the run; a receipt file or output path is not proof of
+successful teardown. No helper supervisor, proxy, or second recorder is involved.
 
 The adapter observes the CDP session created by **the existing recorder**. It
 does not start another screencast, capture frames, replace ACKs, or draw a cursor.
@@ -87,7 +103,10 @@ required; there is no plaintext or unkeyed fallback.
 A safe example is opening an execution-context draft, entering a disposable name,
 and dismissing it without Save. Observe the actual page before choosing selectors.
 Supply the installed resource URL, approved preview URL, owned output directory,
-actual run/source/helper identifiers and installed recorder version:
+actual run/source/helper identifiers, installed recorder version and full native
+`recorderSourceRevision` from the parent-verified executing SDK binding. A package
+version or staged source path alone cannot establish that binding. Capability and
+ownership versions are protocol versions, not SDK package versions or Git SHAs.
 
 ```js
 const { captureDemo } = await import(captureModuleUrl);
@@ -103,6 +122,7 @@ const result = await captureDemo({
     applicationRevision,
     helperRevision,
     recorderVersion,
+    recorderSourceRevision,
     safeSelectors: ['form h2', 'input[placeholder="e.g. Work or Personal"]'],
   },
   scenario: async ({ tab, page, capture }) => {
@@ -139,16 +159,19 @@ console.log(result);
 ```
 
 The scenario must not call `finish()` itself; `captureDemo` owns that transition
-and the outer teardown. It also closes the tab if `beginCapture` fails before the
-scenario begins. Do not reuse the page after a failure. An aborted recording is
-not successful demo evidence. Even if OMP already makes the recorder inactive,
-an old page listener can remain until the owned page is closed.
+and the outer teardown. The native Eval lifetime also covers failure before
+`beginCapture` or scenario entry. Do not reuse the page after a failure. An
+aborted recording is not successful demo evidence; a cleanup failure must not
+be hidden even when the owned target has closed.
 
-`beginCapture({tab,page,...options})` remains the low-level producer for callers
-that already own this same outer browser lifecycle. Its run-local `abort()`
-attempts stop/cleanup and marks closed only after cleanup completes. It cannot
-revive cancelled facades; every such caller must still close its owned tab in a
-fresh outer `finally`. Do not export a run-scoped capture object for later use.
+`beginCapture({tab,page,ownership,...options})` is the low-level producer only for
+callers already holding this supported native Eval-owned lifecycle. Pass the
+actual outer handle's `ownership` into the same owning Eval's `tab.run`, alongside
+the verified native source revision; it is required, not synthesized or obtained
+from a session-owned page. Its run-local `abort()` attempts stop/cleanup and marks
+closed only after cleanup completes. It cannot revive cancelled facades. The
+native ownership drain, not a run-local `finally`, covers whole-Eval teardown.
+Do not export a run-scoped capture object for later use.
 
 Wait for actual readiness, **then** use explicit readability holds. A timeout is
 a failure deadline, not readiness. Static pages may send no screencast frame
@@ -172,15 +195,21 @@ node "$resource_dir/render-demo.mjs" "$capture_dir/capture.json" "$new_output_di
 ```
 
 Equivalent: `await renderDemo(captureJsonPath, newOutputDirectory)` from
-`render-demo.mjs`. The JSON input is the adapter's version-2 receipt. It contains
+`render-demo.mjs`. The JSON input is the adapter's version-3 receipt. It contains
 `original`, `originalSha256`, `title` (up to 64 printable characters), `scenario`,
 `runId`, full `applicationRevision`/`helperRevision`, `safeSelectors`, `capture`,
-`clicks`, `changes`, and `holds`. `capture.observation` is
-`ephemeral-hmac-sha256`; before/after state objects allow only presence,
-visibility and digest. Raw/extra observation fields and version-1 receipts are
-rejected, not converted. Existing version-1 artifacts remain historical under
-their original hashes and pinned helper; never rewrite them into fake v2 proof.
-This unshipped helper receipt/manifest cutover changes no Task evidence schema.
+`clicks`, `changes`, and `holds`. `capture.ownership` retains the native receipt:
+`{version:1,lifetime:"eval",ownerGeneration,leaseId,targetId,created:true,ownsPage:true}`.
+`capture.recorder` retains the installed package version and required full native
+`sourceRevision`, binding that ownership evidence to the qualified SDK source in
+the same receipt. The native receipt acknowledges ownership; its source revision
+is caller-attested from the verified binding, not a cryptographic host attestation.
+`capture.observation` is `ephemeral-hmac-sha256`; before/after state objects allow
+only presence, visibility and digest. Raw/extra observation fields, missing native
+ownership/source provenance and version-1/2 receipts are rejected, not converted.
+Keep historical artifacts under their original bytes, hashes and pinned helper;
+never relabel old recordings as v3 native-lifetime proof. This local
+receipt/manifest cutover changes no Task evidence schema.
 No ignored options: unsupported fields, synthetic clicks, missing clocks,
 unchanged/out-of-bounds regions, overlapping cues and out-of-duration events
 are rejected. Labels are plain text (no ASS braces/backslashes or control codes).
@@ -203,8 +232,9 @@ The bundle contains:
 - `captions.ass`, `filters.txt`: inspectable FFmpeg edit instructions.
 - `demo.mp4`: final playable video; optional `voiceover.audio` retains supplied audio.
 - `manifest.json`: original/final sizes and SHA-256 hashes, source/helper revisions,
-  run/scenario, adapter/renderer hashes, FFmpeg version and invocation, duration,
-  click/cue media times, rectangles, all recorded holds and explicit empty cut list.
+  native recorder version/source revision and ownership receipt, run/scenario,
+  adapter/renderer hashes, FFmpeg version and invocation, duration, click/cue media
+  times, rectangles, all recorded holds and explicit empty cut list.
 
 The recorder starts media time at its **first CDP frame**, not at recordStart's
 return. The adapter passively retains that genuine timestamp. Event time minus

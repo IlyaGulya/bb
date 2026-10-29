@@ -5,7 +5,7 @@ const video = { width: 1440, height: 1000, durationMs: 10000 };
 
 function receipt() {
   return {
-    version: 2,
+    version: 3,
     original: "original.mp4",
     originalSha256: "a".repeat(64),
     title: "Unsaved draft",
@@ -15,7 +15,8 @@ function receipt() {
     helperRevision: "c".repeat(40),
     safeSelectors: ["input"],
     capture: {
-      recorder: { name: "OMP browser.recordStart", version: "18.13.3", fps: 15, durationMs: 10000, frames: 3, bytes: 1024, cursor: true },
+      recorder: { name: "OMP browser.recordStart", version: "test-native-sdk", sourceRevision: "1".repeat(40), fps: 15, durationMs: 10000, frames: 3, bytes: 1024, cursor: true },
+      ownership: { version: 1, lifetime: "eval", ownerGeneration: "test-eval-generation", leaseId: "test-native-lease", targetId: "test-owned-target", created: true, ownsPage: true },
       viewport: { width: 1440, height: 1000 },
       frameTimestampsMs: [1000, 4000, 9000],
       startedAtBoundsMs: [990, 1010],
@@ -71,6 +72,16 @@ describe("local video demo cue boundaries", () => {
 
   it.each([
     ["legacy raw-content receipt", (input) => { input.version = 1; }],
+    ["legacy session-lifetime receipt", (input) => { input.version = 2; }],
+    ["missing native ownership receipt", (input) => { delete input.capture.ownership; }],
+    ["unsupported native ownership protocol", (input) => { input.capture.ownership.version = 2; }],
+    ["session-owned page", (input) => { input.capture.ownership.lifetime = "session"; }],
+    ["borrowed native page", (input) => { input.capture.ownership.ownsPage = false; }],
+    ["reused native page", (input) => { input.capture.ownership.created = false; }],
+    ["missing Eval owner generation", (input) => { input.capture.ownership.ownerGeneration = ""; }],
+    ["missing native lease identity", (input) => { delete input.capture.ownership.leaseId; }],
+    ["missing native target identity", (input) => { input.capture.ownership.targetId = ""; }],
+    ["unverified native source revision", (input) => { input.capture.recorder.sourceRevision = "main"; }],
     ["unapproved observation", (input) => { input.safeSelectors = ["other"]; }],
     ["missing digest", (input) => { input.changes[0].after.state.digest = null; }],
     ["raw before value", (input) => { input.changes[0].before.state.value = "FAKE_NONSECRET_RAW_VALUE"; }],

@@ -39,13 +39,22 @@ export async function observeTarget(selector, id) {
   return { timestampMs, state: { present: true, visible, digest }, rect: { x: box.x, y: box.y, width: box.width, height: box.height } };
 }
 
+function requireEvalOwnership(ownership) {
+  if (!ownership || typeof ownership !== "object" || Array.isArray(ownership) || ownership.version !== 1 || ownership.lifetime !== "eval" || ownership.created !== true || ownership.ownsPage !== true || ["ownerGeneration", "leaseId", "targetId"].some((key) => typeof ownership[key] !== "string" || ownership[key].trim().length === 0)) throw new Error("Capture requires the native Eval-owned new-page receipt; session lifetime is not a fallback");
+}
+
 export async function captureDemo({ browser, url, viewport, options, scenario, timeout = 90 }) {
-  const ownedTab = await browser.open({ name: `bb-demo-${randomUUID()}`, url, viewport });
+  if (typeof browser?.capabilities !== "function") throw new Error("Capture requires native browser.capabilities() and Eval lifetime protocol v1; older SDKs are not supported");
+  const capabilities = await browser.capabilities();
+  if (capabilities?.version !== 1 || capabilities.evalLifetime?.supported !== true || capabilities.evalLifetime.receiptVersion !== 1) throw new Error("Native Eval browser lifetime protocol v1 is unavailable; session lifetime is not a fallback");
+  const ownedTab = await browser.open({ name: `bb-demo-${randomUUID()}`, url, viewport, lifetime: "eval" });
   try {
+    const ownership = ownedTab.ownership;
+    requireEvalOwnership(ownership);
     await ownedTab.emulate({ viewport: { width: viewport.width, height: viewport.height, scale: 1 } });
-    return await ownedTab.run(async ({ tab, page }, moduleUrl, options, scenario) => {
+    return await ownedTab.run(async ({ tab, page }, moduleUrl, options, scenario, ownership) => {
       const { beginCapture } = await import(moduleUrl);
-      const capture = await beginCapture({ ...options, tab, page });
+      const capture = await beginCapture({ ...options, tab, page, ownership });
       try {
         await scenario({ tab, page, capture });
         return await capture.finish();
@@ -53,14 +62,15 @@ export async function captureDemo({ browser, url, viewport, options, scenario, t
         await capture.abort();
         throw error;
       }
-    }, { args: [import.meta.url, options, scenario], timeout });
+    }, { args: [import.meta.url, options, scenario, ownership], timeout });
   } finally {
     await ownedTab.close();
   }
 }
 
-export async function beginCapture({ tab, page, directory, title, scenario, runId, applicationRevision, helperRevision, recorderVersion, safeSelectors }) {
-  if (![applicationRevision, helperRevision].every((revision) => /^[a-f0-9]{40}$/.test(revision))) throw new Error("Provide exact application and helper Git revisions");
+export async function beginCapture({ tab, page, ownership, directory, title, scenario, runId, applicationRevision, helperRevision, recorderVersion, recorderSourceRevision, safeSelectors }) {
+  requireEvalOwnership(ownership);
+  if (![applicationRevision, helperRevision, recorderSourceRevision].every((revision) => /^[a-f0-9]{40}$/.test(revision))) throw new Error("Provide exact application, helper, and native recorder Git revisions");
   if (!recorderVersion) throw new Error("Provide the installed OMP version, not a guessed version");
   if (!Array.isArray(safeSelectors) || safeSelectors.length === 0 || safeSelectors.some((selector) => typeof selector !== "string" || selector.trim().length === 0) || new Set(safeSelectors).size !== safeSelectors.length) throw new Error("Declare unique nonsecret observation selectors explicitly");
   const approvedSelectors = [...safeSelectors];
@@ -176,7 +186,7 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
       if (clockError) throw clockError;
       if (result.frames !== frames.length || frames.length === 0) throw new Error("Observed frame count differs from the existing recorder; timing is not trustworthy");
       const receipt = {
-        version: 2,
+        version: 3,
         original: "original.mp4",
         originalSha256: await sha256(original),
         title,
@@ -186,7 +196,8 @@ export async function beginCapture({ tab, page, directory, title, scenario, runI
         helperRevision,
         safeSelectors: approvedSelectors,
         capture: {
-          recorder: { name: "OMP browser.recordStart", version: recorderVersion, fps: 15, durationMs: result.durationMs, frames: result.frames, bytes: result.bytes, cursor: true },
+          recorder: { name: "OMP browser.recordStart", version: recorderVersion, sourceRevision: recorderSourceRevision, fps: 15, durationMs: result.durationMs, frames: result.frames, bytes: result.bytes, cursor: true },
+          ownership,
           viewport,
           frameTimestampsMs: frames,
           startedAtBoundsMs,

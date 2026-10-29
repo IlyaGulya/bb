@@ -9,11 +9,14 @@
   approved narration stays separate; no new recorder, cloud upload, server
   encoding API, task-video schema, or analytics transport.
   Reject hidden or unobserved change results even when their boxes have positive
-  size, and require fresh outer owned-tab teardown after cancelled capture runs.
-  The owned `captureDemo` entry point enforces that outer lifecycle. Unshipped
-  receipt/manifest v2 uses explicit nonsecret targets and page-local ephemeral
-  keyed digests instead of raw DOM values/text, refuses known protected fields
-  and arbitrary container text, and rejects legacy raw-content receipts.
+  size. Explicitly negotiate native Eval lifetime protocol v1 and acquire a new
+  Eval-owned tab; native ownership, not a run-local `finally`, handles whole-Eval
+  teardown. Refuse older SDKs/session-lifetime fallback and retain the native
+  ownership receipt plus qualified recorder source revision in local v3
+  receipts/manifests. Keep explicit nonsecret targets and page-local ephemeral
+  keyed digests instead of raw DOM values/text, refuse known protected fields
+  and arbitrary container text, and reject legacy receipts without rewriting
+  historical artifacts.
 
 - Fence Tasks Start against concurrent draft revision/selection changes in its
   launch-receipt transaction. Retain the first validated bugfix reproduction
