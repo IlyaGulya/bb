@@ -1,3 +1,4 @@
+import { beginProductAnalyticsAction, withProductAnalyticsOperation } from "@/lib/product-analytics";
 import { useCallback, useRef, useState } from "react";
 import {
   usePendingAttachmentUploads,
@@ -198,6 +199,7 @@ export function useDraftAttachmentUploads({
     async (files: File[]) => {
       const activeTarget = targetRef.current;
       if (!activeTarget || files.length === 0) return [];
+      const analytics = beginProductAnalyticsAction("ui.attachments", "attach", { kind: "project", projectId });
       const capturedTargetKey = activeTarget.key;
       setOperation((current) =>
         beginDraftAttachmentOperation(current, capturedTargetKey),
@@ -209,12 +211,16 @@ export function useDraftAttachmentUploads({
           uploads,
           targetKey: capturedTargetKey,
           upload: (file) =>
-            uploadPromptAttachment.mutateAsync({ projectId, file }),
+            withProductAnalyticsOperation(analytics, () => uploadPromptAttachment.mutateAsync({ projectId, file })),
           getCurrentTarget: () => targetRef.current,
           onUploadSettled: (upload) => finishUploads([upload]),
         });
         failureMessage = result.failureMessage;
+        void analytics.complete(result.failureMessage !== null ? "failed" : result.added.length === uploads.length ? "succeeded" : "cancelled", result.failureMessage !== null ? "internal" : result.added.length === uploads.length ? "none" : "cancelled");
         return result.added;
+      } catch (error) {
+        void analytics.complete("failed", "internal");
+        throw error;
       } finally {
         setOperation((current) =>
           finishDraftAttachmentOperation(

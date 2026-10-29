@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command, CommanderError } from "commander";
+import { beginLocalProductAnalytics, finishLocalProductAnalytics } from "./product-analytics.js";
 import { maybeReexecViaBbCli } from "./bb-cli-reexec.js";
 import {
   CORE_COMMAND_GROUPS,
@@ -93,6 +94,7 @@ async function tryPluginCommandProxy(
     argv.slice(1).some((arg) => arg === "--help" || arg === "-h")
   ) {
     console.log(command.usage);
+    await finishLocalProductAnalytics(beginLocalProductAnalytics("help"));
     process.exit(0);
   }
   const exitCode = await proxy.runPluginCliCommand(
@@ -136,7 +138,10 @@ async function exitForCommanderError(
   error: CommanderError,
   getUrl: (() => string) | null,
 ): Promise<never> {
-  if (error.exitCode === 0) process.exit(0);
+  if (error.exitCode === 0) {
+    if (error.code === "commander.helpDisplayed" || error.code === "commander.help") await finishLocalProductAnalytics(beginLocalProductAnalytics("help"));
+    process.exit(0);
+  }
   const [errors, hints] = await Promise.all([
     import("./commander-errors.js"),
     import("./context-hints.js"),

@@ -1,3 +1,4 @@
+import { beginProductAnalyticsAction, withProductAnalyticsOperation } from "@/lib/product-analytics";
 import { createMicrophoneRecordingStream } from "@/lib/microphone-recording-stream";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMicrophoneSignal } from "./useMicrophoneSignal";
@@ -131,6 +132,7 @@ export function useVoiceInput(options: UseVoiceInputOptions) {
   const startingRef = useRef(false);
   const recordingPreferenceRef = useRef(preferredAudioInputDeviceId);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingAnalyticsRef = useRef<ReturnType<typeof beginProductAnalyticsAction> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startedAtMsRef = useRef<number | null>(null);
@@ -342,6 +344,7 @@ export function useVoiceInput(options: UseVoiceInputOptions) {
       }
       mediaRecorderRef.current = null;
       if (!acceptedRecordingPending) {
+        void recordingAnalyticsRef.current?.complete("cancelled", "cancelled");
         chunksRef.current = [];
         startedAtMsRef.current = null;
         promptContextRef.current = undefined;
@@ -361,6 +364,7 @@ export function useVoiceInput(options: UseVoiceInputOptions) {
 
   const start = useCallback(async () => {
     if (!isSupported) {
+      void beginProductAnalyticsAction("ui.voice", "record").complete("unavailable", "unavailable");
       showError(voiceUnsupportedMessage(unsupportedReason));
       return;
     }
@@ -372,6 +376,8 @@ export function useVoiceInput(options: UseVoiceInputOptions) {
       return;
     }
 
+    const recording = beginProductAnalyticsAction("ui.voice", "record");
+    recordingAnalyticsRef.current = recording;
     startingRef.current = true;
     const request = ++deviceRequestRef.current;
     try {
@@ -389,6 +395,7 @@ export function useVoiceInput(options: UseVoiceInputOptions) {
       });
       if (request !== deviceRequestRef.current) {
         stream.getTracks().forEach((track) => track.stop());
+        void recording.complete("cancelled", "cancelled");
         return;
       }
       setCaptureError(null);
@@ -410,7 +417,10 @@ export function useVoiceInput(options: UseVoiceInputOptions) {
           : createMicrophoneRecordingStream(stream);
       recordingStreamRef.current = recordingStream;
       if (recordingStream) await recordingStream.resume();
-      if (request !== deviceRequestRef.current) return;
+      if (request !== deviceRequestRef.current) {
+        void recording.complete("cancelled", "cancelled");
+        return;
+      }
       const recorderInput = recordingStream?.stream ?? stream;
       const preferredMimeType = resolvePreferredAudioMimeType();
       const recorder = preferredMimeType
@@ -429,6 +439,7 @@ export function useVoiceInput(options: UseVoiceInputOptions) {
       };
 
       recorder.onerror = () => {
+        void recording.complete("failed", "unavailable");
         showError("Voice recording failed");
       };
 
@@ -438,6 +449,7 @@ export function useVoiceInput(options: UseVoiceInputOptions) {
         stopMediaStream();
 
         if (!shouldTranscribeRef.current) {
+          void recording.complete("cancelled", "cancelled");
           shouldTranscribeRef.current = true;
           chunksRef.current = [];
           promptContextRef.current = undefined;
@@ -450,6 +462,7 @@ export function useVoiceInput(options: UseVoiceInputOptions) {
         const durationMs = Date.now() - startedAtMs;
 
         if (durationMs < MIN_RECORDING_DURATION_MS) {
+          void recording.complete("failed", "invalid");
           showError("Recording too short (minimum 1 second)");
           chunksRef.current = [];
           promptContextRef.current = undefined;
@@ -459,10 +472,12 @@ export function useVoiceInput(options: UseVoiceInputOptions) {
         const chunks = chunksRef.current;
         chunksRef.current = [];
         if (chunks.length === 0) {
+          void recording.complete("failed", "unavailable");
           showError("No audio was captured");
           promptContextRef.current = undefined;
           return;
         }
+        void recording.complete();
 
         const recordedMimeType =
           recorder.mimeType || preferredMimeType || "audio/webm";
@@ -471,28 +486,35 @@ export function useVoiceInput(options: UseVoiceInputOptions) {
         const promptContext = promptContextRef.current;
         promptContextRef.current = undefined;
 
-        const transcribeRecording = async () => {
+        const transcribeRecording = async (retry = false) => {
+          const transcription = retry ? beginProductAnalyticsAction("ui.voice", "transcribe") : withProductAnalyticsOperation(recording, () => beginProductAnalyticsAction("ui.voice", "transcribe"));
           setState("transcribing");
           const abortController = new AbortController();
           transcriptionAbortRef.current = abortController;
           try {
-            const transcript = await options.onTranscribe({
+            const transcript = await withProductAnalyticsOperation(transcription, () => options.onTranscribe({
               file: audioFile,
               promptContext,
               signal: abortController.signal,
-            });
-            if (abortController.signal.aborted) return;
+            }));
+            if (abortController.signal.aborted) {
+              void transcription.complete("cancelled", "cancelled");
+              return;
+            }
             const normalized = normalizeTranscript(transcript);
             if (normalized.length === 0) {
               throw new Error("Voice transcription returned an empty result.");
             }
-            await options.onTranscript(normalized);
+            await withProductAnalyticsOperation(transcription, () => options.onTranscript(normalized));
+            void transcription.complete();
             setState("idle");
           } catch (error) {
             if (error instanceof DOMException && error.name === "AbortError") {
+              void transcription.complete("cancelled", "cancelled");
               setState("idle");
               return;
             }
+            void transcription.complete("failed", "internal");
             setState("error");
             appToast.error("Voice input failed", {
               description: resolveRecordingErrorMessage(error),
@@ -507,7 +529,7 @@ export function useVoiceInput(options: UseVoiceInputOptions) {
                     event.preventDefault();
                     return;
                   }
-                  void transcribeRecording();
+                  void transcribeRecording(true);
                 },
               },
               cancel: {
@@ -529,6 +551,8 @@ export function useVoiceInput(options: UseVoiceInputOptions) {
 
       recorder.start(CHUNK_TIMESLICE_MS);
     } catch (error) {
+      const denied = error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "SecurityError");
+      void recording.complete(denied ? "denied" : "failed", denied ? "forbidden" : "unavailable");
       stopMediaStream();
       mediaRecorderRef.current = null;
       chunksRef.current = [];
@@ -574,6 +598,7 @@ export function useVoiceInput(options: UseVoiceInputOptions) {
     try {
       recorder.stop();
     } catch (error) {
+      void recordingAnalyticsRef.current?.complete("failed", "unavailable");
       acceptedRecordingPendingRef.current = false;
       showError(resolveRecordingErrorMessage(error));
     }

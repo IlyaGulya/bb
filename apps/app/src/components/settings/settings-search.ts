@@ -270,6 +270,10 @@ export const SETTINGS_SEARCH_INDEX: Record<
     keywords: ["archive", "restore", "unarchive"],
     settings: [],
   },
+  analytics: {
+    keywords: ["private", "product analytics", "feature usage", "coverage", "outcomes", "funnels", "delivery", "freshness", "retention", "scope"],
+    settings: [],
+  },
 };
 
 type SettingsSearchItemIcon =

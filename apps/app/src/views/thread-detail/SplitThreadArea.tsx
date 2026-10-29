@@ -1,3 +1,4 @@
+import { useProductAnalyticsCommit } from "@/hooks/useProductAnalyticsCommit";
 import { focusPaneComposer } from "@/lib/pane-composer-focus";
 import { cn } from "@bb/shared-ui/lib/utils";
 import {
@@ -280,6 +281,7 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
   const dimsInactiveSplits = useAtomValue(dimInactiveSplitsAtom);
   const [maximizedPaneId, setMaximizedPaneIdAtom] =
     useAtom(maximizedPaneIdAtom);
+  const observeMaximize = useProductAnalyticsCommit("ui.splits", "maximize", maximizedPaneId);
   const secondaryPanelRegistry = useMemo(
     () => createPaneSecondaryPanelRegistry(),
     [],
@@ -550,9 +552,9 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
         const route = focusedPaneRoute(next);
         if (route !== null) navigate(route, { replace: true });
       }
-      setMaximizedPaneId((previous) => (previous === paneId ? null : paneId));
+      observeMaximize(maximizedPaneId === paneId ? null : paneId, () => setMaximizedPaneId((previous) => (previous === paneId ? null : paneId)));
     },
-    [navigate, setMaximizedPaneId, store],
+    [maximizedPaneId, navigate, observeMaximize, setMaximizedPaneId, store],
   );
 
   const movePaneToSide = useCallback(

@@ -2,6 +2,14 @@
 
 ## AgentOS fork — unreleased
 
+- Extend private analytics through actual workspace/split/navigation, palette and
+  search, timeline/interaction, execution selection, attachment, voice,
+  appearance and onboarding producers. Preserve initiating scope and QA metadata
+  through local completion; do not treat accepted work as downstream success.
+  Observe registered plugin controls and actual skill/theme/mention consumption.
+  Deliver local CLI guide/help/authoring/diagnostic outcomes through the shared
+  bounded outbox, with `bb diagnostics product-analytics` for local delivery.
+  Correct analytics relative-time argument contracts and settings search discovery.
 - Add owner-local private feature analytics across Core routes, live plugin
   registrations, UI navigation and command intent, CLI/SDK/MCP calls and actual
   root-turn/provider outcomes. Keep anonymous vendor telemetry unchanged.

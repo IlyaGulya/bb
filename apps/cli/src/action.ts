@@ -1,3 +1,4 @@
+import { beginLocalProductAnalytics, finishLocalProductAnalytics } from "./product-analytics.js";
 import { Command } from "commander";
 import { BbHttpError } from "@bb/sdk";
 import {
@@ -43,12 +44,15 @@ export function action<TArgs extends CommandActionArgs>(
 ): CommandAction<TArgs> {
   return async (...args) => {
     beginJsonOutputTracking();
+    const analytics = beginLocalProductAnalytics(commandPath(args));
     try {
       await fn(...args);
+      await finishLocalProductAnalytics(analytics);
     } catch (err: unknown) {
       if (isProcessExitError(err)) {
         throw err;
       }
+      await finishLocalProductAnalytics(analytics, true);
       const exitCode = err instanceof CliExitError ? err.exitCode : 1;
       const message =
         err instanceof CliExitError ? err.message : getErrorMessage(err);

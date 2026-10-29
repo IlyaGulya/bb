@@ -373,6 +373,19 @@ diagnostics, `bb settings general telemetryEnabled false`, or SDK
 takes effect immediately. `BB_TELEMETRY=false` always disables telemetry, even
 when the saved preference is enabled.
 
+Private product analytics is separate from anonymous vendor telemetry and uses
+this BB server, not a vendor backend. `bb analytics --json` reports one logical
+scope and QA mode. `bb diagnostics product-analytics [--json]` shows the local
+acknowledged delivery queue for the configured server without event payloads:
+pending, retrying, gaps, expired and storage status. Local guide/help, plugin
+new/types/build/dev and CLI diagnostics use the same outbox. Their metadata is
+bounded action identity and outcome, never argv, paths, searches, output or raw
+errors. The local spool retains at most 500 events for seven days and retries on
+subsequent local CLI activity; server identity is isolated by a hash of its
+configured URL. Overflow, expiry and storage/process/device loss can leave gaps;
+diagnostic totals saturate at their bounded log limit. A watch starting is not
+a successful build, and explicit QA modes stay separate from production.
+
 Mobile app downloads
 
 Settings → Mobile links the iOS TestFlight

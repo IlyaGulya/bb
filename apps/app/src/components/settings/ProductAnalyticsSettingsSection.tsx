@@ -37,7 +37,7 @@ function FeatureRow({ row }: { row: ProductAnalyticsRow }) {
         <div><dt className="text-subtle-foreground">Human / agent</dt><dd>{known ? `${row.human} / ${row.agent}` : "Not covered"}</dd></div>
         <div><dt className="text-subtle-foreground">System / unknown</dt><dd>{known ? `${row.system} / ${row.unknown}` : "Not covered"}</dd></div>
         <div><dt className="text-subtle-foreground">Returning actor sessions</dt><dd>{known ? row.repeatActors : "Not covered"}</dd></div>
-        <div><dt className="text-subtle-foreground">Last meaningful use</dt><dd>{row.lastUsedAt === null ? known && row.availability === "available" ? "No recorded use in this window" : "Unknown, not zero" : formatRelativeTime(row.lastUsedAt)}</dd></div>
+        <div><dt className="text-subtle-foreground">Last meaningful use</dt><dd>{row.lastUsedAt === null ? known && row.availability === "available" ? "No recorded use in this window" : "Unknown, not zero" : formatRelativeTime({ timestamp: row.lastUsedAt, now: Date.now() })}</dd></div>
       </dl>
       <p className="break-all font-mono text-subtle-foreground">{row.featureId} / {row.action} · schema v{row.version}</p>
       <p className="break-words text-subtle-foreground">Entrypoints: {row.entrypoints.join(" · ")}</p>
@@ -87,7 +87,7 @@ export function ProductAnalyticsSettingsSection() {
       <div className="space-y-2 text-xs leading-relaxed tabular-nums" aria-live="polite">
         <p>Server: {state ? `${state.pending} pending · ${state.failed} failed admissions · ${state.gaps} gaps · ${state.expired} expired · storage ${state.storage}` : "Delivery state is unavailable until the server responds."}</p>
         <p>Instance-level diagnostic gaps: {state?.instanceGaps ?? "Not available"}. Missing plugin scope is a visible gap, never guessed Work or Personal activity.</p>
-        <p>Last admitted: {state?.lastAcceptedAt ? formatRelativeTime(state.lastAcceptedAt) : "No admission in this scope"}. Last projected: {state?.lastProjectedAt ? formatRelativeTime(state.lastProjectedAt) : "No projection in this scope"}.</p>
+        <p>Last admitted: {state?.lastAcceptedAt ? formatRelativeTime({ timestamp: state.lastAcceptedAt, now: Date.now() }) : "No admission in this scope"}. Last projected: {state?.lastProjectedAt ? formatRelativeTime({ timestamp: state.lastProjectedAt, now: Date.now() }) : "No projection in this scope"}.</p>
         <p>This browser’s delivery queue: {local.pending} pending · {local.failed} retrying · {local.gaps} gaps · storage {local.storage}. These are device-wide delivery diagnostics, not cross-project popularity.</p>
         <p className="text-subtle-foreground">Server retention: 30 days, up to 100,000 events / 10,000 pending. Browser queue: 500 events / 7 days. Current server release: {report.data?.release ?? "Not available"}.</p>
       </div>

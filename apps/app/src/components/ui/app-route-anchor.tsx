@@ -1,3 +1,5 @@
+import { beginProductAnalyticsNavigation, captureProductAnalyticsContext } from "@/lib/product-analytics";
+import { productAnalyticsRouteFeature, productAnalyticsRouteProject } from "@/lib/product-analytics-navigation";
 import {
   createContext,
   useCallback,
@@ -113,6 +115,8 @@ export function RouteNavigationProvider({
   }, [navigate]);
   const [isNavigationPending, startNavigationTransition] = useTransition();
   const navigateImmediately = useCallback<RouteNavigate>((path, options) => {
+    const pathname = path.split(/[?#]/)[0] ?? path;
+    beginProductAnalyticsNavigation(productAnalyticsRouteFeature(pathname), productAnalyticsRouteProject(pathname, captureProductAnalyticsContext().projectId));
     if (options === undefined) {
       navigateRef.current(path);
       return;

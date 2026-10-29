@@ -1,3 +1,5 @@
+import { observeProductAnalyticsLocal } from "@/lib/product-analytics";
+import { useProductAnalyticsCommit } from "@/hooks/useProductAnalyticsCommit";
 import { memo } from "react";
 import type {
   PermissionMode,
@@ -91,6 +93,10 @@ export const ExecutionControls = memo(function ExecutionControls({
 }: ExecutionControlsProps) {
   const handleServiceTierChange = serviceTier?.onChange ?? (() => {});
   const selectedProviderId = provider.selectedId ?? "";
+  const observeProvider = useProductAnalyticsCommit("ui.execution", "provider.select", selectedProviderId);
+  const observeModel = useProductAnalyticsCommit("ui.execution", "model.select", model.active?.model ?? model.selected);
+  const observeReasoning = useProductAnalyticsCommit("ui.execution", "reasoning.select", reasoning.value);
+  const observeTier = useProductAnalyticsCommit("ui.execution", "service-tier.select", serviceTier?.value);
 
   const canSwitchProviders = Boolean(
     provider.hasMultiple &&
@@ -113,7 +119,7 @@ export const ExecutionControls = memo(function ExecutionControls({
           providerOptions={provider.options ?? []}
           providerRouting={providerRouting}
           selectedProviderId={selectedProviderId}
-          onSelectedProviderChange={provider.onChange}
+          onSelectedProviderChange={provider.onChange === undefined ? undefined : (value) => observeProvider(value, () => provider.onChange?.(value))}
           hasMultipleProviders={provider.hasMultiple ?? false}
           modelValue={model.active?.model ?? model.selected}
           modelOptions={model.options}
@@ -121,21 +127,21 @@ export const ExecutionControls = memo(function ExecutionControls({
           modelIsLoading={model.isLoading}
           modelLoadFailed={model.loadFailed}
           modelLoadError={model.loadError}
-          onModelChange={model.onChange}
+          onModelChange={(value) => observeModel(value, () => model.onChange(value))}
           formatModelLabel={formatModelLabel}
           reasoningValue={reasoning.value}
           reasoningOptions={reasoning.options}
-          onReasoningChange={reasoning.onChange}
+          onReasoningChange={(value) => observeReasoning(value, () => reasoning.onChange(value))}
           serviceTierValue={serviceTier?.value}
           serviceTierOptions={
             serviceTier?.supported
               ? serviceTier.options
               : EMPTY_SERVICE_TIER_OPTIONS
           }
-          onServiceTierChange={handleServiceTierChange}
+          onServiceTierChange={(value) => observeTier(value, () => handleServiceTierChange(value))}
           serviceTierSupportByProvider={serviceTier?.supportByProvider}
           agentSections={agentOptions?.sections}
-          onAgentOptionChange={agentOptions?.onChange}
+          onAgentOptionChange={agentOptions === undefined ? undefined : (id, value) => observeProductAnalyticsLocal("ui.execution", "agent-option.select", () => agentOptions.onChange(id, value))}
           muted
           disabled={disabled}
           handoff={handoff}

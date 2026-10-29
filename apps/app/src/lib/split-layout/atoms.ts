@@ -1,3 +1,5 @@
+import type { SetStateAction } from "react";
+import { beginProductAnalyticsAction, captureProductAnalyticsContext } from "@/lib/product-analytics";
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import {
@@ -21,11 +23,32 @@ function createSplitLayoutStorage(): SyncStorage<SplitLayout | null> {
   });
 }
 
-export const splitLayoutAtom = atomWithStorage<SplitLayout | null>(
+const persistedSplitLayoutAtom = atomWithStorage<SplitLayout | null>(
   SPLIT_LAYOUT_STORAGE_KEY,
   null,
   createSplitLayoutStorage(),
   { getOnInit: true },
+);
+export const splitLayoutAtom = atom(
+  (get) => get(persistedSplitLayoutAtom),
+  (get, set, update: SetStateAction<SplitLayout | null>) => {
+    const previous = get(persistedSplitLayoutAtom);
+    const next = typeof update === "function" ? update(previous) : update;
+    if (previous === next) return;
+    if (captureProductAnalyticsContext().intentional !== true) return set(persistedSplitLayoutAtom, next);
+    const before = previous === null ? 0 : listPanes(previous.root).length;
+    const after = next === null ? 0 : listPanes(next.root).length;
+    const action = after > before ? "open" : after < before ? "close" : next?.focusedPaneId !== previous?.focusedPaneId ? "focus" : "layout.change";
+    const focused = next === null ? previous === null ? null : findPane(previous.root, previous.focusedPaneId) : findPane(next.root, next.focusedPaneId);
+    const analytics = beginProductAnalyticsAction("ui.splits", action, focused?.content.kind === "thread" ? { kind: "project", projectId: focused.content.projectId } : undefined);
+    try {
+      set(persistedSplitLayoutAtom, next);
+      void analytics.complete();
+    } catch (error) {
+      void analytics.complete("failed", "internal");
+      throw error;
+    }
+  },
 );
 
 export const MAXIMIZED_PANE_STORAGE_KEY = "bb.splitLayout.maximizedPaneId";

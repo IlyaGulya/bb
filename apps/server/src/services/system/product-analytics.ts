@@ -78,7 +78,7 @@ export class PrivateProductAnalytics {
   private catalogProvider: () => ProductAnalyticsFeature[] = () => [];
   private dynamicCatalogKeys = new Set<string>();
   constructor(private readonly db: DbConnection, readonly release: string, readonly mode: ProductAnalyticsMode, private readonly logger: ServerLogger) {
-    for (const feature of [...CORE_ANALYTICS_ROUTES, ...CLIENT_ANALYTICS_FEATURES]) this.register(feature, feature.featureId.startsWith("ui.") ? "client" : "server");
+    for (const feature of [...CORE_ANALYTICS_ROUTES, ...CLIENT_ANALYTICS_FEATURES]) this.register(feature, feature.featureId.startsWith("ui.") || feature.featureId === "cli.local" ? "client" : "server");
     try {
       this.initializeIdentity();
     } catch {
@@ -127,7 +127,7 @@ export class PrivateProductAnalytics {
     if (!/^[a-zA-Z][a-zA-Z0-9_.-]{0,119}$/.test(feature.featureId) || !/^[a-zA-Z][a-zA-Z0-9_.-]{0,119}$/.test(feature.action)) return;
     this.catalog.set(`${feature.featureId}:${feature.action}`, feature);
     const key = `${feature.featureId}:${feature.action}`;
-    if (completionSource === "client" || (feature.featureId.startsWith("plugin.") && feature.action === "open" && feature.coverage === "lifecycle")) this.clientCompletionFeatures.add(key);
+    if (completionSource === "client" || (feature.featureId.startsWith("plugin.") && feature.action === "open" && feature.coverage === "lifecycle") || (feature.featureId.startsWith("ui.plugin.") && feature.coverage === "lifecycle")) this.clientCompletionFeatures.add(key);
     else this.clientCompletionFeatures.delete(key);
   }
   registerOwned(feature: ProductAnalyticsFeature, completionSource: "server" | "client"): { dispose(): void } {
@@ -195,7 +195,7 @@ export class PrivateProductAnalytics {
       return this.db.transaction(() => {
         const id = eventKey(event);
         if (this.db.select({ id: events.id }).from(events).where(eq(events.id, id)).get()) return receipt("duplicate", "none");
-        if ((event.featureId.startsWith("plugin.") || !this.catalog.has(`${event.featureId}:${event.action}`)) && !this.refreshCatalog()) return receipt("retry", "storage_unavailable");
+        if ((event.featureId.startsWith("plugin.") || event.featureId.startsWith("ui.plugin.") || !this.catalog.has(`${event.featureId}:${event.action}`)) && !this.refreshCatalog()) return receipt("retry", "storage_unavailable");
         const feature = this.catalog.get(`${event.featureId}:${event.action}`);
         if (!feature || feature.coverage === "gap" || feature.availability === "unavailable") return receipt("rejected", "unknown_feature");
         if (source === "client" && event.stage === "completed" && !this.clientCompletionFeatures.has(`${event.featureId}:${event.action}`)) return receipt("rejected", "server_authoritative");

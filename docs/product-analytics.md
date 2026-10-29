@@ -136,22 +136,37 @@ from a nonzero counter or the mere existence of an endpoint.
 | Native plugin tools | Actual authenticated native tool execution | Deliberate agent result and bounded duration; Core SDK children share provenance and QA follows the recorded root turn. External business effects require their own completion declaration. |
 | Plugin services and schedules | Shared service lifecycle and claimed schedule execution | System/background activity, separate from intentional human use and separately scoped Core child actions. |
 | Native execution/provider | Accepted root-turn start/completion effects | Actual execution result; runtime system attribution is not inferred human/provider choice. Observed admission-to-completion time can include delivery delay. |
-| Core UI | Visible route entry, meaningful navigation, shared command dispatch | Exposed/opened/started/terminal navigation; accepted command dispatch is not downstream completion. Trusted input/automation provenance is separate from background exposure and unknown opens. |
-| Bundled local plugin commands | Monaco command identities and Prompt Library composer command | Backend-declared identities and the existing shared Core command path, not a second tracker. |
-| Custom local plugin actions | Explicit private analytics declarations | Client-local versus server completion authority is explicit; plugin disposal retires availability. See the Plugin Guide. |
+| Core UI | Workspace host acknowledgement, committed split/navigation state, palette opening and deferred command selection, settled intentional search, timeline expansion, interaction resolution, execution selection, attachment and voice lifecycle, appearance and onboarding | Initiating project/actor/QA metadata is captured before asynchronous work. Committed local state and returned asynchronous admission remain distinct from downstream completion. No search strings, selections, filenames, audio or transcript content are collected. |
+| Registered local plugin controls | Shared slot callback invocation and committed component consumption | Code-declared `ui.plugin.<id>` / `slot.<kind>.<id>.run` or `.mount`; callback completion is local handler completion, not downstream business success. Mounts are unknown-actor observations, not registration, visibility or inferred clicks. Thread-owned components resolve the actual Core thread project. |
+| Custom semantic plugin actions | Existing explicit private analytics declarations | Client-local versus server completion authority is explicit; plugin disposal retires availability. Component consumption does not imply coverage of every internal control. See the Plugin Guide. |
 | MCP discovery/read/run | Existing MCP semantic handlers and their CLI subprocess boundary | Source MCP remains distinguishable; no tool arguments, business payloads or outputs enter analytics. |
 
-UI-only controls without a declared semantic action remain explicit coverage
-gaps. Skills, themes and thread integrations without a semantic lifecycle
-contract are inventoried as gaps. Provider/environment/machine registration
-does not prove current host installation or project readiness; availability
-remains unknown where that cannot be established. BBDEV-39's player/gate and
-BBDEV-42's demo pipeline are separate unavailable/pending capabilities until
-their owning changes supply actual instrumentation. None of these gaps may be
-interpreted as unused features or silently called accepted coverage.
+Registered plugin callbacks and component consumers publish at most 500 local
+action declarations per active backend handle through the typed
+`experimental_productAnalytics.declareLocalActions` path. These identities cannot
+replace Core/server actions. The same outbox declares queued local identities
+before delivery; disabled or removed apps cannot grant new completion authority.
+Catalog delivery failures become visible gaps rather than failing a control.
+Actual mention search/resolution, selected runtime skill injection and theme
+resource consumption use the same collector. Skill injection is a system
+observation, not evidence that a model read or followed instructions. Missing
+asynchronous skill provenance is a diagnostic gap rather than guessed production
+usage. Theme prefetch is not human selection. Provider/host readiness remains
+unknown unless actually established. BBDEV-39 and BBDEV-42 remain separate
+unavailable/pending capabilities until their owning source is integrated.
 
-Local-only CLI guide/help, plugin-authoring commands and CLI error diagnostics
-are also explicit gaps: a server request observer cannot prove their use.
+Local-only CLI guide/help, plugin new/types/build/dev and CLI diagnostics record
+actual invocation/exit through the shared SDK outbox. A filesystem adapter uses
+500 exclusive reservation directories, seven-day expiry and per-envelope identity
+checks. A replayed receipt cannot remove a different queued action. The spool is
+isolated by a hash of the configured server URL; events retain their actual Core
+project, actor and QA plane. Exit recording uses synchronous filesystem admission;
+it does not wait for network delivery. Subsequent local activity retries pending
+delivery. `bb diagnostics product-analytics --json` exposes local health without
+event payloads. A watch starting is not a successful build. Diagnostic totals are
+bounded lower bounds after their 1 MiB log saturates; overflow, concurrent crashes,
+expiry, unavailable storage and device loss can leave gaps. This is not a power-loss
+or exactly-once guarantee. Production popularity cannot be inferred from these gaps.
 
 ## Owner report
 

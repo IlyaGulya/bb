@@ -1,6 +1,8 @@
 import {
   productAnalyticsBatchSchema,
   productAnalyticsReportQuerySchema,
+  productAnalyticsLocalActionsSchema,
+  type ProductAnalyticsLocalActions,
   type ProductAnalyticsBatch,
   type ProductAnalyticsAck,
   type ProductAnalyticsReportQuery,
@@ -1939,6 +1941,12 @@ export const publicApiRoutes = {
   },
 
   system: {
+    productAnalyticsLocalActions: defineRoute({
+      path: "/system/product-analytics/local-actions",
+      method: "post",
+      request: jsonRequest<EmptyInput, ProductAnalyticsLocalActions>(productAnalyticsLocalActionsSchema),
+      response: jsonResponse<{ ok: boolean }>(),
+    }),
     productAnalyticsEvents: defineRoute({
       path: "/system/product-analytics/events",
       method: "post",

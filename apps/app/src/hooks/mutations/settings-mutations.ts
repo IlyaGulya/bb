@@ -1,3 +1,4 @@
+import { observeProductAnalyticsAsync } from "@/lib/product-analytics";
 import {
   mutationOptions,
   type QueryClient,
@@ -187,7 +188,7 @@ export function useUpdateAppearance() {
     meta: {
       errorMessage: "Failed to update appearance.",
     },
-    mutationFn: (selection: AppThemeSelection) => sdk.theme.set(selection),
+    mutationFn: (selection: AppThemeSelection) => observeProductAnalyticsAsync("ui.appearance", "theme.select", () => sdk.theme.set(selection), () => "succeeded", { kind: "instance" }),
     onSuccess: () => {
       invalidateSystemConfig({ queryClient });
     },

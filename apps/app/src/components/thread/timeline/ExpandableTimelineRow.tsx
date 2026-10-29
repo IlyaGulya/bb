@@ -1,3 +1,4 @@
+import { useProductAnalyticsCommit } from "@/hooks/useProductAnalyticsCommit";
 import {
   memo,
   useCallback,
@@ -157,6 +158,7 @@ function ExpandableTimelineRowComponent({
     (forceExpanded ||
       (manualExpansionOverride ??
         (autoExpanded || terminalAutoExpanded || terminalAutoExpandedLatch)));
+  const observeExpansion = useProductAnalyticsCommit("ui.timeline", isExpanded ? "collapse" : "expand", isExpanded);
   useEffect(() => {
     if (isExpanded) {
       setCollapsedPreviewActive(false);
@@ -166,8 +168,8 @@ function ExpandableTimelineRowComponent({
   const horizontalPaddingClass =
     timelineRowHorizontalPaddingClassName(horizontalPadding);
   const handleToggle = useCallback((): void => {
-    setManualExpansionOverride(!isExpanded);
-  }, [isExpanded, setManualExpansionOverride]);
+    observeExpansion(!isExpanded, () => setManualExpansionOverride(!isExpanded));
+  }, [isExpanded, observeExpansion, setManualExpansionOverride]);
   const handleCollapsedPreviewClick = useCallback(
     (event: CollapsedPreviewClickEvent): void => {
       if (

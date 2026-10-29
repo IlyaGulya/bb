@@ -369,6 +369,7 @@ for the full report. The omitted scope is instance-only, not all projects.
 
 - `bb diagnostics`
 - `bb diagnostics cli-errors`
+- `bb diagnostics product-analytics`
 
 ## voice
 

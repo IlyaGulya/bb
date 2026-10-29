@@ -1,3 +1,5 @@
+import { analyticsMode, initializePrivateProductAnalytics, productAnalyticsContext } from "../system/product-analytics.js";
+import { pluginAnalyticsAction } from "../system/product-analytics-plugin-catalog.js";
 import {
   mayHaveWorkspaceRepositoryGroups,
   repositoryWorkspacePaths,
@@ -245,7 +247,16 @@ export async function resolveThreadRuntimeCommandConfig(
     sharedSkillSources: workspaceAgentContext.sharedSkills.runtimeSources,
     pluginSkillSelections: conditionalConfiguration.selectedSkillIdsByPlugin,
     includeUserSkills: executionContext === null,
-  }).map((entry) => entry.runtimeSource);
+  }).map((entry) => {
+    if (entry.provenance.kind === "plugin") {
+      const analytics = initializePrivateProductAnalytics({ db: deps.db, release: deps.config.appVersion, mode: analyticsMode(deps.config.isDevelopment), logger: deps.logger });
+      const context = productAnalyticsContext();
+      const scope = { kind: "project" as const, projectId: args.thread.projectId };
+      if (context === undefined) analytics.noteGap(scope);
+      else analytics.record(`plugin.${entry.provenance.pluginId}`, pluginAnalyticsAction("skill", entry.runtimeSource.name), "exposed", "none", "none", null, { scope, actorKind: "system", surface: "system", mode: context.mode });
+    }
+    return entry.runtimeSource;
+  });
   const dataDirAgentInstructions =
     executionContext === null
       ? readDataDirAgentInstructions(deps.logger, deps.config.dataDir)

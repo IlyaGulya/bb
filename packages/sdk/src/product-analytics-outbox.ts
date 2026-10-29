@@ -21,6 +21,7 @@ export class ExperimentalProductAnalyticsOutbox {
   constructor(private readonly store: ExperimentalAnalyticsQueueStore, private readonly send: (batch: ProductAnalyticsBatch) => Promise<ProductAnalyticsAck>) {}
   getSnapshot = (): ExperimentalAnalyticsQueueHealth => this.snapshot;
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
+  noteGap(): void { this.volatileFailures++; this.volatileGaps++; this.publish(this.baseHealth); }
   private publish(next: ExperimentalAnalyticsQueueHealth): void {
     this.baseHealth = next;
     this.snapshot = { ...next, failed: next.failed + this.volatileFailures, gaps: next.gaps + this.volatileGaps };
@@ -76,5 +77,22 @@ export class ExperimentalProductAnalyticsOutbox {
       }
       this.publish(await this.store.health());
     } catch { this.unavailable(); }
+  }
+}
+
+export class ExperimentalProductAnalyticsOperation {
+  readonly started: Promise<boolean>;
+  readonly identity: Readonly<Omit<ProductAnalyticsEvent, "stage" | "outcome" | "errorCode" | "timestamp" | "durationMs">>;
+  private finished = false;
+  private readonly startedAt = Date.now();
+  constructor(private readonly outbox: ExperimentalProductAnalyticsOutbox, identity: Omit<ProductAnalyticsEvent, "stage" | "outcome" | "errorCode" | "timestamp" | "durationMs">) {
+    this.identity = Object.freeze({ ...identity, scope: Object.freeze({ ...identity.scope }) });
+    this.started = outbox.record({ ...this.identity, stage: "started", outcome: "none", errorCode: "none", timestamp: this.startedAt, durationMs: null });
+  }
+  complete(outcome: Exclude<ProductAnalyticsEvent["outcome"], "none"> = "succeeded", errorCode: ProductAnalyticsEvent["errorCode"] = "none"): Promise<boolean> {
+    if (this.finished) return Promise.resolve(false);
+    this.finished = true;
+    const timestamp = Date.now();
+    return this.outbox.record({ ...this.identity, stage: "completed", outcome, errorCode, timestamp, durationMs: Math.min(86_400_000, Math.max(0, timestamp - this.startedAt)) });
   }
 }

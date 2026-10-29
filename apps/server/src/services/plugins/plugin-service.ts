@@ -1,6 +1,7 @@
 import { withProductAnalyticsJsonResult } from "../system/product-analytics-result.js";
 import { pluginAnalyticsFeature } from "../system/product-analytics-catalog.js";
 import type { ProductAnalyticsFeature } from "@bb/server-contract";
+import type { ProductAnalyticsLocalActions } from "@bb/server-contract";
 import { analyticsMode, initializePrivateProductAnalytics, productAnalyticsContext } from "../system/product-analytics.js";
 import { observePluginAnalytics } from "../system/product-analytics-plugin.js";
 import { pluginAnalyticsAction, pluginCliAnalyticsAction } from "../system/product-analytics-plugin-catalog.js";
@@ -263,6 +264,7 @@ export interface PluginService {
   handleUncaughtException(error: unknown): boolean;
   list(): InstalledPlugin[];
   listAnalyticsFeatures(): ProductAnalyticsFeature[];
+  declareLocalAnalyticsActions(input: ProductAnalyticsLocalActions): boolean;
   getDisplayName(id: string): string;
   providerCatalog(): Array<{
     id: string;
@@ -584,6 +586,7 @@ function normalizeMentionSearchItems(
 export function createPluginService(deps: PluginServiceDeps): PluginService {
   const logger = deps.logger;
   const analytics = initializePrivateProductAnalytics({ db: deps.db, release: deps.appVersion, mode: analyticsMode(false), logger });
+  const localAnalyticsActions = new WeakMap<object, ProductAnalyticsLocalActions["actions"]>();
   const installHandlerTimeoutMs = deps.installHandlerTimeoutMs ?? 30_000;
 
   async function runInstallHandlers(id: string): Promise<void> {
@@ -1319,22 +1322,29 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     async readThemeCss(themeId) {
       const theme = findLoadedTheme(themeId);
       if (!theme) return null;
-      try {
-        const css = await readFile(theme.cssPath, "utf8");
-        return css.length <= CUSTOM_THEME_CSS_MAX_LENGTH ? css : null;
-      } catch {
-        return null;
-      }
+      const owner = [...loaded].find(([, plugin]) => plugin.manifest.themes.includes(theme));
+      if (owner === undefined) return null;
+      return observePluginAnalytics(analytics, owner[0], pluginAnalyticsAction("theme", theme.id), async () => {
+        try {
+          const css = await readFile(theme.cssPath, "utf8");
+          return css.length <= CUSTOM_THEME_CSS_MAX_LENGTH ? css : null;
+        } catch {
+          return null;
+        }
+      }, { scope: { kind: "instance" }, scopeKnown: true }, (result) => result === null ? { outcome: "unavailable", errorCode: "unavailable" } : null);
     },
 
     readThemeCodeTheme(themeId) {
       const theme = findLoadedTheme(themeId);
       if (!theme) return null;
-      return readPluginThemeCodeTheme(
+      const result = readPluginThemeCodeTheme(
         themeId,
         theme.codeTheme ?? undefined,
         theme.codeThemePaths,
       );
+      const owner = [...loaded].find(([, plugin]) => plugin.manifest.themes.includes(theme));
+      if (owner !== undefined && result !== null) analytics.record(`plugin.${owner[0]}`, pluginAnalyticsAction("theme", theme.id), "exposed", "none", "none", null, { scope: { kind: "instance" }, actorKind: "system" });
+      return result;
     },
 
     events: {
@@ -2065,9 +2075,19 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       );
     },
 
+    declareLocalAnalyticsActions(input) {
+      const plugin = loaded.get(input.pluginId);
+      if (plugin === undefined || plugin.manifest.appEntry === undefined) return false;
+      const actions = new Map((localAnalyticsActions.get(plugin.handle) ?? []).map((action) => [action.action, action]));
+      for (const action of input.actions) actions.set(action.action, action);
+      if (actions.size > 500) return false;
+      localAnalyticsActions.set(plugin.handle, [...actions.values()]);
+      return true;
+    },
     listAnalyticsFeatures() {
       const features: ProductAnalyticsFeature[] = [];
       for (const [pluginId, plugin] of loaded) {
+        for (const action of localAnalyticsActions.get(plugin.handle) ?? []) features.push({ featureId: `ui.plugin.${pluginId}`, action: action.action, version: 1, label: `${pluginId} · ${action.action}`, entrypoints: ["apps/app/src/lib/plugin-slots.ts", `plugin:${pluginId}:app:${action.action}`], surfaces: ["web", "compact", "mobile", "desktop"], coverage: action.coverage, availability: "unknown", limitation: "Actual registered callback completion or committed component consumption; not registration, visibility, or downstream business success. Availability is client-local." });
         for (const method of plugin.handle.rpcHandlers.keys()) features.push(pluginAnalyticsFeature(pluginId, pluginAnalyticsAction("rpc", method), ["web", "compact", "mobile", "desktop", "sdk", "agent", "mcp"]));
         for (const route of plugin.handle.httpRoutes) features.push(pluginAnalyticsFeature(pluginId, pluginAnalyticsAction("http", `${route.method}.${route.path}`), ["web", "compact", "mobile", "desktop", "cli", "sdk", "agent", "mcp"], route.method === "GET" ? "observation" : "admission"));
         for (const route of plugin.handle.websocketRoutes) features.push({ ...pluginAnalyticsFeature(pluginId, pluginAnalyticsAction("websocket", route.path), ["web", "compact", "mobile", "desktop", "sdk"], "observation"), limitation: "Connection negotiation; semantic message actions require a declaration. Payloads and frame contents are never collected." });
@@ -2521,7 +2541,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           if (!record.triggers.includes(args.trigger)) continue;
           tasks.push(
             (async () => {
-              const outcome = await invokeWrapped(
+              const outcome = await observePluginAnalytics(analytics, id, pluginAnalyticsAction("mention-search", record.id), () => invokeWrapped(
                 id,
                 `mention search ${record.id}`,
                 async () => {
@@ -2540,7 +2560,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
                   );
                   return normalizeMentionSearchItems(record.id, result);
                 },
-              );
+              ));
               if (!outcome.ok || outcome.value.length === 0) return null;
               return {
                 pluginId: id,
@@ -2591,7 +2611,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         };
       }
       const provider = lookup.value;
-      const outcome = await invokeWrapped(
+      const outcome = await observePluginAnalytics(analytics, pluginId, pluginAnalyticsAction("thread-integration", `mention:${providerId}`), () => invokeWrapped(
         pluginId,
         `mention resolve ${providerId}`,
         async () => {
@@ -2657,7 +2677,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           });
           return { context, images };
         },
-      );
+      ));
       if (outcome.ok) return { ok: true, ...outcome.value };
       return { ok: false, error: outcome.error };
     },
