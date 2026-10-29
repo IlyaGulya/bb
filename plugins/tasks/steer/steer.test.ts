@@ -376,7 +376,7 @@ describe.each(["awaited", "queued RPC"] as const)("owned task comment notificati
     const launch = await fixture.prepare();
     fixture.reply();
     const paused = fixture.pauseStart();
-    const starting = fixture.workflows.launchTaskWorkflow(launch).then(value => ({ value, error: null }), error => ({ value: null, error }));
+    const starting = Promise.resolve(fixture.workflows.launchTaskWorkflow(launch)).then(value => ({ value, error: null }), error => ({ value: null, error }));
     try {
       await paused.entered;
       const request = fixture.nativeStarts[0];
@@ -405,7 +405,7 @@ describe.each(["awaited", "queued RPC"] as const)("owned task comment notificati
     const posting = fixture.post(path);
     try {
       await paused.entered;
-      const starting = await fixture.workflows.launchTaskWorkflow(launch).then(value => ({ value, error: null }), error => ({ value: null, error }));
+      const starting = await Promise.resolve(fixture.workflows.launchTaskWorkflow(launch)).then(value => ({ value, error: null }), error => ({ value: null, error }));
       expect(starting.error).toBeInstanceOf(Error);
       expect(fixture.api.database.prepare("SELECT id FROM task_workflow_runs WHERE task_id = ?").all(fixture.task.id)).toEqual([]);
       expect(fixture.nativeStarts).toEqual([]);
