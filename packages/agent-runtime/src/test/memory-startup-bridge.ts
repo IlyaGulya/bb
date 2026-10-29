@@ -22,21 +22,25 @@ export class MemoryBridge extends ChildProcess {
   override stderr = new PassThrough();
   readonly requests: FixtureRequest[] = [];
   readyOnConstruction = true;
+  startupReadiness: "native-init" | "session-created" = "native-init";
+  deferConstruction = false;
   rateLimitedTurns = 0;
   deferTurn = false;
   replaceOnFullSteer = false;
   stopped = false;
   stopRequested = false;
   stopGate: Promise<void> | null = null;
+  treeTermination: "confirmed" | "unverified" = "confirmed";
   private buffered = "";
   private turn = 0;
+  private readonly activeTurns = new Map<string, string>();
 
   readonly stop: ManagedProcess["stop"] = async () => {
     this.stopRequested = true;
     await this.stopGate;
-    this.stopped = true;
+    this.stopped = this.treeTermination === "confirmed";
     this.finish();
-    return { treeTermination: "confirmed" };
+    return { treeTermination: this.treeTermination };
   };
 
   constructor() {
@@ -78,6 +82,7 @@ export class MemoryBridge extends ChildProcess {
     const threadId = request.params?.threadId;
     if (!threadId) throw new Error("Fixture turn requires a thread id");
     const providerTurnId = `turn-${++this.turn}`;
+    this.activeTurns.set(threadId, providerTurnId);
     this.phase(threadId, "ready");
     this.send({ method: "thread/delta", params: { threadId, deltas: [
       { kind: "input.accepted", clientRequestId: request.params?.clientRequestId, providerTurnId },
@@ -86,17 +91,36 @@ export class MemoryBridge extends ChildProcess {
     this.reply(request);
   }
 
+
+  completeTurn(threadId: string): void {
+    const providerTurnId = this.activeTurns.get(threadId);
+    if (!providerTurnId) throw new Error("Fixture has no active turn to complete");
+    this.send({ method: "thread/delta", params: { threadId, deltas: [
+      { kind: "turn.boundary", providerTurnId, status: "completed", providerCheckpointId: `checkpoint-${providerTurnId}` },
+    ] } });
+    this.activeTurns.delete(threadId);
+  }
+
+  recommendRestart(threadId: string): void {
+    this.send({ method: "provider/recovery", params: {
+      threadId, kind: "restartRecommended", retryable: true, message: "Synthetic bridge refresh",
+    } });
+  }
   private receive(request: FixtureRequest): void {
     if (request.id === undefined) return;
     if (request.method === "initialize") {
       this.reply(request, { protocolVersion: 2, capabilities: {
-        sessionRestore: true, startupReadiness: "native-init", fork: "checkpoint", grammarVersions: [2, 3],
+        sessionRestore: true, startupReadiness: this.startupReadiness, fork: "checkpoint", grammarVersions: [2, 3],
       } });
       return;
     }
     const threadId = request.params?.threadId;
     if (["thread/start", "thread/resume", "thread/fork"].includes(request.method)) {
       if (!threadId) throw new Error("Fixture construction requires a thread id");
+      if (this.deferConstruction) {
+        this.phase(threadId, "hook");
+        return;
+      }
       if (this.readyOnConstruction) this.phase(threadId, "ready");
       this.reply(request, { providerThreadId: request.params?.providerThreadId ?? `native-${threadId}`, sessionRestorable: true });
       return;
