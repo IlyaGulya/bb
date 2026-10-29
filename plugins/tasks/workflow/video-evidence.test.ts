@@ -7,7 +7,7 @@ import { registerAttachments, saveAttachmentFromBytes } from "../attachments/ind
 import { registerTaskWorkflows } from "./index.js";
 import { buildEvidenceSchema, taskBuildEvidenceContract, type BuildReviewResult, type BuildReviewStart } from "../../workflows/src/build-review-contract.js";
 import type { TaskWorkflow } from "../shared/workflow-contract.js";
-import { TaskWorkflowStore, taskWorkflowVideoLineageMigration } from "./store.js";
+import { TaskWorkflowStore, taskWorkflowVideoLineageMigration, taskWorkflowUnverifiableVideoOriginsMigration } from "./store.js";
 
 const hosts: FakePluginHost[] = [];
 afterEach(async () => { for (const host of hosts.splice(0)) await host.harness.dispose(); });
@@ -142,6 +142,7 @@ describe("video-required task artifact admission", () => {
     const { request } = publishRecordingLineage(fixture, recorded);
     fixture.store.database.exec("ALTER TABLE task_workflow_runs DROP COLUMN video_lineage_json");
     fixture.store.database.exec(taskWorkflowVideoLineageMigration);
+    fixture.store.database.exec(taskWorkflowUnverifiableVideoOriginsMigration);
     const reopened = new TaskWorkflowStore(fixture.store);
     reopened.return(request.group, 1, "Retain the published original across upgrade");
     expect(await fixture.validate(recorded)).toEqual({ verified: true });
@@ -169,6 +170,7 @@ describe("video-required task artifact admission", () => {
     expect(returned.revision).toBe(2);
     expect(returned.native).toBeNull();
     fixture.store.database.exec(taskWorkflowVideoLineageMigration);
+    fixture.store.database.exec(taskWorkflowUnverifiableVideoOriginsMigration);
     const reopened = new TaskWorkflowStore(fixture.store);
     const runId = "wfr_after_upgrade_c2";
     reopened.save({ ...returned, state: "running", native: { ...native, runId, key: reopened.request(request.group).key, status: "running", result: null } });
