@@ -2373,6 +2373,27 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         }
       }
 
+      let retiredPluginIds: Set<string> | undefined;
+      for (const { pluginId, handle } of plugins) {
+        if (loaded.get(pluginId)?.handle === handle) continue;
+        (retiredPluginIds ??= new Set()).add(pluginId);
+        if (selectedSkillIdsByPlugin.get(pluginId)?.size !== 0) {
+          selectedSkillIdsByPlugin.set(pluginId, new Set());
+        }
+      }
+      if (retiredPluginIds) {
+        let toolIndex = 0;
+        for (const contribution of tools) {
+          if (!retiredPluginIds.has(contribution.pluginId)) tools[toolIndex++] = contribution;
+        }
+        tools.length = toolIndex;
+        let instructionIndex = 0;
+        for (const contribution of dynamicInstructions) {
+          if (!retiredPluginIds.has(contribution.pluginId)) dynamicInstructions[instructionIndex++] = contribution;
+        }
+        dynamicInstructions.length = instructionIndex;
+      }
+
       return { tools, selectedSkillIdsByPlugin, dynamicInstructions };
     },
 
