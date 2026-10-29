@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { createFakePluginHost, makeThreadResponse, type FakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost, makePluginAgentConfigurationContext, makeThreadResponse, type FakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { createStore, registerTasksApi } from "../tasks/api/index.js";
+import { tasksRpcContract } from "../tasks/shared/contract.js";
 import memoryPlugin, { memoryRpcContract } from "./server.js";
 import type { MemorySelection } from "./lineage.js";
 
@@ -58,7 +59,29 @@ async function fixture() {
     call("proposeReflection", { selection, changes: [{ id: name, expectedVersion, summary, details: "Retained original; revised conclusion.", classification: "observation", state: "current", source: source(), reason: "New inspected evidence" }] }, memoryRpcContract.proposeReflection.output);
   const decide = async (id: string, decision: "apply" | "reject" = "apply") =>
     call("decideReflection", { selection, id, decision }, memoryRpcContract.decideReflection.output);
-  return { host, tasks, task, otherTask, workTask, selection, otherContext, general, global, source, create, read, history, propose, decide, call };
+  return { host, tasks, tasksHost, personalProject, workProject, task, otherTask, workTask, selection, otherContext, general, global, source, create, read, history, propose, decide, call };
+}
+
+async function injectedInstructions(f: Awaited<ReturnType<typeof fixture>>) {
+  const ctx = { projectId: "proj_personal", threadId: "thr_personal" };
+  const sections: string[] = [];
+  const provider = f.host.harness.registrations.instructionProvider;
+  if (provider) {
+    const text = provider(ctx);
+    if (text !== null) sections.push(text);
+  }
+  const configured = await f.host.harness.behavior.resolveAgentConfiguration(makePluginAgentConfigurationContext({
+    thread: { id: ctx.threadId }, project: { id: ctx.projectId },
+  }));
+  if (configured.instructions !== null) sections.push(configured.instructions);
+  return sections.join("\n");
+}
+
+function suggestedCommand(instructions: string, command: string) {
+  const suggestions = instructions.match(/bb memory [^`\n]+/g) ?? [];
+  const suggestion = suggestions.find((entry) => entry.split(/\s+/)[2] === command);
+  if (!suggestion) throw new Error(`No executable ${command} guidance was offered`);
+  return suggestion.trim().split(/\s+/).slice(2);
 }
 
 describe("task/context memory boundaries", () => {
@@ -252,5 +275,157 @@ describe("diff-first reflection", () => {
     await expect(f.create("invented-quote", f.selection, { source: { kind: "comment", commentId: own.id, revision: own.createdAt, observedAt: Date.now(), quote: "A quote not in the original" } })).rejects.toThrow();
     expect(await f.read("foreign-comment")).toBeNull();
     expect(await f.read("invented-quote")).toBeNull();
+  });
+});
+
+describe("reviewed task memory invariants", () => {
+  it("applies a reviewed canonical target even when a newer name shadows its immutable ID", async () => {
+    const f = await fixture();
+    const target = await f.create("reviewed-target");
+    const proposal = await f.propose(target.name, target.version, "Reviewed conclusion belongs only to the original target.");
+    const shadow = await f.create(target.id, f.selection, { summary: "Independent decision that must not be overwritten." });
+    f.host.bb.storage.database().prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(Math.max(target.updatedAt, shadow.updatedAt) + 1, shadow.id);
+    expect(await f.read(target.name)).toMatchObject({ id: target.id, version: 1, summary: target.summary });
+    expect(await f.read(shadow.id)).toMatchObject({ id: shadow.id, version: 1, summary: shadow.summary });
+    expect(proposal.diffs[0]?.before.id).toBe(target.id);
+    await f.decide(proposal.id);
+    expect(await f.read(target.name)).toMatchObject({ id: target.id, version: 2, summary: "Reviewed conclusion belongs only to the original target." });
+    expect(await f.read(shadow.id)).toMatchObject({ id: shadow.id, version: 1, summary: shadow.summary });
+    expect((await f.history(target.name)).map((entry) => entry.snapshot.summary)).toEqual([
+      "Reviewed conclusion belongs only to the original target.", target.summary,
+    ]);
+  });
+
+  it("replaces the canonical linked record rather than a newer memory named after its ID", async () => {
+    const f = await fixture();
+    const target = await f.create("replacement-target");
+    const shadow = await f.create(target.id, f.selection, { summary: "This is not the replacement base." });
+    f.host.bb.storage.database().prepare("UPDATE memories SET updated_at = ? WHERE id = ?").run(Math.max(target.updatedAt, shadow.updatedAt) + 1, shadow.id);
+    const replacement = await f.create("accepted-replacement", f.selection, { replaces: { id: target.id, version: target.version } });
+    expect(replacement.lineage?.replaces).toEqual({ id: target.id, version: 1 });
+    expect(await f.read(target.name)).toMatchObject({ version: 2, lineage: { state: "replaced", replacedBy: { id: replacement.id, version: 1 } } });
+    expect(await f.read(shadow.id)).toMatchObject({ version: 1, summary: shadow.summary, lineage: { state: "current", replacedBy: null } });
+    expect((await f.history(target.name)).map((entry) => entry.snapshot.lineage?.state)).toEqual(["replaced", "current"]);
+  });
+
+  it.each(["reflection", "replacement"] as const)("does not redirect a persisted %s target to a name when its canonical record is no longer active", async (operation) => {
+    const f = await fixture();
+    const target = await f.create("retired-canonical-target");
+    const proposal = await f.propose(target.name);
+    await f.call("deleteMemory", { selection: f.selection, id: target.id, expectedVersion: 1 }, memoryRpcContract.deleteMemory.output);
+    expect(await f.read(target.name)).toBeNull();
+    expect((await f.history(target.name)).map((entry) => entry.action)).toEqual(["forget", "create"]);
+    const shadow = await f.create(target.id, f.selection, { summary: "Independent record with a colliding name." });
+    if (operation === "reflection") {
+      await expect(f.decide(proposal.id)).rejects.toThrow();
+    } else {
+      await expect(f.create("must-not-be-created", f.selection, { replaces: { id: target.id, version: 1 } })).rejects.toThrow();
+      expect(await f.read("must-not-be-created")).toBeNull();
+    }
+    expect(await f.read(shadow.id)).toMatchObject({ id: shadow.id, version: 1, summary: shadow.summary, lineage: { state: "current" } });
+    expect(await f.call("getReflection", { selection: f.selection, id: proposal.id }, memoryRpcContract.getReflection.output)).toMatchObject({ state: "pending" });
+  });
+
+  it.each(["move", "relink", "unlink"] as const)("withdraws active injection after task/project %s without erasing retained Memory revisions", async (change) => {
+    const f = await fixture();
+    const fact = await f.create("withdrawn-scope");
+    await f.call("setTaskBindings", { projectId: "proj_personal", threadId: "thr_personal", expectedVersion: 0, tasks: [f.selection.task] }, memoryRpcContract.setTaskBindings.output);
+    expect(await injectedInstructions(f)).toContain(fact.summary);
+    expect(await f.read(fact.name)).toMatchObject({ id: fact.id, version: 1 });
+    if (change === "move") {
+      const moved = tasksRpcContract.moveTaskToProject.output.parse(await f.tasksHost.harness.behavior.callRpc("moveTaskToProject", {
+        taskId: f.task.id, projectId: f.workProject.id,
+      }));
+      expect(moved).toMatchObject({ ok: true, task: { projectId: f.workProject.id } });
+    } else {
+      const linkedBbProjectId = change === "relink" ? "proj_work" : null;
+      const updated = tasksRpcContract.updateProject.output.parse(await f.tasksHost.harness.behavior.callRpc("updateProject", {
+        projectId: f.personalProject.id, linkedBbProjectId,
+      }));
+      expect(updated.project.linkedBbProjectId).toBe(linkedBbProjectId);
+    }
+    await expect(f.propose(fact.name)).rejects.toThrow();
+    const instructions = await injectedInstructions(f);
+    expect(instructions).not.toContain(fact.summary);
+    const retained = await f.history(fact.name);
+    expect(retained.map((entry) => entry.snapshot)).toEqual([fact]);
+    expect(await f.history(fact.id, { projectId: "proj_work", task: f.selection.task })).toEqual([]);
+  });
+
+  it("retains Memory history and permits rejecting a pending diff after the source task is deleted", async () => {
+    const f = await fixture();
+    const fact = await f.create("retained-after-task-deletion");
+    const proposal = await f.propose(fact.name);
+    expect((await f.history(fact.name)).map((entry) => entry.snapshot)).toEqual([fact]);
+    expect(await f.call("getReflection", { selection: f.selection, id: proposal.id }, memoryRpcContract.getReflection.output)).toMatchObject({ state: "pending" });
+    const deleted = tasksRpcContract.deleteTask.output.parse(await f.tasksHost.harness.behavior.callRpc("deleteTask", { taskId: f.task.id }));
+    expect(deleted.deleted).toBe(true);
+    expect(tasksRpcContract.getTask.output.parse(await f.tasksHost.harness.behavior.callRpc("getTask", { taskId: f.task.id })).task).toBeNull();
+    await expect(f.decide(proposal.id, "apply")).rejects.toThrow();
+    const row = z.object({ summary: z.string(), version: z.number() }).parse(f.host.bb.storage.database().prepare("SELECT summary, version FROM memories WHERE id = ?").get(fact.id));
+    expect(row).toEqual({ summary: fact.summary, version: 1 });
+    expect((await f.history(fact.name)).map((entry) => entry.snapshot)).toEqual([fact]);
+    expect(await f.call("getReflection", { selection: f.selection, id: proposal.id }, memoryRpcContract.getReflection.output)).toMatchObject({ id: proposal.id, state: "pending" });
+    expect(await f.decide(proposal.id, "reject")).toMatchObject({ id: proposal.id, state: "rejected" });
+    expect((await f.history(fact.name)).map((entry) => entry.snapshot)).toEqual([fact]);
+  });
+
+  it.each(["accessToken", "token"])("rejects a synthetic %s credential object without rejecting ordinary tokenization metadata", async (field) => {
+    const f = await fixture();
+    const safe = await f.create("tokenization-metadata", f.selection, { details: JSON.stringify({ tokenizer: "sentencepiece", tokenCount: 12, accessPolicy: "explicit-task-binding" }) });
+    expect(await f.read(safe.name)).toMatchObject({ id: safe.id, details: safe.details });
+    const marker = "BBDEV29_SYNTHETIC_CREDENTIAL_ONLY";
+    await expect(f.create("unsafe-credential-object", f.selection, { details: JSON.stringify({ [field]: marker }) })).rejects.toThrow();
+    expect(await f.read("unsafe-credential-object")).toBeNull();
+    expect((await f.call("searchMemories", { selection: f.selection, query: marker }, memoryRpcContract.searchMemories.output)).memories).toEqual([]);
+  });
+
+  it("lets a bound agent retrieve an explicit general note by following its injected search and get guidance", async () => {
+    const f = await fixture();
+    await f.create("task-only-decision");
+    const marker = "generalretrievalmarker";
+    const saved = await f.host.harness.behavior.runCli([
+      "add", "--general", "--scope", "global", "--name", "explicit-general-note",
+      "--summary", marker, "--details", "A broadly shared communication preference.", "--reason", "Owned general-note control", "--json",
+    ]);
+    expect(saved.exitCode, saved.stderr).toBe(0);
+    const original = z.object({ memory: z.object({ id: z.string(), details: z.string() }) }).parse(JSON.parse(saved.stdout ?? "")).memory;
+    await f.call("setTaskBindings", { projectId: "proj_personal", threadId: "thr_personal", expectedVersion: 0, tasks: [f.selection.task] }, memoryRpcContract.setTaskBindings.output);
+    const ctx = { projectId: "proj_personal", threadId: "thr_personal" };
+    const positive = await f.host.harness.behavior.runCli(["get", original.id, "--general", "--scope", "global", "--json"], ctx);
+    expect(positive.exitCode, positive.stderr).toBe(0);
+    expect(JSON.parse(positive.stdout ?? "").memory.details).toBe(original.details);
+    const instructions = await injectedInstructions(f);
+    const search = suggestedCommand(instructions, "search").map((word) => /^<[^>]+>$/.test(word) ? marker : word);
+    const found = await f.host.harness.behavior.runCli(search, ctx);
+    expect(found.exitCode, found.stderr).toBe(0);
+    const matches = z.object({ memories: z.array(z.object({ id: z.string() })) }).parse(JSON.parse(found.stdout ?? ""));
+    expect(matches.memories.map((memory) => memory.id)).toContain(original.id);
+    const get = suggestedCommand(instructions, "get").map((word) => /^<[^>]+>$/.test(word) ? original.id : word);
+    const read = await f.host.harness.behavior.runCli(get, ctx);
+    expect(read.exitCode, read.stderr).toBe(0);
+    expect(JSON.parse(read.stdout ?? "").memory.details).toBe(original.details);
+  });
+
+  it("keeps injected historical retrieval usable with a named task after its last current decision becomes obsolete", async () => {
+    const f = await fixture();
+    const fact = await f.create("obsolete-but-retained");
+    await f.call("setTaskBindings", { projectId: "proj_personal", threadId: "thr_personal", expectedVersion: 0, tasks: [f.selection.task] }, memoryRpcContract.setTaskBindings.output);
+    const proposal = await f.call("proposeReflection", { selection: f.selection, changes: [{
+      id: fact.id, expectedVersion: 1, summary: fact.summary, details: fact.details,
+      classification: "decision", state: "obsolete", source: fact.lineage!.source, reason: "The decision no longer applies; retain its evidence",
+    }] }, memoryRpcContract.proposeReflection.output);
+    await f.decide(proposal.id);
+    const ctx = { projectId: "proj_personal", threadId: "thr_personal" };
+    const positive = await f.host.harness.behavior.runCli(["get", fact.name, "--task", f.task.key, "--context", "research", "--json"], ctx);
+    expect(positive.exitCode, positive.stderr).toBe(0);
+    expect(JSON.parse(positive.stdout ?? "").memory.lineage.state).toBe("obsolete");
+    const summary = await f.call("taskSummary", f.selection, memoryRpcContract.taskSummary.output);
+    expect(summary.summary).not.toContain(fact.summary);
+    const retrieval = suggestedCommand(summary.summary, "catalog");
+    const followed = await f.host.harness.behavior.runCli(retrieval, ctx);
+    expect(followed.exitCode, followed.stderr).toBe(0);
+    const records = z.object({ memories: z.array(z.object({ id: z.string(), lineage: z.object({ state: z.string() }).nullable() })) }).parse(JSON.parse(followed.stdout ?? ""));
+    expect(records.memories.find((record) => record.id === fact.id)?.lineage?.state).toBe("obsolete");
   });
 });
