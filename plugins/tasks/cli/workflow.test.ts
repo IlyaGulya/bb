@@ -62,6 +62,9 @@ describe("named workflow CLI choices", () => {
       const legacy = await set("--ui");
       expect(legacy.selection.evidencePolicy).toBeUndefined();
       expect(legacy.selection.uiRequired).toBe(true);
+      const unrelated = await set("--checks", '["node --version"]');
+      expect(unrelated.selection.uiRequired).toBe(true);
+      expect(unrelated.selection.evidencePolicy).toBeUndefined();
       const backend = await set("--task-kind", "backend");
       expect(backend.selection.evidencePolicy).toEqual({ version: 1, requirement: "technical" });
       const conflict = await harness.runCli(["workflow", "draft", "set", task.key, "--ui", "--evidence-policy", "video", "--json"]);

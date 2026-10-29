@@ -100,7 +100,7 @@ export function workflowCommands(
             selection[role] = updated;
           }
           if (input.options.checks) selection.smokeCommands = JSON.parse(input.options.checks);
-          if (input.options.ui !== undefined) {
+          if (input.options.ui) {
             if (input.options["task-kind"] || input.options["evidence-policy"]) throw new Error("Choose legacy --ui or explicit --task-kind/--evidence-policy, not both");
             selection.uiRequired = input.options.ui;
             delete selection.evidencePolicy;

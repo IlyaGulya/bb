@@ -359,6 +359,9 @@ smoke. `--evidence-policy technical|ui|video` is an explicit override (`ui` perm
 screenshot/preview). The dialog and SDK draft use the same `evidencePolicy`.
 Existing saved drafts/results and legacy `uiRequired` / `--ui` keep their old
 meaning; classification is never inferred from prose, files, model or account.
+Only an explicitly enabled `--ui` changes the legacy requirement; editing other
+draft fields preserves it. The parser's default `false` does not select legacy
+policy or conflict with an explicit task kind.
 Project/template saves and application are explicit. Return cannot lower policy.
 
 First-class video evidence refers to an existing task/comment attachment, not
