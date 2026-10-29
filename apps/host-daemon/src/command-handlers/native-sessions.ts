@@ -341,7 +341,7 @@ async function readNativeSpill(source: ConfinedNativeFile, roots: string[], id: 
       for await (const entry of entries) {
         signal?.throwIfAborted();
         if (++visited > MAX_DISCOVERY_ENTRIES) throw new Error("Native spill directory exceeds the bounded lookup limit.");
-        const match = /^(0|[1-9][0-9]*)\.[A-Za-z0-9_-]{1,64}\.log$/u.exec(entry.name);
+        const match = /^(0|[1-9][0-9]*)\.[A-Za-z0-9_-]{1,64}(?:-original)?\.log$/u.exec(entry.name);
         const artifactId = match?.[1];
         if (artifactId !== undefined && match?.[0] === entry.name) names.set(artifactId, names.has(artifactId) ? null : entry.name);
       }

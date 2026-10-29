@@ -2,6 +2,8 @@
 
 ## AgentOS fork — unreleased
 
+- Retain numeric tool spills for full 64-character native tool names, including
+  their original-log suffix, without loosening source or ambiguity checks.
 - Regenerate capture migration metadata from the composed analytics schema without
   changing applied SQL or migration timestamps. Keep the real startup logging
   regression inside the existing runtime test-package boundary.

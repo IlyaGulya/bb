@@ -221,6 +221,7 @@ describe("explicit native source boundaries", () => {
     { toolName: "read", id: "25" },
     { toolName: "eval", id: "25" },
     { toolName: "bash", id: "0" },
+    { toolName: "a".repeat(64), id: "25" },
   ])("retains full native numeric spill bytes for $toolName artifact://$id without changing the native header or cwd", async (options) => {
     const saved = await numericSpillFixture(options);
     const pieces: Buffer[] = [];
