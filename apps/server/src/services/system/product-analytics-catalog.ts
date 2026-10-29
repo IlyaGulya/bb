@@ -80,7 +80,9 @@ export const CLIENT_ANALYTICS_FEATURES: ProductAnalyticsFeature[] = [
 export function pluginAnalyticsFeature(pluginId: string, action: string, surfaces: ProductAnalyticsFeature["surfaces"], coverage: ProductAnalyticsFeature["coverage"] = "admission"): ProductAnalyticsFeature {
   return {
     featureId: `plugin.${pluginId}`, action, version: 1, label: `${pluginId} · ${action}`,
-    entrypoints: ["apps/server/src/services/plugins/plugin-service.ts", `plugin:${pluginId}:${action}`],
+    entrypoints: pluginId === "tasks" && ["video.open", "video.play", "video.seek", "video.close", "video.error"].includes(action)
+      ? ["plugins/tasks/views/detail/video-attachment.tsx", "VideoAttachment", action, "plugins/tasks/views/detail/attachments.tsx", "plugins/tasks/views/detail/workflow-evidence.tsx"]
+      : ["apps/server/src/services/plugins/plugin-service.ts", `plugin:${pluginId}:${action}`],
     surfaces, coverage, availability: "available",
     limitation: coverage === "lifecycle" ? null : "Handler outcome; asynchronous external work requires its own declared completion event. No payloads are collected.",
   };

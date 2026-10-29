@@ -66,6 +66,7 @@ export class WorkflowPreparationStore {
       taskId, revision: 0, updatedAt: "",
       selection: this.settings(taskId, "development-review").selection ?? {
         template: "development-review", hostId: null, baseBranch: "", writer: null, reviewer: null, smokeCommands: [], uiRequired: false,
+        evidencePolicy: { version: 1, requirement: "technical" },
       },
     });
   }

@@ -6,8 +6,9 @@ import {
 } from "../shared/workflow-contract.js";
 import {
   buildReviewStartSchema,
+  assertBuildEvidencePolicy,
   type BuildReviewStart,
-} from "./remote-contract.js";
+} from "../../workflows/src/build-review-contract.js";
 
 export const taskWorkflowMigration = `CREATE TABLE task_workflow_runs (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -101,6 +102,7 @@ export class TaskWorkflowStore {
         });
       if (!native.result)
         throw new Error("Completed workflow has no result package");
+      assertBuildEvidencePolicy(this.request(id), native.result.build);
       const claimed = this.store.database
         .prepare(
           "UPDATE task_workflow_runs SET published_revision = ? WHERE id = ? AND published_revision < ?",

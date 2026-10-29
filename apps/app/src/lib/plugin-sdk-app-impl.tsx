@@ -42,6 +42,7 @@ import {
   useSettings,
   experimental_useAppPanel,
   experimental_useFixedTabTarget,
+  experimental_useProductAnalytics,
 } from "./plugin-sdk-hooks";
 import {
   useSidebarThreadActions,
@@ -128,6 +129,7 @@ export const pluginSdkAppImplementation = {
   experimental_ThreadStatusGlyph: ThreadStatusGlyph,
   useEnvironmentProviders,
   useSdk,
+  experimental_useProductAnalytics,
   experimental_useProviders: useProviders,
   experimental_useCodeTheme: useCodeTheme,
   experimental_copyToClipboard: copyToClipboard,

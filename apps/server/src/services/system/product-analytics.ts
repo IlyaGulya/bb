@@ -115,6 +115,7 @@ export class PrivateProductAnalytics {
   register(feature: ProductAnalyticsFeature, completionSource: "server" | "client" = "server"): void {
     if (!/^[a-zA-Z][a-zA-Z0-9_.-]{0,119}$/.test(feature.featureId) || !/^[a-zA-Z][a-zA-Z0-9_.-]{0,119}$/.test(feature.action)) return;
     this.catalog.set(`${feature.featureId}:${feature.action}`, feature);
+    if (feature.featureId === "plugin.tasks" && feature.action === "video.open" && feature.coverage === "lifecycle" && feature.availability === "available") this.catalog.delete("demo.player:run");
     const key = `${feature.featureId}:${feature.action}`;
     if (completionSource === "client" || (feature.featureId.startsWith("plugin.") && feature.action === "open" && feature.coverage === "lifecycle")) this.clientCompletionFeatures.add(key);
     else this.clientCompletionFeatures.delete(key);

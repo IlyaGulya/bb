@@ -7,7 +7,7 @@ import { createWorkflowPreparation } from "./preparation.js";
 import { registerTaskWorkflows } from "./index.js";
 import type { WorkflowSelection } from "../shared/workflow-preparation.js";
 import { TaskWorkflowStore } from "./store.js";
-import type { BuildReviewStart } from "./remote-contract.js";
+import type { BuildReviewStart } from "../../workflows/src/build-review-contract.js";
 
 const hosts: FakePluginHost[] = [];
 afterEach(async () => { for (const host of hosts.splice(0)) await host.harness.dispose(); });

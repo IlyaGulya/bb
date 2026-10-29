@@ -5,7 +5,7 @@ import { publishTasksChanged, type TasksApiStore } from "../api/index.js";
 import { inboxRpcContract } from "../shared/inbox-contract.js";
 import { errorMessage } from "../shared/errors.js";
 import { InboxStore, type InboxSource } from "./store.js";
-import { buildReviewInspectionSchema } from "../workflow/remote-contract.js";
+import { buildReviewInspectionSchema } from "../../workflows/src/build-review-contract.js";
 
 export type InboxHandlers = PluginRpcHandlers<typeof inboxRpcContract>;
 type WorkingItem = z.infer<

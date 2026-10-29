@@ -1286,6 +1286,16 @@ is also explicit. Neither task edits nor Start save global presets or defaults.
 Required platform smoke commands must be configured; there are no fabricated
 passing checks. Logical context and model account are independent explicit picks.
 
+Task drafts optionally carry explicit `evidencePolicy:{version:1,requirement:
+"technical"|"ui"|"video"}`. New explicitly classified UI/interactive requests
+default to `video` through `--task-kind ui` or the dialog's UI choice; backend
+classification uses `technical`. `--evidence-policy` overrides deliberately.
+Missing policy preserves legacy `uiRequired` screenshot/preview meaning; old
+saved settings/results are not rewritten. This is task/project-template policy,
+not an account/model/global default. Safe recording unavailability blocks required
+video. Technical smoke remains mandatory, and Return retains the selected policy.
+These are configuration contracts, not a runtime acceptance or deployment claim.
+
 Core prepares an isolated single-root git worktree and native internal contexts
 without a donor origin or model initialization turn. Preparation is observable,
 reuses its durable reservation after interruption, and never starts implementation.

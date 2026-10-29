@@ -1,4 +1,6 @@
 import { defineConfig } from "vitest/config";
+import { fileURLToPath } from "node:url";
+import { sharedWorkerProjects } from "../../vitest.shared";
 
 export default defineConfig({
   resolve: {
@@ -9,9 +11,12 @@ export default defineConfig({
   },
   test: {
     silent: "passed-only",
-    name: "bb-plugin-tasks",
-    include: ["**/*.test.{ts,tsx}"],
-    exclude: ["node_modules/**"],
+    projects: sharedWorkerProjects({
+      pkgDir: fileURLToPath(new URL(".", import.meta.url)),
+      name: "bb-plugin-tasks",
+      include: ["**/*.test.{ts,tsx}"],
+      exclude: ["node_modules/**"],
+    }),
     testTimeout: 20_000,
     setupFiles: ["./vitest.setup.ts"],
     server: {

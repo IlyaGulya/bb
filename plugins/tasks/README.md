@@ -230,6 +230,39 @@ later unrelated replacement attempts are rejected. Generic Done cannot bypass
 pending workflow acceptance. Human Accept requires the exact latest revision
 and an unchanged clean reviewed commit.
 
+### Explicit video evidence policy
+
+The evidence input contract is versioned independently of execution profiles.
+For newly classified UI/interactive work, `workflow draft set TASK --task-kind ui`
+selects `{version:1,requirement:"video"}`. `--task-kind backend` selects technical
+smoke. `--evidence-policy technical|ui|video` is an explicit override (`ui` permits
+screenshot/preview). The dialog and SDK draft use the same `evidencePolicy`.
+Existing saved drafts/results and legacy `uiRequired` / `--ui` keep their old
+meaning; classification is never inferred from prose, files, model or account.
+Project/template saves and application are explicit. Return cannot lower policy.
+
+First-class video evidence refers to an existing task/comment attachment, not
+an arbitrary URL or temporary path. It carries the exact commit, source run,
+scenario, original attachment and nullable editing disclosure. MP4 / H.264 and
+WebM reuse Tasks storage and its 25 MiB limit. Ownership, availability, container
+structure and commit/provenance are checked before review/publication/Accept;
+these checks do not prove decoder support or the truth of a recorded scenario.
+Only actual playback and independent inspection can do that.
+
+The task attachment and result controls use one responsive in-task HTML video
+player, native controls, no autoplay, separate download, and explicit
+loading/error/unsupported states. Closing releases playback and restores the
+trigger without navigating the task. Delivery uses the existing authenticated
+attachment path with bounded streaming, HEAD and single-byte Range support.
+Core's shared acknowledged analytics outbox records local video outcomes without
+video content, filenames, URLs, task/attachment IDs or raw errors.
+
+Safe recording unavailability blocks a video-required result; screenshot/preview
+is not a fallback. Technical smoke, independent review, human Accept and
+merge/deploy remain separate. These source contracts are not a claim of observed
+desktop/mobile/native-workflow or analytics acceptance on a deployed candidate.
+
+
 ## Lists, boards, and parent tasks
 
 List and Board show all tasks in the selected tracker project, including

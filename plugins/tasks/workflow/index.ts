@@ -2,8 +2,10 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import {
   buildReviewRpcContract,
+  assertBuildEvidencePolicy,
+  taskBuildEvidenceContract,
   type BuildReviewStart,
-} from "./remote-contract.js";
+} from "../../workflows/src/build-review-contract.js";
 import { publishTasksChanged, type TasksApiStore } from "../api/index.js";
 import { withTaskExecution } from "../delegate/execution.js";
 import {
@@ -14,6 +16,7 @@ import { TaskWorkflowStore, newTaskWorkflowId } from "./store.js";
 import { RepositoryStore } from "../repositories/store.js";
 import { createWorkflowPreparation, requireWorkflowSelection } from "./preparation.js";
 import type { workflowSetupContract } from "../shared/workflow-preparation.js";
+import { verifyTaskVideoAttachment } from "../attachments/index.js";
 
 export type TaskWorkflowHandlers = PluginRpcHandlers<
   typeof workflowRpcContract & typeof workflowSetupContract
@@ -26,6 +29,20 @@ export function registerTaskWorkflows(
   const workflows = new TaskWorkflowStore(store);
   const preparation = createWorkflowPreparation(bb, store);
   const pending = new Map<string, Promise<TaskWorkflow>>();
+  async function validateEvidence(input: Parameters<PluginRpcHandlers<typeof taskBuildEvidenceContract>["validateTaskBuildEvidence"]>[0]) {
+    assertBuildEvidencePolicy(input, input.build);
+    const verified = new Set<string>();
+    for (const evidence of input.build.uiEvidence) {
+      if (evidence.kind !== "video") continue;
+      for (const attachmentId of [evidence.attachmentId, evidence.recording.sourceAttachmentId]) {
+        if (verified.has(attachmentId)) continue;
+        await verifyTaskVideoAttachment(store.tasks, input.taskId, attachmentId);
+        verified.add(attachmentId);
+      }
+    }
+    return { verified: true as const };
+  }
+  bb.rpc.register(taskBuildEvidenceContract, { validateTaskBuildEvidence: validateEvidence });
   function publish(id: string) {
     const view = workflows.get(id);
     const task = store.tasks.getTask(view.taskId);
@@ -82,6 +99,14 @@ export function registerTaskWorkflows(
           throw new Error(
             "Native workflow is unavailable; its receipt is retained and no replacement was launched",
           );
+        if (native.status === "succeeded" && native.result) {
+          try { await validateEvidence({ taskId: view.taskId, uiRequired: request.uiRequired, evidencePolicy: request.evidencePolicy, build: native.result.build }); }
+          catch (cause) {
+            view = workflows.save({ ...view, native, state: "failed", error: cause instanceof Error ? cause.message : String(cause) });
+            publish(id);
+            return view;
+          }
+        }
         view = workflows.publish(id, native);
         for (const worker of native.workers)
           store.tasks.upsertTaskThread({
@@ -139,6 +164,8 @@ export function registerTaskWorkflows(
           task: `${task.key}: ${task.title}\n\n${task.description}`,
           template: ready.selection.template, writer: roles.writer, reviewer: roles.reviewer,
           smokeCommands: ready.selection.smokeCommands, uiRequired: ready.selection.uiRequired, feedback: "",
+          evidenceTaskId: task.id,
+          ...(ready.selection.evidencePolicy ? { evidencePolicy: ready.selection.evidencePolicy } : {}),
         };
         store.transaction(() => {
           const currentDraft = preparation.persistence.draft(input.taskId);
@@ -177,6 +204,7 @@ export function registerTaskWorkflows(
             environmentId: origin.environmentId,
           });
           const build = view.native.result.build;
+          await validateEvidence({ taskId: view.taskId, uiRequired: request.uiRequired, evidencePolicy: request.evidencePolicy, build });
           if (
             status.outcome !== "available" ||
             status.workspace.checkout.kind !== "branch" ||

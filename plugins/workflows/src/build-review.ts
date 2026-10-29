@@ -9,6 +9,8 @@ import {
 } from "./build-review-policy.js";
 import {
   BUILD_REVIEW_POLICY_LIMITATIONS,
+  buildEvidenceSchema,
+  evidenceRequirement,
   buildReviewResultSchema,
   buildReviewStartSchema,
   buildReviewRpcContract,
@@ -17,53 +19,7 @@ import {
 
 const string = { type: "string", minLength: 1 };
 const strings = { type: "array", items: string };
-const buildSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "branch",
-    "commit",
-    "diff",
-    "commands",
-    "uiEvidence",
-    "limitations",
-    "nextDecision",
-  ],
-  properties: {
-    branch: string,
-    commit: string,
-    diff: string,
-    limitations: strings,
-    nextDecision: string,
-    commands: {
-      type: "array",
-      minItems: 1,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["command", "exitCode", "output"],
-        properties: {
-          command: string,
-          exitCode: { type: "integer" },
-          output: string,
-        },
-      },
-    },
-    uiEvidence: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["kind", "location", "description"],
-        properties: {
-          kind: { type: "string", enum: ["screenshot", "preview"] },
-          location: string,
-          description: string,
-        },
-      },
-    },
-  },
-};
+const buildSchema = z.toJSONSchema(buildEvidenceSchema, { target: "draft-7" });
 const reviewSchema = {
   type: "object",
   additionalProperties: false,
@@ -82,6 +38,12 @@ const reproductionEvidenceSchema = z.object({
 }).strict();
 
 export function buildReviewSource(input: BuildReviewStart): string {
+  const requirement = evidenceRequirement(input);
+  const policy = JSON.stringify({ version: input.evidencePolicy?.version ?? "legacy", requirement });
+  const evidenceInstructions = "Evidence policy: " + policy + ". Technical platform smoke and independent code review remain mandatory; video is a human demo, not technical proof or human acceptance. For video-required work, record a short real action → visible result (before/after and Return where applicable) on the exact reported commit. Attach the recording to this task using bb tasks attachment add; report its attachmentId, recording commit, original runId, scenario, original sourceAttachmentId and a truthful transformation description (null only for unedited originals). Preserve the original server attachment for sped-up/edited clips. No secrets, other users' data, placeholder cards, local /tmp paths or invented evidence. Reuse the existing approved recorder only. If safe capture, a decoder, or a real accessible artifact is unavailable, stop with an honest blocker; screenshots/previews cannot replace required video. Legacy UI policy still accepts screenshot/preview.";
+  const checkEvidence = requirement === "video"
+    ? 'if (!build.uiEvidence.some(e => e.kind === "video")) throw new Error("Video recording is required; screenshot/preview is not a substitute");'
+    : requirement === "ui" ? 'if (build.uiEvidence.length === 0) throw new Error("UI screenshot or preview evidence is required");' : "";
   const options = (role: "writer" | "reviewer", outputSchema: object) =>
     JSON.stringify({
       provider: input[role].provider,
@@ -92,7 +54,7 @@ export function buildReviewSource(input: BuildReviewStart): string {
     });
   if (input.template === "bugfix") {
     const reproductionSchema = { type: "object", additionalProperties: false, required: ["summary", "command", "exitCode", "output"], properties: { summary: string, command: string, exitCode: { type: "integer" }, output: string } };
-    const fixSchema = { ...buildSchema, required: [...buildSchema.required, "regressionCommand"], properties: { ...buildSchema.properties, regressionCommand: string } };
+    const fixSchema = z.toJSONSchema(buildEvidenceSchema.extend({ regressionCommand: z.string().trim().min(1).max(100000) }), { target: "draft-7" });
     return `export const meta = { name: "task-bugfix-review", description: "Real reproduction, retained writer fix and regression, platform smoke, independent review", phases: [{title:"Reproduce"},{title:"Fix, regression and platform smoke"},{title:"Independent review"}] };
 phase("Reproduce");
 const reproduction = await agent((args.previousReproduction ? "This is a human Return in the SAME retained writer session. Preserve the original genuine failing-before command, nonzero exit code and exact output below; do not pretend the already-fixed bug must fail again. Re-plan the requested changes in summary, retaining the original reproduction fields unchanged. Original evidence: " + JSON.stringify(args.previousReproduction) : "Reproduce the reported bug in this owned workspace BEFORE changing implementation. Run the real failing command and record its exact command, nonzero exit code, observed output and concise root-cause/repair plan. Do not claim a reproduction from source inspection alone. If this cannot be reproduced, stop honestly.") + " Task: " + args.task + "\\nHuman feedback: " + args.feedback, ${options("writer", reproductionSchema)});
@@ -100,27 +62,27 @@ if (reproduction.exitCode === 0) throw new Error("Bugfix requires genuine failin
 if (args.previousReproduction && (reproduction.command !== args.previousReproduction.command || reproduction.exitCode !== args.previousReproduction.exitCode || reproduction.output !== args.previousReproduction.output)) throw new Error("Return must retain the original genuine reproduction evidence");
 const plan = JSON.stringify(reproduction);
 phase("Fix, regression and platform smoke");
-const fixed = await agent("Continue in this SAME retained writer session. Fix the reproduced bug, add a meaningful consumer regression, run that regression and rerun the EXACT failing-before command to prove passing-after, then execute every required platform smoke command. Report regressionCommand as an executed command in commands. Include exact exit codes and observed output. Commit only owned changes; no publishing or acceptance. Task: " + args.task + "\\nReproduction: " + plan + "\\nRequired smoke: " + JSON.stringify(args.smokeCommands) + "\\nUI evidence required: " + args.uiRequired + "\\nHuman feedback: " + args.feedback, ${options("writer", fixSchema)});
+const fixed = await agent("Continue in this SAME retained writer session. Fix the reproduced bug, add a meaningful consumer regression, run that regression and rerun the EXACT failing-before command to prove passing-after, then execute every required platform smoke command. Report regressionCommand as an executed command in commands. Include exact exit codes and observed output. Commit only owned changes; no publishing or acceptance. " + ${JSON.stringify(evidenceInstructions)} + " Task: " + args.task + "\\nReproduction: " + plan + "\\nRequired smoke: " + JSON.stringify(args.smokeCommands) + "\\nHuman feedback: " + args.feedback, ${options("writer", fixSchema)});
 if (fixed.commands.some(c => c.exitCode !== 0)) throw new Error("Fix/regression/platform smoke failed");
 if (!fixed.commands.some(c => c.command === reproduction.command && c.exitCode === 0)) throw new Error("Missing passing-after evidence for the original reproduction");
 if (!fixed.commands.some(c => c.command === fixed.regressionCommand && c.exitCode === 0)) throw new Error("Missing executed consumer regression evidence");
 if (args.smokeCommands.some(command => !fixed.commands.some(c => c.command === command))) throw new Error("Missing required real smoke command evidence");
-if (args.uiRequired && fixed.uiEvidence.length === 0) throw new Error("UI screenshot or preview evidence is required");
 const build = fixed;
+${checkEvidence}
 phase("Independent review");
-const review = await agent("Independently inspect the actual fix and consumer regression against the original failing-before and passing-after evidence, actual repository and smoke output. Do not modify files, commit, publish, delegate or accept. Instructions are NOT a read-only security sandbox. Task: " + args.task + "\\nReproduction: " + plan + "\\nBuild: " + JSON.stringify(build), ${options("reviewer", reviewSchema)});
+const review = await agent("Independently inspect the actual fix and consumer regression against the original failing-before and passing-after evidence, actual repository and smoke output. Inspect the real attached video and its exact commit/run/scenario and editing disclosure when required; a plausible URL or screenshot is not video. Do not modify files, commit, publish, delegate or accept. Instructions are NOT a read-only security sandbox. " + ${JSON.stringify(evidenceInstructions)} + " Task: " + args.task + "\\nReproduction: " + plan + "\\nBuild: " + JSON.stringify(build), ${options("reviewer", reviewSchema)});
 return { plan, build, review };`;
   }
   return `export const meta = { name: "task-build-review", description: "Bounded task plan, one retained writer, platform smoke, independent review", phases: [{title:"Plan"},{title:"Build and platform smoke"},{title:"Independent review"}] };
 phase("Plan");
-const plan = await agent("Plan this bounded task. Do not change files yet. Return the concrete plan, real platform smoke commands, and acceptance criteria. Task: " + args.task + "\\nHuman return feedback: " + args.feedback, ${options("writer", string)});
+const plan = await agent("Plan this bounded task. Do not change files yet. Return the concrete plan, real platform smoke commands, and acceptance criteria. " + ${JSON.stringify(evidenceInstructions)} + " Task: " + args.task + "\\nHuman return feedback: " + args.feedback, ${options("writer", string)});
 phase("Build and platform smoke");
-const build = await agent("Continue in this same writer session. Implement the plan and execute the actual platform smoke commands; do not substitute unit tests for platform smoke. Capture exact commands, exit codes and real output. Commit only the owned task changes and report branch, full commit and diff summary. For UI tasks capture screenshot/preview evidence. Do not publish externally or accept the task. Never invent evidence. Task: " + args.task + "\\nPlan: " + plan + "\\nRequired smoke commands: " + JSON.stringify(args.smokeCommands) + "\\nUI evidence required: " + args.uiRequired + "\\nHuman feedback: " + args.feedback, ${options("writer", buildSchema)});
+const build = await agent("Continue in this same writer session. Implement the plan and execute the actual platform smoke commands; do not substitute unit tests for platform smoke. Capture exact commands, exit codes and real output. Commit only the owned task changes and report branch, full commit and diff summary. Do not publish externally or accept the task. Never invent evidence. " + ${JSON.stringify(evidenceInstructions)} + " Task: " + args.task + "\\nPlan: " + plan + "\\nRequired smoke commands: " + JSON.stringify(args.smokeCommands) + "\\nHuman feedback: " + args.feedback, ${options("writer", buildSchema)});
 if (build.commands.some(c => c.exitCode !== 0)) throw new Error("Platform smoke failed; task remains unaccepted");
 if (args.smokeCommands.some(command => !build.commands.some(c => c.command === command))) throw new Error("Missing required real smoke command evidence");
-if (args.uiRequired && build.uiEvidence.length === 0) throw new Error("UI screenshot or preview evidence is required");
+${checkEvidence}
 phase("Independent review");
-const review = await agent("Independently inspect the actual repository changes and smoke evidence against the task. Do not modify files, commit, publish, delegate or accept the task. These are role instructions, NOT a read-only security sandbox. Report defects and limitations honestly. Task: " + args.task + "\\nPlan: " + plan + "\\nBuild evidence: " + JSON.stringify(build), ${options("reviewer", reviewSchema)});
+const review = await agent("Independently inspect the actual repository changes and smoke evidence against the task. Inspect the real attached video and its exact commit/run/scenario and editing disclosure when required; a plausible URL or screenshot is not video. Do not modify files, commit, publish, delegate or accept the task. These are role instructions, NOT a read-only security sandbox. " + ${JSON.stringify(evidenceInstructions)} + " Task: " + args.task + "\\nPlan: " + plan + "\\nBuild evidence: " + JSON.stringify(build), ${options("reviewer", reviewSchema)});
 return { plan, build, review };`;
 }
 
@@ -155,6 +117,8 @@ export function registerBuildReview(
       phase: run.phase,
       error: run.error,
       result: parsed,
+      ...(request.evidencePolicy ? { evidencePolicy: request.evidencePolicy } : {}),
+      uiRequired: request.uiRequired,
       workers,
       policyLimitations: BUILD_REVIEW_POLICY_LIMITATIONS,
     };
@@ -191,6 +155,8 @@ export function registerBuildReview(
         )
           throw new Error("Return must retain the same origin and workspace");
         if (previous.template !== input.template) throw new Error("Return must retain the same workflow template");
+        if (JSON.stringify(previous.evidencePolicy) !== JSON.stringify(input.evidencePolicy) || previous.uiRequired !== input.uiRequired || previous.evidenceTaskId !== input.evidenceTaskId)
+          throw new Error("Return must retain the same evidence policy and artifact task");
         if (
           managedContextStarted(db, input.group) &&
           (JSON.stringify(previous.writer) !== JSON.stringify(input.writer) ||

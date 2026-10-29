@@ -1,9 +1,10 @@
 import { experimental_saveFile } from "@get-bb/plugin-sdk/app";
 import { useEffect, useState } from "react";
-import { attachmentDownloadUrl } from "../../shared/attachments.js";
+import { attachmentDownloadUrl, isVideoMime } from "../../shared/attachments.js";
 import type { Attachment } from "../../shared/contract.js";
 import { errorMessage } from "../../shared/errors.js";
 import { formatFileSize } from "../activity/time.js";
+import { VideoAttachment } from "./video-attachment.js";
 import {
   ConfirmDeleteDialog,
   ConfirmDeleteDialogContent,
@@ -185,32 +186,19 @@ export function AttachmentsGrid({
   };
 
   const fileCard = (attachment: Attachment) => (
-    <div
-      key={attachment.id}
-      className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-sm shadow-2xs"
-    >
-      <a
+    <div key={attachment.id} className={isVideoMime(attachment.mime) ? "flex min-w-0 max-w-full items-center gap-2" : "flex min-w-0 max-w-full items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-sm shadow-2xs"}>
+      {isVideoMime(attachment.mime) ? <VideoAttachment attachment={attachment} /> : <a
         href={attachmentDownloadUrl(attachment.id)}
         download={attachment.fileName}
         onClick={(event) => {
           event.preventDefault();
-          void experimental_saveFile({
-            url: attachmentDownloadUrl(attachment.id),
-            fileName: attachment.fileName,
-          });
+          void experimental_saveFile({ url: attachmentDownloadUrl(attachment.id), fileName: attachment.fileName });
         }}
         className="flex min-w-0 items-center gap-2 rounded-sm hover:bg-state-hover"
       >
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-secondary text-muted-foreground">
-          <Icon name="File" className="size-3.5" />
-        </span>
-        <span className="min-w-0">
-          <span className="block max-w-48 truncate">{attachment.fileName}</span>
-          <span className="block text-2xs text-muted-foreground">
-            {formatFileSize(attachment.sizeBytes)}
-          </span>
-        </span>
-      </a>
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-secondary text-muted-foreground"><Icon name="File" className="size-3.5" /></span>
+        <span className="min-w-0"><span className="block max-w-48 truncate">{attachment.fileName}</span><span className="block text-2xs text-muted-foreground">{formatFileSize(attachment.sizeBytes)}</span></span>
+      </a>}
       {removeButton(attachment, "file")}
     </div>
   );

@@ -33,6 +33,16 @@ plugin RPC/CLI/HTTP/tools, schedules/services, native root turns and MCP use
 the same private server collector. Monaco and Prompt Library declare their
 actual shared command identities rather than implementing separate trackers.
 
+`experimental_useProductAnalytics` binds local plugin events to Core's existing
+acknowledged browser outbox. Core navigation/commands and Tasks video controls
+share `recordProductAnalytics`, including actual Core scope, input provenance,
+surface, QA mode, session hashing and bounded retries. The hook accepts only
+action/stage and bounded operation/outcome/error/duration options, not payloads
+or scope/account overrides. Its return is enqueue intent, never an admission
+receipt. Before stabilization: qualify Tasks open/play/seek/close/error through
+lost ACK, offline/reconnect and the projected private report; confirm completion
+authority, asynchronous media outcomes and privacy on desktop/compact/mobile.
+
 Docs: Plugin Guide, `private-analytics` surface in
 `plugins/plugin-api-docs/src/surfaces.ts`.
 Before stabilization: qualify actual web/compact/mobile, CLI, SDK and native

@@ -21,6 +21,9 @@ import {
   type ThreadsChangedEvent,
 } from "../shared/contract";
 import { errorMessage } from "../shared/errors";
+import { WorkflowPreparationStore } from "../workflow/preparation-store.js";
+import type { WorkflowSelection } from "../shared/workflow-preparation.js";
+import { evidenceRequirement } from "../../workflows/src/build-review-contract.js";
 import { truncateToWidth } from "../shared/text-measure";
 import { delegationRpcContract } from "./contract";
 import { storedJiraContext } from "../jira/store";
@@ -71,6 +74,7 @@ interface SeedPromptInput {
   presetInstructions: string;
   extraInstructions?: string;
   jiraContext?: string | null;
+  evidence: Pick<WorkflowSelection, "uiRequired" | "evidencePolicy">;
 }
 
 function markdownSection(title: string, body: string): string {
@@ -121,6 +125,7 @@ export function buildSeedPrompt(input: SeedPromptInput): string {
     markdownSection("Sub-tasks", formatSubtasks(input.subtasks)),
     markdownSection("Attachments", formatAttachments(input.attachments)),
     markdownSection("Recent comments", formatComments(input.recentComments)),
+    markdownSection("Evidence policy", `Policy: ${input.evidence.evidencePolicy ? `v1 ${input.evidence.evidencePolicy.requirement}` : `legacy ${evidenceRequirement(input.evidence)}`}. Read the saved policy with bb tasks workflow draft show ${input.task.key} --json. Technical smoke and independent review are not replaced by video. If video is required, attach a short real scenario on the exact reviewed commit with run/commit/scenario and honest editing/original provenance. Reuse the approved existing recorder only; unavailable safe recording is a blocker, never a screenshot/preview or temporary-path fallback. Exclude secrets and unrelated work. Human Accept and merge/deploy remain separate. Do not lower policy to evade missing evidence.`),
     markdownSection(
       "Report-back contract",
       `You are working on task ${input.task.key}. Use the bb tasks CLI: comment substantive updates (bb tasks comment ${input.task.key} --body ...), attach result artifacts, set status when done (bb tasks update ${input.task.key} --status in_review) or explain blockage in a comment. Your thread is already attached to the task.`,
@@ -341,6 +346,7 @@ export function taskExecutionEffects(
         presetInstructions: preset.instructions,
         extraInstructions,
         jiraContext: storedJiraContext(bb, task.id),
+        evidence: new WorkflowPreparationStore(store).draft(task.id).selection,
       });
     },
     title: delegatedThreadTitle,

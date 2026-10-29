@@ -33,6 +33,7 @@ import type {
 import type {
   CreateExecutionInputSources,
   CreateThreadEnvironmentArgs,
+  ProductAnalyticsEvent,
 } from "@bb/server-contract";
 import type {
   BbSdkAreas,
@@ -1298,6 +1299,12 @@ export type PluginBoundThreadsArea = Omit<
 export type PluginBrowserBbSdk = Omit<BbSdkAreas, "threads"> & {
   threads: PluginBoundThreadsArea;
 };
+
+export type ExperimentalPluginProductAnalytics = (
+  action: string,
+  stage: ProductAnalyticsEvent["stage"],
+  options?: Partial<Pick<ProductAnalyticsEvent, "operationId" | "outcome" | "errorCode">> & { durationMs?: number },
+) => void;
 
 /** Props for {@link PluginSdkApp.ThreadTitle}. */
 export interface PluginThreadTitleProps {
@@ -3877,6 +3884,8 @@ export interface PluginSdkApp {
    * and callback dependency lists.
    */
   useSdk(): PluginBrowserBbSdk;
+  /** Records a declared plugin-local action through Core's shared acknowledged browser outbox, using Core's current scope, actor, surface and QA mode. Experimental; see docs/api_to_audit.md. */
+  experimental_useProductAnalytics(): ExperimentalPluginProductAnalytics;
   /**
    * The provider directory (see {@link PluginProvidersState}). Reads the
    * host's own cached provider roster, so a plugin that shows a thread's
