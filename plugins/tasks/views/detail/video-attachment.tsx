@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState, type ReactNode, type Syntheti
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { Skeleton } from "@/components/ui/skeleton";
 import { attachmentDownloadUrl, attachmentFileDownloadUrl } from "../../shared/attachments.js";
 import type { Attachment } from "../../shared/contract.js";
 import { formatFileSize } from "../activity/time.js";
@@ -138,7 +137,6 @@ export function VideoAttachment({ attachment, children }: { attachment: VideoFil
               fail(code === 3 ? "This video could not be decoded. It may be damaged; download the original or ask for a new recording." : code === 4 ? "This video format or codec is not supported here. Download the original or ask for an MP4 / H.264 or WebM recording." : "Video is unavailable or could not be loaded. Retry, download the original, or ask for a new attachment.", code === 3 ? "invalid" : "unavailable");
             }}
           >Your browser does not support HTML video. Download the original recording below.</video>}
-          {state === "loading" && !error && <Skeleton className="pointer-events-none absolute inset-0" />}
         </div>
         {(state === "loading" || state === "buffering") && !error && <p role="status" className="text-sm text-muted-foreground">{state === "buffering" ? "Buffering video…" : "Loading video…"} Playback starts only when you press Play.</p>}
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
