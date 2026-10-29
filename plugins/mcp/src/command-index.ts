@@ -62,15 +62,15 @@ export function parseCommandIndex(stdout: string): CommandIndex {
 export function createCommandIndexLoader(
   runCli: CliRunner,
   now: () => number = Date.now,
-): () => Promise<CommandIndex> {
+): (requestRunCli?: CliRunner) => Promise<CommandIndex> {
   let cached: { index: CommandIndex; expiresAt: number } | null = null;
   let loading: Promise<CommandIndex> | null = null;
 
-  return async () => {
+  return async (requestRunCli = runCli) => {
     if (cached !== null && cached.expiresAt > now()) return cached.index;
     loading ??= (async () => {
       try {
-        const result = await runCli(["guide", "commands", "--json"], {
+        const result = await requestRunCli(["guide", "commands", "--json"], {
           stdin: null,
           timeoutMs: COMMAND_INDEX_TIMEOUT_MS,
           signal: new AbortController().signal,

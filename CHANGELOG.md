@@ -2,6 +2,9 @@
 
 ## AgentOS fork — unreleased
 
+- Preserve initiating MCP QA modes in cold search/read command-index CLI
+  children by passing the existing request-bound runner into index loading.
+  Retain the shared cache and in-flight load without mutating the server environment.
 - Drain pending local CLI analytics independently of new-event admission when
   reconnecting with a full spool. Keep returned thread actions and split-close
   usage scoped to their actual targets, not the current or surviving view.
