@@ -27,6 +27,7 @@ export default async function setup(project: TestProject) {
     const fixture = await createAnalyticsConsumer();
     try {
       fixture.harness.config.serverPort = port;
+      fixture.harness.pluginService.bindSdk({ baseUrl: `http://127.0.0.1:${port}` });
       const pluginId = options.pluginSource === undefined ? null : (await installConsumerPlugin(fixture.harness, options.pluginSource)).pluginId;
       active = fixture;
       return context.json({ work: { id: fixture.work.id }, personal: { id: fixture.personal.id }, pluginId } satisfies AnalyticsBrowserFixtureContext);

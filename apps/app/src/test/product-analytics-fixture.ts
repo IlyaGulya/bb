@@ -40,9 +40,14 @@ export async function withBrowserAnalyticsConsumer<T>(
     const sdk = createBrowserBbSdk({ baseUrl, fetch: fetchImpl });
     return await run({
       ...context,
-      forward(request) {
+      async forward(request) {
         const source = new URL(request.url);
-        return fetchImpl(new Request(new URL(`${source.pathname}${source.search}`, baseUrl), request));
+        return fetchImpl(new URL(`${source.pathname}${source.search}`, baseUrl), {
+          method: request.method,
+          headers: request.headers,
+          ...(request.method === "GET" || request.method === "HEAD" ? {} : { body: await request.arrayBuffer() }),
+          signal: request.signal,
+        });
       },
       async report(projectId) {
         await control("POST", "/__analytics_fixture/flush");
