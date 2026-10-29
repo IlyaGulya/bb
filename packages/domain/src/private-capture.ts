@@ -34,7 +34,7 @@ export const capturePolicySchema = z.object({
     sourceId: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u),
     relativePath: z.string().min(1).max(1024).refine(value => value.split("/").every(part => /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u.test(part) && part !== "." && part !== "..")),
     representation: z.enum(["transcript", "raw", "binary"]),
-    binaryReview: z.literal("owner-reviewed-no-auth-material"),
+    binaryReview: z.literal("owner-reviewed-no-auth-material").optional(),
   }).strict()).max(8),
 }).strict().superRefine((policy, ctx) => {
   if (policy.offlineLeaseSeconds < policy.syncIntervalSeconds) ctx.addIssue({ code: "custom", message: "Offline admission lease must cover the sync interval" });
@@ -53,7 +53,7 @@ export const captureSessionSchema = z.object({
 }).strict();
 export const captureSourceSchema = z.enum(["cpa-request-log", "bridge-recorder", "native-events", "native-transcript", "owner-import"]);
 export const captureManifestSchema = z.object({
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   captureId: z.string().uuid(),
   artifactId: captureDigestSchema,
   source: captureSourceSchema,
@@ -78,7 +78,7 @@ export const captureManifestSchema = z.object({
   representation: z.enum(["raw", "normalized", "transcript", "binary"]),
   streamState: z.enum(["complete", "interrupted", "unknown"]),
   fidelity: z.enum(["source-bytes", "redacted-source", "normalized-source"]),
-  redactionPolicy: z.enum(["headers-json-credentials-v1", "owner-reviewed-binary-v1"]),
+  redactionPolicy: z.enum(["headers-json-credentials-v1", "owner-reviewed-binary-v1", "source-preserved-v2"]),
   redacted: z.boolean(),
   payloadSecrets: z.literal("not-guaranteed"),
   chunks: z.array(z.object({
@@ -92,8 +92,11 @@ export const captureManifestSchema = z.object({
       value.chunks.slice(0, -1).some(chunk => chunk.bytes !== CAPTURE_CHUNK_BYTES)) {
     ctx.addIssue({ code: "custom", message: "Invalid contiguous capture chunk manifest" });
   }
-  if ((value.representation === "binary") !== (value.redactionPolicy === "owner-reviewed-binary-v1")) {
-    ctx.addIssue({ code: "custom", message: "Binary content requires explicit owner review" });
+  if (value.version === 1 && ((value.representation === "binary") !== (value.redactionPolicy === "owner-reviewed-binary-v1") || value.redactionPolicy === "source-preserved-v2")) {
+    ctx.addIssue({ code: "custom", message: "Invalid historical capture policy" });
+  }
+  if (value.version === 2 && (value.redactionPolicy !== "source-preserved-v2" || value.redacted || value.sourceBytes !== value.storedBytes || value.sourceSha256 !== value.storedSha256 || value.fidelity !== (value.representation === "normalized" ? "normalized-source" : "source-bytes"))) {
+    ctx.addIssue({ code: "custom", message: "New captures must preserve exact source bytes and fidelity" });
   }
   if (value.fidelity === "source-bytes" && (value.redacted || value.sourceBytes !== value.storedBytes || value.sourceSha256 !== value.storedSha256)) {
     ctx.addIssue({ code: "custom", message: "Source-byte fidelity requires identical unmodified source and stored bytes" });

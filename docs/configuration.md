@@ -1602,6 +1602,13 @@ does not enable or reconfigure either logger. Explicit native exports are
 relative to the enrolled thread-storage root, or the capture-specific standalone
 input root, never an authentication home or arbitrary source root. Raw/stored
 copies require private encrypted application storage and approved transport.
+New capture retains exact source bytes, including credentials already inside
+authorized payloads; it performs no automatic redaction or secret-based rejection.
+Manifest version 2 requires identical source/stored size and SHA-256. Historical
+version-1 artifacts remain immutable and truthfully labelled; they are not fresh
+byte-preserving coverage. Native normalized events remain normalized. Export
+registrations name sourceId, relativePath and representation; binaryReview is
+read-only historical metadata and is refused on new registration.
 
 Per-artifact data is bounded to 64 MiB, per-capture reservations to 256 MiB/512
 artifacts; policies may choose lower bounds. Retention is 1–720 hours, sync and
@@ -1639,8 +1646,8 @@ are required. Missing key access fails closed; no attestation flag enables plain
 body files. The existing machine-environment adjacent key and secrets dotenv
 workflow are not used as capture master storage.
 
-Ciphertext is scope/object/role authenticated; plaintext SHA-256, redaction and
-committed ACK contracts are unchanged. Indexes/manifests remain private metadata.
+Ciphertext is scope/object/role authenticated; plaintext SHA-256 and committed ACKs
+describe exact admitted source bytes. Indexes/manifests remain private metadata.
 Existing source logs/event DB and intentional plaintext exports need their own
 proven protection. This source is not a claim that the unencrypted Linux volume,
 old sources, transport, OS key restore or the full native matrix is qualified.

@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { open, readFile, realpath, statfs } from "node:fs/promises";
 import { resolve } from "node:path";
 import { execPortableFile } from "./exec-portable-file.js";
-import { CaptureStorageError, captureObjectDigest, captureReadPrivate, captureSha256, captureWritePrivate } from "./private-capture-files.js";
+import { CaptureStorageError, captureObjectDigest, captureReadPrivate, captureSha256, captureSyncDirectory, captureWritePrivate } from "./private-capture-files.js";
 
 export type CaptureKeyRole = "host" | "core";
 export type CaptureKeyProvider = () => Promise<Uint8Array>;
@@ -152,6 +152,7 @@ export async function captureWriteEncrypted(directory: string, name: string, byt
   try {
     const existing = await captureReadPrivate(directory, name, captureEncryptedSize(bytes.byteLength));
     if (captureSha256(decryptCaptureBytes(key, context, existing, bytes.byteLength)) !== captureSha256(bytes)) throw new CaptureStorageError("integrity");
+    await captureSyncDirectory(directory);
     return;
   } catch (error) {
     if (!(error instanceof CaptureStorageError) || error.code !== "storage_unavailable") throw error;

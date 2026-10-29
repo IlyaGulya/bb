@@ -122,18 +122,18 @@ export function registerPrivateCapturesCommands(program: Command, getUrl: () => 
       catch { invalid("Private output could not be created; choose a new writable file."); }
       output(options, { captureId, artifactId, sizeBytes: blob.size, integrity: "verified-stored-sha256" });
     }));
-  scoped(captures.command("import <captureId>").description("Upload reviewed local native/standalone evidence through the shared redaction/chunk/ACK SDK path; retry the same file to resume"))
-    .requiredOption("--file <path>", "Exact owned evidence file, not an auth home or credential export")
+  scoped(captures.command("import <captureId>").description("Upload exact local evidence bytes through the shared chunk/ACK SDK path; credentials inside approved payloads are preserved"))
+    .requiredOption("--file <path>", "Exact owned evidence file; no authentication-home discovery")
     .requiredOption("--operation <uuid>", "Opaque logical import UUID; reuse on retry, never derive it from payload hashes")
     .requiredOption("--representation <kind>", "raw, transcript or binary")
     .requiredOption("--stream-state <state>", "complete, interrupted or unknown; report only what the source establishes")
-    .requiredOption("--reviewed", "Owner confirms private scope/export permission and no auth material") .option("--json", "Print manifest metadata, never payloads")
+    .requiredOption("--reviewed", "Owner authorizes all source bytes, including any embedded credentials, in this exact private scope") .option("--json", "Print manifest metadata, never payloads")
     .action(action(async (captureId: string, options: Options) => {
       if (!options.reviewed || !["raw", "transcript", "binary"].includes(options.representation ?? "") || !["complete", "interrupted", "unknown"].includes(options.streamState ?? "")) invalid("Review, representation and stream state are required.");
       const bytes = await readPrivateFile(options.file!, CAPTURE_MAX_ARTIFACT_BYTES);
       const representation = options.representation === "binary" ? "binary" : options.representation === "transcript" ? "transcript" : "raw";
       const streamState = options.streamState === "complete" ? "complete" : options.streamState === "interrupted" ? "interrupted" : "unknown";
-      const value = await createCliBbSdk(getUrl()).experimental_privateCaptures.upload({ ...scope(options), captureId, operationId: options.operation!, sourceId: basename(options.file!), file: new Blob([new Uint8Array(bytes)]), representation, streamState, binaryReview: "owner-reviewed-no-auth-material" });
+      const value = await createCliBbSdk(getUrl()).experimental_privateCaptures.upload({ ...scope(options), captureId, operationId: options.operation!, sourceId: basename(options.file!), file: new Blob([new Uint8Array(bytes)]), representation, streamState });
       output(options, value);
     }));
 }

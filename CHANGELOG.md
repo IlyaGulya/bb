@@ -92,39 +92,39 @@
   Present workflow setup as a centered persistent desktop overlay and compact
   bottom drawer; retain deferred content, first-open focus return and Tasks
   shortcuts after dismissal.
+- Preserve every approved private capture source byte, including credentials,
+  nested JSON, binary and private-key content, through Core/host/SDK/CLI/UI. Remove
+  automatic cleaning, secret-based rejection and their obsolete tests. Fresh v2
+  manifests require identical source/stored size and SHA-256; historical v1
+  artifacts remain immutable/read-only and cannot qualify fresh raw coverage.
+  Keep normalized native events honest. Add ancestor-directory fsync before ACK,
+  reserve/check host ACK-file replacement space, and authenticate the first bounded
+  download chunk before binary headers for generic missing-key 503. Protocol 249;
+  authored regressions and semantic UI copy remain source-only/unexecuted, with
+  parent-owned compact CSS fixes, final review and runtime qualification.
 - Keep BBDEV-33 network capture exclusively on the existing CPA finalized-file
   path, frozen endpoint mapping and exact inbound thread-header ownership. Remove
   the unintegrated second-proxy/process-launch implementation, its configuration,
   dependencies and dedicated tests; preserve its frozen bd53c00 evidence.
-- Retain protected Node host/Core ciphertext storage, immutable scopes, redaction,
+- Retain protected Node host/Core ciphertext storage, immutable scopes,
   bounded complete file/chunk ingestion, committed ACK/replay and retention through
-  existing Core/CLI/SDK/drawer owners. Require a thread for automatic CPA intake,
-  audit every assembled plaintext artifact and clear recovered sync errors without
-  erasing their cumulative evidence. Coverage claims no CPA omission without actual
-  artifact/contract proof. Protocol 248 and synthetic CPA consumer cases are
-  source-only and unexecuted; parent owns composition and full qualification.
-- Make the private capture CLI error return explicit and place the unchanged
-  five real-wire Core cases in a dedicated shared-worker integration project.
-  Keep Server's compiler scope, all assertions and durable privacy behavior
-  unchanged; compiler/placement after-verification remains parent-owned.
-- Admit the existing `capture.exchange` result in the successful host RPC
-  response union so the real Core consumer can receive artifacts and propagate
-  durable privacy dispositions. Keep all authored assertions and controls;
-  this narrow amendment remains unexecuted and unactivated pending parent proof.
-- Correct private-capture credential decoding, recognized pending-publication
-  recovery, complete-spool readiness, independent expiry cleanup, persisted-ACK
-  reconciliation and bounded CPA snapshot reads. Reject forbidden binary key
-  material before host publication and deliver scoped terminal privacy
-  dispositions through the existing capture RPC. Preserve the regression
-  assertions; corrective source remains unexecuted and unactivated pending
-  parent composition, native gates and full acceptance qualification.
+  existing Core/CLI/SDK/drawer owners. Require a thread for automatic CPA intake;
+  clear recovered sync errors without erasing cumulative evidence. Coverage claims
+  no CPA omission without actual artifact/contract proof. Source is unexecuted;
+  parent owns composition and full qualification.
+- Keep private capture CLI error returns explicit and isolate real-wire Core
+  cases in the existing shared-worker integration project without widening the
+  server compiler root. Admit capture.exchange in the successful host RPC union.
+  Retain pending-publication recovery, complete-spool readiness, independent expiry,
+  persisted-ACK reconciliation and bounded CPA snapshot reads. Historical privacy
+  dispositions remain readable metadata, not a new body-rejection path.
 - Add explicit scoped private capture data contracts across Core, SDK, CLI and
   Thread Info: immutable manifests, confined private chunks, deterministic
   committed ACK/dedupe, bounded host data outbox, leases, retention, quotas,
   reviewed imports, same-context evidence links and honest source coverage.
   Reuse retained CPA files, already-enabled thread bridge lanes and hydrated
   Core native events without enabling capture or changing runtime accounts.
-  Reserve migration 0147 and host protocol 245 for ordered parent integration;
+  Reserve migration 0147 and host protocol 249 for ordered parent integration;
   source38 analytics receives only its native allowlisted metadata. Source is
   unqualified and unactivated; the full BBDEV-33 native/privacy matrix remains
   a parent gate, not a completion or acceptance claim.

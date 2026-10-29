@@ -191,7 +191,7 @@ host/run/native-session/model labels are separate and unknown values stay null.
 Core callers: Thread Info's private capture drawer and `bb captures` use this
 same API. The Plugin Guide's **The bb SDK** documents these symbols.
 Before stabilization: integrate the immutable source38 native analytics API,
-compose migration 0147 after parent 0146 and host protocol 248, and qualify the
+compose migration 0147 after parent 0146 and host protocol 249, and qualify the
 complete BBDEV-33 acceptance contract. CPA is the sole network data path, through
 its existing frozen endpoint mapping/exact thread-header guard and finalized-file
 reader. No process policy, wrapper, runner or second network proxy is exposed.
@@ -203,6 +203,13 @@ disk key, plaintext fallback or encryption-attestation flag is accepted. Interna
 resident key providers are not a remote SDK surface. Prove key restore, source
 retention/protection, authenticated transport, plaintext hash/ACK/replay contracts,
 current-scope reads and the full owned CPA/native/offline/UI matrix.
+New uploads and Core/host ingestion preserve exact approved source bytes,
+including embedded credentials/private keys, without cleaning or secret-based
+rejection. Version-2 source/stored hashes and sizes must match; normalized native
+events remain normalized. Historical version-1 artifacts are immutable/read-only
+and cannot establish fresh raw coverage. `binaryReview` is historical read metadata,
+not a new import/registration argument. Qualify ancestor-directory fsync, ACK-file
+growth/atomic-replacement quota and missing-key generic 503 before binary headers.
 No capture activation, deployment or acceptance is implied by this source.
 
 ## Private request-log coverage and retained-file manifests

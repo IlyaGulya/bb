@@ -21,6 +21,8 @@ import {
   writeCaptureArtifactFixture, writeCaptureSessionFixture,
   captureFixtureKeys,
 } from "../../../apps/host-daemon/test/private-capture-fixtures.js";
+import { createPrivateCapturesArea } from "../../../packages/sdk/src/areas/private-captures.js";
+import { createHttpTransport } from "../../../packages/sdk/src/transport-http.js";
 
 describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("private capture Core consumer boundaries", () => {
   let harness: TestAppHarness;
@@ -57,7 +59,6 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("
     const fixture = captureSessionFixture(undefined, { projectId, executionContextId, hostId }, {
       nativeExports: withHostDelivery ? [{
         sourceId: "removed-export", relativePath: "no-longer-present.bin", representation: "binary",
-        binaryReview: "owner-reviewed-no-auth-material",
       }] : [],
     });
     return createPrivateCapture(harness.deps, { id: fixture.id, ...fixture.subject, policy: fixture.policy }).session;
@@ -96,51 +97,51 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("
     });
   }
 
-  it.each([0, CAPTURE_CHUNK_BYTES])("denies completion and body access for a multiline escaped credential after %i bytes of padding", async padding => {
+  it.each(["raw", "transcript", "binary"] as const)("round-trips every authorized %s byte through SDK upload, real Core routes and encrypted storage", async representation => {
     const session = createCapture();
     const scope = { projectId: session.subject.projectId, executionContextId: session.subject.executionContextId };
-    const source = Buffer.from(`{\n  "safe": "${"s".repeat(padding)}",\n  "\\u0078-api-key": "SYNTHETIC_SECRET"\n}\n`);
-    const artifact = captureArtifactFixture(session, source, "escaped-credential");
-    stageCaptureManifest(harness.deps, scope, artifact.manifest);
-    for (const chunk of artifact.manifest.chunks.slice(0, -1)) {
-      await acceptCaptureChunk(harness.deps, scope, {
-        captureId: session.id, artifactId: artifact.manifest.artifactId,
-        sequence: chunk.sequence, sha256: chunk.sha256,
-        base64: source.subarray(chunk.sequence * CAPTURE_CHUNK_BYTES, chunk.sequence * CAPTURE_CHUNK_BYTES + chunk.bytes).toString("base64"),
-      });
-    }
-    const last = artifact.manifest.chunks.at(-1)!;
-    await expect(acceptCaptureChunk(harness.deps, scope, {
-      captureId: session.id, artifactId: artifact.manifest.artifactId,
-      sequence: last.sequence, sha256: last.sha256,
-      base64: source.subarray(last.sequence * CAPTURE_CHUNK_BYTES).toString("base64"),
-    })).rejects.toMatchObject({ status: 403, body: { code: "capture_privacy_rejected" } });
-    const rejected = captureArtifact(harness.deps, session.id, artifact.manifest.artifactId, scope);
-    expect(rejected.rejectedAt).not.toBeNull();
-    expect(rejected.completedAt).toBeNull();
-    expect(rejected.committedSequences).toEqual([]);
-    expect(() => downloadCaptureArtifact(harness.deps, session.id, artifact.manifest.artifactId, scope)).toThrow();
+    const source = Buffer.concat([
+      Buffer.alloc(CAPTURE_CHUNK_BYTES - 10, 115),
+      Buffer.from('Authorization: Bearer SYNTHETIC_HEADER_SECRET\r\n=== REQUEST BODY ===\n' + JSON.stringify({ input: JSON.stringify({ authorization: "SYNTHETIC_NESTED_SECRET" }), "\\u0078-api-key": "SYNTHETIC_ESCAPED_SECRET" }, null, 2)),
+      Buffer.from('\n-----BEGIN PRIVATE KEY-----\nSYNTHETIC_NOT_A_REAL_KEY\n-----END PRIVATE KEY-----\n'),
+      Buffer.from([0, 255, 254, 128]),
+    ]);
+    const api = createPrivateCapturesArea({ transport: createHttpTransport({
+      baseUrl: "http://synthetic-capture.local", runtime: "browser",
+      fetch: async (input, init) => harness.app.request(new Request(input, init)),
+    }) });
+    const input = { ...scope, captureId: session.id, operationId: "00000000-0000-4000-8000-000000000002", sourceId: `sensitive-${representation}`, file: new Blob([source]), representation, streamState: "unknown" as const };
+    const artifact = await api.upload(input);
+    expect(artifact.completedAt).not.toBeNull();
+    expect(artifact.rejectedAt).toBeNull();
+    expect(artifact.manifest).toMatchObject({ version: 2, redacted: false, fidelity: "source-bytes", redactionPolicy: "source-preserved-v2", sourceBytes: source.length, storedBytes: source.length });
+    expect(artifact.manifest.sourceSha256).toBe(artifact.manifest.storedSha256);
+    const downloaded = await api.download({ ...scope, captureId: session.id, artifactId: artifact.manifest.artifactId });
+    expect(Buffer.from(await downloaded.arrayBuffer())).toEqual(source);
+    const replay = await api.upload(input);
+    expect(replay.manifest.artifactId).toBe(artifact.manifest.artifactId);
+    expect(replay.completedAt).toBe(artifact.completedAt);
+    expect(replay.committedSequences).toEqual([0, 1]);
   });
 
-  it("propagates a Core privacy rejection to the real host and permits the next artifact to commit", async () => {
+  it("commits credential-bearing host evidence through the real exchange and ACK deletion path", async () => {
     const session = createCapture(true);
     const scope = { projectId: session.subject.projectId, executionContextId: session.subject.executionContextId };
-    const forbidden = Buffer.from("SYNTHETIC_BINARY\u0000-----BEGIN PRIVATE KEY-----\nSYNTHETIC_NOT_A_REAL_KEY\n-----END PRIVATE KEY-----");
-    const pair = orderedCaptureArtifacts(session, forbidden, Buffer.from("SYNTHETIC_LATER_DELIVERY"));
+    const sensitive = Buffer.from("SYNTHETIC_BINARY\u0000-----BEGIN PRIVATE KEY-----\nSYNTHETIC_NOT_A_REAL_KEY\n-----END PRIVATE KEY-----");
+    const pair = orderedCaptureArtifacts(session, sensitive, Buffer.from("SYNTHETIC_LATER_DELIVERY"));
     await writeCaptureSessionFixture(hostRoot, session);
-    const rejectedRoot = await writeCaptureArtifactFixture(hostRoot, pair.earlier);
+    const earlierRoot = await writeCaptureArtifactFixture(hostRoot, pair.earlier);
     await writeCaptureArtifactFixture(hostRoot, pair.later);
     registerRealCapturePeer();
-
     await syncPrivateCapture(harness.deps, session.id, scope);
     await syncPrivateCapture(harness.deps, session.id, scope);
-
-    const rejected = captureArtifact(harness.deps, session.id, pair.earlier.manifest.artifactId, scope);
-    expect(rejected.rejectedAt).not.toBeNull();
-    expect(rejected.completedAt).toBeNull();
-    await expect(lstat(join(rejectedRoot, "0.chunk"))).rejects.toMatchObject({ code: "ENOENT" });
-    expect(captureArtifact(harness.deps, session.id, pair.later.manifest.artifactId, scope).completedAt).not.toBeNull();
-    expect(Buffer.from(await downloadCaptureArtifact(harness.deps, session.id, pair.later.manifest.artifactId, scope).arrayBuffer())).toEqual(pair.later.bytes);
+    for (const artifact of [pair.earlier, pair.later]) {
+      const retained = captureArtifact(harness.deps, session.id, artifact.manifest.artifactId, scope);
+      expect(retained.rejectedAt).toBeNull();
+      expect(retained.completedAt).not.toBeNull();
+      expect(Buffer.from(await (await downloadCaptureArtifact(harness.deps, session.id, artifact.manifest.artifactId, scope)).arrayBuffer())).toEqual(artifact.bytes);
+    }
+    await expect(lstat(join(earlierRoot, "0.chunk"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it.each([false, true])("audits a restarted SQLite receipt with missing ancestor = %s without claiming a power-loss proof", async missingAncestor => {
@@ -163,12 +164,12 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")("
       if (missingAncestor) {
         await rm(join(harness.config.dataDir, "private-capture", "core", captureObjectDigest(scope)), { recursive: true });
         await expect(acceptCaptureChunk(receiver, scope, chunk)).rejects.toMatchObject({ code: "storage_unavailable" });
-        await expect(downloadCaptureArtifact(receiver, session.id, artifact.manifest.artifactId, scope).arrayBuffer()).rejects.toThrow("capture_download_unavailable");
+        await expect(downloadCaptureArtifact(receiver, session.id, artifact.manifest.artifactId, scope)).rejects.toMatchObject({ code: "storage_unavailable" });
       } else {
         const replay = await acceptCaptureChunk(receiver, scope, chunk);
         expect(replay.status).toBe("duplicate");
         expect(replay.receiptId).toBe(committed.receiptId);
-        expect(Buffer.from(await downloadCaptureArtifact(receiver, session.id, artifact.manifest.artifactId, scope).arrayBuffer())).toEqual(artifact.bytes);
+        expect(Buffer.from(await (await downloadCaptureArtifact(receiver, session.id, artifact.manifest.artifactId, scope)).arrayBuffer())).toEqual(artifact.bytes);
       }
       expect(reopened.select().from(privateCaptureChunks).where(eq(privateCaptureChunks.captureId, session.id)).all().map(row => row.receiptId)).toEqual([committed.receiptId]);
     } finally { reopened.$client.close(); }

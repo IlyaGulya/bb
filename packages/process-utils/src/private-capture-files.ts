@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import { lstat, mkdir, open, opendir, realpath, rename, rm, statfs, type FileHandle } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export class CaptureStorageError extends Error {
   constructor(readonly code: "storage_unavailable" | "disk_pressure" | "integrity" | "source_limit" | "source_changed") {
@@ -35,6 +35,7 @@ export async function capturePrivateDirectory(dataDir: string, ...parts: string[
       const stat = await lstat(path);
       if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0 ||
           (process.getuid !== undefined && stat.uid !== process.getuid()) || await realpath(path) !== path) throw new CaptureStorageError("integrity");
+      await captureSyncDirectory(dirname(path));
     }
     return path;
   } catch (error) {
@@ -113,6 +114,7 @@ export async function captureWritePrivate(directory: string, name: string, bytes
       try {
         const existing = await captureReadPrivate(directory, name, bytes.byteLength);
         if (captureSha256(existing) !== captureSha256(bytes)) throw new CaptureStorageError("integrity");
+        await captureSyncDirectory(directory);
         return;
       } catch (error) {
         if (error instanceof CaptureStorageError && error.code !== "storage_unavailable") throw error;
@@ -146,22 +148,20 @@ export function captureDecodeBase64(value: string, maxBytes: number): Buffer {
   return bytes;
 }
 
-export function capturePreparePayload(source: Uint8Array, value: { bytes: Uint8Array; redacted: boolean }, chunkBytes: number) {
-  const prepared = { bytes: Buffer.from(value.bytes.buffer, value.bytes.byteOffset, value.bytes.byteLength), redacted: value.redacted };
+export function capturePreparePayload(source: Uint8Array, chunkBytes: number) {
+  const bytes = Buffer.from(source.buffer, source.byteOffset, source.byteLength);
+  const sha256 = captureSha256(bytes);
   const chunks = [];
-  for (let offset = 0; offset < prepared.bytes.length; offset += chunkBytes) {
-    const bytes = prepared.bytes.subarray(offset, offset + chunkBytes);
-    chunks.push({ sequence: chunks.length, bytes: bytes.length, sha256: captureSha256(bytes) });
+  for (let offset = 0; offset < bytes.length; offset += chunkBytes) {
+    const chunk = bytes.subarray(offset, offset + chunkBytes);
+    chunks.push({ sequence: chunks.length, bytes: chunk.length, sha256: captureSha256(chunk) });
   }
   return {
-    bytes: prepared.bytes,
+    bytes,
     fields: {
-      sourceBytes: source.byteLength,
-      sourceSha256: captureSha256(source),
-      storedBytes: prepared.bytes.length,
-      storedSha256: captureSha256(prepared.bytes),
-      redacted: prepared.redacted,
-      chunks,
+      sourceBytes: bytes.length, sourceSha256: sha256,
+      storedBytes: bytes.length, storedSha256: sha256,
+      redacted: false, chunks,
     },
   };
 }

@@ -3,15 +3,16 @@ import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createEnvironment, createProject, createThread, noopNotifier, saveExecutionContext, upsertHost } from "@bb/db";
-import { CAPTURE_CHUNK_BYTES, executionContextSchema, redactCapturePayload, type CaptureSession } from "@bb/domain";
+import { createEnvironment, createProject, createThread, noopNotifier, saveExecutionContext, upsertHost, privateCaptureArtifacts, privateCaptureChunks, privateCaptureSessions } from "@bb/db";
+import { CAPTURE_CHUNK_BYTES, captureManifestSchema, executionContextSchema, type CaptureSession } from "@bb/domain";
 import { createModelConnectionRequestSchema } from "@bb/server-contract";
-import { captureObjectDigest } from "@bb/process-utils";
+import { captureObjectDigest, capturePrivateDirectory, captureWriteEncrypted, captureCipherContext } from "@bb/process-utils";
 import { createModelConnectionDefinition, resolveThreadExecutionBinding } from "../../../apps/server/src/services/execution-contexts.js";
 import { listCaptureArtifacts, createPrivateCapture, downloadCaptureArtifact, getPrivateCapture, syncPrivateCapture } from "../../../apps/server/src/services/private-captures.js";
-import { gatewayLogManifest } from "../../../apps/server/src/services/gateway-logs.js";
+import { captureGatewayLogSource, gatewayLogManifest } from "../../../apps/server/src/services/gateway-logs.js";
 import { createTestAppHarness, type TestAppHarness } from "../../../apps/server/test/helpers/test-app.js";
-import { captureFixtureKeys, captureSessionFixture } from "../../../apps/host-daemon/test/private-capture-fixtures.js";
+import { captureAckFixture, captureArtifactFixture, captureFixtureKeys, captureSessionFixture } from "../../../apps/host-daemon/test/private-capture-fixtures.js";
+import { eq } from "drizzle-orm";
 
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 function nativeCpaFile(threadId: string, payload: string): Buffer {
@@ -87,10 +88,10 @@ describe.skipIf(process.platform !== "linux")("CPA retained-file to encrypted Co
     expect(artifact!.manifest.sourceSha256).toBe(nativeManifest.sha256);
     expect(artifact!.manifest.sourceBytes).toBe(original.length);
     expect(artifact!.manifest.chunks.map(value => value.sequence)).toEqual([0, 1, 2]);
-    const stored = Buffer.from(await downloadCaptureArtifact(harness.deps, session.id, artifact!.manifest.artifactId, session.subject).arrayBuffer());
-    expect(stored).toEqual(Buffer.from(redactCapturePayload(original).bytes));
-    expect(sha(stored)).toBe(artifact!.manifest.storedSha256);
-    expect(stored.includes("SYNTHETIC_HEADER_SECRET") || stored.includes("SYNTHETIC_BODY_SECRET") || stored.includes("SYNTHETIC_OTHER_ACCOUNT") || stored.includes("SYNTHETIC_OTHER_THREAD")).toBe(false);
+    const stored = Buffer.from(await (await downloadCaptureArtifact(harness.deps, session.id, artifact!.manifest.artifactId, session.subject)).arrayBuffer());
+    expect(stored).toEqual(original);
+    expect(artifact!.manifest).toMatchObject({ version: 2, redacted: false, fidelity: "source-bytes", sourceSha256: sha(original), storedSha256: sha(original), storedBytes: original.length });
+    expect(stored.includes("SYNTHETIC_OTHER_ACCOUNT") || stored.includes("SYNTHETIC_OTHER_THREAD")).toBe(false);
     expect(stored.toString()).toContain("SYNTHETIC_RESPONSE_TAIL");
     const directory = join(harness.config.dataDir, "private-capture", "core", captureObjectDigest({ projectId: session.subject.projectId, executionContextId: context.id }), session.id, artifact!.manifest.artifactId);
     for (const chunk of artifact!.manifest.chunks) {
@@ -119,14 +120,43 @@ describe.skipIf(process.platform !== "linux")("CPA retained-file to encrypted Co
     expect(committed.gapCount).toBe(pending.gapCount);
     expect(committed.committedChunks).toBe(1);
     const [artifact] = index();
-    expect(Buffer.from(await downloadCaptureArtifact(harness.deps, session.id, artifact!.manifest.artifactId, session.subject).arrayBuffer())).toEqual(Buffer.from(redactCapturePayload(original).bytes));
+    expect(Buffer.from(await (await downloadCaptureArtifact(harness.deps, session.id, artifact!.manifest.artifactId, session.subject)).arrayBuffer())).toEqual(original);
+  });
+
+  it("does not let a historical redacted completion stamp skip fresh raw CPA bytes or rewrite old evidence", async () => {
+    const original = nativeCpaFile(session.subject.threadId!, "SYNTHETIC_FRESH_RAW_EVIDENCE");
+    const path = await source(original);
+    const snapshot = await captureGatewayLogSource(root, session.subject.threadId!, Buffer.from("request.log").toString("base64url"), new Set(), 64 * 1024 * 1024);
+    expect(snapshot).not.toBeNull();
+    const historicalBytes = Buffer.from("Authorization: [REDACTED]\nSYNTHETIC_HISTORICAL_REDACTED_BODY\n");
+    const { artifactId: _artifactId, ...base } = captureArtifactFixture(session, historicalBytes, snapshot!.sourceId).manifest;
+    const fields = { ...base, version: 1 as const, source: "cpa-request-log" as const, sourceBytes: original.length, sourceSha256: sha(original), redacted: true, fidelity: "redacted-source" as const, redactionPolicy: "headers-json-credentials-v1" as const };
+    const manifest = captureManifestSchema.parse({ ...fields, artifactId: captureObjectDigest(fields) });
+    const directory = await capturePrivateDirectory(harness.config.dataDir, "core", captureObjectDigest({ projectId: session.subject.projectId, executionContextId: context.id }), session.id, manifest.artifactId);
+    await captureWriteEncrypted(directory, "0.chunk", historicalBytes, captureCipherContext(harness.config.dataDir, "core", session, `${manifest.artifactId}/0.chunk`));
+    const receipt = captureAckFixture(manifest, 0);
+    harness.db.insert(privateCaptureArtifacts).values({ captureId: session.id, artifactId: manifest.artifactId, manifest, createdAt: 1, completedAt: 2 }).run();
+    harness.db.insert(privateCaptureChunks).values({ captureId: session.id, artifactId: manifest.artifactId, sequence: 0, sha256: manifest.chunks[0]!.sha256, bytes: historicalBytes.length, receiptId: receipt.receiptId, committedAt: receipt.committedAt }).run();
+    harness.db.update(privateCaptureSessions).set({ cpaStamps: { [snapshot!.sourceId]: { stamp: snapshot!.stamp, artifactId: manifest.artifactId } }, lastSyncAt: 2, lastAckAt: receipt.committedAt }).where(eq(privateCaptureSessions.id, session.id)).run();
+    const cipher = await readFile(join(directory, "0.chunk"));
+    expect(getPrivateCapture(harness.deps, session.id, session.subject).coverage.find(value => value.source === "cpa-request-log")?.state).toBe("uninstrumented");
+    expect(getPrivateCapture(harness.deps, session.id, session.subject).outcome).toBe("accepted");
+    await syncPrivateCapture(harness.deps, session.id, session.subject);
+    const retained = index();
+    expect(retained.find(value => value.manifest.artifactId === manifest.artifactId)).toMatchObject({ manifest, completedAt: 2 });
+    const fresh = retained.find(value => value.manifest.version === 2)!;
+    expect(fresh.manifest).toMatchObject({ sourceId: snapshot!.sourceId, redacted: false, sourceBytes: original.length, storedBytes: original.length, storedSha256: sha(original) });
+    expect(Buffer.from(await (await downloadCaptureArtifact(harness.deps, session.id, fresh.manifest.artifactId, session.subject)).arrayBuffer())).toEqual(original);
+    expect(Buffer.from(await (await downloadCaptureArtifact(harness.deps, session.id, manifest.artifactId, session.subject)).arrayBuffer())).toEqual(historicalBytes);
+    expect(await readFile(join(directory, "0.chunk"))).toEqual(cipher);
+    expect(await readFile(path)).toEqual(original);
   });
 
   it("rechecks current scope before releasing decrypted CPA data", async () => {
     await source(nativeCpaFile(session.subject.threadId!, "SYNTHETIC_SCOPE_BODY"));
     await syncPrivateCapture(harness.deps, session.id, session.subject);
     const [artifact] = index();
-    const response = downloadCaptureArtifact(harness.deps, session.id, artifact!.manifest.artifactId, session.subject);
+    const response = await downloadCaptureArtifact(harness.deps, session.id, artifact!.manifest.artifactId, session.subject);
     saveExecutionContext(harness.db, { ...context, enabled: false });
     await expect(response.arrayBuffer()).rejects.toThrow("capture_download_unavailable");
     expect(() => getPrivateCapture(harness.deps, session.id, session.subject)).toThrow();

@@ -53,14 +53,14 @@ export function captureArtifactFixture(
   sourceId: string,
   representation: "raw" | "binary" = "raw",
 ): { manifest: CaptureManifest; bytes: Buffer } {
-  const prepared = capturePreparePayload(bytes, { bytes, redacted: false }, CAPTURE_CHUNK_BYTES);
+  const prepared = capturePreparePayload(bytes, CAPTURE_CHUNK_BYTES);
   const fields = {
-    version: 1 as const, captureId: session.id, source: "owner-import" as const, sourceId,
+    version: 2 as const, captureId: session.id, source: "owner-import" as const, sourceId,
     hostId: session.subject.hostId, runId: null, nativeSessionId: null,
     models: [], indexLimited: false, destinations: [], transport: "file" as const,
     requestId: null, observedAt: null, sourceOffset: 0, ...prepared.fields,
     representation, streamState: "complete" as const, fidelity: "source-bytes" as const,
-    redactionPolicy: representation === "binary" ? "owner-reviewed-binary-v1" as const : "headers-json-credentials-v1" as const,
+    redactionPolicy: "source-preserved-v2" as const,
     payloadSecrets: "not-guaranteed" as const,
   };
   return { manifest: captureManifestSchema.parse({ ...fields, artifactId: captureObjectDigest(fields) }), bytes };
