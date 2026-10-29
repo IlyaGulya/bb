@@ -1,3 +1,4 @@
+import { nativeSessionImportRoutes } from "./native-session-import-routes.js";
 import {
   gatewayLogListQuerySchema,
   gatewayLogReadQuerySchema,
@@ -456,6 +457,7 @@ type PathThreadInteractionId = {
 type PathGatewayLogId = { param: { logId: string } };
 
 export const publicApiRoutes = {
+  nativeSessionImports: nativeSessionImportRoutes,
   gatewayLogs: {
     list: defineRoute({
       path: "/gateway-logs",

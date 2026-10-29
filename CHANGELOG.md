@@ -2,6 +2,13 @@
 
 ## AgentOS fork — unreleased
 
+- Add experimental native OMP, Claude Code and Codex history archives through
+  the new-thread UI, SDK and `bb thread import`: retain original JSONL, native
+  state, record provenance and referenced artifacts separately from next-turn
+  context, with bounded transfers, search, checkpoints and explicit cancellation.
+  Keep archive-only, provider-controlled native admission and a separately
+  requested new handoff dialogue distinct; unsupported external ownership or
+  missing original receipts refuse without starting a second writer.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact

@@ -64,6 +64,7 @@ export class BBSdk implements BbSdk {
   readonly experimental_desktopBrowsers: BbSdk["experimental_desktopBrowsers"];
   readonly experimental_executionContexts: BbSdk["experimental_executionContexts"];
   readonly experimental_gatewayLogs: BbSdk["experimental_gatewayLogs"];
+  readonly experimental_nativeSessionImports: BbSdk["experimental_nativeSessionImports"];
   readonly experimental_modelConnections: BbSdk["experimental_modelConnections"];
   readonly experimental_promptHistory: BbSdk["experimental_promptHistory"];
   readonly experimental_server: BbSdk["experimental_server"];
@@ -88,6 +89,7 @@ export class BBSdk implements BbSdk {
     this.experimental_desktopBrowsers = sdk.experimental_desktopBrowsers;
     this.experimental_executionContexts = sdk.experimental_executionContexts;
     this.experimental_gatewayLogs = sdk.experimental_gatewayLogs;
+    this.experimental_nativeSessionImports = sdk.experimental_nativeSessionImports;
     this.experimental_modelConnections = sdk.experimental_modelConnections;
     this.experimental_promptHistory = sdk.experimental_promptHistory;
     this.experimental_server = sdk.experimental_server;

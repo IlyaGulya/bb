@@ -383,6 +383,7 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
   });
 
   post(routes.create, async (context, payload) => {
+    if (payload.originPluginId === "native-session-history") throw new ApiError(403, "invalid_request", "Use the supported native session import service to register historical threads.");
     if (payload.sectionId) {
       requireThreadSection(deps, payload.sectionId);
     }

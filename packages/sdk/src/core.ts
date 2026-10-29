@@ -1,3 +1,4 @@
+import { createNativeSessionImportsArea, type ExperimentalNativeSessionImportsArea } from "./areas/native-session-imports.js";
 import {
   createGatewayLogsArea,
   type ExperimentalGatewayLogsArea,
@@ -57,6 +58,7 @@ export interface CreateBbSdkWithGuideArgs extends CreateBbSdkArgs {
 }
 
 export interface BbSdkAreas extends BbRealtime {
+  experimental_nativeSessionImports: ExperimentalNativeSessionImportsArea;
   experimental_gatewayLogs: ExperimentalGatewayLogsArea;
   experimental_executionContexts: ExecutionContextsArea;
   experimental_modelConnections: ModelConnectionsArea;
@@ -92,6 +94,7 @@ export function createBbSdk(
     transport: args.transport,
   });
   const areas: BbSdkAreas = {
+    experimental_nativeSessionImports: createNativeSessionImportsArea(sdkContext),
     experimental_gatewayLogs: createGatewayLogsArea(sdkContext),
     experimental_executionContexts: createExecutionContextsArea(sdkContext),
     experimental_modelConnections: createModelConnectionsArea(sdkContext),

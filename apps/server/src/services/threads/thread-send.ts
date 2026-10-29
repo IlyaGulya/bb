@@ -1,3 +1,4 @@
+import { assertNativeHistoryWritable } from "./native-history-guard.js";
 import {
   getEnvironment,
   getThread,
@@ -416,6 +417,7 @@ function appendAndQueueSendThreadMessageInTransaction({
   const request = db.transaction(
     (tx) => {
       assertThreadHostAcceptsWork(tx, thread);
+      assertNativeHistoryWritable(tx, thread.id);
       beforeAppendInTransaction?.({ tx });
       const appended =
         appendPreparedClientTurnRequestedEventWithNotificationInTransaction(

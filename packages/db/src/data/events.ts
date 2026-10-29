@@ -2,6 +2,7 @@ import { markThreadPruningWork } from "./thread-pruning-work.js";
 import { isBeforeLatestThreadEvent } from "./event-pruning-guards.js";
 import { acquireProjectAttachmentOwnership } from "./project-attachments.js";
 import {
+  NATIVE_HISTORY_OWNER,
   storedAttachmentPaths,
   type ProjectAttachmentOwnershipMode,
 } from "@bb/domain";
@@ -3565,6 +3566,7 @@ export function getLatestCompletedThreadContextClearSequence(
 interface StoredProviderThreadIdentityScope {
   hostId: string | null;
   providerId: string;
+  nativeNamespace: string | null;
   threadId: string;
 }
 
@@ -3606,6 +3608,10 @@ export type StoredProviderThreadClaimClass =
   | "foreign"
   | "ambiguous";
 
+function storedNativeNamespace(threadId: SQL): SQL<string | null> {
+  return sql<string | null>`(SELECT CASE WHEN json_valid(native_metadata.metadata_json) THEN CASE WHEN json_type(native_metadata.metadata_json, '$.nativeNamespace') = 'text' THEN json_extract(native_metadata.metadata_json, '$.nativeNamespace') ELSE NULL END ELSE NULL END FROM thread_plugin_metadata AS native_metadata WHERE native_metadata.thread_id = ${threadId} AND native_metadata.plugin_id = ${NATIVE_HISTORY_OWNER})`;
+}
+
 function listStoredProviderThreadIdentityScopes(
   db: DbQueryConnection,
   threadIds: readonly string[],
@@ -3615,6 +3621,7 @@ function listStoredProviderThreadIdentityScopes(
       hostId: environments.hostId,
       providerId: threads.providerId,
       threadId: threads.id,
+      nativeNamespace: storedNativeNamespace(sql`${threads.id}`),
     })
     .from(threads)
     .leftJoin(environments, eq(environments.id, threads.environmentId))
@@ -3631,6 +3638,9 @@ function readStoredProviderThreadClaim(
     scope.hostId === null
       ? sql`1`
       : sql`(earliest_environment.host_id IS NULL OR earliest_environment.host_id = ${scope.hostId})`;
+  const namespace = storedNativeNamespace(sql`${threads.id}`);
+  const earliestNamespace = storedNativeNamespace(sql`earliest_thread.id`);
+  const earliestNamespaceCondition = scope.nativeNamespace === null ? sql`1` : sql`(${earliestNamespace} IS NULL OR ${earliestNamespace} = ${scope.nativeNamespace})`;
   const claimantThreadIds = db
     .selectDistinct({ threadId: events.threadId })
     .from(events)
@@ -3641,6 +3651,7 @@ function readStoredProviderThreadClaim(
         eq(events.type, "thread/identity"),
         eq(events.providerThreadId, providerThreadId),
         eq(threads.providerId, scope.providerId),
+        scope.nativeNamespace === null ? undefined : or(isNull(namespace), eq(namespace, scope.nativeNamespace)),
         scope.hostId === null
           ? undefined
           : or(
@@ -3658,6 +3669,7 @@ function readStoredProviderThreadClaim(
             AND earliest.provider_thread_id = ${providerThreadId}
             AND earliest_thread.provider_id = ${scope.providerId}
             AND ${earliestHostCondition}
+            AND ${earliestNamespaceCondition}
           ORDER BY earliest.created_at
           LIMIT 1
         )`,
@@ -3713,6 +3725,7 @@ function readNewestStoredProviderThreadIdentity(
       hostId: environments.hostId,
       providerId: threads.providerId,
       providerThreadId: events.providerThreadId,
+      nativeNamespace: storedNativeNamespace(sql`${threads.id}`),
     })
     .from(events)
     .innerJoin(threads, eq(threads.id, events.threadId))
@@ -3749,6 +3762,7 @@ function readNewestStoredProviderThreadIdentity(
     hostId: row.hostId,
     providerId: row.providerId,
     providerThreadId: row.providerThreadId,
+    nativeNamespace: row.nativeNamespace,
     threadId: args.threadId,
   };
 }

@@ -1,3 +1,4 @@
+export * from "./api/native-session-imports.js";
 export * from "./api/execution-contexts.js";
 export * from "./api/gateway-logs.js";
 export * from "./api-client.js";

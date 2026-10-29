@@ -187,6 +187,17 @@ Raw logs may contain sensitive prompts and tool results; keep them outside Git.
 - `bb thread create`
 - `bb thread new`
 - `bb thread fork`
+- `bb thread import`
+- `bb thread import discover`
+- `bb thread import preview`
+- `bb thread import start`
+- `bb thread import get`
+- `bb thread import resume`
+- `bb thread import cancel`
+- `bb thread import records`
+- `bb thread import download`
+- `bb thread import admit`
+- `bb thread import handoff`
 - `bb thread list`
 - `bb thread show`
 - `bb thread get`

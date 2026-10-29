@@ -1,3 +1,4 @@
+import { assertImportedNativeIdentity, nativeImportResumeOptions } from "./native-session-admission.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AgentRuntimeBridgeLaunch } from "@bb/agent-runtime";
@@ -189,6 +190,7 @@ async function resumeThreadRuntimeIfMissing(
   const { command, entry, options } = args;
   const { resumeContext } = command;
   if (entry.runtime.hasThread(command.threadId)) {
+    if (resumeContext.nativeImport) await assertImportedNativeIdentity(entry.runtime, command.threadId, resumeContext.nativeImport.sessionId);
     return;
   }
   if (!resumeContext.providerThreadId) {
@@ -210,11 +212,12 @@ async function resumeThreadRuntimeIfMissing(
     providerThreadId: resumeContext.providerThreadId,
     providerId: resumeContext.providerId,
     contributedEnv: resumeContext.contributedEnv,
-    options: command.options,
+    options: resumeContext.nativeImport ? nativeImportResumeOptions(command.options, resumeContext.nativeImport) : command.options,
     instructions: resumeContext.instructions,
     dynamicTools: resumeContext.dynamicTools,
     instructionMode: resumeContext.instructionMode,
   });
+  if (resumeContext.nativeImport) await assertImportedNativeIdentity(entry.runtime, command.threadId, resumeContext.nativeImport.sessionId);
 }
 
 export async function startThread(

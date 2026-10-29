@@ -1,3 +1,4 @@
+export * from "./native-sessions.js";
 export * from "./commands.js";
 export * from "./local-state.js";
 export * from "./local.js";

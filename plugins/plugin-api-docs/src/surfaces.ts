@@ -769,6 +769,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         surfaceIds: [
           "storage",
           "bb-sdk",
+          "native-session-archives",
           "thread-plugin-metadata",
           "desktop-browsers",
           "ai-services",
@@ -1256,6 +1257,21 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Thread list",
           "Workflows",
         ],
+      },
+      {
+        id: "native-session-archives",
+        title: "Native session archives",
+        summary: "Retain selected native histories through the same Core path as the import UI and CLI, without starting agents or Tasks.",
+        bullets: [
+          "Discover explicit machine/profile roots and preview bounded source bytes; archive selected or bulk OMP, Claude Code and Codex histories",
+          "Page and search full retained native records, stream original JSONL and referenced artifacts, and inspect source identities, branches, checksums and recoverable import progress",
+          "Keep full native history and state separate from next-turn model context; Core timeline values are bounded display previews",
+          "Request exclusive same-identity native admission separately without a prompt; unsupported ownership or original receipt adoption refuses rather than inventing an identity or account binding",
+          "Explicitly create a different handoff dialogue with user-supplied next-turn context and an archive link; no imported tool, hook or configuration is executed by archiving",
+        ],
+        apiSymbols: ["PluginBbSdk.experimental_nativeSessionImports", "ExperimentalNativeSessionImportsArea", "NativeImportManifest", "NativeImportSelection", "NativeImportRecord", "NativeImportPageResponse", "NativeSessionSource"],
+        firstParty: ["Core native import UI", "bb thread import"],
+        experimental: true,
       },
       {
         id: "bb-sdk",

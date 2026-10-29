@@ -1,3 +1,4 @@
+import { nativeHistoryMetadata } from "./native-history-guard.js";
 import { createEventId, getThread } from "@bb/db";
 import {
   THREAD_CONTEXT_CLEAR_OPERATION,
@@ -21,6 +22,7 @@ export async function clearThreadContext(
     thread: Thread;
   },
 ): Promise<void> {
+  if (nativeHistoryMetadata(deps.db, args.thread.id) !== null) throw new ApiError(409, "invalid_request", "Native imports preserve their original identity and state. Create a separate handoff thread instead of clearing into a fresh native session.");
   await withThreadContextClearGuard(args.thread.id, async () => {
     const thread = getThread(deps.db, args.thread.id);
     if (!thread) {

@@ -1,3 +1,4 @@
+import { registerNativeSessionImportRoutes } from "./routes/native-session-imports.js";
 import { createPluginUpdateJobs } from "./services/plugins/plugin-update-jobs.js";
 import { registerPluginUpdateJobRoutes } from "./routes/plugin-update-jobs.js";
 import { recheckEnvironmentProvisioning } from "./services/threads/thread-environment-providers.js";
@@ -880,6 +881,7 @@ export function createApp(
   registerPromptHistoryRoutes(publicApi, deps);
   registerThreadSectionRoutes(publicApi, deps);
   registerGatewayLogRoutes(publicApi, deps);
+  const nativeSessionImports = registerNativeSessionImportRoutes(publicApi, deps);
   registerExecutionContextRoutes(publicApi, deps);
   registerFileRoutes(publicApi, deps);
   registerHostRoutes(publicApi, deps, pluginService);
@@ -1044,12 +1046,14 @@ export function createApp(
 
   return {
     app,
-    closeWebSockets: () =>
-      closeWebSocketServer({
+    closeWebSockets: async () => {
+      await nativeSessionImports.dispose();
+      await closeWebSocketServer({
         forceCloseAfterMs: WEB_SOCKET_SHUTDOWN_FORCE_CLOSE_MS,
         reason: WEB_SOCKET_SHUTDOWN_REASON,
         server: wss,
-      }),
+      });
+    },
     injectWebSocket,
     pluginService,
     pluginCatalogService,

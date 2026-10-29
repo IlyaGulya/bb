@@ -1,3 +1,4 @@
+import { assertNativeHistoryWritable, nativeHistoryMetadata } from "./native-history-guard.js";
 import {
   appendStoredThreadEventsInTransaction,
   createEventId,
@@ -881,7 +882,10 @@ export function requireDispatchableProviderThreadId(
   deps: ThreadEventReadDeps,
   threadId: string,
 ): string | null {
+  assertNativeHistoryWritable(deps.db, threadId);
   const session = getStoredProviderSession(deps.db, threadId);
+  const nativeImport = nativeHistoryMetadata(deps.db, threadId);
+  if (nativeImport !== null && (session.kind !== "owned" || session.providerThreadId !== nativeImport.nativeSessionId)) throw new ApiError(409, "provider_session_unavailable", "The imported native identity is no longer owned by this thread. A fresh session will not be substituted; create an explicit new handoff thread.");
   switch (session.kind) {
     case "none":
       return null;

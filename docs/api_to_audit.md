@@ -14,6 +14,33 @@ question.
 [provider-bridge-protocol.md](provider-bridge-protocol.md). An entry without
 a "Docs:" line has no owning doc, so it keeps the essential contract itself.
 
+## `sdk.experimental_nativeSessionImports`
+
+Discover explicit host-local native history roots, preview bounded source bytes,
+start selected or bulk archive jobs, resume/cancel import processing, page/search
+retained records, and stream the permanent original JSONL and referenced artifacts.
+`admit` separately requests provider-controlled exclusive same-identity loading
+without a prompt; `handoff` explicitly creates a different native dialogue with
+user-selected next-turn context and an archive link. Neither discovery nor
+archiving creates agents or Tasks. Source profile labels do not select payers.
+
+**Core callers.** The new-thread import page, imported-history header link and
+`bb thread import` commands use this SDK area and the same Core import and
+continuation routes/services. Core timeline projections are previews; the private
+archive retains original bytes, source identities, parent links and native state.
+OMP and Claude external takeover currently refuse because these adapters cannot
+prove external ownership and original scoped receipts; no receipt is fabricated.
+
+**Before stabilization.** Prove large multi-chunk imports, cancellation and crash
+recovery, prefix/checksum rejection, duplicate-free reimport, full-value search
+and streaming artifact retrieval. Exercise SDK/CLI and desktop/compact controls
+against the same real service, including accessibility and native-shell downloads.
+Qualify provider writer-lock, exact identity/path/workspace and original payer
+semantics on supported runtimes before claiming native admission. Source code
+and authored fixtures are not real-host acceptance or permission for a live pilot.
+
+Docs: Plugin Guide, Native session archives surface.
+
 ## Scoped execution context roots and launch bindings
 
 `PluginProviderDeclaration.experimental_executionBindings` declares independent
