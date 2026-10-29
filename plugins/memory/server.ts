@@ -22,7 +22,7 @@ const MAX_RESULT_LIMIT = 100;
 const bindingTaskKeysSchema = z.record(taskScopeSchema.shape.taskId, lineageSchema.shape.taskKey);
 const NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,79}$/;
 const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]{0,39}$/;
-const artifactPinSchema = artifactSourceSelectionSchema.pick({ artifactId: true, executionContextId: true, revision: true });
+const artifactPinSchema = artifactSourceSelectionSchema.pick({ artifactId: true, executionContextId: true, revision: true, quote: true });
 const reflectionVisibilitySql = `NOT EXISTS (
   SELECT 1 FROM json_each(proposal_json, '$.diffs') AS diff
   JOIN json_each(diff.value, '$.before.lineage.evidenceContextIds') AS evidence
@@ -1233,8 +1233,10 @@ export default async function plugin(bb: BbPluginApi) {
     const view = await readArtifact(selection, artifactId);
     if (pin && pin.revision !== view.artifact.source.textSha256)
       throw new CliError("Retained artifact revision no longer matches this stored source reference; the original was not substituted");
+    if (pin?.quote && !view.artifact.source.quote.includes(pin.quote))
+      throw new CliError("Retained selection no longer contains the stored source excerpt; the original was not substituted");
     return { view, source: artifactSourceSelectionSchema.parse({ kind: "artifact", commentId: null, artifactId: view.artifact.id,
-      executionContextId: view.artifact.executionContextId, revision: view.artifact.source.textSha256, observedAt: Date.now(), quote: "" }) };
+      executionContextId: view.artifact.executionContextId, revision: view.artifact.source.textSha256, observedAt: Date.now(), quote: pin?.quote ?? "" }) };
   }
 
   async function validateSelection(selection: MemorySelection) {
@@ -1533,11 +1535,15 @@ export default async function plugin(bb: BbPluginApi) {
         artifact: cliCommand({
           summary: "Inspect one actual retained thread decision and return its validated Memory source",
           positionals: [{ name: "id", description: "Artifact ID returned by memory artifacts", required: true }],
-          options: { ...taskOptions, revision: { type: "string", description: "Expected raw-text SHA-256 from a stored artifact source; reject a substituted original" } },
+          options: { ...taskOptions,
+            revision: { type: "string", description: "Expected raw-text SHA-256 from a stored artifact source; reject a substituted original" },
+            quote: { type: "string", description: "Exact stored source excerpt, at most 600 characters; requires --revision and must remain in the retained selection" },
+          },
           async run(input, ctx) {
+            if (input.options.quote !== undefined && input.options.revision === undefined) throw new CliError("--quote requires --revision to validate a stored artifact source");
             const selection = await cliSelection(ctx, input.options, true);
             const artifactId = z.uuid().parse(input.positionals.id);
-            const pin = input.options.revision === undefined ? null : artifactPinSchema.parse({ artifactId, executionContextId: selection.executionContextId, revision: input.options.revision });
+            const pin = input.options.revision === undefined ? null : artifactPinSchema.parse({ artifactId, executionContextId: selection.executionContextId, revision: input.options.revision, quote: input.options.quote ?? "" });
             return { exitCode: 0, stdout: jsonOutput(await inspectArtifact(selection, artifactId, pin)) };
           },
         }),
