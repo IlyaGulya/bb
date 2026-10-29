@@ -251,8 +251,7 @@ export class PrivateProductAnalytics {
     }
     if (stage === "completed" && durationMs === null) {
       try {
-        const mode = this.mode === "production" ? event.mode : this.mode;
-        const started = this.db.select({ timestamp: events.timestamp }).from(events).where(eq(events.id, eventKey({ ...event, mode, stage: "started" }))).get();
+        const started = this.db.select({ timestamp: events.timestamp }).from(events).where(eq(events.id, eventKey({ ...event, stage: "started" }))).get();
         if (started) event.durationMs = Math.min(86_400_000, Math.max(0, event.timestamp - started.timestamp));
       } catch {
         this.failure(analyticsScopeKey(event.scope), event.mode);
