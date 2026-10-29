@@ -11,8 +11,12 @@ import { runPluginMessageAction } from "@/lib/plugin-message-actions";
 import { createQueryClientTestHarness } from "./queryClientTestHarness";
 import type { TaskArtifactReviewFixture } from "./task-artifact-review-fixture";
 
+const artifactAppModules = import.meta.glob(["../../../../plugins/tasks/app.tsx"]);
+
 export function loadTaskArtifactApp() {
-  return loadPluginApp(() => import("../../../../plugins/tasks/app"));
+  const loader = artifactAppModules["../../../../plugins/tasks/app.tsx"];
+  if (!loader) throw new Error("Actual Tasks app module could not be located");
+  return loadPluginApp(async () => z.object({ default: z.unknown() }).parse(await loader()));
 }
 
 export function artifactConsumerRpc(fixture: TaskArtifactReviewFixture) {
