@@ -16,12 +16,12 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const attachment = { id: "owned-video-fixture", fileName: "demo.mp4", mime: "video/mp4", sizeBytes: 4096 };
-function fixture() {
-  return renderSlot({ component: () => <main aria-label="Existing task"><p>Task result stays here</p><VideoAttachment attachment={attachment} /></main> }, {}, { pluginId: "tasks" });
+function fixture(file = attachment) {
+  return renderSlot({ component: () => <main aria-label="Existing task"><p>Task result stays here</p><VideoAttachment attachment={file} /></main> }, {}, { pluginId: "tasks" });
 }
 
-function media(slot: ReturnType<typeof fixture>): HTMLVideoElement {
-  const element = slot.getByLabelText("Video: demo.mp4");
+function media(slot: ReturnType<typeof fixture>, fileName = attachment.fileName): HTMLVideoElement {
+  const element = slot.getByLabelText(`Video: ${fileName}`);
   if (!(element instanceof HTMLVideoElement)) throw new Error("Expected an actual HTML video element");
   return element;
 }
@@ -96,5 +96,30 @@ describe("task video popup lifecycle", () => {
     expect(video.paused).toBe(true);
     expect(video.hasAttribute("src")).toBe(false);
     expect(task.closest('[inert], [aria-hidden="true"]')).toBeNull();
+  });
+
+  it("keeps WebM playback available when metadata duration is initially unknown", async () => {
+    const file = { ...attachment, fileName: "unknown-duration.webm", mime: "video/webm" };
+    const finiteSlot = fixture(file);
+    fireEvent.click(finiteSlot.getByRole("button", { name: "Watch unknown-duration.webm" }));
+    const finite = media(finiteSlot, file.fileName);
+    Object.defineProperty(finite, "duration", { configurable: true, value: 12 });
+    fireEvent.loadedMetadata(finite);
+    expect(finiteSlot.queryByRole("alert")).toBeNull();
+    expect(finite.hasAttribute("src")).toBe(true);
+    fireEvent.click(finiteSlot.getByRole("button", { name: "Close video" }));
+    expect(finite.hasAttribute("src")).toBe(false);
+    finiteSlot.unmount();
+    const slot = fixture(file);
+    fireEvent.click(slot.getByRole("button", { name: "Watch unknown-duration.webm" }));
+    const unknown = media(slot, file.fileName);
+    Object.defineProperty(unknown, "duration", { configurable: true, value: Infinity });
+    fireEvent.loadedMetadata(unknown);
+    expect(slot.queryByRole("alert")).toBeNull();
+    expect(unknown.hasAttribute("src")).toBe(true);
+    fireEvent.play(unknown);
+    fireEvent.playing(unknown);
+    expect(slot.queryByRole("alert")).toBeNull();
+    expect(unknown.hasAttribute("src")).toBe(true);
   });
 });

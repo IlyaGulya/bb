@@ -5,7 +5,9 @@ import { createFakePluginHost, type FakePluginHost } from "@get-bb/plugin-sdk/te
 import { createStore } from "../api/index.js";
 import { registerAttachments, saveAttachmentFromBytes } from "../attachments/index.js";
 import { registerTaskWorkflows } from "./index.js";
-import { buildEvidenceSchema, taskBuildEvidenceContract, type BuildReviewResult } from "../../workflows/src/build-review-contract.js";
+import { buildEvidenceSchema, taskBuildEvidenceContract, type BuildReviewResult, type BuildReviewStart } from "../../workflows/src/build-review-contract.js";
+import type { TaskWorkflow } from "../shared/workflow-contract.js";
+import { TaskWorkflowStore } from "./store.js";
 
 const hosts: FakePluginHost[] = [];
 afterEach(async () => { for (const host of hosts.splice(0)) await host.harness.dispose(); });
@@ -36,6 +38,25 @@ function setup() {
 }
 
 const fixtureUrl = new URL("../../../apps/web/public/blog/tweets/tiling.mp4", import.meta.url);
+
+function publishRecordingLineage(fixture: ReturnType<typeof setup>, build: BuildReviewResult["build"]) {
+  const workflows = new TaskWorkflowStore(fixture.store);
+  const role: BuildReviewStart["writer"] = { provider: "fixture", model: "fixture-model", reasoningLevel: "high", permissionMode: "full", serviceTier: null, instructions: "Owned fixture" };
+  const request: BuildReviewStart = {
+    key: "twf_video_lineage:1", group: "twf_video_lineage", projectId: "proj_video_fixture", originThreadId: "thr_video_origin",
+    task: fixture.task.title, template: "development-review", writer: role, reviewer: role,
+    smokeCommands: ["consumer-smoke"], uiRequired: false, evidencePolicy: { version: 1, requirement: "video" }, evidenceTaskId: fixture.task.id, feedback: "",
+  };
+  const native: NonNullable<TaskWorkflow["native"]> = {
+    runId: "owned-fixture-run", key: request.key, contextStarted: true, status: "succeeded", phase: "Independent review", error: null,
+    result: { plan: "Recorded fixture lineage", build, review: { verdict: "ready", findings: [], summary: "Fixture review" } },
+    workers: [{ threadId: "thr_video_writer", role: "writer", callIndex: 1 }, { threadId: "thr_video_reviewer", role: "reviewer", callIndex: 2 }],
+    policyLimitations: [], evidencePolicy: request.evidencePolicy, uiRequired: false,
+  };
+  workflows.create("video-lineage-launch", fixture.task.id, request, "{}");
+  expect(workflows.publish(request.group, native).state).toBe("in_review");
+  return { workflows, request, native };
+}
 
 describe("video-required task artifact admission", () => {
   it.each(["missing", "screenshot", "preview"] as const)("refuses %s evidence without publishing a reviewable package", async kind => {
@@ -90,5 +111,44 @@ describe("video-required task artifact admission", () => {
     expect(await fixture.validate(build)).toEqual({ verified: true });
     await rm(join(fixture.root, original.blobPath));
     await expect(fixture.validate(build)).rejects.toThrow();
+  });
+
+  it("rejects relabelling a previously published C1 recording as C2 and a fabricated run after Return", async () => {
+    const fixture = setup();
+    const attachment = await saveAttachmentFromBytes(fixture.store.tasks, await readFile(fixtureUrl), { taskId: fixture.task.id, fileName: "recorded-at-c1.mp4" });
+    const recorded = fixture.withVideo(attachment.id);
+    expect(await fixture.validate(recorded)).toEqual({ verified: true });
+    const { workflows, request, native } = publishRecordingLineage(fixture, recorded);
+    const reopened = new TaskWorkflowStore(fixture.store);
+    const returned = reopened.return(request.group, 1, "Show the corrected result on C2 without rewriting old recording lineage");
+    reopened.save({ ...returned, state: "running", native: { ...native, runId: "wfr_c2_attempt", key: reopened.request(request.group).key, status: "running", result: null } });
+    const evidence = recorded.uiEvidence[0]!;
+    if (evidence.kind !== "video") throw new Error("Expected video fixture");
+    const relabelled = buildEvidenceSchema.parse({
+      ...recorded, commit: "b".repeat(40),
+      uiEvidence: [{ ...evidence, recording: { ...evidence.recording, commit: "b".repeat(40), runId: "wfr_nonexistent_recording" } }],
+    });
+    await expect(fixture.validate(relabelled)).rejects.toThrow();
+    expect(workflows.get(request.group).revision).toBe(2);
+    expect(workflows.get(request.group).state).toBe("running");
+    expect(fixture.store.tasks.getTask(fixture.task.id)?.status).toBe("in_progress");
+  });
+
+  it("rejects substituting an unrelated same-task upload for an edited recording's persisted original", async () => {
+    const fixture = setup();
+    const bytes = await readFile(fixtureUrl);
+    const original = await saveAttachmentFromBytes(fixture.store.tasks, bytes, { taskId: fixture.task.id, fileName: "captured-original.mp4" });
+    const edited = await saveAttachmentFromBytes(fixture.store.tasks, bytes, { taskId: fixture.task.id, fileName: "edited-recording.mp4" });
+    const unrelated = await saveAttachmentFromBytes(fixture.store.tasks, bytes, { taskId: fixture.task.id, fileName: "unrelated-upload.mp4" });
+    const recording = fixture.withVideo(edited.id);
+    const evidence = recording.uiEvidence[0]!;
+    if (evidence.kind !== "video") throw new Error("Expected video fixture");
+    evidence.recording.sourceAttachmentId = original.id;
+    evidence.recording.transformation = "Edited fixture; the original attachment is retained";
+    expect(await fixture.validate(recording)).toEqual({ verified: true });
+    publishRecordingLineage(fixture, recording);
+    const substituted = buildEvidenceSchema.parse({ ...recording, uiEvidence: [{ ...evidence, recording: { ...evidence.recording, sourceAttachmentId: unrelated.id } }] });
+    await expect(fixture.validate(substituted)).rejects.toThrow();
+    expect(fixture.store.tasks.getTask(fixture.task.id)?.status).toBe("in_review");
   });
 });
