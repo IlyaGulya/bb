@@ -73,6 +73,9 @@ export async function updateAiServiceSelection(
   request: SetAiServiceSelectionRequest,
 ): Promise<SystemAiServicesResponse> {
   const { selection, task } = request;
+  if (request.task === "task-route" && selection.mode === "automatic") {
+    throw new ApiError(400, "invalid_request", "Task routing requires an explicitly selected service or Off; automatic fallback is not permitted.");
+  }
   if (selection.mode === "service") {
     const service = deps.aiServices.get(selection);
     if (service === null) {

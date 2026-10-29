@@ -56,6 +56,8 @@ import type { TaskWorkflowHandlers } from "../workflow/index.js";
 import { repositoryCommands } from "./repositories";
 import { workflowCommands } from "./workflow.js";
 import { artifactCommands } from "./artifacts.js";
+import type { RoutingHandlers } from "../routing/index.js";
+import { routingCommands } from "./routing.js";
 
 const TASK_KEY_PATTERN = /^([A-Z][A-Z0-9]{0,9})-(\d+)$/;
 const BB_PROJECT_ID_PATTERN = /^proj_[A-Za-z0-9_-]+$/;
@@ -698,6 +700,7 @@ export function registerTasksCli(
   inboxHandlers?: InboxHandlers,
   repositories?: RepositoryHandlers,
   workflows?: TaskWorkflowHandlers,
+  routing?: RoutingHandlers,
 ): void {
   const domain = registerHandlers(bb, store);
   bb.cli.register(
@@ -720,6 +723,11 @@ export function registerTasksCli(
           ],
         ),
         ...artifactCommands(bb, store, (address) => resolveTask(domain, address), guard),
+        ...(routing ? {
+          route: groupCommand("route", "Advisory routing and revision-CAS local actions; never launches workers", [["show", "Read advice, grants and journal"], ["preview", "Propose existing/new task or one scope question"], ["apply", "Apply one explicit local-only action"]]),
+          away: groupCommand("away", "Explicit bounded local-action grants, off by default; never native execution", [["enable", "Grant selected local actions with attempt/time limits"], ["revoke", "Stop further admission without resetting receipts"]]),
+          ...routingCommands(routing, address => resolveTask(domain, address), address => resolveProject(domain, address), guard),
+        } : {}),
         ...(repositories
           ? {
               repositories: groupCommand(

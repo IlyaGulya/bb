@@ -18,6 +18,7 @@ const VIEW: SystemAiServicesResponse = {
       serviceId: "openrouter-helper",
     },
     voice: { mode: "service", pluginId: "gone-plugin", serviceId: "gone" },
+    "task-route": { mode: "off" },
   },
   services: [
     {

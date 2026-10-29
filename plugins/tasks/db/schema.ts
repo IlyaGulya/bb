@@ -3,6 +3,7 @@ import { repositoryMigrations } from "../repositories/store.js";
 import { taskWorkflowMigration, taskWorkflowVideoLineageMigration } from "../workflow/store.js";
 import { workflowPreparationMigration } from "../workflow/preparation-store.js";
 import { taskArtifactMigration } from "../artifacts/store.js";
+import { routingMigration } from "../routing/store.js";
 
 type PluginDatabase = ReturnType<BbPluginApi["storage"]["database"]>;
 
@@ -378,6 +379,7 @@ const MIGRATIONS = [
   workflowPreparationMigration,
   taskWorkflowVideoLineageMigration,
   taskArtifactMigration,
+  routingMigration,
 ] as const;
 
 export function initializeTasksSchema(db: PluginDatabase): void {

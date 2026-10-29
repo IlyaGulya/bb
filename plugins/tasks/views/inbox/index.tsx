@@ -8,6 +8,7 @@ import { useProjects, useTasksQuery, useTasksRpc } from "../../shell/data.js";
 import { useTasksNavigation } from "../../shell/routes.js";
 import { errorMessage } from "../../shared/errors.js";
 import { Button } from "@/components/ui/button";
+import { InboxRoutingControl } from "./routing.js";
 
 const field =
   "min-h-11 min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm sm:min-h-9";
@@ -178,7 +179,8 @@ function InboxCard({
           </Button>
         </form>
       )}
-      {!item.taskId && (
+      <InboxRoutingControl item={item} refresh={refresh} />
+      {!item.taskId && item.sourceKind !== "task_route" && (
         <details>
           <summary className="cursor-pointer text-sm">
             Create or link a task

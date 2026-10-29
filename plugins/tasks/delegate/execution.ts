@@ -47,7 +47,7 @@ export async function resolveTaskExecution(
   if (!resolved) {
     const preset = presetId
       ? tasks.getPreset(presetId)
-      : tasks.listPresets()[0];
+      : tasks.firstPreset();
     if (preset && project.linkedBbProjectId) {
       const codeProject = await bb.sdk.projects.get({
         projectId: project.linkedBbProjectId,

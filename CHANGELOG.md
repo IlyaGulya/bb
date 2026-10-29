@@ -2,6 +2,26 @@
 
 ## AgentOS fork — unreleased
 
+- Add Tasks Inbox routing advice with exact task/thread reuse, retained writer
+  and prepared-workspace ownership, revision-CAS local actions and open-worker
+  links. Share UI/CLI/SDK policy without a second executor or runnable queue.
+  Add explicitly scoped local-away grants, server-reserved attempt/time limits,
+  receipts and Needs input parking; never admit semantic/native/external/Jira
+  execution or Accept through away. Core's task-route helper defaults off and
+  invokes only one explicitly selected completion callback without fallback;
+  this is not a physical model-request limit or a native-session sandbox.
+- Preserve exact attached-thread routing answers and fence responder ownership
+  and newly selected profile meaning through apply. Allow an explicit separate
+  new-task decision for contextual references without starting a thread. Retry
+  definitively parked drawer previews with a fresh operation while preserving
+  uncertain reservations and their receipt identity.
+- Retain an uncertain preview's complete request through receipt refreshes and
+  form/source changes until its terminal reply is received. Treat incidental
+  historical thread references as context before ownership resolution for an
+  explicit separate task, including the same bounded local-away path.
+- Keep an uncertain preview's receipt retry available after its local-away grant
+  is exhausted, expired or revoked. Retrieving that existing operation does not
+  renew the grant, consume another attempt or admit a new preview.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact

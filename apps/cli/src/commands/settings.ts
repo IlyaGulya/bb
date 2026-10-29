@@ -401,7 +401,7 @@ export function registerSettingsCommands(
   const aiServices = settings
     .command("ai-services")
     .description(
-      "Choose which plugin AI service writes thread titles, commit messages, and voice transcripts",
+      "Choose plugin AI services for titles, commit messages, voice and explicit advisory task routing",
     );
   aiServices
     .command("show", { isDefault: true })
@@ -417,7 +417,7 @@ export function registerSettingsCommands(
   aiServices
     .command("set <task> <choice>")
     .description(
-      `Set the service for a task (${AI_TASKS.join(", ")}): automatic, off, or a service id`,
+      `Set the service for a task (${AI_TASKS.join(", ")}): off or a service id; automatic is allowed except for task-route`,
     )
     .option(
       "--plugin <plugin-id>",

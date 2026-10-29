@@ -45,7 +45,7 @@ export function aiServiceTasks(service: NormalizedPluginAiService): AiTask[] {
   return [
     ...(service.complete === null
       ? []
-      : (["thread-title", "commit-message"] as const)),
+      : (["thread-title", "commit-message", "task-route"] as const)),
     ...(service.transcribe === null ? [] : (["voice"] as const)),
   ];
 }

@@ -61,6 +61,7 @@ import {
   testAiService,
   updateAiServiceSelection,
 } from "../services/ai/ai-services-view.js";
+import { classifyTaskRoute } from "../services/ai/task-route.js";
 import {
   resolveVoiceTranscriptionEnabled,
   transcribeVoiceInput,
@@ -665,6 +666,9 @@ export function registerSystemRoutes(
 
   get(routes.aiServices, async (context) =>
     context.json(await buildAiServicesView(deps)),
+  );
+  post(routes.classifyTaskRoute, async (context, payload) =>
+    context.json(await classifyTaskRoute(deps, payload, context.req.raw.signal)),
   );
 
   put(routes.setAiServiceSelection, async (context, payload) =>
