@@ -23,12 +23,14 @@ async function fixture(pending?: { entered: () => void; release: Promise<void> }
   const host = createFakePluginHost({ pluginId: "tasks", sdk: {
     hosts: { list: async () => [] }, projects: { list: async () => [] },
     experimental_executionContexts: { list: async () => [] }, experimental_modelConnections: { list: async () => [] },
+    ...(source ? { threads: { get: async ({ threadId }: { threadId: string }) => makeThreadResponse({ id: threadId, projectId: "proj_code", status: "working" }) } } : {}),
   } });
   hosts.push(host);
   const store = createStore(host.bb);
   registerTasksApi(host.bb, store);
   const project = store.tasks.createProject({ name: "Routing UI", prefix: "RUI", color: "blue" });
   const task = store.tasks.createTask({ projectId: project.id, title: "Keep existing checkout writer" });
+  if (source) store.tasks.upsertTaskThread({ taskId: task.id, threadId: "thr_semanticreceiptowner", title: "Existing semantic candidate", presetName: "Worker", liveStatus: "working" });
   const inbox = registerInbox(host.bb, store, { background: false });
   const routing = registerRouting(host.bb, store);
   const { item } = source

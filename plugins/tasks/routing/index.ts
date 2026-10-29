@@ -153,7 +153,8 @@ export function registerRouting(bb: BbPluginApi, store: TasksApiStore, options: 
         const projectRows = store.database.prepare<[string | null, string | null], { id: string }>("SELECT id FROM projects WHERE (? IS NULL OR id = ?) ORDER BY prefix LIMIT 20").all(input.projectId, input.projectId);
         const projects = projectRows.map(row => store.tasks.getProject(row.id)).filter(project => project !== undefined).map(project => ({ id: project.id, name: `${project.prefix} · ${project.name}` }));
         if (input.projectId && !projects.length) throw new Error("Selected tracker project is unavailable");
-        const references = await resolveRouteReferences(bb, store, source, input.taskRef);
+        const separateTask = input.newTask && !input.taskRef && !source.taskId && !source.threadId;
+        const references = separateTask ? { tasks: [], threads: [], missing: [], explicitThreadId: null } : await resolveRouteReferences(bb, store, source, input.taskRef);
         const exact = new Map(references.tasks.map(task => [task.id, task]));
         const missing = references.missing;
         const directThread = references.threads[0];
@@ -166,7 +167,7 @@ export function registerRouting(bb: BbPluginApi, store: TasksApiStore, options: 
         let callbackInvocations: 0 | 1 = 0;
         let classifierService: string | null = null;
         let limitation = "Exact references resolve without a classifier. Semantic advice uses at most 20 candidate tasks and projects. No commands or worker messages are sent.";
-        if (input.newTask && !input.taskRef && !source.taskId && !source.threadId) {
+        if (separateTask) {
           if (!input.projectId) throw new Error("Explicitly choose a tracker project before proposing a new task");
           decision = { kind: "new", projectId: input.projectId, reason: "You explicitly chose a separate new task in this tracker project; incoming task/thread references are context. Creating it will not start or replace an executor." };
         } else if (exact.size + references.threads.length > 1 || missing.length) {

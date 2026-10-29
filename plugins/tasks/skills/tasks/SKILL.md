@@ -83,8 +83,10 @@ An exact attached idle-thread answer can resolve ordinary ownership ambiguity;
 managed writer and retired-source protections still apply. Changed responder
 ownership or a selected profile's model/payer meaning requires fresh validation.
 After a definitive parked preview, an explicit retry uses a fresh operation ID.
-Uncertain delivery retains the same identity for receipt lookup, never a second
-attempt while the reservation is unresolved.
+Uncertain delivery retains the same identity and complete original request,
+including source/proposal revisions and choices, for receipt lookup. Refresh or
+form edits do not replace that request. Wait for its terminal receipt before
+admitting another preview; never allocate a second unresolved attempt.
 
 Only on explicit authorization, enable local away with `bb tasks away enable
 --operation <unique-id> --project ABC --inboxes <comma-separated-inbox-ids>

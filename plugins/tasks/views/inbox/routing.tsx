@@ -62,7 +62,7 @@ function RoutingBody({ item: entry, active, refresh, close }: { item: InboxEntry
   const [checks, setChecks] = useState("");
   const [parkReason, setParkReason] = useState("");
   const lock = useRef(false);
-  const previewAttempt = useRef<{ key: string; operationId: string } | null>(null);
+  const previewAttempt = useRef<z.infer<RoutingRpcContract["previewInboxRoute"]["input"]> | null>(null);
   const applyAttempt = useRef<{ key: string; operationId: string } | null>(null);
   const enableAttempt = useRef<{ key: string; operationId: string } | null>(null);
   const operation = (ref: typeof applyAttempt, input: object) => {
@@ -120,9 +120,10 @@ function RoutingBody({ item: entry, active, refresh, close }: { item: InboxEntry
     <form className="space-y-3" onSubmit={event => {
       event.preventDefault();
       void run(async () => {
-        const input = { id: item.id, sourceRevision: item.revision, expectedRevision: query.data?.proposal?.revision ?? 0, projectId: projectId || null, taskRef, newTask, semantic, grantId };
-        const result = await rpc.call("previewInboxRoute", { ...input, operationId: operation(previewAttempt, input) });
-        if (result.state === "parked") previewAttempt.current = null;
+        const input = previewAttempt.current ?? { id: item.id, sourceRevision: item.revision, expectedRevision: query.data?.proposal?.revision ?? 0, projectId: projectId || null, taskRef, newTask, semantic, grantId, operationId: crypto.randomUUID() };
+        previewAttempt.current = input;
+        const result = await rpc.call("previewInboxRoute", input);
+        previewAttempt.current = null;
         setOutcome(result);
         if (result.proposal?.revision === input.expectedRevision + 1) { setShown(result.proposal); setBindingStale(false); setDraft(current => current?.taskId === result.proposal?.taskId ? current : null); }
       });

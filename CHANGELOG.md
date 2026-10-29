@@ -15,6 +15,10 @@
   new-task decision for contextual references without starting a thread. Retry
   definitively parked drawer previews with a fresh operation while preserving
   uncertain reservations and their receipt identity.
+- Retain an uncertain preview's complete request through receipt refreshes and
+  form/source changes until its terminal reply is received. Treat incidental
+  historical thread references as context before ownership resolution for an
+  explicit separate task, including the same bounded local-away path.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact

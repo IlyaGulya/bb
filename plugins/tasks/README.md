@@ -181,6 +181,10 @@ from `route show`. Preview takes `--new-task` with a selected project and no
 `--task` answer to treat incoming references as context for separate work.
 An already linked intake owner or explicit exact-reference answer retains
 precedence. A new task is not a new thread and starts no executor.
+Incidental references are not resolved as ownership choices for this separate
+task: historical/unavailable thread mentions and excessive contextual reference
+lists do not block manual or explicitly granted local-away previews. Stored
+intake links and explicit answers still use their normal ownership validation.
 Use `--semantic` to request semantic advice. Apply accepts strict JSON for `link`,
 `create`, `target` (with `target`, nullable to clear), or `workflow-draft` (with
 `draftRevision` and `selection`). Target/draft saves reuse native execution and
@@ -195,10 +199,13 @@ changes to its model, payer or other profile fields require fresh validation,
 even when the task's previously saved profile did not change.
 
 After a definitive parked preview, another Preview click starts a fresh attempt,
-including after closing/reopening the drawer. Uncertain delivery or a pending
-reservation retains its operation identity for receipt lookup instead. CLI/SDK
-clients likewise use a fresh operation ID for a deliberate retry after a known
-terminal preview result, not to duplicate an unresolved operation.
+including after closing/reopening the drawer. Uncertain delivery retains both
+the operation identity and the entire original request for receipt lookup,
+even if refresh advances the proposal revision or the source/form choices change.
+The drawer uses fresh choices only after receiving a terminal result and another
+explicit Preview. CLI/SDK clients likewise retain the original source/proposal
+revisions and all other inputs while resolving uncertain delivery; use a fresh
+operation ID for a deliberate retry after a known terminal preview result.
 
 ```sh
 bb tasks away enable --operation grant-1 --project PROD --inboxes <inbox-id> --tasks PROD-1 --actions preview,link --attempts 3 --seconds 300 --acknowledge-local-only --json
