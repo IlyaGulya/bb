@@ -1,3 +1,4 @@
+import { providerStartupCodeSchema } from "@bb/domain";
 import type {
   HostDaemonCommand,
   HostDaemonOnlineRpcCancelMessage,
@@ -133,7 +134,9 @@ export class CommandRouter {
         this.logger.warn(
           {
             type: message.command.type,
-            err: error,
+            ...(providerStartupCodeSchema.safeParse(errorCode).success
+              ? { errorCode }
+              : { err: error }),
           },
           "online host RPC failed",
         );

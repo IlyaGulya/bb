@@ -120,6 +120,8 @@
 - Retain original startup exceptions as internal, non-enumerable causes and
   record the last known coordinator stage in safe startup diagnostics without
   exposing raw exception fields or changing generic public failure messages.
+  Project startup warnings to command type and safe classification at the host
+  RPC boundary so cause-aware logging cannot expose internal exception causes.
 - Keep bounded startup cleanup ownership through expected bridge exit and persist
   unverified-stop blockers across reopen. Confirm owned cleanup before
   acknowledging failed prepared-rewind disposal, and refuse new work through
