@@ -78,6 +78,21 @@
   contracts, durable admission and bounded acknowledged browser delivery.
   Keep logical projects and QA modes separate; expose delivery gaps, unknown
   availability and incomplete coverage rather than treating them as unused.
+- Ship a Tasks skill recipe for truthful, readable UI demos using the existing
+  OMP cursor/click recorder and local FFmpeg. Retain real frame/action clocks,
+  observed change outlines, captions outside the viewport, unchanged originals
+  and app/helper/run/hash provenance in portable replay bundles. Optional local
+  approved narration stays separate; no new recorder, cloud upload, server
+  encoding API, task-video schema, or analytics transport.
+  Reject hidden or unobserved change results even when their boxes have positive
+  size. Explicitly negotiate native Eval lifetime protocol v1 and acquire a new
+  Eval-owned tab; native ownership, not a run-local `finally`, handles whole-Eval
+  teardown. Refuse older SDKs/session-lifetime fallback and retain the native
+  ownership receipt plus qualified recorder source revision in local v3
+  receipts/manifests. Keep explicit nonsecret targets and page-local ephemeral
+  keyed digests instead of raw DOM values/text, refuse known protected fields
+  and arbitrary container text, and reject legacy receipts without rewriting
+  historical artifacts.
 - Fence Tasks Start against concurrent draft revision/selection changes in its
   launch-receipt transaction. Retain the first validated bugfix reproduction
   across Return, permit retry after an exit-zero attempt, and keep legacy

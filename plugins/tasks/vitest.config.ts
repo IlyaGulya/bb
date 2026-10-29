@@ -14,7 +14,7 @@ export default defineConfig({
     projects: sharedWorkerProjects({
       pkgDir: fileURLToPath(new URL(".", import.meta.url)),
       name: "bb-plugin-tasks",
-      include: ["**/*.test.{ts,tsx}"],
+      include: ["**/*.test.{ts,tsx,mjs}"],
       exclude: ["node_modules/**"],
     }),
     testTimeout: 20_000,

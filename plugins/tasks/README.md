@@ -16,6 +16,18 @@ bb plugin install tasks
 The plugin adds the Tasks sidebar panel, the `bb tasks` command, and an agent
 skill that teaches workers how to report progress back to tasks.
 
+For readable UI evidence, the shipped Tasks skill includes a local OMP-recorder
+timing adapter and FFmpeg caption/change-accent recipe. Read
+[the video demo reference](skills/tasks/references/video-demo.md) for distributed
+worker/CLI/SDK resource access, genuine action clocks, original/final provenance,
+optional approved local narration, visual verification and existing attachments.
+It adds no recording service, server encoding API, analytics transport, or Task
+video schema.
+Capture requires qualified native JavaScript Eval lifetime protocol v1, explicit
+Eval-owned new-page acknowledgement and the executing SDK's source revision.
+Older SDKs/session-owned captures are refused; default browser session lifetime
+is unchanged. Local receipt/manifest v3 retains this ownership/source provenance.
+
 ## Quick start
 
 Install the plugin with `bb plugin install tasks`. Then use the `bb tasks` CLI
