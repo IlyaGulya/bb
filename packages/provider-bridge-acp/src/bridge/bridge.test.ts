@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createStandaloneBuiltinCompactCommandInput } from "@bb/domain";
+import { availableModelSchema, createStandaloneBuiltinCompactCommandInput, modelConnectionSnapshotSchema } from "@bb/domain";
 import type { DynamicTool, ReasoningLevel } from "@bb/domain";
 import {
   BRIDGE_JSON_RPC_ERRORS,
@@ -33,6 +33,8 @@ import type {
 import { z } from "zod";
 
 import { handleLine } from "./bridge.js";
+import * as ompNativeRuntime from "../omp-native-runtime.js";
+import { gatewayModelSchema, type GatewayModel } from "@bb/provider-bridge-protocol/model-gateway";
 import { ACP_BRIDGE_MCP_SERVER_NAME } from "./tool-proxy-mcp.js";
 
 const FAKE_AGENT_PATH = resolve(
@@ -412,6 +414,32 @@ function sendModelList(
   });
 }
 
+async function gatewayListedModel(overrides: Partial<GatewayModel>) {
+  const model = gatewayModelSchema.parse({
+    id: "personal-codex/gpt-6.1-sol", name: "Sol 6.1", reasoning: true,
+    input: ["text"], cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 100000, maxTokens: 10000, ...overrides,
+  });
+  const discovery = vi.spyOn(ompNativeRuntime, "listOmpGatewayModels").mockResolvedValue([model]);
+  try {
+    const id = sendRequest("model/list", { providerOptions: {
+      ...launchProviderOptions({ dialectId: "omp" }),
+      modelConnection: modelConnectionSnapshotSchema.parse({
+        id: "personal-sol", name: "Personal Sol", provider: "acp-omp", hostId: null,
+        createdAt: 1, updatedAt: 1,
+        gateway: { baseUrl: "https://gateway.example/v1", protocol: "openai-responses", accountPrefix: "personal-codex", modelProvider: "openai-codex", credential: { kind: "env", name: "CPA_TEST_CLIENT_KEY" }, allowedHostIds: ["personal-host"] },
+      }),
+    } });
+    const response = await waitForResponse(id);
+    const catalog = z.object({ models: z.array(availableModelSchema) }).parse(response.result);
+    const listed = catalog.models[0];
+    if (!listed) throw new Error("Gateway model/list omitted its native catalog model");
+    return listed;
+  } finally {
+    discovery.mockRestore();
+  }
+}
+
 function sendTurnRequest(
   method: "turn/start" | "turn/steer",
   providerThreadId: string,
@@ -672,6 +700,47 @@ describe("acp bridge", () => {
       models: [{ id: "acp-default", isDefault: true }],
       selectedOnlyModels: [],
     });
+  });
+
+  it("admits high reasoning from native gateway thinking metadata with a null default", async () => {
+    const model = await gatewayListedModel({ thinking: { efforts: ["low", "medium", "high", "xhigh"], defaultLevel: null } });
+    expect(model.supportedReasoningEfforts.map(effort => effort.reasoningEffort)).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(model.defaultReasoningEffort).toBe("medium");
+  });
+
+  it("keeps a supported native gateway default rather than replacing it with medium", async () => {
+    const model = await gatewayListedModel({ thinking: { efforts: ["low", "high"], defaultLevel: "high" } });
+    expect(model.supportedReasoningEfforts.map(effort => effort.reasoningEffort)).toEqual(["low", "high"]);
+    expect(model.defaultReasoningEffort).toBe("high");
+  });
+
+  it("rejects an unsupported native default and retains supported medium", async () => {
+    const model = await gatewayListedModel({ thinking: { efforts: ["low", "medium", "high"], defaultLevel: "xhigh" } });
+    expect(model.supportedReasoningEfforts.map(effort => effort.reasoningEffort)).toEqual(["low", "medium", "high"]);
+    expect(model.defaultReasoningEffort).toBe("medium");
+  });
+
+  it("does not advertise medium as the default of a nonempty ladder that excludes it", async () => {
+    const model = await gatewayListedModel({ thinking: { efforts: ["low", "high"], defaultLevel: "max" } });
+    expect(model.supportedReasoningEfforts.map(effort => effort.reasoningEffort)).toEqual(["low", "high"]);
+    expect(model.defaultReasoningEffort).toBe("low");
+  });
+
+  it("uses the existing ACP vocabulary without duplicating aliases or inventing unknown efforts", async () => {
+    const model = await gatewayListedModel({ thinking: { efforts: ["minimal", "low", "future-effort", "high", "high"], defaultLevel: "high" } });
+    expect(model.supportedReasoningEfforts.map(effort => effort.reasoningEffort)).toEqual(["low", "high"]);
+    expect(model.defaultReasoningEffort).toBe("high");
+  });
+
+  it.each([
+    ["missing thinking", {}],
+    ["null thinking", { thinking: null }],
+    ["empty native ladder", { thinking: { efforts: [], defaultLevel: null } }],
+    ["nonreasoning model", { reasoning: false, thinking: { efforts: ["high"], defaultLevel: "high" } }],
+  ] satisfies Array<[string, Partial<GatewayModel>]>)("does not grant reasoning control for %s", async (_name, metadata) => {
+    const model = await gatewayListedModel(metadata);
+    expect(model.supportedReasoningEfforts).toEqual([]);
+    expect(model.defaultReasoningEffort).toBe("medium");
   });
 
   it("uses the CLI model list before ACP-native session discovery when both are present", async () => {
