@@ -1,4 +1,4 @@
-import type { ThreadEventRow } from "@bb/domain";
+import type { ProviderStartupDiagnostic, ThreadEventRow } from "@bb/domain";
 import { describe, expect, it } from "vitest";
 import { buildThreadTimelineTurnDetailsFromEvents } from "../src/build-thread-timeline.js";
 import { assertTimelineSourceOwnership } from "./timeline-source-ownership.js";
@@ -27,6 +27,29 @@ function fixture() {
             ]
           : [],
       }),
+    startup: (
+      phase: ProviderStartupDiagnostic["phase"],
+      message: string,
+      status = "running",
+      operationId = "startup-1",
+    ) => factory.systemOperation({
+      operation: "provider_startup",
+      operationId,
+      status,
+      message,
+      metadata: {
+        phase,
+        hookEvent: null,
+        hookId: null,
+        hookState: null,
+        failureStage: phase === "stopping" || phase === "stopped" ? "initializing" : null,
+        elapsedMs: phase === "initializing" ? 0 : 2000,
+        deadlineMs: 3000,
+        code: phase === "stopping" || phase === "stopped" ? "provider_startup_timeout" : null,
+        retryBlocked: phase === "stopping",
+        optionalMcpServerCount: 0,
+      },
+    }),
     error: (
       detail: string | undefined = undefined,
       code = "thread_provisioning_failed",
@@ -50,6 +73,48 @@ function fixture() {
 }
 
 describe("timeline source ownership", () => {
+  it("updates pending startup diagnostics without retaining stale progress", () => {
+    const { startup, render } = fixture();
+    const latest = "Waiting for the startup hook";
+    const { rows } = render([
+      startup("initializing", "Initializing the provider"),
+      startup("hook", latest),
+    ], "active");
+    expect(rows).toMatchObject([{
+      providerStartup: { phase: "hook", elapsedMs: 2000 },
+      detail: latest,
+    }]);
+  });
+
+  it("keeps terminal startup diagnostics stable and separates a retry attempt", () => {
+    const { startup, render } = fixture();
+    const terminal = "Stopped the timed-out attempt";
+    const next = "Initializing the retry";
+    const { rows } = render([
+      startup("initializing", "Initializing the provider"),
+      startup("stopping", "Waiting for owned cleanup"),
+      startup("stopping", "Cleanup has not yet been confirmed", "failed"),
+      startup("stopped", terminal, "failed"),
+      startup("hook", "Late progress from the stopped attempt"),
+      startup("initializing", next, "running", "startup-2"),
+    ], "active");
+    expect(rows).toMatchObject([
+      {
+        status: "error",
+        detail: terminal,
+        providerStartup: {
+          phase: "stopped",
+          code: "provider_startup_timeout",
+          retryBlocked: false,
+        },
+      },
+      {
+        detail: next,
+        providerStartup: { phase: "initializing", code: null },
+      },
+    ]);
+  });
+
   it("merges provisioning companions across intervening events and preserves both details", () => {
     const { factory, failed, error, render } = fixture();
     const { rows } = render([

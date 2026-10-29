@@ -466,6 +466,7 @@ export function NewTaskDialog({
             className="w-full shrink-0 bg-transparent text-base font-semibold text-foreground outline-none placeholder:text-muted-foreground"
           />
           <TasksEditor
+            aria-label="Task description"
             variant="comment"
             value={description}
             onChange={(markdown) =>

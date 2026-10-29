@@ -325,6 +325,7 @@ export function TaskRepositoriesControl({
                 <Button
                   type="button"
                   variant="outline"
+                  disabled={busy || locked || !binding.bbProjectId || !binding.sourceEnvironmentId || !binding.targetHostId}
                   onClick={() =>
                     void act(async () => {
                       const source = await rpc.call("inspectTaskRepository", {
@@ -383,9 +384,9 @@ export function TaskRepositoriesControl({
                   Inspect source and select portable dirty files
                 </Button>
                 <p className="break-words text-sm">
-                  {machineName(binding.sourceHostId)}:{binding.sourcePath} ·{" "}
-                  {binding.sourceBranch ?? "detached"} · HEAD{" "}
-                  {binding.sourceHead || "not inspected"}
+                  {binding.sourceEnvironmentId
+                    ? `${machineName(binding.sourceHostId)}:${binding.sourcePath}${binding.sourceHead ? ` · ${binding.sourceBranch ?? "detached"} · HEAD ${binding.sourceHead}` : " · Not inspected"}`
+                    : "Choose a source workspace to inspect."}
                 </p>
                 <label className="flex items-center gap-2 text-sm">
                   <input

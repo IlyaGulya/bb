@@ -130,7 +130,8 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
     {connectionError && !open && <p role="alert" className="text-sm text-destructive">Workflow connection lost. Last observed state is retained.</p>}
     {preparation && runsLoaded && runs.length === 0 && <p role="status" className="text-sm text-muted-foreground">{preparation.error ?? preparation.progress}</p>}
     <ResponsiveDrawerShell open={open} presentation={isCompactViewport ? "drawer" : "floating"} onOpenChange={next => { setOpen(next); if (!next && showSetup) void draft.flush(); }} srLabel={showSetup ? "Launch workflow" : "Workflow details"} contentClassName="max-w-2xl">
-      <div className="min-h-0 flex-auto space-y-4 overflow-y-auto p-4">
+      <div className="flex min-h-0 flex-auto flex-col">
+        <div className="min-h-0 flex-auto space-y-4 overflow-y-auto p-4">
         <header className="space-y-1"><h2 className="text-lg font-semibold">{showSetup ? "Launch workflow" : "Workflow details"}</h2><p className="text-sm text-muted-foreground">{showSetup ? "Choose the roles, prepare a private workspace, then start explicitly. Closing never starts or cancels an agent." : "This run uses its retained execution choices. Follow its workers and results below; closing never cancels an agent."}</p></header>
         {!runsLoaded ? <div aria-label="Loading workflow state"><Skeleton className="h-40 w-full" /></div> : !showSetup ? <section aria-label="Workflow run details" className="space-y-4">{runDetails}</section> : !selection ? <div className="space-y-3" aria-label="Loading saved workflow draft"><Skeleton className="h-10 w-full" /><Skeleton className="h-40 w-full" /></div> : <div className="min-w-0 space-y-4">
           <p className="text-sm text-muted-foreground">Code project: {project.data?.name ?? "Link this task's tracker project to a code project first"}</p>
@@ -178,7 +179,8 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
           {showSetup && !selection && <Button variant="outline" size="sm" onClick={() => void draft.reload()}>Retry loading draft</Button>}
           {showSetup && (machines.error || project.error || selections.contexts.error || selections.connections.error) && <Button type="button" variant="outline" size="sm" onClick={() => { machines.refresh(); project.refresh(); selections.contexts.refresh(); selections.connections.refresh(); }}>Retry execution choices</Button>}
         </div>}
-        <footer className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-background py-3">
+        </div>
+        <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border bg-background px-4 py-3">
           {showSetup && <span role="status" className="mr-auto text-xs text-muted-foreground">{draft.saving ? "Saving draft…" : draft.error ? "Draft not saved" : draft.draft?.revision ? "Draft saved on server" : "Choose workflow settings"}</span>}
           <Button type="button" variant="outline" onClick={() => { setOpen(false); if (showSetup) void draft.flush(); }}>Close</Button>
           {showSetup && !active && <Button className="min-h-11 sm:min-h-9" disabled={busy || draft.saving || !!draft.error || !rolesAvailable || !selection?.smokeCommands.length || !!connectionError} onClick={() => void act(async () => {

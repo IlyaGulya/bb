@@ -261,7 +261,9 @@ function mergeThreadOperationMessage(
     existing.status ?? "pending",
     incoming.status ?? "pending",
   );
-  const shouldUseIncomingLifecycle = existing.status !== mergedStatus;
+  const isStartup = incoming.threadOperation?.rawOperation === "provider_startup";
+  const shouldUseIncomingLifecycle = existing.status !== mergedStatus ||
+    (isStartup && (incoming.status ?? "pending") === mergedStatus);
   existing.status = mergedStatus;
   if (shouldUseIncomingLifecycle) {
     existing.title = incoming.title;
@@ -270,10 +272,14 @@ function mergeThreadOperationMessage(
       existing.completedAt = incoming.completedAt ?? incoming.createdAt;
     }
   }
-  existing.detail = mergeOperationDetail({
-    existing: existing.detail,
-    incoming: incoming.detail,
-  });
+  if (isStartup) {
+    if (shouldUseIncomingLifecycle) existing.detail = incoming.detail;
+  } else {
+    existing.detail = mergeOperationDetail({
+      existing: existing.detail,
+      incoming: incoming.detail,
+    });
+  }
 }
 
 export function upsertPermissionGrantLifecycleMessage(

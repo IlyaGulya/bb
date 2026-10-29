@@ -359,6 +359,7 @@ export function CommentComposer({ taskId, notificationTarget }: ComposerProps) {
   return (
     <div className="mt-3.5 rounded-lg border border-border bg-card px-3.5 pb-2.5 pt-3 shadow-2xs transition-colors focus-within:border-input focus-within:ring-1 focus-within:ring-ring">
       <TasksEditor
+        aria-label="Task comment"
         value={body}
         onChange={setBody}
         variant="comment"

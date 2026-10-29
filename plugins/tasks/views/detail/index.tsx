@@ -456,6 +456,7 @@ function TaskDetail({ task }: { task: Task }) {
           />
 
           <TasksEditor
+            aria-label="Task description"
             value={descriptionValue}
             onChange={onDescriptionChange}
             variant="doc"

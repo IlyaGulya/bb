@@ -690,7 +690,7 @@ function MenuRowButton({
       id={id}
       role={role}
       disabled={disabled}
-      aria-selected={role === "option" ? Boolean(isActive) : undefined}
+      aria-selected={role === "option" ? selected : undefined}
       onClick={onClick}
       className={cn(
         "relative flex w-full cursor-default select-none items-center justify-between gap-3 rounded-sm px-2 text-xs outline-none hover:bg-state-hover hover:text-foreground",

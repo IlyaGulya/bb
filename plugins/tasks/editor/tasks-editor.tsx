@@ -195,6 +195,7 @@ interface TasksEditorProps {
   value: string;
   onChange(markdown: string): void;
   placeholder?: string;
+  "aria-label"?: string;
   readOnly?: boolean;
   variant?: "doc" | "comment";
   onUploadImage?: (
@@ -212,6 +213,7 @@ export function TasksEditor({
   value,
   onChange,
   placeholder,
+  "aria-label": ariaLabel,
   readOnly = false,
   variant = "doc",
   onUploadImage,
@@ -336,6 +338,11 @@ export function TasksEditor({
       content: initialValueRef.current,
       autofocus: false,
       editorProps: {
+        attributes: {
+          role: readOnly ? "document" : "textbox",
+          "aria-label": ariaLabel ?? (variant === "doc" ? "Task description" : "Task comment"),
+          ...(!readOnly ? { "aria-multiline": "true" } : {}),
+        },
         handleKeyDown(_view, event) {
           if (!onSubmitRef.current || readOnly) return false;
           if (event.key !== "Enter") return false;
@@ -468,12 +475,13 @@ export function TasksEditor({
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor || editor.isDestroyed) return;
+    editor.view.dom.setAttribute("aria-label", ariaLabel ?? (variant === "doc" ? "Task description" : "Task comment"));
     if (editorEnterKeyHint) {
       editor.view.dom.setAttribute("enterkeyhint", editorEnterKeyHint);
     } else {
       editor.view.dom.removeAttribute("enterkeyhint");
     }
-  }, [editorEnterKeyHint]);
+  }, [editorEnterKeyHint, ariaLabel, variant]);
 
   const editor = editorRef.current;
   const mentionRect = mention?.clientRect?.() ?? null;
