@@ -175,6 +175,28 @@ it("blocks retry while stop is pending and retains ownership when stop cannot be
   expect(events.at(-1)).toMatchObject({ type: "system/operation", status: "failed", metadata: { retryBlocked: true } });
 });
 
+it("retains ownership and blocks retry when a ready provider cannot confirm shutdown", async () => {
+  const startup = new RuntimeStartup(() => {});
+  await startup.run({
+    threadId: "ready-thread",
+    policy: { deadlineMs: 3_000, optionalMcpServers: [] },
+    stop: async () => { throw new Error("Fixture owned process is still alive"); },
+    work: async () => { startup.ready("ready-thread"); },
+  });
+
+  await expect(startup.shutdown()).rejects.toMatchObject({
+    code: "provider_startup_stop_unverified",
+  });
+  expect(startup.owns("ready-thread")).toBe(true);
+  expect(startup.hasOwnedWork()).toBe(true);
+  await expect(startup.run({
+    threadId: "ready-thread",
+    policy: { deadlineMs: 3_000, optionalMcpServers: [] },
+    stop: async () => {},
+    work: async () => {},
+  })).rejects.toMatchObject({ code: "provider_startup_stop_unverified" });
+});
+
 it("retains an ordinary pre-hook cause internally while publishing only allowlisted startup failure fields", async () => {
   const events: ThreadEvent[] = [];
   const startup = new RuntimeStartup((event) => events.push(event));

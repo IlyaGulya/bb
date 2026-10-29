@@ -237,8 +237,27 @@ export class RuntimeStartup {
   }
 
   async shutdown(): Promise<void> {
-    for (const threadId of [...this.retainedRuns.keys()]) this.requireCleanup(threadId, "provider_startup_cancelled");
-    const results = await Promise.allSettled([...this.active.keys()].map((threadId) => this.cancel(threadId)));
+    const readyStops: Promise<void>[] = [];
+    for (const [threadId, run] of this.retainedRuns) {
+      if (!run.ready) {
+        this.requireCleanup(threadId, "provider_startup_cancelled");
+        continue;
+      }
+      run.controller.abort(new ProviderStartupError("provider_startup_cancelled"));
+      readyStops.push((async () => {
+        try {
+          await run.stop();
+          await Promise.allSettled([...run.work]);
+          this.forgetReadiness(threadId);
+        } catch {
+          this.blocked.add(threadId);
+        }
+      })());
+    }
+    const results = await Promise.allSettled([
+      ...readyStops,
+      ...[...this.active.keys()].map((threadId) => this.cancel(threadId)),
+    ]);
     if (this.blocked.size > 0) throw new ProviderStartupError("provider_startup_stop_unverified");
     for (const result of results) {
       if (result.status === "rejected") throw result.reason;

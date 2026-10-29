@@ -2,6 +2,8 @@
 
 ## AgentOS fork — unreleased
 
+- Preserve successful startup history during ordinary runtime shutdown while still
+  awaiting confirmed owned-provider termination; unverified cleanup keeps retry blocked.
 - Durably reset optional Core native-event v1-to-v2 replay before archiving when
   retained in-scope events lack their own completed v2 artifacts. Do not infer safe
   cursor progress from any one v2 artifact. Add a real-SQLite interruption/reopen

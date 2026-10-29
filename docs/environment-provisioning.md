@@ -74,6 +74,12 @@ cancel. The existing runtime stop still waits for confirmed owned-process cleanu
 before acknowledgment. Legacy startup handoff ordering, release requests, and the
 five-second active-turn wait outside that owned startup state are unchanged.
 
+Normal runtime shutdown still aborts and drains the owned processes of an already
+ready provider, but it preserves the completed startup result instead of creating
+a false startup-cancelled attempt. Pending startup and prepared rewind cleanup
+retain their cancellation diagnostics. If ready-provider termination cannot be
+confirmed, ownership and the retry blocker remain until operator verification.
+
 Startup diagnostics retain the coordinator's last known stage in `failureStage`
 before switching to `stopping`/`stopped`: `initializing`, `hook`, `capabilities`,
 or `ready`. It is `null` before interruption and when parsing older receipts
