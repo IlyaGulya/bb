@@ -3,13 +3,26 @@
 import { useState } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { Provider, createStore, useAtomValue, useStore } from "jotai";
+import { MemoryRouter } from "react-router-dom";
+import type { PluginThreadActionTarget } from "@get-bb/plugin-sdk/app";
+import type { ExperimentalAnalyticsQueueStore } from "@bb/sdk/browser";
+import { notificationsThreadAction, type ThreadNotificationsData } from "../../../../plugins/push-notifications/notificationsAction";
+import { pushNotificationsRpcContract } from "../../../../plugins/push-notifications/contract";
+import { instrumentPluginLocalRegistration } from "./plugin-local-analytics";
+import { bindThreadAction } from "./thread-actions/thread-action-registry";
+import { BrowserAnalyticsStore } from "./product-analytics-store";
+import { productAnalyticsOutbox } from "./product-analytics";
+import { closePanesForThreadsAtom, splitLayoutAtom } from "./split-layout/atoms";
+import { splitPane, setFocus, listPanes } from "./split-layout/ops";
+import type { SplitLayout } from "./split-layout/types";
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { PRODUCT_ANALYTICS_HEADERS as headers } from "@bb/server-contract";
 import { z } from "zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PluginContext } from "@/components/plugin/plugin-context";
 import { useUpdateProject } from "@/hooks/mutations/project-mutations";
-import { useRpc } from "./plugin-sdk-hooks";
+import { useRpc, useSdk, useBbNavigate } from "./plugin-sdk-hooks";
 import { createAppQueryClient } from "./query-client";
 import { productAnalyticsInput, setProductAnalyticsView } from "./product-analytics";
 import { withBrowserAnalyticsConsumer } from "@/test/product-analytics-fixture";
@@ -90,6 +103,127 @@ describe("analytics TanStack asynchronous action provenance", () => {
         expect((await report(personal.id)).rows.find((row) => row.featureId === "core.projects" && row.action === "update")).toMatchObject({ attempts: 0, successes: 0 });
       } finally {
         queryClient.clear();
+      }
+    });
+  });
+});
+
+function bindConsumerQueue(queue: ExperimentalAnalyticsQueueStore) {
+  const admissions: Promise<boolean>[] = [];
+  const spies = [
+    vi.spyOn(BrowserAnalyticsStore.prototype, "enqueue").mockImplementation((entry) => { const admitted = queue.enqueue(entry); admissions.push(admitted); return admitted; }),
+    vi.spyOn(BrowserAnalyticsStore.prototype, "batch").mockImplementation(() => queue.batch()),
+    vi.spyOn(BrowserAnalyticsStore.prototype, "settle").mockImplementation((entries) => queue.settle(entries)),
+    vi.spyOn(BrowserAnalyticsStore.prototype, "health").mockImplementation(() => queue.health()),
+  ];
+  return async () => {
+    try {
+      await Promise.all(admissions);
+      await productAnalyticsOutbox.flush();
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  };
+}
+
+function NotificationsConsumer({ target, pluginId }: { target: PluginThreadActionTarget; pluginId: string }) {
+  const rpc = useRpc<typeof pushNotificationsRpcContract>();
+  const sdk = useSdk();
+  const navigate = useBbNavigate();
+  const [stored, setStored] = useState("inherit");
+  const data: ThreadNotificationsData = {
+    levels: new Map(),
+    defaults: { defaultLevel: "all", childLevel: "input-only" },
+    async setLevel(threadId, level) {
+      await rpc.call("threadNotifications.set", { threadId, level });
+      const persisted = await rpc.call("threadNotifications.list", { threadIds: [threadId] });
+      const preference = persisted.threads[threadId];
+      if (preference === undefined) throw new Error("Owned notification preference was not persisted");
+      setStored(preference.own);
+    },
+  };
+  const registration = instrumentPluginLocalRegistration(pluginId, "threadActions", notificationsThreadAction);
+  const item = registration.item({ thread: target, data, sdk, navigate });
+  if (item === null) throw new Error("Owned notification target did not expose its action");
+  const action = bindThreadAction(`${pluginId}/notifications`, item, () => { throw new Error("Notification action must not request a rename"); });
+  return <><button onClickCapture={(event) => productAnalyticsInput(event.nativeEvent)} onClick={() => { void action.run("muted"); }}>Mute target notifications</button><output>{stored}</output></>;
+}
+
+describe("analytics returned thread-action target scope", () => {
+  it.each(["work", "personal"] as const)("keeps a Work notification target scoped to Work while viewing %s", async (view) => {
+    await withBrowserAnalyticsConsumer({ notifications: true }, async ({ forward, report, queue, work, personal, workThread, pluginId }) => {
+      if (pluginId === null) throw new Error("Owned notifications consumer was not installed");
+      const restoreQueue = bindConsumerQueue(queue);
+      const queryClient = createAppQueryClient({ showMutationErrorToasts: false });
+      const requests: Request[] = [];
+      vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? new Request(input, init) : new Request(new URL(String(input), "http://localhost"), init);
+        requests.push(request.clone());
+        return forward(request);
+      });
+      try {
+        setProductAnalyticsView({ kind: "project", projectId: view === "work" ? work.id : personal.id }, "web");
+        const target: PluginThreadActionTarget = { ...workThread, parentThreadId: null, archivedAt: null, pinnedAt: null, sectionId: null, isUnread: false, status: "idle", environment: null };
+        render(<MemoryRouter><QueryClientProvider client={queryClient}><PluginContext.Provider value={pluginId}><NotificationsConsumer target={target} pluginId={pluginId} /></PluginContext.Provider></QueryClientProvider></MemoryRouter>);
+        fireEvent.click(screen.getByRole("button", { name: "Mute target notifications" }));
+        await waitFor(() => expect(screen.getByText("muted")).toBeTruthy());
+        await waitFor(async () => {
+          await productAnalyticsOutbox.flush();
+          const result = await report(work.id);
+          expect(result.rows.find((row) => row.featureId === `ui.plugin.${pluginId}` && row.action === "slot.threadActions.notifications.run")).toMatchObject({ attempts: 1, successes: 1, unknown: 1, human: 0 });
+          expect(result.rows.find((row) => row.featureId === `plugin.${pluginId}` && row.action === "rpc.threadNotifications.set")).toMatchObject({ attempts: 1, successes: 1 });
+          expect(result.rows.find((row) => row.featureId === "core.threads" && row.action === "pluginMetadata.update")).toMatchObject({ attempts: 1, successes: 1 });
+        });
+        for (const projectId of [personal.id, undefined]) {
+          const result = await report(projectId);
+          expect(result.rows.find((row) => row.featureId === `ui.plugin.${pluginId}` && row.action === "slot.threadActions.notifications.run")).toMatchObject({ attempts: 0, successes: 0, lastUsedAt: null });
+          expect(result.rows.find((row) => row.featureId === `plugin.${pluginId}` && row.action === "rpc.threadNotifications.set")).toMatchObject({ attempts: 0, successes: 0 });
+          expect(result.rows.find((row) => row.featureId === "core.threads" && row.action === "pluginMetadata.update")).toMatchObject({ attempts: 0, successes: 0 });
+        }
+        const request = requests.find((value) => value.url.endsWith("/rpc/threadNotifications.set"));
+        expect(request?.headers.get(headers.project)).toBe(work.id);
+        expect(request?.headers.get(headers.intent)).toBe("use");
+        expect(request?.headers.get(headers.actor)).toBe("unknown");
+      } finally {
+        cleanup();
+        queryClient.clear();
+        await restoreQueue();
+      }
+    });
+  });
+});
+
+function SplitCloseConsumer({ threadId }: { threadId: string }) {
+  const store = useStore();
+  const layout = useAtomValue(splitLayoutAtom);
+  const panes = layout === null ? [] : listPanes(layout.root);
+  return <><button onClickCapture={(event) => productAnalyticsInput(event.nativeEvent)} onClick={() => store.set(closePanesForThreadsAtom, [threadId])}>Close target pane</button><output>{panes.map((pane) => pane.content.kind === "thread" ? pane.content.threadId : pane.content.kind).join(",")}</output></>;
+}
+
+describe("analytics split-close removed owner", () => {
+  it.each(["personal", "work"] as const)("attributes closing Work to the removed owner when the survivor is %s", async (survivor) => {
+    await withBrowserAnalyticsConsumer({}, async ({ forward, report, queue, work, personal, workThread, secondWorkThread, personalThread }) => {
+      const restoreQueue = bindConsumerQueue(queue);
+      const store = createStore();
+      vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => forward(input instanceof Request ? new Request(input, init) : new Request(new URL(String(input), "http://localhost"), init)));
+      try {
+        setProductAnalyticsView({ kind: "project", projectId: work.id }, "web");
+        const remaining = survivor === "work" ? secondWorkThread : personalThread;
+        const initial: SplitLayout = { root: { type: "pane", paneId: "removed", content: { kind: "thread", projectId: work.id, threadId: workThread.id } }, focusedPaneId: "removed" };
+        store.set(splitLayoutAtom, setFocus(splitPane(initial, "removed", "right", { kind: "thread", projectId: remaining.projectId, threadId: remaining.id }), "removed"));
+        render(<Provider store={store}><SplitCloseConsumer threadId={workThread.id} /></Provider>);
+        fireEvent.click(screen.getByRole("button", { name: "Close target pane" }));
+        await waitFor(() => expect(screen.getByText(remaining.id)).toBeTruthy());
+        expect(store.get(splitLayoutAtom)).toMatchObject({ root: { type: "pane", content: { kind: "thread", threadId: remaining.id, projectId: remaining.projectId } } });
+        await waitFor(async () => {
+          await productAnalyticsOutbox.flush();
+          expect((await report(work.id)).rows.find((row) => row.featureId === "ui.splits" && row.action === "close")).toMatchObject({ attempts: 1, successes: 1, unknown: 1, human: 0 });
+        });
+        for (const projectId of [personal.id, undefined]) expect((await report(projectId)).rows.find((row) => row.featureId === "ui.splits" && row.action === "close")).toMatchObject({ attempts: 0, successes: 0, lastUsedAt: null });
+      } finally {
+        cleanup();
+        store.set(splitLayoutAtom, null);
+        await restoreQueue();
       }
     });
   });
