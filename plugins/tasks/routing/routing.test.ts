@@ -46,6 +46,59 @@ async function enable(f: ReturnType<typeof setup>, id: string, taskIds: string[]
   return f.routing.enableLocalAway({ operationId: "grant-one", projectId: f.project.id, inboxIds: [id], taskIds, actions, maxAttempts, durationSeconds: 60, acknowledgedBoundary: true });
 }
 
+function ordinaryOwners() {
+  const f = setup();
+  const task = f.store.tasks.createTask({ projectId: f.project.id, title: "Ordinary executor choice" });
+  const first = "thr_ordinaryfirst";
+  const second = "thr_ordinarysecond";
+  for (const threadId of [first, second]) f.store.tasks.upsertTaskThread({ taskId: task.id, threadId, title: threadId, presetName: "Worker", liveStatus: "idle" });
+  return { ...f, task, first, second };
+}
+
+describe("review regressions: explicit attached-thread answers", () => {
+  it("accepts an exact idle attached-thread answer through RPC and retains it when linking", async () => {
+    const f = ordinaryOwners();
+    const { item } = await f.incoming(`Continue ${f.task.key}`);
+    const question = await preview(f, item.id);
+    expect(question).toMatchObject({ state: "parked", proposal: { decision: { kind: "clarify" }, threadId: null } });
+    const answer = routeOutcomeSchema.parse(await f.harness.callRpc("previewInboxRoute", { id: item.id, operationId: "answer-attached-thread", grantId: null, sourceRevision: item.revision, expectedRevision: 1, projectId: f.project.id, taskRef: f.second, newTask: false, semantic: false }));
+    expect(answer).toMatchObject({ state: "applied", proposal: { decision: { kind: "existing", taskId: f.task.id }, owner: "ordinary", threadId: f.second, workerThreadIds: expect.arrayContaining([f.first, f.second]) } });
+    const applied = routeOutcomeSchema.parse(await f.harness.callRpc("applyInboxRoute", { id: item.id, operationId: "link-selected-thread", grantId: null, expectedRevision: 2, action: { kind: "link" } }));
+    expect(applied).toMatchObject({ state: "applied", item: { taskId: f.task.id, state: "resolved" }, proposal: { threadId: f.second } });
+    expect((await f.routing.getInboxRoute({ id: item.id })).proposal?.threadId).toBe(f.second);
+    expect(f.store.tasks.listTasks().map(task => task.id)).toEqual([f.task.id]);
+    expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
+  });
+
+  it("does not turn an exact managed reviewer reference into writer ownership", async () => {
+    const f = setup();
+    const task = f.store.tasks.createTask({ projectId: f.project.id, title: "Managed writer remains retained" });
+    seedWorkflowOwnership(f.store, task.id, "proj_code", "in_review");
+    const { item } = await f.incoming(task.key);
+    const advice = await preview(f, item.id, { taskRef: "thr_ownedretainedreviewer" });
+    expect(advice.proposal).toMatchObject({ owner: "managed", threadId: "thr_ownedretainedwriter", workerThreadIds: expect.arrayContaining(["thr_ownedretainedwriter", "thr_ownedretainedreviewer"]) });
+    const applied = routeOutcomeSchema.parse(await f.harness.callRpc("applyInboxRoute", { id: item.id, operationId: "link-managed-reference", grantId: null, expectedRevision: 1, action: { kind: "link" } }));
+    expect(applied).toMatchObject({ state: "applied", item: { taskId: task.id }, proposal: { threadId: "thr_ownedretainedwriter" } });
+    expect(f.store.tasks.getTask(task.id)?.status).toBe("in_review");
+    expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
+  });
+
+  it("keeps a started continuation source as history even when it is named explicitly", async () => {
+    const f = ordinaryOwners();
+    const preset = f.store.tasks.createPreset({ name: "Continuation profile", providerId: "acp-omp", modelId: "selected-model", reasoningLevel: "high", permissionMode: "full", serviceTier: null, environmentKind: "project-default", baseBranch: null, machineId: null, instructions: "Native continuation" });
+    const executions = new ExecutionStore(f.store.database);
+    executions.create({ receipt: { operationId: "started-continuation", taskId: f.task.id, sourceThreadId: f.first, bbProjectId: "proj_code", sourceEnvironmentId: "env_source", targetHostId: "host_one", targetPath: "/code", presetId: preset.id, environmentId: "env_target", state: "started", threadId: f.second, lastError: null, createdAt: "2026-10-29T00:00:00.000Z" }, request: { includePaths: [] }, handoff: "Retain the established target" });
+    f.store.tasks.createComment({ taskId: f.task.id, kind: "agent", authorName: "Historical source", threadId: f.first, body: "Earlier source response" });
+    const { item } = await f.incoming(f.task.key);
+    const advice = await preview(f, item.id, { taskRef: f.first });
+    expect(advice.proposal).toMatchObject({ owner: "ordinary", threadId: f.second });
+    const applied = routeOutcomeSchema.parse(await f.harness.callRpc("applyInboxRoute", { id: item.id, operationId: "link-current-continuation", grantId: null, expectedRevision: 1, action: { kind: "link" } }));
+    expect(applied).toMatchObject({ state: "applied", item: { taskId: f.task.id }, proposal: { threadId: f.second } });
+    expect(executions.get("started-continuation")?.receipt).toMatchObject({ state: "started", sourceThreadId: f.first, threadId: f.second });
+    expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
+  });
+});
+
 describe("advisory routes without a second executor", () => {
   it("resolves exact references to a retained managed writer even when the latest responder is its reviewer", async () => {
     const f = setup();
@@ -269,6 +322,170 @@ describe("routing selection boundaries", () => {
     const result = await f.routing.applyInboxRoute({ id: item.id, operationId: "invalid-binding", grantId: null, expectedRevision: 1, action: { kind: "target", target: { ...target, workspace: { kind: "managed-worktree", baseBranch: "changed" } } } });
     expect(result.state).toBe("parked");
     expect(executions.target(task.id)).toEqual(target);
+    expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
+  });
+});
+
+describe("review regressions: latest-responder ownership fences", () => {
+  it("marks retained advice stale when another idle attachment becomes the latest agent responder", async () => {
+    const f = ordinaryOwners();
+    f.store.tasks.createComment({ taskId: f.task.id, kind: "agent", authorName: "First executor", threadId: f.first, body: "Current implementation" });
+    const { item } = await f.incoming(f.task.key);
+    expect((await preview(f, item.id)).proposal?.threadId).toBe(f.first);
+    f.store.tasks.createComment({ taskId: f.task.id, kind: "agent", authorName: "Second executor", threadId: f.second, body: "I now own this implementation" });
+    expect((await f.routing.getInboxRoute({ id: item.id })).stale).toBe(true);
+    const refreshed = await preview(f, item.id);
+    expect(refreshed.proposal).toMatchObject({ owner: "ordinary", threadId: f.second });
+    expect((await f.routing.getInboxRoute({ id: item.id })).stale).toBe(false);
+    expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
+  });
+
+  it("fences a responder change while a link is awaiting native ownership reads", async () => {
+    const f = ordinaryOwners();
+    f.store.tasks.createComment({ taskId: f.task.id, kind: "agent", authorName: "First executor", threadId: f.first, body: "Current implementation" });
+    const { item } = await f.incoming(f.task.key);
+    expect((await preview(f, item.id)).proposal?.threadId).toBe(f.first);
+    const entered = createDeferredPromise<void>();
+    const release = createDeferredPromise<void>();
+    f.harness.sdk.stub("threads.get", async (raw: unknown) => {
+      const { threadId } = z.object({ threadId: z.string() }).parse(raw);
+      entered.resolve();
+      await release.promise;
+      return makeThreadResponse({ id: threadId, projectId: "proj_code", status: "idle" });
+    });
+    const pending = f.harness.callRpc("applyInboxRoute", { id: item.id, operationId: "link-during-responder-change", grantId: null, expectedRevision: 1, action: { kind: "link" } });
+    await entered.promise;
+    try {
+      f.store.tasks.createComment({ taskId: f.task.id, kind: "agent", authorName: "Second executor", threadId: f.second, body: "New current owner" });
+    } finally {
+      release.resolve();
+    }
+    const result = routeOutcomeSchema.parse(await pending);
+    expect(result.state).toBe("parked");
+    expect(new InboxStore(f.store.database).get(item.id).taskId).toBeNull();
+    expect(f.persistence.journal(item.id).find(entry => entry.operationId === "link-during-responder-change")?.state).toBe("parked");
+    expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
+  });
+
+  it("still links the retained responder when a user comment does not change executor ownership", async () => {
+    const f = ordinaryOwners();
+    f.store.tasks.createComment({ taskId: f.task.id, kind: "agent", authorName: "First executor", threadId: f.first, body: "Current implementation" });
+    const { item } = await f.incoming(f.task.key);
+    expect((await preview(f, item.id)).proposal?.threadId).toBe(f.first);
+    f.store.tasks.createComment({ taskId: f.task.id, kind: "user", authorName: "Operator", body: "Keep the same executor; no notification requested" });
+    expect((await f.routing.getInboxRoute({ id: item.id })).stale).toBe(false);
+    const result = routeOutcomeSchema.parse(await f.harness.callRpc("applyInboxRoute", { id: item.id, operationId: "link-unchanged-responder", grantId: null, expectedRevision: 1, action: { kind: "link" } }));
+    expect(result).toMatchObject({ state: "applied", item: { taskId: f.task.id, state: "resolved" }, proposal: { threadId: f.first } });
+    expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
+  });
+});
+
+describe("review regressions: newly selected profile commit fences", () => {
+  it.each(["unchanged", "unrelated-profile", "model", "payer"] as const)("retains only a validated model and payer after %s changes during target validation", async change => {
+    const f = setup();
+    f.store.tasks.updateProject(f.project.id, { linkedBbProjectId: "proj_code" });
+    f.harness.sdk.stub("hosts.list", async () => [{ id: "host_one", name: "One", status: "connected" }]);
+    f.harness.sdk.stub("projects.get", async () => ({ id: "proj_code", name: "Code", sources: [{ hostId: "host_one", type: "local_path", path: "/code", isDefault: true }] }));
+    f.harness.sdk.stub("experimental_executionContexts.list", async () => [{ id: "context_one", name: "Context", enabled: true, projectIds: ["proj_code"] }]);
+    f.harness.sdk.stub("experimental_modelConnections.list", async () => ["account_a", "account_b", "account_changed"].map(id => ({ id, name: id, enabled: true, revoked: false, provider: "acp-omp", hostId: "host_one", gateway: null })));
+    f.harness.sdk.stub("providers.list", async () => [{ id: "acp-omp", available: true, capabilities: { permissionModes: ["full"] } }]);
+    const profileInput = { providerId: "acp-omp", modelId: "model_a", reasoningLevel: "high", permissionMode: "full" as const, serviceTier: null, environmentKind: "project-default" as const, baseBranch: null, machineId: null, executionContextId: "context_one", modelConnectionId: "account_a", instructions: "Explicit registry selection" };
+    const currentProfile = f.store.tasks.createPreset({ ...profileInput, name: "Currently persisted A" });
+    const selectedProfile = f.store.tasks.createPreset({ ...profileInput, name: "Newly selected B", modelId: "model_b", modelConnectionId: "account_b" });
+    const unrelatedProfile = f.store.tasks.createPreset({ ...profileInput, name: "Unrelated C" });
+    const task = f.store.tasks.createTask({ projectId: f.project.id, title: "Select a different execution profile" });
+    const executions = new ExecutionStore(f.store.database);
+    const originalTarget = { bbProjectId: "proj_code", hostId: "host_one", presetId: currentProfile.id, workspace: { kind: "managed-worktree" as const, baseBranch: "main" } };
+    executions.setTarget(task.id, originalTarget);
+    const { item } = await f.incoming(task.key);
+    expect((await preview(f, item.id)).proposal).toMatchObject({ target: { presetId: currentProfile.id, executionContextId: "context_one", modelConnectionId: "account_a" }, targetIssue: null });
+    const entered = createDeferredPromise<void>();
+    const release = createDeferredPromise<void>();
+    f.harness.sdk.stub("providers.models", async () => {
+      entered.resolve();
+      await release.promise;
+      return { modelLoadError: null, models: [{ id: "model_b", model: "model_b", supportedReasoningEfforts: [{ reasoningEffort: "high" }] }], selectedOnlyModels: [] };
+    });
+    const selectedTarget = { ...originalTarget, presetId: selectedProfile.id };
+    const pending = f.harness.callRpc("applyInboxRoute", { id: item.id, operationId: "select-profile-b", grantId: null, expectedRevision: 1, action: { kind: "target", target: selectedTarget } });
+    await entered.promise;
+    try {
+      if (change === "model") f.store.tasks.updatePreset(selectedProfile.id, { modelId: "model_changed" });
+      if (change === "payer") f.store.tasks.updatePreset(selectedProfile.id, { modelConnectionId: "account_changed" });
+      if (change === "unrelated-profile") f.store.tasks.updatePreset(unrelatedProfile.id, { modelConnectionId: "account_changed", modelId: "model_changed" });
+    } finally {
+      release.resolve();
+    }
+    const result = routeOutcomeSchema.parse(await pending);
+    if ((change === "model" || change === "payer") && result.state === "parked") {
+      expect(executions.target(task.id)).toEqual(originalTarget);
+    } else {
+      expect(result.state).toBe("applied");
+      const refreshed = await preview(f, item.id);
+      expect(refreshed.proposal?.target).toMatchObject({ executionContextId: "context_one", modelConnectionId: "account_b" });
+      expect(f.store.tasks.getPreset(refreshed.proposal!.target!.presetId)?.modelId).toBe("model_b");
+      expect(refreshed.proposal?.targetIssue).toBeNull();
+    }
+    expect(f.persistence.journal(item.id).find(entry => entry.operationId === "select-profile-b")?.state).toBe(result.state);
+    expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
+  });
+});
+
+describe("review regressions: explicit separate-new-work answers", () => {
+  it("creates separate work once through CLI when conflicting task references are context", async () => {
+    const f = setup();
+    const first = f.store.tasks.createTask({ projectId: f.project.id, title: "Existing checkout work" });
+    const second = f.store.tasks.createTask({ projectId: f.project.id, title: "Existing deployment work" });
+    const { item } = await f.incoming(`New integration work related to ${first.key} and ${second.key}`);
+    expect(await preview(f, item.id)).toMatchObject({ state: "parked", proposal: { decision: { kind: "clarify" } } });
+    const response = await f.harness.runCli(["route", "preview", item.id, "--operation", "answer-separate-work", "--revision", "1", "--source-revision", item.revision, "--project", f.project.prefix, "--new-task", "--json"]);
+    expect(response.exitCode).toBe(0);
+    const answer = routeOutcomeSchema.parse(JSON.parse(response.stdout));
+    expect(answer).toMatchObject({ state: "applied", proposal: { decision: { kind: "new", projectId: f.project.id }, taskId: null, threadId: null } });
+    const apply = async () => {
+      const result = await f.harness.runCli(["route", "apply", item.id, "--operation", "create-separate-work", "--revision", "2", "--action", JSON.stringify({ kind: "create" }), "--json"]);
+      expect(result.exitCode).toBe(0);
+      return routeOutcomeSchema.parse(JSON.parse(result.stdout));
+    };
+    const created = await apply();
+    expect(created).toMatchObject({ state: "applied", item: { state: "resolved" } });
+    const createdId = z.string().min(1).parse(created.item?.taskId);
+    expect(createdId).not.toBe(first.id);
+    expect(createdId).not.toBe(second.id);
+    expect(f.store.tasks.getTask(createdId)).toMatchObject({ projectId: f.project.id, title: item.title });
+    expect(await apply()).toEqual(created);
+    expect(f.store.tasks.listTasks().map(task => task.id).sort()).toEqual([first.id, second.id, createdId].sort());
+    expect(f.store.tasks.getTask(first.id)).toEqual(first);
+    expect(f.store.tasks.getTask(second.id)).toEqual(second);
+    expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
+  });
+
+  it("does not treat separate-new-work intent as permission to infer a tracker project", async () => {
+    const f = setup();
+    const first = f.store.tasks.createTask({ projectId: f.project.id, title: "Checkout" });
+    const second = f.store.tasks.createTask({ projectId: f.project.id, title: "Deployment" });
+    const { item } = await f.incoming(`Separate work related to ${first.key} and ${second.key}`);
+    const answer = await preview(f, item.id, { projectId: null, newTask: true });
+    expect(answer.state).toBe("parked");
+    const applied = routeOutcomeSchema.parse(await f.harness.callRpc("applyInboxRoute", { id: item.id, operationId: "create-without-project", grantId: null, expectedRevision: 1, action: { kind: "create" } }));
+    expect(applied.state).toBe("parked");
+    expect(new InboxStore(f.store.database).get(item.id).taskId).toBeNull();
+    expect(f.store.tasks.listTasks().map(task => task.id).sort()).toEqual([first.id, second.id].sort());
+    expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
+  });
+
+  it("preserves an already linked intake owner instead of creating separate work again", async () => {
+    const f = setup();
+    const first = f.store.tasks.createTask({ projectId: f.project.id, title: "Linked native owner" });
+    const second = f.store.tasks.createTask({ projectId: f.project.id, title: "Context only" });
+    const { item } = await f.incoming(`Related to ${first.key} and ${second.key}`);
+    await f.harness.callRpc("linkInboxTask", { id: item.id, taskId: first.id });
+    const answer = await preview(f, item.id, { newTask: true });
+    expect(answer.proposal?.decision).toMatchObject({ kind: "existing", taskId: first.id });
+    const applied = routeOutcomeSchema.parse(await f.harness.callRpc("applyInboxRoute", { id: item.id, operationId: "do-not-recreate-linked-intake", grantId: null, expectedRevision: 1, action: { kind: "create" } }));
+    expect(applied.state).toBe("parked");
+    expect(new InboxStore(f.store.database).get(item.id).taskId).toBe(first.id);
+    expect(f.store.tasks.listTasks().map(task => task.id).sort()).toEqual([first.id, second.id].sort());
     expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
   });
 });
