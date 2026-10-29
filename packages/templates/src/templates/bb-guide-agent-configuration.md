@@ -34,6 +34,7 @@ Explicit contexts and model connections:
     bb execution-context create --file context.json --json
     bb execution-context show <id> --json
     bb execution-context update <id> --file patch.json --json
+    bb execution-context thread-eligibility <thread-id> --json
     bb execution-context mcp-inspect --machine <host-id> \
       --provider claude-code --config /absolute/path/mcp.json --json
     bb model-connection create --file connection.json --json
@@ -70,9 +71,24 @@ Explicit contexts and model connections:
   different account. A thread retains its snapshots for reopen/followup;
   changing a definition/default affects new threads, not its native session.
 
+  Current eligibility is separate from the frozen receipt. The thread-eligibility
+  command and sdk.experimental_executionContexts.getThreadEligibility({threadId})
+  return one bounded synchronous Core observation of thread routing, current
+  context/connection definitions and execution-host session status, alongside
+  the unchanged frozen binding, available, issue and an opaque generation.
+  getThreadBinding({threadId}) remains frozen-receipt inspection; neither read
+  replaces the saved selection or borrows a host/default/pool account.
+  available:true reports Core eligibility at that observation, not verified
+  credentials, a turn's physical payer, model entitlement or subscription quota.
+  No authentication or quota probe is performed. Later changes can invalidate
+  the observation; reconcile delivered Core changes and reconnects rather than
+  treating generation as a promise of ongoing or instantaneous global validity.
+  The same observation is GET /api/v1/execution-contexts/thread-eligibility/<id>.
+
   SDK equivalents: experimental_executionContexts.{list,get,create,update,delete,inspectMcp},
   experimental_modelConnections.{list,get,create,update,delete},
-  experimental_executionContexts.{getProjectDefaults,setProjectDefaults,getThreadBinding},
+  experimental_executionContexts.{getProjectDefaults,setProjectDefaults,
+    getThreadBinding,getThreadEligibility},
   threads.spawn({executionContextId,modelConnectionId,...}). HTTP resources:
   /api/v1/execution-contexts and /api/v1/model-connections; static MCP inspection
   is POST /api/v1/execution-contexts/mcp/inspect with {hostId,providerId,configPaths}.
