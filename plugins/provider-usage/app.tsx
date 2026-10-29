@@ -946,10 +946,9 @@ export function SelectedThreadUsage({
   const selectedThread = sidebar.threads.find((thread) => thread.id === threadId);
   const environmentId = selectedThread?.environment?.id;
   const hostId = selectedThread?.host?.id ?? threadMachineId;
-  const hostStatus = sidebar.experimental_hosts.find((host) => host.id === hostId)?.status;
   const routeKey = JSON.stringify([
     threadId, selectedThread?.projectId, selectedThread?.providerId,
-    environmentId, selectedThread?.environment?.path, hostId, hostStatus,
+    environmentId, selectedThread?.environment?.path, hostId,
   ]);
   const [browseAll, setBrowseAll] = useState(false);
   const [generation, setGeneration] = useState(0);
