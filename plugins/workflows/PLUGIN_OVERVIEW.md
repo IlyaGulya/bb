@@ -1,4 +1,4 @@
-Run a script that fans work out to many agent threads, pipelines their results, and returns structured data. The run survives restarts and continues from the last completed step.
+Run parallel agents and pipeline structured results. Runs survive restarts and resume from the last completed step.
 
 ## What you get
 

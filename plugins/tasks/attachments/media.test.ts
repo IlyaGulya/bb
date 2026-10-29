@@ -68,7 +68,8 @@ describe("task video HTTP delivery", () => {
       expect(response.headers.get("content-length")).toBe("0");
       expect(await response.text()).toBe("");
     }
-    for (const headers of [{ range: "bytes=4-2" }, { range: "bytes=0-1,4-5" }, { range: "bytes=0-1", "if-range": '"unknown"' }]) {
+    const invalidHeaders: HeadersInit[] = [{ range: "bytes=4-2" }, { range: "bytes=0-1,4-5" }, { range: "bytes=0-1", "if-range": '"unknown"' }];
+    for (const headers of invalidHeaders) {
       const response = await fixture.harness.fetchHttp("GET", fixture.url, { headers });
       expect(response.status).toBe(200);
       expect(response.headers.get("content-range")).toBeNull();

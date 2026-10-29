@@ -1,8 +1,7 @@
-import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
-import { sharedWorkerProjects } from "../../vitest.shared";
+import { defineWorkspaceTestConfig, sharedWorkerProjects } from "../../vitest.shared.js";
 
-export default defineConfig({
+export default defineWorkspaceTestConfig({
   resolve: {
     tsconfigPaths: true,
     alias: {
