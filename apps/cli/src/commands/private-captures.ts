@@ -54,7 +54,7 @@ async function readPrivateFile(path: string, maximum: number): Promise<Buffer> {
     return bytes;
   } catch (error) {
     if (error instanceof CliUsageError) throw error;
-    invalid("Private capture input is unavailable or unsafe.");
+    return invalid("Private capture input is unavailable or unsafe.");
   } finally {
     try { await handle?.close(); } catch { invalid("Private capture input could not be closed safely."); }
   }

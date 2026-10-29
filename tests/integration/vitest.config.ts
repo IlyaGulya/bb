@@ -62,6 +62,11 @@ export default defineWorkspaceTestConfig({
         if (typeof project !== "object" || project === null || !("test" in project) || typeof project.test !== "object" || project.test === null) throw new Error("Analytics fixtures require an inline test project");
         return { ...project, test: { ...project.test, isolate: true, globalSetup: ["./global-setup.ts"] } };
       }),
+      ...sharedWorkerProjects({
+        pkgDir: __dirname,
+        name: "@bb/integration-tests:private-capture",
+        include: ["private-capture/**/*.test.ts"],
+      }),
     ],
   },
 });
