@@ -1,5 +1,30 @@
 import type { UsageMeasurement } from "./usage-source-contract.js";
 import type { ProviderUsage } from "./usage-schema.js";
+import type { ThreadUsage } from "./thread-usage-schema.js";
+
+export const THREAD_USAGE_MAX_AGE_MS = 60_000;
+
+export function withThreadUsageFreshness(value: ThreadUsage, now: number): ThreadUsage {
+  if (value.usage?.status !== "ok") return value;
+  if (value.observedAt === null || !Number.isFinite(value.observedAt) ||
+    value.observedAt < 0 || !Number.isFinite(now) || value.observedAt > now) {
+    return {
+      ...value,
+      state: "unknown",
+      observedAt: null,
+      usage: null,
+      reason: "The source did not provide a valid observation time. Quota and plan cannot be attributed as current.",
+    };
+  }
+  if (value.state !== "stale" && now - value.observedAt >= THREAD_USAGE_MAX_AGE_MS) {
+    return {
+      ...value,
+      state: "stale",
+      reason: "The last selected-source observation reached its one-minute freshness deadline; current quota is unknown.",
+    };
+  }
+  return value;
+}
 
 export function normalizedUsage(
   usage: UsageMeasurement["usage"] | undefined,

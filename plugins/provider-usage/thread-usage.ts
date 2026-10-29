@@ -1,9 +1,8 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
-import { normalizeUsageMeasurement, normalizedUsage } from "./usage-normalization.js";
+import { normalizeUsageMeasurement, normalizedUsage, withThreadUsageFreshness } from "./usage-normalization.js";
 import { usageFetchMethod, usageListMethod, usageSourceRpcContract } from "./usage-source-contract.js";
 import type { ThreadUsage, ThreadUsageInput } from "./thread-usage-schema.js";
 
-const MAX_OBSERVATION_AGE_MS = 2 * 60_000;
 const SOURCE_PLUGIN_ID = "provider-claude-code";
 
 function unknownUsage(threadId: string): ThreadUsage {
@@ -41,7 +40,19 @@ export function createThreadUsageReader(bb: BbPluginApi) {
       kind: connection.gateway === null ? "native" : "gateway",
       definition: "unknown",
     };
-    const [definition, environment] = await Promise.all([
+    const frozenContext = binding?.executionContext ?? null;
+    const environment = thread.environmentId === null
+      ? null
+      : await bb.sdk.environments.get({ environmentId: thread.environmentId }).catch(() => null);
+    const host = environment === null
+      ? null
+      : await bb.sdk.hosts.get({ hostId: environment.hostId }).catch(() => null);
+    result.host = host === null ? null : { id: host.id, name: host.name };
+    if (host !== null) {
+      const providers = await bb.sdk.providers.list({ hostId: host.id }).catch(() => []);
+      result.connection.providerName = providers.find((provider) => provider.id === connection.provider)?.displayName ?? connection.provider;
+    }
+    const [definition, contextDefinition] = await Promise.all([
       bb.sdk.experimental_modelConnections.get({ id: connection.id }).then(
         (value) => ({ kind: "found" as const, value }),
         (cause: unknown) => ({
@@ -50,9 +61,16 @@ export function createThreadUsageReader(bb: BbPluginApi) {
             : "unknown" as const,
         }),
       ),
-      thread.environmentId === null
-        ? null
-        : bb.sdk.environments.get({ environmentId: thread.environmentId }).catch(() => null),
+      frozenContext === null
+        ? { kind: "unscoped" as const }
+        : bb.sdk.experimental_executionContexts.get({ id: frozenContext.id }).then(
+            (value) => ({ kind: "found" as const, value }),
+            (cause: unknown) => ({
+              kind: cause instanceof Error && "status" in cause && cause.status === 404
+                ? "missing" as const
+                : "unknown" as const,
+            }),
+          ),
     ]);
     if (definition.kind !== "found") {
       result.connection.definition = definition.kind;
@@ -68,15 +86,31 @@ export function createThreadUsageReader(bb: BbPluginApi) {
       : !current.enabled || !connection.enabled
         ? "disabled"
         : JSON.stringify(current) === JSON.stringify(connection) ? "active" : "changed";
-    const host = environment === null
-      ? null
-      : await bb.sdk.hosts.get({ hostId: environment.hostId }).catch(() => null);
-    result.host = host === null ? null : { id: host.id, name: host.name };
-    if (host !== null) {
-      const providers = await bb.sdk.providers.list({ hostId: host.id }).catch(() => []);
-      result.connection.providerName = providers.find((provider) => provider.id === connection.provider)?.displayName ?? connection.provider;
+    if (contextDefinition.kind === "missing" || contextDefinition.kind === "unknown") {
+      result.state = contextDefinition.kind;
+      result.reason = contextDefinition.kind === "missing"
+        ? "The execution context referenced by the frozen binding was removed. No quota was attributed."
+        : "The current execution context could not be verified. No quota was attributed.";
+      return { result, key: "context-unavailable", qualified: false };
     }
-    const key = JSON.stringify([binding, thread.providerId, thread.environmentId, environment?.hostId, current, host?.status]);
+    if (contextDefinition.kind === "found") {
+      if (!contextDefinition.value.enabled) {
+        result.state = "disabled";
+        result.reason = "The frozen binding's execution context is currently disabled. Usage is not collected.";
+        return { result, key: "context-disabled", qualified: false };
+      }
+      if (!contextDefinition.value.projectIds.includes(thread.projectId)) {
+        result.reason = "The current execution context does not permit this thread's project. No quota was attributed.";
+        return { result, key: "context-project-unavailable", qualified: false };
+      }
+    }
+    const contextPolicy = contextDefinition.kind === "found" ? {
+      id: contextDefinition.value.id,
+      enabled: contextDefinition.value.enabled,
+      projectIds: contextDefinition.value.projectIds,
+      updatedAt: contextDefinition.value.updatedAt,
+    } : null;
+    const key = JSON.stringify([binding, thread.projectId, thread.providerId, thread.environmentId, environment?.hostId, current, contextPolicy, host?.status]);
     if (result.connection.definition === "revoked" || result.connection.definition === "disabled") {
       result.state = result.connection.definition;
       result.reason = `This model connection is ${result.state}. The frozen binding remains unchanged; usage is not collected.`;
@@ -124,6 +158,13 @@ export function createThreadUsageReader(bb: BbPluginApi) {
     }
     return { result, key, qualified: true };
   };
+  const recheck = async (threadId: string, key: string): Promise<ThreadUsage | null> => {
+    const latest = await inspect(threadId);
+    if (!latest.qualified) return latest.result;
+    if (latest.key === key) return null;
+    latest.result.reason = "The frozen binding or current execution definitions changed while usage was loading. Reload to inspect the frozen selection; no old quota was retained.";
+    return latest.result;
+  };
 
   return async (input: ThreadUsageInput): Promise<ThreadUsage> => {
     let initial: Awaited<ReturnType<typeof inspect>>;
@@ -160,6 +201,8 @@ export function createThreadUsageReader(bb: BbPluginApi) {
         if (resources.length !== 1) {
           result.reason = "An unambiguous host-default Claude resource is not published for this execution machine. No pooled or other-host resource was selected.";
         } else {
+          const changed = await recheck(input.threadId, initial.key);
+          if (changed !== null) return changed;
           result.source = { pluginId: source.pluginId, name: source.displayName, resourceId: expectedId };
           const measurement = normalizeUsageMeasurement(await bb.sdk.plugins.callRpc({
             pluginId: source.pluginId,
@@ -181,22 +224,16 @@ export function createThreadUsageReader(bb: BbPluginApi) {
               : usage.status === "unauthenticated"
                 ? "The selected source reports no authenticated login, not exhausted quota."
                 : "Claude is not installed on this execution machine.";
-          } else if (measurement.observedAt === null || measurement.observedAt > Date.now()) {
-            result.observedAt = null;
-            result.reason = "The source did not provide a valid observation time. Quota and plan cannot be attributed as current.";
           } else {
             result.usage = normalizedUsage(usage);
-            result.state = Date.now() - measurement.observedAt > MAX_OBSERVATION_AGE_MS
-              ? "stale"
-              : usage.windows.some((window) => window.usedPercent >= 100) ? "exhausted"
-                : usage.windows.length === 0 ? "unknown" : "available";
-            result.reason = result.state === "stale"
-              ? "The last selected-source observation is older than two minutes; current quota is unknown."
-              : result.state === "exhausted"
-                ? "The selected source reports at least one exhausted quota window. No fallback account was selected."
-                : result.state === "unknown"
-                  ? "The selected source reports no quota windows. Missing limits are not zero consumption."
-                  : "Host-default Claude observation for this frozen logical connection; not a receipt of the physical credential used by a turn.";
+            result.state = usage.windows.some((window) => window.usedPercent >= 100)
+              ? "exhausted"
+              : usage.windows.length === 0 ? "unknown" : "available";
+            result.reason = result.state === "exhausted"
+              ? "The selected source reports at least one exhausted quota window. No fallback account was selected."
+              : result.state === "unknown"
+                ? "The selected source reports no quota windows. Missing limits are not zero consumption."
+                : "The selected source reports quota windows for the frozen logical connection.";
           }
         }
       }
@@ -206,19 +243,11 @@ export function createThreadUsageReader(bb: BbPluginApi) {
       result.usage = null;
     }
     try {
-      const latest = await inspect(input.threadId);
-      if (!latest.qualified) return latest.result;
-      if (latest.key !== initial.key) {
-        latest.result.reason = "The binding or connection definition changed while usage was loading. Reload to inspect the frozen selection; no old quota was retained.";
-        return latest.result;
-      }
+      const changed = await recheck(input.threadId, initial.key);
+      if (changed !== null) return changed;
     } catch {
       return unknownUsage(input.threadId);
     }
-    if (result.usage?.status === "ok" && result.observedAt !== null && Date.now() - result.observedAt > MAX_OBSERVATION_AGE_MS) {
-      result.state = "stale";
-      result.reason = "The last selected-source observation is older than two minutes; current quota is unknown.";
-    }
-    return result;
+    return withThreadUsageFreshness(result, Date.now());
   };
 }

@@ -13,14 +13,27 @@ unsupported, stale, unauthenticated, expired, and exhausted are distinct states.
 Definition changes and reconnects invalidate selected observations; late replies
 from an older thread or invalidated request cannot populate the selection.
 
+When the frozen binding references an execution context, its current definition
+must exist, be enabled, and permit the thread's actual Core project. A null frozen
+context remains legitimately unscoped; it is not replaced with a default context.
+Current definitions supply eligibility only, never replacement instructions, MCP
+sources, authentication references, or account routing. Metadata awaits precede
+the current-definition reads. The binding, project, context-policy revision,
+connection, environment and host are rechecked immediately before the selected
+measurement and again after collection; unavailable or changed eligibility
+suppresses the observation instead of retaining old quota.
+
 The qualified association currently is native `claude-code`, gateway absent,
 all `nativeAuth` references null, and the same actual execution host authorized by
 both frozen and current definitions. A native MCP profile must also use the
 default account directory. The canonical `provider-claude-code` source must publish
 exactly its host-default resource for that host/provider pair. Only that resource
 is fetched. This is a **host-default source observation for a logical connection**,
-not proof of the physical credential used by a turn. Plan labels are explicitly
-source-reported, not verified native session identity or readiness.
+not proof of the physical credential used by a turn. That qualification remains
+visible for every selected-source collection state, including exhaustion,
+authentication failures, collection errors, stale readings and missing limits.
+Plan labels are explicitly source-reported, not verified native session identity
+or readiness.
 
 Gateway namespaces/account families, native `configDir`/`profile`/`hostEnv`
 selectors, and other unproven provider mappings return metadata-only unsupported
@@ -29,12 +42,18 @@ quota. There is no per-connection quota API, auth-file lookup, alternate-account
 fallback, or payer rotation added here. The binding and current availability are
 checked again after collection before an observation can be returned.
 
-Selected observations show source and last successful measurement time; successful
-observations older than two minutes are stale. Missing or invalid observation
-times cannot produce current percentages or plans. Failed collection does not
-substitute another source. Authentication failure is not exhausted quota, and
-missing quota windows are not zero consumption. Existing bars, reset details and
-reported extra-usage costs are reused when the qualifying source supplies them.
+Selected observations show source and last successful measurement time. A shared
+60-second observed-time deadline marks successful observations stale in the
+resolver and the selected surface. The surface expires each admitted observation
+at `observedAt + 60_000`, independently of the existing two-minute refresh or a
+pending request. Expiry changes display state only; it does not start another
+request. Timers are disposed on replacement, invalidation, thread change or
+unmount, and their callbacks cannot modify a different admitted result.
+Missing, nonfinite or future observation times cannot produce current percentages
+or plans. Failed collection does not substitute another source. Authentication
+failure is not exhausted quota, and missing quota windows are not zero consumption.
+Existing bars, reset details and reported extra-usage costs are reused when the
+qualifying source supplies them. All accounts maintenance freshness is unchanged.
 
 ## All accounts: separate maintenance browsing
 

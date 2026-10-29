@@ -13,6 +13,12 @@
 - Restore Provider Usage RPC registration by declaring consumer schemas with
   Zod's built-in Standard JSON Schema exporters. Keep maintenance `getUsage` and
   selected `getThreadUsage` discoverable without changing validation or routing.
+- Fail selected usage closed when a frozen execution context's current definition
+  is missing, disabled, unavailable or excludes the actual project. Recheck
+  eligibility around collection without replacing frozen instructions or payer
+  references. Keep host-default observation provenance visible across all source
+  states and expire selected readings at their 60-second observed-time deadline,
+  independently of refresh completion and obsolete thread timers.
 - Give Tasks one header workflow action backed by the shared persistent drawer;
   retain single-agent dispatch as a secondary action. Keep draft selections and
   explicit unavailable choices while Core definition/account catalog events and

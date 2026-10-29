@@ -58,6 +58,7 @@ import {
 import { UsageSettings } from "./settings.js";
 import { z } from "zod/mini";
 import type { providerUsageRpcContract } from "./server.js";
+import { THREAD_USAGE_MAX_AGE_MS, withThreadUsageFreshness } from "./usage-normalization.js";
 import type { ThreadUsage } from "./thread-usage-schema.js";
 
 export interface UsageStoreSnapshot {
@@ -997,10 +998,34 @@ export function SelectedThreadUsage({
       window.removeEventListener("focus", refresh);
     };
   }, [rpc, threadId, generation, browseAll, connectionState, invalidate]);
-  const result = loaded?.generation === generation &&
+  const admitted = loaded?.generation === generation &&
     loaded.value.threadId === threadId && connectionState === "connected"
     ? loaded.value
     : null;
+  useEffect(() => {
+    if (browseAll || admitted?.usage?.status !== "ok" || admitted.state === "stale") return;
+    const observedAt = admitted.observedAt;
+    const now = Date.now();
+    if (observedAt === null || !Number.isFinite(observedAt) || observedAt < 0 ||
+      !Number.isFinite(now) || observedAt > now) return;
+    const remaining = observedAt + THREAD_USAGE_MAX_AGE_MS - now;
+    if (remaining <= 0) return;
+    const admission = loaded;
+    let disposed = false;
+    const timer = window.setTimeout(() => {
+      if (disposed) return;
+      setLoaded((current) => {
+        if (current === null || current !== admission || current.generation !== generation ||
+          current.value.threadId !== threadId) return current;
+        return { ...current, value: withThreadUsageFreshness(current.value, Date.now()) };
+      });
+    }, remaining);
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+    };
+  }, [admitted, loaded, generation, threadId, browseAll]);
+  const result = admitted === null ? null : withThreadUsageFreshness(admitted, Date.now());
   if (browseAll) return (
     <div data-provider-usage-scope="all-accounts">
       <div className="flex items-center gap-2 border-b border-sidebar-border px-2.5 py-1.5">
@@ -1011,6 +1036,7 @@ export function SelectedThreadUsage({
           size="sm"
           variant="ghost"
           className="h-7 shrink-0 px-2 text-2xs"
+          data-provider-usage-action="selected.show"
           onClick={() => { setBrowseAll(false); invalidate(); }}
         >
           Selected account
@@ -1065,7 +1091,7 @@ export function SelectedThreadUsage({
         <h2 className="min-w-0 flex-1 truncate text-2xs font-medium text-sidebar-foreground">
           {connection?.name ?? "Selected account"}
         </h2>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-2xs" onClick={() => setBrowseAll(true)}>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-2xs" data-provider-usage-action="accounts.browse" onClick={() => setBrowseAll(true)}>
           All accounts
         </Button>
         <Button
@@ -1073,6 +1099,7 @@ export function SelectedThreadUsage({
           variant="ghost"
           className="size-7 p-0"
           aria-label="Reload selected account usage"
+          data-provider-usage-action="selected.refresh"
           onClick={() => { forceNext.current = true; invalidate(); }}
         >
           <Icon name="RotateCcw" className="size-3.5" />
@@ -1107,10 +1134,15 @@ export function SelectedThreadUsage({
               </p>
             ) : null}
             {result.source ? (
-              <p className="text-subtle-foreground">
-                Source: {result.source.name}
-                {result.observedAt === null ? " · Never observed" : ` · Last observed ${new Date(result.observedAt).toLocaleString()}`}
-              </p>
+              <>
+                <p className="text-subtle-foreground">
+                  Host-default observation source; not proof of the physical credential used by a turn.
+                </p>
+                <p className="text-subtle-foreground">
+                  Source: {result.source.name}
+                  {result.observedAt === null ? " · Never observed" : ` · Last observed ${new Date(result.observedAt).toLocaleString()}`}
+                </p>
+              </>
             ) : null}
             {account ? (
               <div className={cn(USAGE_GRID_CLASS_NAME, "gap-y-2")}>
@@ -1128,7 +1160,7 @@ export function SelectedThreadUsage({
           <summary className="cursor-pointer rounded-sm py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
             Diagnostics
           </summary>
-          <Button size="sm" variant="ghost" className="my-1 h-7 px-2 text-2xs" onClick={() => void copyDiagnostics()}>
+          <Button size="sm" variant="ghost" className="my-1 h-7 px-2 text-2xs" data-provider-usage-action="diagnostics.copy" onClick={() => void copyDiagnostics()}>
             Copy diagnostics
           </Button>
           {copyStatus ? <p role="status">{copyStatus}</p> : null}
