@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { appSettingsValues, threads, type DbConnection } from "@bb/db";
+import { appSettingsValues, threads, type DbConnection, type DbQueryConnection } from "@bb/db";
 import type { TurnRequestTarget } from "@bb/domain";
 import { productAnalyticsModeSchema, type ProductAnalyticsMode } from "@bb/server-contract";
 import { and, count, eq, gte, like, lt } from "drizzle-orm";
@@ -13,6 +13,30 @@ const pendingModePrefix = ANALYTICS_PENDING_TURN_MODE_PREFIX;
 function pendingModeKey(threadId: string): string {
   return `${pendingModePrefix}${createHash("sha256").update(threadId).digest("hex")}`;
 }
+function queuedModeKey(queuedMessageId: string): string {
+  return `${pendingModePrefix}queued.${createHash("sha256").update(queuedMessageId).digest("hex")}`;
+}
+
+function writeMode(db: DbQueryConnection, key: string, mode: ProductAnalyticsMode, updatedAt: number): boolean {
+  db.delete(appSettingsValues).where(and(like(appSettingsValues.key, `${pendingModePrefix}%`), lt(appSettingsValues.updatedAt, updatedAt - ANALYTICS_RETENTION_MS))).run();
+  const existing = db.select({ key: appSettingsValues.key }).from(appSettingsValues).where(eq(appSettingsValues.key, key)).get();
+  if (existing === undefined && (db.select({ value: count() }).from(appSettingsValues).where(like(appSettingsValues.key, `${pendingModePrefix}%`)).get()?.value ?? 0) >= ANALYTICS_MAX_PENDING) return false;
+  const value = JSON.stringify(mode);
+  db.insert(appSettingsValues).values({ key, value, updatedAt }).onConflictDoUpdate({ target: appSettingsValues.key, set: { value, updatedAt } }).run();
+  return true;
+}
+
+export function rememberQueuedAnalyticsMode(db: DbConnection, transaction: DbQueryConnection, queuedMessageId: string): void {
+  const context = productAnalyticsContext();
+  if (context === undefined) return;
+  const service = getPrivateProductAnalytics(db);
+  try {
+    if (!writeMode(transaction, queuedModeKey(queuedMessageId), context.mode, Date.now())) service.noteGap(context.scope, context.mode);
+  } catch {
+    service.noteGap(context.scope, context.mode);
+  }
+}
+
 function turnOperationId(threadId: string, turnId: string): string {
   const hash = createHash("sha256").update(`${threadId}:${turnId}`).digest("hex");
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
@@ -22,24 +46,38 @@ export function analyticsTurnMode(db: DbConnection, threadId: string, turnId: st
   return getPrivateProductAnalytics(db).modeForOperation({ scope: { kind: "project", projectId }, operationId: turnOperationId(threadId, turnId), featureId: "core.execution", action: "turn", version: 1 });
 }
 
-export function rememberAnalyticsTurnMode(db: DbConnection, threadId: string, target: TurnRequestTarget): void {
+export function rememberAnalyticsTurnMode(db: DbConnection, threadId: string, target: TurnRequestTarget, provenance: { projectId: string; queuedMessageIds: readonly string[]; transaction: DbQueryConnection }): void {
   const context = productAnalyticsContext();
-  if (target.kind !== "new-turn" || context === undefined) return;
+  const newTurn = target.kind === "new-turn" || target.kind === "thread-start";
+  if (provenance.queuedMessageIds.length === 0 && (context === undefined || !newTurn)) return;
   const service = getPrivateProductAnalytics(db);
+  const scope = { kind: "project" as const, projectId: provenance.projectId };
+  let mode = context?.mode ?? service.mode;
+  let mixed = false;
   try {
-    const key = pendingModeKey(threadId);
     const updatedAt = Date.now();
-    const stored = db.transaction((tx) => {
-      tx.delete(appSettingsValues).where(and(like(appSettingsValues.key, `${pendingModePrefix}%`), lt(appSettingsValues.updatedAt, updatedAt - ANALYTICS_RETENTION_MS))).run();
-      const existing = tx.select({ key: appSettingsValues.key }).from(appSettingsValues).where(eq(appSettingsValues.key, key)).get();
-      if (existing === undefined && (tx.select({ value: count() }).from(appSettingsValues).where(like(appSettingsValues.key, `${pendingModePrefix}%`)).get()?.value ?? 0) >= ANALYTICS_MAX_PENDING) return false;
-      const value = JSON.stringify(context.mode);
-      tx.insert(appSettingsValues).values({ key, value, updatedAt }).onConflictDoUpdate({ target: appSettingsValues.key, set: { value, updatedAt } }).run();
-      return true;
-    });
-    if (!stored) service.noteGap(context.scope, context.mode);
+    const tx = provenance.transaction;
+    let queuedMode: ProductAnalyticsMode | undefined;
+    for (const id of provenance.queuedMessageIds) {
+      const key = queuedModeKey(id);
+      if (newTurn) {
+        const entry = tx.select({ value: appSettingsValues.value }).from(appSettingsValues).where(and(eq(appSettingsValues.key, key), gte(appSettingsValues.updatedAt, updatedAt - ANALYTICS_RETENTION_MS))).get();
+        if (entry !== undefined) {
+          const value = productAnalyticsModeSchema.parse(JSON.parse(entry.value));
+          if (queuedMode === undefined) queuedMode = value;
+          else if (queuedMode !== value) {
+            mixed = true;
+            if (queuedMode === "production") queuedMode = value;
+          }
+        }
+      }
+      tx.delete(appSettingsValues).where(eq(appSettingsValues.key, key)).run();
+    }
+    mode = queuedMode ?? mode;
+    const stored = !newTurn || writeMode(tx, pendingModeKey(threadId), mode, updatedAt);
+    if (!stored || mixed) service.noteGap(scope, mode);
   } catch {
-    service.noteGap(context.scope, context.mode);
+    service.noteGap(scope, mode);
   }
 }
 

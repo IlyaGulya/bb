@@ -79,12 +79,18 @@ Bounds:
 - Server: 30-day event retention, 100,000 events, 10,000 pending; project at most
   500 pending records per sweep. Instance identity and cumulative delivery
   counters are diagnostic state, not a retained payload/event history.
-- Immediate native dispatch retains only a validated QA mode under a hashed pending-thread
-  key in existing Core key-value storage: one marker per pending thread, at most
-  10,000 markers, with 30-day expiry in the existing collector sweep. An admitted
-  native start consumes the marker; paired completion uses the existing durable
-  event attribution across restart. Marker storage failure remains a visible gap
-  and does not fail the primary dispatch. No request content or new queue is stored.
+- Native and queued dispatch retain only validated QA modes under hashed
+  pending-thread and queued-message keys in existing Core key-value storage.
+  The two marker kinds share a 10,000-entry cap and 30-day expiry in the existing
+  collector sweep. A queued marker is committed with its queue row; its mode is
+  transferred to the pending-thread marker in the existing consumption/admission
+  transaction, including the fast, hook-driven and provisioning paths. An
+  admitted native start consumes the thread marker; paired completion uses the
+  existing durable event attribution across restart. Consumed queue markers are
+  retired. If existing business grouping combines modes, the first non-production
+  mode wins and a gap is exposed, never production popularity for mixed QA work.
+  Marker storage failure remains a visible gap and does not fail the primary
+  dispatch. No request content, new queue or wire field is stored.
 - Browser: 500 pending events, seven-day expiry, 50 events per batch, at most
   ten batches per flush. Reconnect and periodic delivery reuse the same outbox.
 - Storage failures, projection failures, capacity limits, expiry, rejected
@@ -98,6 +104,14 @@ server boundary. CLI requests also forward an explicit value from their process
 environment, including MCP's inherited CLI environment. A non-production server
 does not accept client production tags as production popularity. Reports keep
 those planes separate. A test suite or replayed workload is not production demand.
+
+MCP semantic search/read/run observers receive the original HTTP request from
+the existing per-request server factory. They retain its bounded operation,
+Core project, actor/session and QA metadata, and use the actual MCP surface.
+Explicit observation intent is not counted as use. Requests without an explicit
+project remain instance-scoped; the existing Core admission gate validates scope
+and the complete event. No request body, tool arguments or results are copied
+into analytics, and no shared mutable request context is introduced.
 
 Authenticated native plugin tools bind deliberate agent intent, agent surface,
 and the owning thread's actual Core project. Their QA mode is read from the

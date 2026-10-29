@@ -22,6 +22,10 @@
   intent and operation identity before asynchronous preparation and retries.
   Bind authenticated native tool and Core SDK child usage to deliberate agent
   provenance and the owning root turn's persisted QA mode.
+- Retain actual MCP request provenance in semantic tool observations through
+  the existing per-request factory. Persist queued QA modes with their rows and
+  transfer them at actual dispatch admission across restart, reusing bounded
+  Core mode markers without replacing the queue or changing wire fields.
 - Fence Tasks Start against concurrent draft revision/selection changes in its
   launch-receipt transaction. Retain the first validated bugfix reproduction
   across Return, permit retry after an exit-zero attempt, and keep legacy

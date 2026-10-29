@@ -40,7 +40,7 @@ export function queueInputForStartingTurn(
         return { kind: "retry", thread };
       }
       const entry = recordQueuedMessageWait(
-        { db: tx, hub: notifications },
+        { db: tx, hub: notifications, analyticsDb: deps.db },
         {
           thread,
           message: args.input,

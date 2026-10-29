@@ -12,6 +12,9 @@ import { createBbMcpHttpHandler } from "./mcp-handler.js";
 
 const MCP_SERVER_VERSION = "0.1.0";
 const MCP_ROUTE_PATH = "/mcp";
+const analyticsUuid = z.string().uuid();
+const analyticsActor = z.enum(["human", "agent", "system", "unknown"]);
+const analyticsMode = z.enum(["production", "preview", "smoke", "test"]);
 const ACCOUNT_PLUGIN_ID = "bb-account";
 const GRANTS_PATH = "/api/mcp/grants";
 const GRANTS_REVOKE_PATH = "/api/mcp/grants/revoke";
@@ -74,10 +77,20 @@ export default async function mcpPlugin(bb: BbPluginApi): Promise<void> {
     {
       runCli,
       loadCommandIndex: createCommandIndexLoader(runCli),
-      async observeAnalytics(action, run) {
-        const operationId = crypto.randomUUID();
+      async observeAnalytics(action, run, request) {
+        const headers = request?.headers;
+        if ((headers?.get("x-bb-product-intent") ?? "use") !== "use") return run();
+        const operationId = analyticsUuid.safeParse(headers?.get("x-bb-product-operation")).data ?? crypto.randomUUID();
         const startedAt = Date.now();
-        const event = { operationId, action: `mcp.${action}`, scope: { kind: "instance" as const }, actorKind: "unknown" as const, actorSessionId: null, surface: "mcp" as const, mode: "production" as const };
+        const projectId = headers?.get("x-bb-product-project");
+        const event = {
+          operationId, action: `mcp.${action}`,
+          scope: projectId === undefined || projectId === null ? { kind: "instance" as const } : { kind: "project" as const, projectId },
+          actorKind: analyticsActor.safeParse(headers?.get("x-bb-product-actor")).data ?? "unknown",
+          actorSessionId: analyticsUuid.safeParse(headers?.get("x-bb-product-session")).data ?? null,
+          surface: "mcp" as const,
+          mode: analyticsMode.safeParse(headers?.get("x-bb-product-mode")).data ?? "production",
+        };
         bb.experimental_productAnalytics.record({ ...event, stage: "started", outcome: "none", errorCode: "none", timestamp: startedAt, durationMs: null });
         let succeeded = false;
         try {
