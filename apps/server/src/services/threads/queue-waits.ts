@@ -1,3 +1,4 @@
+import { assertNativeHistoryWritable } from "./native-history-guard.js";
 import {
   clearQueuedThreadMessageWaitingOn,
   createQueuedThreadMessageInTransaction,
@@ -113,6 +114,7 @@ export function recordQueuedMessageWait(
   deps: QueueWaitDeps,
   args: RecordQueuedMessageWaitArgs,
 ): ThreadQueuedMessage | null {
+  assertNativeHistoryWritable(deps.db, args.thread.id);
   const claimed = args.claimed ?? [];
   const leadClaim = claimed[0];
   let row: QueuedThreadMessageRow | null;
@@ -120,6 +122,7 @@ export function recordQueuedMessageWait(
   if (leadClaim === undefined) {
     row = deps.db.transaction(
       (tx) => {
+        assertNativeHistoryWritable(tx, args.thread.id);
         assertThreadHostAcceptsWork(tx, args.thread);
         return createQueuedThreadMessageInTransaction(tx, {
           threadId: args.thread.id,

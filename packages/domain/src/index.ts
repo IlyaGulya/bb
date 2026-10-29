@@ -1,4 +1,5 @@
 export * from "./product-analytics.js";
+export * from "./native-session-record.js";
 export * from "./execution-contexts.js";
 export * from "./mcp-descriptors.js";
 export * from "./context-snapshot.js";

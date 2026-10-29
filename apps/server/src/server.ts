@@ -1,6 +1,7 @@
 import { livePluginAnalyticsCatalog } from "./services/system/product-analytics-plugin-catalog.js";
 import { analyticsMode, initializePrivateProductAnalytics } from "./services/system/product-analytics.js";
 import { privateAnalyticsMiddleware } from "./services/system/product-analytics-http.js";
+import { registerNativeSessionImportRoutes } from "./routes/native-session-imports.js";
 import { createPluginUpdateJobs } from "./services/plugins/plugin-update-jobs.js";
 import { registerPluginUpdateJobRoutes } from "./routes/plugin-update-jobs.js";
 import { recheckEnvironmentProvisioning } from "./services/threads/thread-environment-providers.js";
@@ -887,6 +888,7 @@ export function createApp(
   registerPromptHistoryRoutes(publicApi, deps);
   registerThreadSectionRoutes(publicApi, deps);
   registerGatewayLogRoutes(publicApi, deps);
+  const nativeSessionImports = registerNativeSessionImportRoutes(publicApi, deps);
   registerExecutionContextRoutes(publicApi, deps);
   registerFileRoutes(publicApi, deps);
   registerHostRoutes(publicApi, deps, pluginService);
@@ -1052,9 +1054,10 @@ export function createApp(
 
   return {
     app,
-    closeWebSockets: () => {
+    closeWebSockets: async () => {
       productAnalytics.stop();
-      return closeWebSocketServer({
+      await nativeSessionImports.dispose();
+      await closeWebSocketServer({
         forceCloseAfterMs: WEB_SOCKET_SHUTDOWN_FORCE_CLOSE_MS,
         reason: WEB_SOCKET_SHUTDOWN_REASON,
         server: wss,

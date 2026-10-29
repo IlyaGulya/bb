@@ -188,6 +188,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
 
   patch(routes.pluginMetadata.update, (context, payload) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
+    if (payload.pluginId === "native-session-history") throw new ApiError(403, "invalid_request", "Native import provenance and writer admission are Core-owned and cannot be edited as plugin metadata.");
     const result = patchThreadPluginMetadata(deps.db, {
       threadId: thread.id,
       pluginId: payload.pluginId,

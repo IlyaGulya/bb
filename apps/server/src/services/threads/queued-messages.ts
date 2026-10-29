@@ -1,3 +1,4 @@
+import { assertNativeHistoryWritable } from "./native-history-guard.js";
 import {
   getLatestThreadSequence,
   claimNextQueuedThreadMessageGroup,
@@ -225,6 +226,7 @@ export async function createQueuedMessageForThread(
   args: CreateQueuedMessageForThreadArgs,
 ): Promise<ThreadQueuedMessage> {
   const { payload, thread } = args;
+  assertNativeHistoryWritable(deps.db, thread.id);
   ensureThreadQueueIsWritable(thread);
   const input = await resolvePromptAttachmentReferences({
     db: deps.db,
@@ -247,6 +249,7 @@ export async function createQueuedMessageForThread(
         if (!currentThread) {
           throw new ApiError(404, "thread_not_found", "Thread not found");
         }
+        assertNativeHistoryWritable(tx, currentThread.id);
         const { hasProviderSession } = admitQueuedMessage(tx, currentThread);
         const queuedMessage = createQueuedThreadMessageInTransaction(tx, {
           threadId: thread.id,

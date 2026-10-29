@@ -51,6 +51,65 @@ and lost ACK; projection/storage failure, overflow and retention; action
 retirement and completion authority; Work/Personal isolation and QA/production
 separation; real owner decision/report and version-bound video evidence.
 Source declarations and tests alone are not live acceptance.
+## `sdk.experimental_nativeSessionImports`
+
+Discover explicit host-local native history roots, preview bounded source bytes,
+start selected or bulk archive jobs, resume/cancel import processing, page/search
+retained records, and stream the permanent original JSONL and referenced artifacts.
+`admit` separately requests provider-controlled exclusive same-identity loading
+without a prompt; `handoff` explicitly creates a different native dialogue with
+user-selected next-turn context and an archive link. Neither discovery nor
+archiving creates agents or Tasks. Source profile labels do not select payers.
+
+**Core callers.** The new-thread import page, imported-history header link and
+`bb thread import` commands use this SDK area and the same Core import and
+continuation routes/services. Core timeline projections are previews; the private
+archive retains original bytes, source identities, parent links and native state.
+OMP and Claude external takeover currently refuse because these adapters cannot
+prove external ownership and original scoped receipts; no receipt is fabricated.
+
+Artifact authority comes from structured native attachment/checkpoint fields,
+not arbitrary message text or tool arguments. Separate authentication/configuration
+files are excluded. Reads traverse no-follow directory descriptors and validate
+the opened file and native recorded workspace/size; hosts without confined
+descriptor traversal refuse rather than falling back to pathname reads.
+Canonical OMP image `data` references (`blob:sha256:` plus exactly 64 lowercase
+hex characters) address the extensionless hash file under an explicitly selected
+artifact root. Only native message/custom-message image content, saved execution,
+tool-result `details.images` or compaction-summary images, and compaction
+`preserveData.snapcompact.frames` (including `withoutThinking.archive` variants)
+grant this authority. Ordinary text, tool arguments and unrelated metadata do not;
+native record bytes stay intact.
+Hardlinked native image blobs are the only exception to the unshared-file rule:
+the authority must occupy a whole OMP JSONL record, and the confined opened file
+must match the canonical SHA-256 and identify PNG, JPEG, GIF, WebP or SVG image
+bytes. Filenames and declared MIME alone are insufficient; unrecognized formats
+refuse. A bounded host-side cache binds successful verification to content hash
+and the opened device/inode/size/mtime/ctime revision, so unchanged chunks do not
+rehash the full image. Caller-supplied revisions never establish verification.
+Every chunk retains descriptor/path confinement and revision checks. Generic
+artifacts and JSONL sources still reject hardlinks, including generic descriptors
+that name an image previously verified through its native image reference.
+
+Import and writer identities use the canonical session file, not the selected
+discovery root. `attemptedSource` records an uncommitted candidate separately;
+rejected prefixes do not replace the committed source or Core provenance.
+Admission waits for native resume acknowledgement, persists execution under the
+`native/session/admitted` source, and distinguishes unclaimed refusals from
+uncertain ownership. Only an unclaimed, never-accepted binding may be replaced.
+Ordinary queued/scheduled writes remain blocked until admission. Handoff recovery
+uses a request fingerprint and durable accepted input, not allocation existence;
+deleted allocations cannot be reported as completed dialogues.
+
+**Before stabilization.** Prove large multi-chunk imports, cancellation and crash
+recovery, prefix/checksum rejection, duplicate-free reimport, full-value search
+and streaming artifact retrieval. Exercise SDK/CLI and desktop/compact controls
+against the same real service, including accessibility and native-shell downloads.
+Qualify provider writer-lock, exact identity/path/workspace and original payer
+semantics on supported runtimes before claiming native admission. Source code
+and authored fixtures are not real-host acceptance or permission for a live pilot.
+
+Docs: Plugin Guide, Native session archives surface.
 
 ## Scoped execution context roots and launch bindings
 

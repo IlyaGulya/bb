@@ -176,6 +176,9 @@ const WORKSPACE_DIFF_AVAILABLE_RESULT: JsonObject = {
 };
 
 const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
+  "native.sessions.discover": { sessions: [], nextCursor: null, warnings: [], incomplete: false },
+  "native.sessions.read": { content: "", offset: 0, sizeBytes: 0, revision: "fixture-revision", sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
+  "native.sessions.admit": { admitted: false, ownership: "unclaimed", reason: "Synthetic provider ownership refusal" },
   "environment.hook.run": {},
   "environment.hook.cancel": { status: "terminated" },
   "desktop.browser.list_instances": { instances: [] },

@@ -1,3 +1,4 @@
+import { nativeSessionCommandSchemas, nativeSessionResultSchemas, nativeSessionSourceSchema } from "./native-sessions.js";
 import {
   workspaceTransferCommandSchemas,
   workspaceTransferResultSchemas,
@@ -241,7 +242,7 @@ const hostDaemonExistingThreadRuntimeContextSchema =
 const turnResumeContextSchema =
   hostDaemonExistingThreadRuntimeContextSchema.omit({
     options: true,
-  });
+  }).extend({ nativeImport: nativeSessionSourceSchema.optional() });
 
 const hostDaemonEnvironmentTargetSchema = z
   .object({
@@ -1433,6 +1434,29 @@ function defineHostDaemonCommandDescriptor<
 }
 
 export const hostDaemonCommandRegistry = {
+  "native.sessions.admit": defineHostDaemonCommandDescriptor({
+    type: "native.sessions.admit",
+    schema: hostDaemonThreadTargetSchema.merge(hostDaemonThreadRuntimeContextSchema).extend({
+      type: z.literal("native.sessions.admit"), source: nativeSessionSourceSchema,
+    }).strict(),
+    resultSchema: z.discriminatedUnion("admitted", [
+      z.object({ admitted: z.literal(true), providerThreadId: z.string() }).strict(),
+      z.object({ admitted: z.literal(false), ownership: z.enum(["unclaimed", "uncertain"]), reason: z.string() }).strict(),
+    ]),
+    transport: "onlineRpc", retryable: false, flushEventsBeforeResult: true, envLane: "read",
+  }),
+  "native.sessions.discover": defineHostDaemonCommandDescriptor({
+    type: "native.sessions.discover",
+    schema: nativeSessionCommandSchemas["native.sessions.discover"],
+    resultSchema: nativeSessionResultSchemas["native.sessions.discover"],
+    transport: "onlineRpc", retryable: true, flushEventsBeforeResult: false, envLane: null,
+  }),
+  "native.sessions.read": defineHostDaemonCommandDescriptor({
+    type: "native.sessions.read",
+    schema: nativeSessionCommandSchemas["native.sessions.read"],
+    resultSchema: nativeSessionResultSchemas["native.sessions.read"],
+    transport: "onlineRpc", retryable: true, flushEventsBeforeResult: false, envLane: null,
+  }),
   "workspace.transferPreview": defineHostDaemonCommandDescriptor({
     type: "workspace.transferPreview",
     schema: workspaceTransferCommandSchemas["workspace.transferPreview"],

@@ -1064,6 +1064,8 @@ const codexThreadIdentityResultSchema = z
     thread: z
       .object({
         id: z.string().min(1),
+        path: z.string().nullable().optional(),
+        cwd: z.string().optional(),
         daybreakEnabled: z.boolean().nullish().catch(null),
       })
       .passthrough(),
@@ -1226,6 +1228,10 @@ async function constructThreadSession(
 ): Promise<ConstructedCodexSession> {
   const existing = sessionsByBbThreadId.get(args.threadId);
   const decoded = decodeCodexOptions(args.options);
+  const nativeImport = args.options.providerOptions?.nativeSessionImport === undefined ? null : z.object({
+    path: z.string().startsWith("/"), rootPath: z.string().startsWith("/"), sessionId: z.string().min(1), cwd: z.string().nullable(),
+  }).strict().parse(args.options.providerOptions.nativeSessionImport);
+  if (nativeImport && (args.request.kind !== "resume" || args.request.providerThreadId !== nativeImport.sessionId || args.cwd !== nativeImport.cwd)) throw new Error("Imported Codex sessions require exact native identity and source workspace; a fresh session was not substituted.");
   existing?.gateway?.verify(
     args.options.providerOptions?.modelConnection,
     args.options.model,
@@ -1456,6 +1462,8 @@ async function constructThreadSession(
       params,
     );
     const codexThreadId = result.thread.id;
+    if (args.request.kind === "resume" && codexThreadId !== args.request.providerThreadId) throw new Error("Codex native resume returned a different session ID; refusing a fresh-session substitution.");
+    if (nativeImport && (result.thread.path !== nativeImport.path || result.thread.cwd !== nativeImport.cwd)) throw new Error("Codex resumed a different native storage path/workspace. The selected archive was not admitted; no prompt was submitted.");
     gateway?.pinNativeSession(codexThreadId);
     session.codexThreadId = codexThreadId;
     translator.activateThreadGitWritableRoots({

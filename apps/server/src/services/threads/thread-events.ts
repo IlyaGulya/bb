@@ -1,3 +1,4 @@
+import { assertNativeHistoryWritable, nativeHistoryMetadata } from "./native-history-guard.js";
 import {
   appendStoredThreadEventsInTransaction,
   createEventId,
@@ -20,6 +21,7 @@ import {
   isStandaloneBuiltinCompactCommand,
   parseStoredThreadEvent,
   systemErrorEventDataSchema,
+  recordedThreadExecutionOptionsSchema,
   threadScope,
   turnRequestEventDataSchema,
   WORKSPACE_PROVISIONING_STEP_KEYS,
@@ -881,7 +883,10 @@ export function requireDispatchableProviderThreadId(
   deps: ThreadEventReadDeps,
   threadId: string,
 ): string | null {
+  assertNativeHistoryWritable(deps.db, threadId);
   const session = getStoredProviderSession(deps.db, threadId);
+  const nativeImport = nativeHistoryMetadata(deps.db, threadId);
+  if (nativeImport !== null && (session.kind !== "owned" || session.providerThreadId !== nativeImport.nativeSessionId)) throw new ApiError(409, "provider_session_unavailable", "The imported native identity is no longer owned by this thread. A fresh session will not be substituted; create an explicit new handoff thread.");
   switch (session.kind) {
     case "none":
       return null;
@@ -915,5 +920,8 @@ export function getLastExecutionOptions(
 ): RecordedThreadExecutionOptions | null {
   const row = getLastStoredTurnRequestEvent(deps.db, threadId);
 
+  const metadata = nativeHistoryMetadata(deps.db, threadId);
+  const admitted = metadata?.admittedExecution === undefined ? null : recordedThreadExecutionOptionsSchema.parse(metadata.admittedExecution);
+  if (admitted && (!row || (admitted.seq !== undefined && row.sequence <= admitted.seq))) return admitted;
   return row ? parseStoredTurnRequestEvent(row).execution : null;
 }

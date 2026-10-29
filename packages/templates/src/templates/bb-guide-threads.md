@@ -186,3 +186,62 @@ Lifecycle ownership:
   dependents; deleting it deletes them. Unarchive the owner before explicitly
   restoring a dependent. Stop does not cascade. Sidebar parents and ordinary
   forks keep their own policies.
+
+Native history archives (experimental):
+
+  bb thread import discover --host <name-or-id> --engine <omp|claude|codex>
+    --root <absolute-host-path> --profile <label>
+    [--artifact-root <paths...>] [--cursor <number>] [--json]
+
+  Explicit roots include work-profile and overridden history directories. Only
+  native JSONL files are discovered. Profile labels record provenance, not payer
+  selection. Discovery is bounded; follow nextCursor or choose a narrower root
+  when incomplete. Save --json output locally and select its sessions (or a plain
+  descriptor array) for --sources. No agent or Task starts during discovery.
+
+  bb thread import preview --host <name-or-id> --sources <file>
+    [--index <number>] [--offset <bytes>] [--json]
+  bb thread import start --host <name-or-id> --project <name-or-id>
+    --sources <file> [--json]
+  bb thread import get <import-id> [--json]
+  bb thread import cancel <import-id> [--json]
+  bb thread import resume <import-id> [--json]
+
+  Preview defaults to source index 0 and byte offset 0. Start archives every
+  selected descriptor, in batches of at most 100; failures retain their input
+  indices. Get reports progress, checksums and unavailable referenced artifacts.
+  Cancel retains committed history; resume continues import processing, not a
+  model conversation. Re-select a changed source through discover/start: committed
+  prefixes must still match. Originals are never replaced by the importer.
+
+  bb thread import records <import-id> [--after <ordinal>]
+    [--query <text>] [--json]
+  bb thread import download <import-id> --output <new-local-file>
+    [--file <native-or-artifact-key>]
+
+  Records page from ordinal 0 and search full retained native values, including
+  tool results beyond timeline previews. Continue with nextAfter even when a
+  bounded search page has no matches. Download streams original bytes to a new
+  private file and refuses to overwrite an existing file. The default file is
+  native; artifact keys come from the manifest. Referenced blobs must be inside
+  explicit artifact roots and proven by a native record; credentials/configuration
+  files, symbolic links and neighboring sessions are not imported as artifacts.
+
+  bb thread import admit <import-id> --environment <id>
+    --model-connection <id> --execution-context <id-or-none>
+    --model <id> --permission-mode <accept-edits|auto|full> [--json]
+  bb thread import handoff <import-id> --environment <id>
+    --model-connection <id> --execution-context <id-or-none>
+    --model <id> --permission-mode <accept-edits|auto|full>
+    --input-file <file> [--json]
+
+  Archiving never starts a provider. Admit is separate: it requests same-identity,
+  same-host/workspace, provider-controlled exclusive loading without a model turn.
+  Unsupported or uncertain ownership and missing original account receipts refuse;
+  OMP and Claude external takeover currently remain archive-only. A source profile
+  is never a payer or fabricated gateway receipt. Handoff explicitly starts a NEW
+  dialogue with only the supplied next-turn context and an original archive link;
+  it is not native resume. The permanent full archive stays separately accessible.
+  The new-thread Import native history page uses this same SDK/Core path, with
+  named machine/project/account/context choices and explicit continuation controls.
+

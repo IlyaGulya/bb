@@ -1,3 +1,5 @@
+import { nativeHistoryMetadata, nativeHistoryResumeSource } from "./native-history-guard.js";
+import { nativeSessionSourceSchema, type NativeSessionSource } from "@bb/host-daemon-contract";
 import {
   environments,
   getThreadExecutionBinding,
@@ -211,7 +213,7 @@ function toRuntimeExecutionOptions(
     input: args.input,
     providerId: args.providerId,
   });
-  const providerOptions =
+  let providerOptions =
     args.deps.providerRegistry.get(args.providerId)?.deriveProviderOptions({
       threadId: args.threadId,
       projectId: args.projectId,
@@ -219,6 +221,11 @@ function toRuntimeExecutionOptions(
       permissionMode,
       ...(promptMode !== undefined ? { promptMode } : {}),
     }) ?? {};
+  const nativeMetadata = nativeHistoryMetadata(args.deps.db, args.threadId);
+  if (nativeMetadata !== null) {
+    const source = nativeSessionSourceSchema.parse(nativeMetadata.source);
+    providerOptions = { ...providerOptions, nativeSessionImport: { path: source.path, rootPath: source.rootPath, sessionId: source.sessionId, cwd: source.cwd } };
+  }
   const binding = getThreadExecutionBinding(args.deps.db, args.threadId);
   assertThreadExecutionBindingAvailable(
     args.deps.db,
@@ -346,6 +353,7 @@ function buildPreparedTurnSubmitCommandPayload(
     args.deps,
     args.runtimeContext.providerId,
   );
+  const nativeImport = nativeHistoryResumeSource(args.deps.db, args.threadId);
   return {
     type: "turn.submit",
     environmentId: args.environmentId,
@@ -363,6 +371,7 @@ function buildPreparedTurnSubmitCommandPayload(
     }),
     target: args.target,
     resumeContext: {
+      ...(nativeImport ? { nativeImport } : {}),
       workspaceContext: {
         ...workspaceContextFromPath({
           path: args.runtimeContext.workspacePath,
@@ -635,5 +644,21 @@ export function buildThreadStorageDeleteCommand(args: {
     type: "thread.storage.delete",
     environmentId: args.environmentId,
     threadId: args.threadId,
+  };
+}
+
+export async function buildNativeSessionAdmissionCommand(
+  deps: LoggedWorkSessionDeps,
+  args: { thread: Thread; environment: ThreadRuntimeCommandEnvironment; execution: ResolvedThreadExecutionOptions; source: NativeSessionSource },
+) {
+  const context = await resolveThreadRuntimeCommandConfig(deps, { thread: args.thread, environment: args.environment, model: args.execution.model });
+  return {
+    type: "native.sessions.admit" as const, threadId: args.thread.id, environmentId: args.environment.id,
+    projectId: args.thread.projectId, providerId: args.thread.providerId, source: args.source,
+    workspaceContext: workspaceContextFromPath({ path: context.workspacePath }),
+    bridgeLaunch: requireBridgeLaunchForProviderId(deps, args.thread.providerId),
+    options: toRuntimeExecutionOptions({ deps, execution: args.execution, hostId: args.environment.hostId, input: [], permissionEscalation: "ask", projectId: args.thread.projectId, providerId: args.thread.providerId, threadId: args.thread.id }),
+    instructions: context.instructions, dynamicTools: context.dynamicTools, contributedEnv: context.contributedEnv,
+    injectedSkillSources: context.injectedSkillSources, instructionMode: context.instructionMode,
   };
 }

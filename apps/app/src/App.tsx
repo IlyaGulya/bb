@@ -88,6 +88,7 @@ import {
   whenCriticalLoadsSettled,
 } from "./lib/split-prefetch";
 
+const NativeSessionImportsView = lazy(() => import("./views/NativeSessionImportsView").then((module) => ({ default: module.NativeSessionImportsView })));
 const SettingsView = lazy(() =>
   import("./views/SettingsView").then((m) => ({
     default: m.SettingsView,
@@ -299,6 +300,7 @@ export function AppRoutes() {
     <AppLayout>
       <Suspense fallback={null}>
         <Routes>
+          <Route path="/native-session-imports" element={<NativeSessionImportsView />} />
           <Route
             path="/settings/usage"
             element={

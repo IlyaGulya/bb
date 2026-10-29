@@ -1477,7 +1477,7 @@ function RootComposeSurface({
     />
   );
 
-  const promptBox = renderPromptBox({
+  const promptBox = <div className="flex min-w-0 flex-col gap-2">{renderPromptBox({
     id: "root-compose-prompt",
     autoFocus: !isProviderCliBlocked,
     mentionMenuPlacement: isCompactViewport ? "top" : "bottom",
@@ -1497,7 +1497,7 @@ function RootComposeSurface({
       isCreating: quickCreateProject.isCreating,
     },
     onRequestMachineSetup: handleRequestMachineSetup,
-  });
+  })}<Button type="button" variant="ghost" className="self-start text-muted-foreground" onClick={() => navigate("/native-session-imports")}>Import native history</Button></div>;
 
   return (
     <PluginDetailPanelContext.Provider value={pluginDetails}>

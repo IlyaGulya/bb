@@ -25,6 +25,28 @@
 - Keep an uncertain preview's receipt retry available after its local-away grant
   is exhausted, expired or revoked. Retrieving that existing operation does not
   renew the grant, consume another attempt or admit a new preview.
+- Add experimental native OMP, Claude Code and Codex history archives through
+  the new-thread UI, SDK and `bb thread import`: retain original JSONL, native
+  state, record provenance and referenced artifacts separately from next-turn
+  context, with bounded transfers, search, checkpoints and explicit cancellation.
+  Keep archive-only, provider-controlled native admission and a separately
+  requested new handoff dialogue distinct; unsupported external ownership or
+  missing original receipts refuse without starting a second writer.
+- Restrict native archive artifact authority to structured native records and
+  exclude separate credential/configuration files. Confine reads through
+  directory descriptors and revalidate recorded workspace/size. Coordinate
+  overlapping-root claims by canonical session file; retain rejected candidate
+  provenance separately. Gate admission on completed native ownership, persist
+  selected execution, recover unaccepted refused selections and block historical
+  queue/schedule writes. Recover handoffs by durable input acceptance, not merely
+  an allocated or deleted thread.
+- Retain canonical native OMP image blobs from declared message, saved-image and
+  snapcompact frame positions. Resolve only the lowercase SHA-256 hash filename
+  beneath explicitly selected artifact roots, never blob-like text/tool arguments.
+- Allow native OMP image blobs with hardlinked display sidecars only after
+  whole-record image authority, confined SHA-256 and image-format verification.
+  Cache verification by host-observed file revision across chunks; preserve
+  generic hardlink bans and reject mismatches, non-images and argument fragments.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact
