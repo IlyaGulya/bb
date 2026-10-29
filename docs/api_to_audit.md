@@ -36,6 +36,9 @@ not arbitrary message text or tool arguments. Separate authentication/configurat
 files are excluded. Reads traverse no-follow directory descriptors and validate
 the opened file and native recorded workspace/size; hosts without confined
 descriptor traversal refuse rather than falling back to pathname reads.
+Every artifact proof requires exact length and whole native JSONL record
+boundaries before parsing grants authority. A checksummed object inside tool
+arguments is not an independent checkpoint record, including for generic artifacts.
 Canonical OMP image `data` references (`blob:sha256:` plus exactly 64 lowercase
 hex characters) address the extensionless hash file under an explicitly selected
 artifact root. Only native message/custom-message image content, saved execution,
@@ -54,8 +57,9 @@ Every chunk retains descriptor/path confinement and revision checks. Generic
 artifacts and JSONL sources still reject hardlinks, including generic descriptors
 that name an image previously verified through its native image reference.
 
-Import and writer identities use the canonical session file, not the selected
-discovery root. `attemptedSource` records an uncommitted candidate separately;
+Import and writer identities use POSIX-normalized session-file pathnames, not
+the discovery root or literal pathname spelling. Submitted descriptor paths still
+pass unchanged through host confinement checks. `attemptedSource` records an uncommitted candidate separately;
 rejected prefixes do not replace the committed source or Core provenance.
 Admission waits for native resume acknowledgement, persists execution under the
 `native/session/admitted` source, and distinguishes unclaimed refusals from

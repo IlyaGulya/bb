@@ -230,13 +230,13 @@ async function readRange(source: ConfinedNativeFile, offset: number, length: num
 }
 async function assertRecordBoundary(source: ConfinedNativeFile, offset: number, bytes: Buffer, signal?: AbortSignal): Promise<void> {
   const stamp = revision(source.stat);
-  if (offset > 0 && (await readRange(source, offset - 1, 1, stamp, signal)).bytes[0] !== 10) throw new Error("Canonical OMP image authority must start at a native JSONL record boundary.");
+  if (offset > 0 && (await readRange(source, offset - 1, 1, stamp, signal)).bytes[0] !== 10) throw new Error("Artifact authority must start at a native JSONL record boundary.");
   const newline = bytes.indexOf(10);
-  if (newline !== -1 && newline !== bytes.length - 1) throw new Error("Canonical OMP image authority must occupy one native JSONL record.");
+  if (newline !== -1 && newline !== bytes.length - 1) throw new Error("Artifact authority must occupy one native JSONL record.");
   const end = offset + bytes.length;
   if (newline === -1 && end < source.stat.size) {
     const next = (await readRange(source, end, 2, stamp, signal)).bytes;
-    if (next[0] !== 10 && !(next[0] === 13 && next[1] === 10)) throw new Error("Canonical OMP image authority must end at a native JSONL record boundary.");
+    if (next[0] !== 10 && !(next[0] === 13 && next[1] === 10)) throw new Error("Artifact authority must end at a native JSONL record boundary.");
   }
 }
 async function describe(root: NativeSessionRoot, path: string): Promise<NativeSessionSource | null> {
@@ -333,15 +333,13 @@ export async function readNativeSession(input: NativeRead, signal?: AbortSignal)
     if (proof.recordLength > MAX_RECORD_BYTES) throw new Error("Artifact reference record exceeds the bounded native record limit.");
     const record = await readRange(source, proof.recordOffset, proof.recordLength, input.source.revision);
     if (createHash("sha256").update(record.bytes).digest("hex") !== proof.recordSha256) throw new Error("Artifact reference does not match its native source record.");
+    if (record.bytes.length !== proof.recordLength) throw new Error("Artifact authority exceeds the native record boundary.");
+    await assertRecordBoundary(source, proof.recordOffset, record.bytes, signal);
     const parsed = parseNativeHistoryRecord(JSON.parse(record.bytes.toString("utf8")), 0);
     if (!parsed.artifacts.includes(proof.reference)) throw new Error("Artifact was not referenced by the selected structured native record.");
     if (proof.reference.endsWith(".jsonl") || forbidden.test(proof.reference)) throw new Error("Authentication/configuration files and neighboring sessions are not native artifacts.");
     const imageHash = input.source.engine === "omp" && nativeOmpImageReferences(parsed.state).includes(proof.reference) ? proof.reference : null;
-    if (imageHash !== null) {
-      if (record.bytes.length !== proof.recordLength) throw new Error("Canonical OMP image authority exceeds the native record boundary.");
-      await assertRecordBoundary(source, proof.recordOffset, record.bytes, signal);
-      await readNativeSessionIdentity(input.source);
-    }
+    if (imageHash !== null) await readNativeSessionIdentity(input.source);
     let artifact: ConfinedNativeFile | null = null;
     for (const root of input.source.artifactRoots) {
       const candidate = isAbsolute(proof.reference) ? proof.reference : resolve(root, proof.reference);

@@ -24,6 +24,9 @@
   whole-record image authority, confined SHA-256 and image-format verification.
   Cache verification by host-observed file revision across chunks; preserve
   generic hardlink bans and reject mismatches, non-images and argument fragments.
+- Require complete native JSONL records for all artifact authority, including
+  generic checkpoints, and normalize POSIX pathname spellings in import/writer
+  identities without relaxing host path, descriptor or revision confinement.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact
