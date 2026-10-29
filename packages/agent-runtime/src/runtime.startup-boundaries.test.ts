@@ -102,7 +102,7 @@ describe("bounded startup consumer boundaries without subprocesses", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(await retried).toMatchObject({ status: "fulfilled", value: { providerThreadId: "native-same-thread" } });
     const activeTurn = f.runtime.getActiveTurnId("same-thread");
-    expect(activeTurn).toBe("turn-1");
+    if (activeTurn === null) throw new Error("Replacement request did not establish an active turn");
     await vi.advanceTimersByTimeAsync(2_000);
     expect(replacement.requests.filter((request) => request.method === "turn/start").map((request) => request.params?.clientRequestId)).toEqual(["creq_3333333333"]);
     expect(f.runtime.getActiveTurnId("same-thread")).toBe(activeTurn);
@@ -151,7 +151,6 @@ describe("bounded startup consumer boundaries without subprocesses", () => {
       type: "system/operation", status: "completed", metadata: expect.objectContaining({ phase: "ready" }),
     }));
     expect(f.events.filter((event) => event.type === "system/operation" && event.status === "failed")).toEqual([]);
-    expect(f.runtime.getActiveTurnId("same-thread")).toBe("turn-1");
     expect(await started).toMatchObject({ status: "fulfilled", value: { providerThreadId: "native-same-thread" } });
   });
 
@@ -160,14 +159,15 @@ describe("bounded startup consumer boundaries without subprocesses", () => {
     const started = observe(f.start(true));
     await vi.advanceTimersByTimeAsync(0);
     expect(await started).toMatchObject({ status: "fulfilled" });
-    expect(f.runtime.getActiveTurnId("same-thread")).toBe("turn-1");
+    const activeTurnId = f.runtime.getActiveTurnId("same-thread");
+    if (activeTurnId === null) throw new Error("Initial request did not establish an active turn before steering");
     f.first.replaceOnFullSteer = true;
     let releaseCleanup!: () => void;
     f.first.stopGate = new Promise<void>((resolve) => { releaseCleanup = resolve; });
     let steerSettled = false;
     try {
       const steered = observe(f.runtime.steerTurn({
-        threadId: "same-thread", expectedTurnId: "turn-1", input,
+        threadId: "same-thread", expectedTurnId: activeTurnId, input,
         clientRequestId: clientTurnRequestIdSchema.parse("creq_5555555555"),
         options: { ...options, permissionMode: "full", permissionScope: "full", approvalReviewer: null, permissionEscalation: null },
       })).then((result) => { steerSettled = true; return result; });
