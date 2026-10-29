@@ -31,6 +31,7 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
   const [settings, setSettings] = useState<{ revision: number; selection: WorkflowSelection | null } | null>(null);
   const [checksText, setChecksText] = useState<string | null>(null);
   const lock = useRef(false);
+  const runMutationGeneration = useRef(0);
   const active = runs.some(run => run.state !== "accepted");
   const repairingFirstLaunch = runs.some(run => run.state === "failed" && run.native?.contextStarted === false);
   const showSetup = runsLoaded && (runs.length === 0 || repairingFirstLaunch);
@@ -45,9 +46,10 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     async function refresh() {
+      const generation = runMutationGeneration.current;
       try {
         const [result, prepared] = await Promise.all([rpc.call("taskWorkflows", { taskId }), setup.call("getTaskWorkflowPreparation", { taskId })]);
-        if (!disposed) {
+        if (!disposed && generation === runMutationGeneration.current) {
           setRuns(current => {
             const observed = new Map(result.runs.map(run => [run.id, run]));
             for (const run of current) if (!observed.has(run.id)) observed.set(run.id, run);
@@ -56,7 +58,7 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
           setRunsLoaded(true); setPreparation(prepared); setConnectionError(null);
         }
       } catch (cause) {
-        if (!disposed) setConnectionError(cause instanceof Error ? cause.message : String(cause));
+        if (!disposed && generation === runMutationGeneration.current) setConnectionError(cause instanceof Error ? cause.message : String(cause));
       }
       if (!disposed) timer = setTimeout(refresh, 3000);
     }
@@ -101,7 +103,7 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
         <details><summary className="cursor-pointer py-2 text-sm">Result diagnostics</summary><Button size="sm" variant="ghost" onClick={() => void act(async () => { await navigator.clipboard.writeText(JSON.stringify(result, null, 2)); })}>Copy result diagnostics</Button><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(result, null, 2)}</pre></details>
       </section>}
       {run.native?.policyLimitations.map(limit => <p key={limit} className="text-xs text-muted-foreground">{limit}</p>)}
-      {run.state === "in_review" && <Button disabled={busy} onClick={() => void act(async () => { const accepted = await rpc.call("acceptTaskWorkflow", { id: run.id, revision: run.revision }); setRuns(current => current.map(entry => entry.id === accepted.id ? accepted : entry)); })}>Accept reviewed result</Button>}
+      {run.state === "in_review" && <Button disabled={busy} onClick={() => void act(async () => { const accepted = await rpc.call("acceptTaskWorkflow", { id: run.id, revision: run.revision }); runMutationGeneration.current += 1; setRuns(current => current.map(entry => entry.id === accepted.id ? accepted : entry)); })}>Accept reviewed result</Button>}
       {["in_review", "failed"].includes(run.state) && <div className="space-y-2"><label className="block space-y-1 text-sm"><span>Human feedback</span><Textarea value={feedback} onChange={event => setFeedback(event.target.value)} /></label><Button variant="outline" disabled={busy || !feedback.trim()} onClick={() => void act(async () => {
         let repairDraftRevision: number | null = null;
         if (run.native?.contextStarted === false) {
@@ -112,6 +114,7 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
           }
         }
         const returned = await rpc.call("returnTaskWorkflow", { id: run.id, revision: run.revision, feedback, repairDraftRevision });
+        runMutationGeneration.current += 1;
         setRuns(current => current.map(entry => entry.id === returned.id ? returned : entry));
       })}>{run.native?.contextStarted === false ? "Retry first writer with feedback" : "Return to same writer"}</Button></div>}
     </article>; });
