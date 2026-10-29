@@ -312,6 +312,47 @@ async function withOwnedLifecycleFixture(run: (fixture: ReturnType<typeof create
   });
 }
 
+it.each(["confirmed", "unverified"] as const)("preserves ordinary ready shutdown admission policy after cold reopen with %s cleanup", async (termination) => {
+  await withOwnedLifecycleFixture(async (f) => {
+    const { entry, requestId } = await f.ready();
+    f.first.completeTurn(f.thread.id);
+    await vi.advanceTimersByTimeAsync(0);
+    const readyHistory = listEvents(f.harness.db, { threadId: f.thread.id })
+      .filter((event) => event.type === "system/operation");
+    f.first.treeTermination = termination;
+    const shutdown = observe(entry.runtime.shutdown());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await shutdown).toMatchObject({ status: termination === "confirmed" ? "fulfilled" : "rejected" });
+    if (termination === "confirmed") {
+      expect(listEvents(f.harness.db, { threadId: f.thread.id })
+        .filter((event) => event.type === "system/operation")).toEqual(readyHistory);
+    }
+    applyLoggedThreadLifecycleEvent(f.harness.deps, { event: { type: "run.failed" }, threadId: f.thread.id });
+    const databasePath = join(f.harness.config.dataDir, "ordinary-shutdown-reopen.sqlite");
+    writeFileSync(databasePath, f.harness.db.$client.serialize());
+    const reopened = createConnection(databasePath);
+    try {
+      const thread = getThread(reopened, f.thread.id);
+      if (!thread) throw new Error("Cold reopen lost the original thread");
+      const retry = retryFailedTurn({ ...f.harness.deps, db: reopened }, {
+        thread, request: { turnRequestId: requestId, sendAt: Date.now() + 60_000, reason: "Retry after ordinary worker shutdown" },
+      });
+      if (termination === "confirmed") {
+        await expect(retry).resolves.toMatchObject({ delivery: "queued", turnRequestId: requestId });
+      } else {
+        await expect.soft(retry).rejects.toMatchObject({ status: 409, body: { code: "provider_startup_stop_unverified" } });
+        const receipt = listEvents(reopened, { threadId: f.thread.id }).filter((event) => event.type === "system/operation").at(-1);
+        expect.soft(JSON.parse(receipt?.data ?? "null")).toMatchObject({
+          status: "failed", metadata: { code: "provider_startup_stop_unverified", retryBlocked: true },
+        });
+        expect(listQueuedThreadMessages(reopened, f.thread.id)).toEqual([]);
+      }
+    } finally {
+      reopened.$client.close();
+    }
+  });
+});
+
 it.each(["confirmed", "unverified"] as const)("preserves durable retry policy after deferred restart expected exit and %s cleanup, including cold reopen", async (termination) => {
   await withOwnedLifecycleFixture(async (f) => {
     const { entry, requestId, providerThreadId } = await f.ready();

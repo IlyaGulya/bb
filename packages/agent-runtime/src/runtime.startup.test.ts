@@ -176,7 +176,8 @@ it("blocks retry while stop is pending and retains ownership when stop cannot be
 });
 
 it("retains ownership and blocks retry when a ready provider cannot confirm shutdown", async () => {
-  const startup = new RuntimeStartup(() => {});
+  const events: ThreadEvent[] = [];
+  const startup = new RuntimeStartup((event) => events.push(event));
   await startup.run({
     threadId: "ready-thread",
     policy: { deadlineMs: 3_000, optionalMcpServers: [] },
@@ -186,6 +187,10 @@ it("retains ownership and blocks retry when a ready provider cannot confirm shut
 
   await expect(startup.shutdown()).rejects.toMatchObject({
     code: "provider_startup_stop_unverified",
+  });
+  expect(events.at(-1)).toMatchObject({
+    type: "system/operation", status: "failed",
+    metadata: { code: "provider_startup_stop_unverified", retryBlocked: true },
   });
   expect(startup.owns("ready-thread")).toBe(true);
   expect(startup.hasOwnedWork()).toBe(true);

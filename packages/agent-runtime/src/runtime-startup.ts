@@ -245,12 +245,19 @@ export class RuntimeStartup {
       }
       run.controller.abort(new ProviderStartupError("provider_startup_cancelled"));
       readyStops.push((async () => {
+        const startedAt = performance.now();
         try {
           await run.stop();
           await Promise.allSettled([...run.work]);
           this.forgetReadiness(threadId);
         } catch {
           this.blocked.add(threadId);
+          run.operationId = randomUUID();
+          run.startedAt = startedAt;
+          run.failureStage = "ready";
+          run.phase = "stopped";
+          run.failureCode = "provider_startup_stop_unverified";
+          this.publish(threadId, run, "failed");
         }
       })());
     }

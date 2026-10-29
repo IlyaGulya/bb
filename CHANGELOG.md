@@ -3,15 +3,16 @@
 ## AgentOS fork — unreleased
 
 - Preserve successful startup history during ordinary runtime shutdown while still
-  awaiting confirmed owned-provider termination; unverified cleanup keeps retry blocked.
+  awaiting confirmed owned-provider termination. If cleanup cannot be confirmed,
+  persist a separate allowlisted failure receipt that blocks retry after cold reopen.
 - Durably reset optional Core native-event v1-to-v2 replay before archiving when
   retained in-scope events lack their own completed v2 artifacts. Do not infer safe
   cursor progress from any one v2 artifact. Add a real-SQLite interruption/reopen
   consumer regression preserving historical v1 evidence and deterministic receipts.
-  Raw bytes, permissions, CPA behavior and wire contracts remain unchanged; the
-  tests-only and product checkpoints await parent-owned BEFORE/AFTER execution.
-- Keep private-capture inputs and buttons comfortably tappable on compact screens,
-  and wrap artifact actions within their card without changing desktop density.
+  Raw bytes, permissions, CPA behavior and wire contracts remain unchanged.
+- Name owned-evidence file uploads, keep private-capture controls comfortably
+  tappable on compact screens, and wrap artifact actions within their card without
+  changing desktop density.
 - Keep startup progress and cleanup diagnostics current without accumulating stale
   summaries or letting late progress replace a terminal attempt.
 - Name editable task descriptions and comments, keep saved comments out of input

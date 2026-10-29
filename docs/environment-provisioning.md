@@ -78,7 +78,9 @@ Normal runtime shutdown still aborts and drains the owned processes of an alread
 ready provider, but it preserves the completed startup result instead of creating
 a false startup-cancelled attempt. Pending startup and prepared rewind cleanup
 retain their cancellation diagnostics. If ready-provider termination cannot be
-confirmed, ownership and the retry blocker remain until operator verification.
+confirmed, a separate allowlisted cleanup-failure receipt durably blocks retry and
+continuation after a daemon restart or cold database reopen. The completed startup
+receipt remains unchanged; ownership remains held until operator verification.
 
 Startup diagnostics retain the coordinator's last known stage in `failureStage`
 before switching to `stopping`/`stopped`: `initializing`, `hook`, `capabilities`,

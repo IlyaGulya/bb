@@ -175,7 +175,7 @@ function PrivateCapturesContent({ threadId, open, onClose }: { threadId: string;
           <details>
             <summary className="cursor-pointer">Import owned evidence</summary>
             <div className="space-y-2 pt-2">
-              <input key={fileKey} type="file" onChange={event => { setFile(event.target.files?.[0] ?? null); setImportId(crypto.randomUUID()); setReviewed(false); }} />
+              <label className="block">Owned evidence file<input className={fieldClass} key={fileKey} type="file" onChange={event => { setFile(event.target.files?.[0] ?? null); setImportId(crypto.randomUUID()); setReviewed(false); }} /></label>
               <label className="block">Representation<select className={fieldClass} value={representation} onChange={event => { setRepresentation(event.target.value === "binary" ? "binary" : event.target.value === "raw" ? "raw" : "transcript"); setImportId(crypto.randomUUID()); }}><option value="transcript">Transcript</option><option value="raw">Raw text</option><option value="binary">Reviewed binary</option></select></label>
               <label className="block"><input type="checkbox" checked={reviewed} onChange={event => setReviewed(event.target.checked)} /> I authorize every byte of this owned file, including any embedded credentials, for this exact private context.</label>
               <Button type="button" size="sm" disabled={!reviewed || !file || upload.isPending || !selected.session.enabled} onClick={() => upload.mutate(captureProductAnalyticsContext())}>{upload.isPending ? "Importing…" : "Import with resumable ACK"}</Button>
