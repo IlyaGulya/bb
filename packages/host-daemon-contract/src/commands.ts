@@ -1,4 +1,5 @@
 import { nativeSessionCommandSchemas, nativeSessionResultSchemas, nativeSessionSourceSchema } from "./native-sessions.js";
+import { captureExchangeCommandSchema, captureExchangeResultSchema } from "./private-capture.js";
 import {
   workspaceTransferCommandSchemas,
   workspaceTransferResultSchemas,
@@ -1456,6 +1457,15 @@ export const hostDaemonCommandRegistry = {
     schema: nativeSessionCommandSchemas["native.sessions.read"],
     resultSchema: nativeSessionResultSchemas["native.sessions.read"],
     transport: "onlineRpc", retryable: true, flushEventsBeforeResult: false, envLane: null,
+  }),
+  "capture.exchange": defineHostDaemonCommandDescriptor({
+    type: "capture.exchange",
+    schema: captureExchangeCommandSchema,
+    resultSchema: captureExchangeResultSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
   }),
   "workspace.transferPreview": defineHostDaemonCommandDescriptor({
     type: "workspace.transferPreview",

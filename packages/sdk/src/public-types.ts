@@ -1,6 +1,7 @@
 export type * from "./areas/native-session-imports.js";
 export type { NativeImportManifest, NativeImportRecord, NativeImportSelection, NativeImportStart, NativeImportBatch, NativeImportPage, NativeImportPageResponse, NativeImportBytes, NativeImportContinue, NativeImportHandoff } from "@bb/server-contract";
 export type { NativeSessionSource, NativeSessionRoot, NativeEngine, NativeChunk, NativeDiscovery } from "@bb/host-daemon-contract";
+export type * from "./areas/private-captures.js";
 export type * from "./areas/gateway-logs.js";
 export type * from "./areas/execution-contexts.js";
 export type {

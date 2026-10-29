@@ -153,6 +153,20 @@ confined preview/download guards still apply. Logs may contain full prompts,
 tool results and secrets; correlation headers are not authorization and this
 is neither lossless capture nor visibility into MCP/Git/browser traffic.
 
+`bb gateway-logs coverage --thread <id>` and the Thread Info log drawer expose
+source-contract gaps separately from the configured root. This metadata report
+also works for non-gateway threads and never activates a recorder or reads a
+native auth home. `bb gateway-logs manifest <logId> --thread <id>` computes
+SHA-256 over the complete retained file, including bytes beyond the preview,
+while preserving the same frozen endpoint and inbound thread-header guard.
+It refuses a file that changes during hashing. The manifest is a retained-file
+identity, not proof of every SSE/WebSocket chunk, redaction, durability or an
+offline delivery ACK. Unknown raw sync/backlog/ACK remain null, not zero.
+Work/Personal scope is the frozen execution context, never the model payer;
+the existing owner API does not establish a new per-context/per-run ACL.
+See [private capture source checkpoint](private-capture.md) for the source
+inventory and remaining full acceptance boundaries.
+
 ### Selecting named MCP servers
 
 The context editor's **MCP servers** section is separate from advanced native
@@ -1571,3 +1585,31 @@ provider child. Recordings can contain secrets; redact them with
 App production builds cache React Compiler output at
 `<git-common-dir>/bb-cache/react-compiler`; it has no configuration and can be
 deleted while no build runs.
+
+## Private Capture Registrations
+
+`bb captures create --file <private-policy.json>` and the Thread Info private
+capture drawer create explicit scoped data registrations, not global defaults.
+They require the actual Core project, enabled execution context, execution host,
+immutable subject, full-content/export consent, retention, byte/artifact quotas,
+sync interval and offline admission lease. The shipped thread-inspection guide
+documents every command and policy field; [the source handoff](private-capture.md)
+records source/permission limits and the remaining qualification gates.
+
+Existing CPA logs use the frozen endpoint's `BB_CPA_LOG_DIRS` mapping. Existing
+bridge lanes use an already-enabled `BB_PROVIDER_BRIDGE_RECORD_DIR`; registration
+does not enable or reconfigure either logger. Explicit native exports are
+relative to the enrolled thread-storage root, or the capture-specific standalone
+input root, never an authentication home or arbitrary source root. Raw/stored
+copies require private encrypted application storage and approved transport.
+
+Per-artifact data is bounded to 64 MiB, per-capture reservations to 256 MiB/512
+artifacts; policies may choose lower bounds. Retention is 1–720 hours, sync and
+offline lease are 30–3600 seconds, and the lease must cover the sync interval.
+Raw host copies expire at the deadline; bounded host metadata tombstones may
+remain for a further 24 hours. Stop denies new Core intake immediately; an
+offline host stops collection by lease expiry. Existing provider logging and
+its source-file retention remain separate. No opening of a drawer or inspection
+command activates capture. The unactivated source is not full-capture/privacy
+certification or authorization to enable MITM, a CA or network probing.
+

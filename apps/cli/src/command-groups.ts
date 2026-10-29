@@ -31,6 +31,11 @@ export const CORE_COMMAND_GROUPS: readonly CommandGroup[] = [
     (m) => (program, deps) => m.registerAnalyticsCommands(program, deps.getUrl),
   ),
   group(
+    "captures",
+    () => import("./commands/private-captures.js"),
+    (m) => (program, deps) => m.registerPrivateCapturesCommands(program, deps.getUrl),
+  ),
+  group(
     "gateway-logs",
     () => import("./commands/gateway-logs.js"),
     (m) => (program, deps) =>

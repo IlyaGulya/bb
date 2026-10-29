@@ -9,6 +9,7 @@ import {
   type ProductAnalyticsReportQuery,
   type ProductAnalyticsReport,
 } from "./api/product-analytics.js";
+import { privateCaptureRoutes } from "./private-capture-routes.js";
 import {
   gatewayLogListQuerySchema,
   gatewayLogReadQuerySchema,
@@ -17,6 +18,8 @@ import {
   type GatewayLogReadQuery,
   type GatewayLogList,
   type GatewayLogPreview,
+  type GatewayLogCoverage,
+  type GatewayLogManifest,
 } from "./api/gateway-logs.js";
 import { executionContextRoutes } from "./execution-context-routes.js";
 import {
@@ -471,7 +474,20 @@ type PathGatewayLogId = { param: { logId: string } };
 
 export const publicApiRoutes = {
   nativeSessionImports: nativeSessionImportRoutes,
+  ...privateCaptureRoutes,
   gatewayLogs: {
+    coverage: defineRoute({
+      path: "/gateway-logs/coverage",
+      method: "get",
+      request: queryRequest<EmptyInput, GatewayLogListQuery>(gatewayLogListQuerySchema),
+      response: jsonResponse<GatewayLogCoverage>(),
+    }),
+    manifest: defineRoute({
+      path: "/gateway-logs/:logId/manifest",
+      method: "get",
+      request: queryRequest<PathGatewayLogId, GatewayLogListQuery>(gatewayLogDownloadQuerySchema),
+      response: jsonResponse<GatewayLogManifest>(),
+    }),
     list: defineRoute({
       path: "/gateway-logs",
       method: "get",

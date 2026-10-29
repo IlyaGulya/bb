@@ -1030,6 +1030,13 @@
       "when": 1793222701846,
       "tag": "0146_private_product_analytics",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "6",
+      "when": 1793260173978,
+      "tag": "0147_private_capture",
+      "breakpoints": true
     }
   ]
 }

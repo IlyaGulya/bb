@@ -5,6 +5,7 @@ import { ResponsiveDrawerShell } from "@bb/shared-ui/responsive-overlay";
 import { cn } from "@bb/shared-ui/lib/utils";
 import { BbHttpError, sdk } from "@/lib/sdk";
 import { saveFile } from "@/lib/save-file";
+import { PrivateCapturesAction } from "./PrivateCapturesDrawer";
 
 const PREVIEW_BYTES = 65_536;
 const LOG_SECTION_PATTERN =
@@ -53,32 +54,21 @@ export function GatewayLogsAction({ threadId }: { threadId: string }) {
   const [open, setOpen] = useState(false);
   const binding = useQuery({
     queryKey: ["thread-execution-binding", threadId],
-    queryFn: () =>
-      sdk.experimental_executionContexts.getThreadBinding({ threadId }),
+    queryFn: () => sdk.experimental_executionContexts.getThreadBinding({ threadId }),
     staleTime: Infinity,
   });
-
-  if (!binding.data?.modelConnection?.gateway) return null;
-
   return (
-    <div className="shrink-0 px-4 pb-2">
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="w-full"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen(true)}
-      >
-        Native CPA request logs
-      </Button>
-      <GatewayLogsDrawer
-        threadId={threadId}
-        open={open}
-        onOpenChange={setOpen}
-      />
-    </div>
+    <>
+      <PrivateCapturesAction threadId={threadId} />
+      {binding.data?.modelConnection?.gateway ? (
+        <div className="shrink-0 px-4 pb-2">
+          <Button type="button" variant="outline" size="sm" className="w-full" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>
+            Native CPA request logs
+          </Button>
+          <GatewayLogsDrawer threadId={threadId} open={open} onOpenChange={setOpen} />
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -119,6 +109,14 @@ function GatewayLogsContent({
 }) {
   const [selection, setSelection] = useState<string | null>(null);
   const [view, setView] = useState<"raw" | "sections">("raw");
+  const coverage = useQuery({
+    queryKey: ["gateway-log-coverage", threadId],
+    queryFn: () => sdk.experimental_gatewayLogs.coverage({ threadId }),
+    enabled: open,
+    retry: false,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+  });
   const logs = useQuery({
     queryKey: ["gateway-logs", threadId],
     queryFn: () => sdk.experimental_gatewayLogs.list({ threadId }),
@@ -168,6 +166,11 @@ function GatewayLogsContent({
     retry: false,
     gcTime: 0,
   });
+  const manifest = useMutation({
+    mutationFn: (logId: string) => sdk.experimental_gatewayLogs.manifest({ threadId, logId }),
+    retry: false,
+    gcTime: 0,
+  });
   const refreshing = logs.isFetching || preview.isFetching;
 
   return (
@@ -186,6 +189,8 @@ function GatewayLogsContent({
               disabled={refreshing}
               onClick={() => {
                 void logs.refetch();
+                void coverage.refetch();
+                manifest.reset();
                 if (selectedLogId) void preview.refetch();
               }}
             >
@@ -204,6 +209,23 @@ function GatewayLogsContent({
           gaps.
         </p>
       </header>
+      <section aria-label="Capture coverage" className="shrink-0 border-b px-4 py-2 text-xs">
+        <details>
+          <summary className="cursor-pointer font-medium">Capture sources, privacy and delivery gaps</summary>
+          {coverage.isPending ? <p role="status">Loading coverage…</p> : coverage.isError ? (
+            <p role="alert">Coverage is unavailable; do not interpret this as complete capture.</p>
+          ) : (
+            <div className="max-h-48 space-y-2 overflow-y-auto py-2">
+              <p>Context: {coverage.data.executionContextId ?? "unknown"} · Connection: {coverage.data.modelConnectionId ?? "unknown"} · Runtime: {coverage.data.providerId ?? "unknown"}</p>
+              <ul className="space-y-2">
+                {coverage.data.sources.map(source => <li key={source.source}><strong>{source.source}: {source.state}</strong> ({source.representation}) — {source.reason}</li>)}
+              </ul>
+              <p>Raw sync/ACK: {coverage.data.delivery.state}. {coverage.data.delivery.reason}</p>
+              <p>Access: {coverage.data.privacy.authorization}. Redaction: {coverage.data.privacy.redaction}. Retention: {coverage.data.privacy.retention}. Context is not inferred from payer identity; this report does not establish per-context ACL enforcement.</p>
+            </div>
+          )}
+        </details>
+      </section>
       {logs.isPending ? (
         <p role="status" className="p-4 text-sm text-muted-foreground">
           Loading request logs…
@@ -295,11 +317,18 @@ function GatewayLogsContent({
                         ? "Downloading…"
                         : "Download full log"}
                     </Button>
+                    <Button type="button" size="sm" variant="outline" disabled={manifest.isPending} onClick={() => manifest.mutate(selectedLogId)}>
+                      {manifest.isPending ? "Hashing…" : "Verify retained file"}
+                    </Button>
                   </div>
                   {download.isError && download.variables === selectedLogId ? (
                     <p role="alert" className="text-xs text-warning-text">
                       Download failed. {availabilityMessage(download.error)}
                     </p>
+                  ) : null}
+                  {manifest.isError && manifest.variables === selectedLogId ? <p role="alert" className="text-xs text-warning-text">File integrity could not be established. {availabilityMessage(manifest.error)}</p> : null}
+                  {manifest.isSuccess && manifest.variables === selectedLogId ? (
+                    <p role="status" className="break-all text-xs text-muted-foreground">SHA-256: {manifest.data.sha256} · {manifest.data.sizeBytes} bytes. Retained-file integrity only, not stream completeness or delivery ACK. Redaction remains unverified.</p>
                   ) : null}
                   {preview.isSuccess ? (
                     <p

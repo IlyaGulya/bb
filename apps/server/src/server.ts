@@ -2,6 +2,7 @@ import { livePluginAnalyticsCatalog } from "./services/system/product-analytics-
 import { analyticsMode, initializePrivateProductAnalytics } from "./services/system/product-analytics.js";
 import { privateAnalyticsMiddleware } from "./services/system/product-analytics-http.js";
 import { registerNativeSessionImportRoutes } from "./routes/native-session-imports.js";
+import { registerPrivateCaptureRoutes } from "./routes/private-captures.js";
 import { createPluginUpdateJobs } from "./services/plugins/plugin-update-jobs.js";
 import { registerPluginUpdateJobRoutes } from "./routes/plugin-update-jobs.js";
 import { recheckEnvironmentProvisioning } from "./services/threads/thread-environment-providers.js";
@@ -889,6 +890,7 @@ export function createApp(
   registerThreadSectionRoutes(publicApi, deps);
   registerGatewayLogRoutes(publicApi, deps);
   const nativeSessionImports = registerNativeSessionImportRoutes(publicApi, deps);
+  registerPrivateCaptureRoutes(publicApi, deps);
   registerExecutionContextRoutes(publicApi, deps);
   registerFileRoutes(publicApi, deps);
   registerHostRoutes(publicApi, deps, pluginService);

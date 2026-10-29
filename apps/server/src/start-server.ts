@@ -1,4 +1,5 @@
 import { analyticsMode, initializePrivateProductAnalytics } from "./services/system/product-analytics.js";
+import { drainPrivateCaptureData } from "./services/private-captures.js";
 import { createDesktopAppUpdateService } from "./services/system/desktop-app-update.js";
 import { createDesktopUpdateChannel } from "./services/system/desktop-update-channel.js";
 import { serve } from "@hono/node-server";
@@ -489,6 +490,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
       if (sweepInterval !== null) {
         clearInterval(sweepInterval);
       }
+      await drainPrivateCaptureData(db);
       pluginCatalogService.stopPeriodicRefresh();
       await pluginService.stopPeriodicUpdateChecks();
       if (pendingServerMove === null) {

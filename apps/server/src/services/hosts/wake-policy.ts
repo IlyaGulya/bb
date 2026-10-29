@@ -4,6 +4,7 @@ const hostCommandWakePolicy = {
   "native.sessions.discover": "never",
   "native.sessions.read": "never",
   "native.sessions.admit": "work",
+  "capture.exchange": "never",
   "server_move.abort": "never",
   "server_move.activate": "never",
   "server_move.delete_old_copy": "never",

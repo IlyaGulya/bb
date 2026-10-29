@@ -55,6 +55,28 @@
   Present workflow setup as a centered persistent desktop overlay and compact
   bottom drawer; retain deferred content, first-open focus return and Tasks
   shortcuts after dismissal.
+- Correct private-capture credential decoding, recognized pending-publication
+  recovery, complete-spool readiness, independent expiry cleanup, persisted-ACK
+  reconciliation and bounded CPA snapshot reads. Reject forbidden binary key
+  material before host publication and deliver scoped terminal privacy
+  dispositions through the existing capture RPC. Preserve the regression
+  assertions; corrective source remains unexecuted and unactivated pending
+  parent composition, native gates and full acceptance qualification.
+- Add explicit scoped private capture data contracts across Core, SDK, CLI and
+  Thread Info: immutable manifests, confined private chunks, deterministic
+  committed ACK/dedupe, bounded host data outbox, leases, retention, quotas,
+  reviewed imports, same-context evidence links and honest source coverage.
+  Reuse retained CPA files, already-enabled thread bridge lanes and hydrated
+  Core native events without enabling capture or changing runtime accounts.
+  Reserve migration 0147 and host protocol 245 for ordered parent integration;
+  source38 analytics receives only its native allowlisted metadata. Source is
+  unqualified and unactivated; the full BBDEV-33 native/privacy matrix remains
+  a parent gate, not a completion or acceptance claim.
+- Expose source-contract capture coverage and full retained CPA file SHA-256
+  manifests through the existing private request-log API, SDK, CLI and drawer.
+  Keep native/bridge/tool/MCP/standalone/bypass gaps and unknown raw sync/ACK
+  explicit. File integrity is not stream completeness, universal redaction,
+  stronger authorization or full-capture acceptance; no capture is activated.
 - Bind the Provider Usage footer to the focused thread's frozen model connection
   and actual execution machine. Never substitute shared pools or unrelated host
   logins for explicit gateway/profile accounts; show unsupported/unknown when no

@@ -24,6 +24,32 @@ export function registerGatewayLogsCommands(
     .description("Inspect private gateway request logs bound to a thread");
 
   logs
+    .command("coverage")
+    .description("Show source gaps and unknown raw sync/ACK state without reading payloads")
+    .requiredOption("--thread <id>", "Thread whose frozen context and connection define the scope")
+    .option("--json", "Print machine-readable coverage")
+    .action(action(async (opts: GatewayLogListOptions) => {
+      const result = await createCliBbSdk(getUrl()).experimental_gatewayLogs.coverage({ threadId: opts.thread });
+      if (outputJson(opts, result)) return;
+      console.log(`Context: ${result.executionContextId ?? "unknown"}; connection: ${result.modelConnectionId ?? "unknown"}; runtime: ${result.providerId ?? "unknown"}`);
+      for (const source of result.sources) console.log(`${source.source}: ${source.state} (${source.representation}) — ${source.reason}`);
+      console.log(`Raw delivery: ${result.delivery.state} — ${result.delivery.reason}`);
+      console.log(`Privacy: ${result.privacy.authorization}; redaction ${result.privacy.redaction}; retention ${result.privacy.retention}`);
+    }));
+
+  logs
+    .command("manifest <logId>")
+    .description("Hash the full retained CPA file; this is not a delivery ACK or completeness proof")
+    .requiredOption("--thread <id>", "Persisted CPA-bound thread")
+    .option("--json", "Print machine-readable manifest")
+    .action(action(async (logId: string, opts: GatewayLogListOptions) => {
+      const result = await createCliBbSdk(getUrl()).experimental_gatewayLogs.manifest({ threadId: opts.thread, logId });
+      if (outputJson(opts, result)) return;
+      console.log(`${result.sha256}  ${result.id} (${result.sizeBytes} bytes)`);
+      console.log("Retained-file integrity only; completeness and redaction unverified; raw delivery ACK unknown.");
+    }));
+
+  logs
     .command("list")
     .description("List available logs without printing their contents")
     .requiredOption(

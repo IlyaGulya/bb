@@ -18,6 +18,10 @@ import { threadOriginKindValues } from "@bb/domain/thread-origin-kind";
 import { threadVisibilityValues } from "@bb/domain/thread-visibility";
 import type {
   ExecutionContext,
+  CaptureSession,
+  CaptureManifest,
+  CaptureOutboxStatus,
+  CaptureGap,
   ModelConnection,
   ThreadExecutionBinding,
   EnvironmentProviderSelection,
@@ -1436,3 +1440,61 @@ export const productAnalyticsHealth = sqliteTable("product_analytics_health", {
   lastAcceptedAt: integer("last_accepted_at"),
   lastProjectedAt: integer("last_projected_at"),
 });
+export const privateCaptureSessions = sqliteTable("private_capture_sessions", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  executionContextId: text("execution_context_id").notNull(),
+  threadId: text("thread_id"),
+  hostId: text("host_id").notNull(),
+  session: text("session", { mode: "json" }).$type<CaptureSession>().notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  lastSyncAt: integer("last_sync_at"),
+  lastAckAt: integer("last_ack_at"),
+  nextSyncAt: integer("next_sync_at").notNull(),
+  gap: text("gap").$type<CaptureGap>().notNull().default("none"),
+  gapCount: integer("gap_count").notNull().default(0),
+  eventCursor: integer("event_cursor").notNull().default(0),
+  cpaStamps: text("cpa_stamps", { mode: "json" }).$type<Record<string, { stamp: string; artifactId: string }>>().notNull().default({}),
+  hostStatus: text("host_status", { mode: "json" }).$type<CaptureOutboxStatus>(),
+  hostEnabled: integer("host_enabled", { mode: "boolean" }),
+}, table => [
+  index("private_capture_scope_idx").on(table.projectId, table.executionContextId, table.threadId),
+  index("private_capture_due_idx").on(table.enabled, table.nextSyncAt),
+  index("private_capture_expiry_idx").on(table.expiresAt),
+]);
+
+export const privateCaptureArtifacts = sqliteTable("private_capture_artifacts", {
+  captureId: text("capture_id").notNull(),
+  artifactId: text("artifact_id").notNull(),
+  manifest: text("manifest", { mode: "json" }).$type<CaptureManifest>().notNull(),
+  createdAt: integer("created_at").notNull(),
+  completedAt: integer("completed_at"),
+  rejectedAt: integer("rejected_at"),
+  purgedAt: integer("purged_at"),
+}, table => [
+  primaryKey({ columns: [table.captureId, table.artifactId] }),
+]);
+
+export const privateCaptureChunks = sqliteTable("private_capture_chunks", {
+  captureId: text("capture_id").notNull(),
+  artifactId: text("artifact_id").notNull(),
+  sequence: integer("sequence").notNull(),
+  sha256: text("sha256").notNull(),
+  bytes: integer("bytes").notNull(),
+  receiptId: text("receipt_id").notNull(),
+  committedAt: integer("committed_at").notNull(),
+}, table => [
+  primaryKey({ columns: [table.captureId, table.artifactId, table.sequence] }),
+]);
+
+export const privateCaptureLinks = sqliteTable("private_capture_links", {
+  captureId: text("capture_id").notNull(),
+  linkId: text("link_id").notNull(),
+  threadId: text("thread_id").notNull(),
+  runId: text("run_id"),
+  createdAt: integer("created_at").notNull(),
+}, table => [
+  primaryKey({ columns: [table.captureId, table.linkId] }),
+  index("private_capture_link_thread_idx").on(table.threadId, table.captureId),
+]);

@@ -123,6 +123,42 @@ semantics on supported runtimes before claiming native admission. Source code
 and authored fixtures are not real-host acceptance or permission for a live pilot.
 
 Docs: Plugin Guide, Native session archives surface.
+## Scoped private capture data
+
+`sdk.experimental_privateCaptures` exposes explicit create/list/get/stop/sync,
+same-context `link` owner associations, artifact metadata/preview/download,
+manifest staging, committed chunk ACKs and reviewed resumable `upload`.
+Original project/context/account/model identity is immutable; reported source
+host/run/native-session/model labels are separate and unknown values stay null.
+Core callers: Thread Info's private capture drawer and `bb captures` use this
+same API. The Plugin Guide's **The bb SDK** documents these symbols.
+Before stabilization: integrate the immutable source38 native analytics API,
+compose migration 0147 after parent 0146 and wire protocol 245 after parent 244,
+and qualify the complete BBDEV-33 native/offline/ACK/privacy/transport matrix.
+Retained CPA/bridge files, normalized native events and owner imports do not
+certify independent MCP, bypass traffic, lossless streaming or full capture.
+No capture activation, deployment or acceptance is implied by this source.
+
+## Private request-log coverage and retained-file manifests
+
+`sdk.experimental_gatewayLogs.coverage({ threadId })` returns source-contract
+coverage, frozen context/connection references and explicit unknown raw delivery
+state. It does not inspect raw payloads, activate capture, discover native homes
+or establish actual runtime coverage. `manifest({ threadId, logId })` hashes all
+bytes of the retained native CPA file through the same confined, exact-header
+ownership check as read/download. It refuses a changing file and labels
+completeness/redaction unverified; `deliveryAck: null` is not success. Existing
+owner API access is not a new per-context/per-run authorization layer.
+
+Core callers: the Thread Info request-log drawer and `bb gateway-logs
+coverage|manifest` use these same SDK/backend paths. The Plugin Guide documents
+the public SDK surface under **The bb SDK**. Before stabilization: qualify
+retained-file mutation, full/binary/large-body identity, scope authorization,
+resource limits and actual desktop/compact UI; bind safe feature analytics to
+the parent source38 API without exporting raw content. Full opt-in capture,
+durable raw ingestion/ACK/dedupe, retention enforcement, independent sources
+and the complete BBDEV-33 runtime/privacy matrix are separate requirements,
+not satisfied by these read-only inspection methods.
 
 ## Scoped execution context roots and launch bindings
 

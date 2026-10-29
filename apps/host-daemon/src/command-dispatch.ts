@@ -1,5 +1,6 @@
 import { admitNativeSession } from "./command-handlers/native-session-admission.js";
 import { discoverNativeSessions, readNativeSession } from "./command-handlers/native-sessions.js";
+import { exchangeHostCapture } from "./private-capture.js";
 import {
   captureWorkspace,
   copyWorkspaceRead,
@@ -615,6 +616,7 @@ const onlineRpcHandlers: OnlineRpcHandlerMap = {
   "native.sessions.admit": admitNativeSession,
   "native.sessions.discover": (command, _options, signal) => discoverNativeSessions(command, signal),
   "native.sessions.read": (command, _options, signal) => readNativeSession(command, signal),
+  "capture.exchange": (command, options) => exchangeHostCapture(options.dataDir, command),
   "environment.hook.run": runEnvironmentHook,
   "environment.hook.cancel": cancelEnvironmentHook,
   "desktop.browser.list_instances": forwardDesktopBrowserCommand,

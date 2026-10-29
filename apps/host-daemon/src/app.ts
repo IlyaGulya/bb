@@ -1,3 +1,4 @@
+import { startHostCaptureOutbox } from "./private-capture.js";
 import { HOST_DAEMON_RESTART_EXIT_CODE } from "@bb/config/machine-service";
 import { startDesktopBrowserBroker } from "./desktop-browser-broker.js";
 import { MachineEnvironment } from "./machine-environment.js";
@@ -208,6 +209,7 @@ interface MaybeInvalidateSessionArgs {
 export async function createHostDaemonApp(
   options: CreateHostDaemonAppOptions,
 ): Promise<HostDaemonApp> {
+  const captureOutbox = startHostCaptureOutbox(options.dataDir);
   const machineEnvironment = new MachineEnvironment(
     process.env,
     options.runtimeShellEnv ?? {},
@@ -927,6 +929,7 @@ export async function createHostDaemonApp(
       await eventSink.flush();
     },
     shutdownRuntimes: async () => {
+      await captureOutbox.stop();
       await desktopBrowserBroker.close();
       idleProviderSessionReaper.stop();
       eventLoopStallMonitor.stop();

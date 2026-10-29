@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import {
   lstat,
@@ -13,6 +14,7 @@ import type {
   GatewayLogEntry,
   GatewayLogList,
   GatewayLogPreview,
+  GatewayLogManifest,
 } from "@bb/server-contract";
 import { ApiError } from "../errors.js";
 
@@ -246,6 +248,32 @@ async function ownedLog(
   }
 }
 
+export async function captureGatewayLogSource(
+  configuredRoot: string | undefined,
+  threadId: string,
+  logId: string,
+  knownStamps: ReadonlySet<string>,
+  maxBytes: number,
+): Promise<{ sourceId: string; stamp: string; bytes: Buffer } | null> {
+  const { handle, stat } = await ownedLog(configuredRoot, threadId, logId);
+  try {
+    const stamp = createHash("sha256").update(JSON.stringify([logId, stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs])).digest("hex");
+    const sourceId = `cpa:${logId}`;
+    if (knownStamps.has(`${sourceId}:${stamp}`)) return null;
+    if (stat.size > maxBytes) throw new ApiError(413, "capture_source_limit", "Private capture source exceeds its artifact limit.");
+    const bytes = Buffer.allocUnsafe(stat.size);
+    for (let offset = 0; offset < bytes.length;) {
+      const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (bytesRead === 0) throw notReady();
+      offset += bytesRead;
+    }
+    if (bytes.length !== stat.size || !sameFile(stat, await handle.stat())) throw notReady();
+    return { sourceId, stamp, bytes };
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function readGatewayLog(
   configuredRoot: string | undefined,
   threadId: string,
@@ -275,6 +303,40 @@ export async function readGatewayLog(
       truncated: bytesRead < stat.size,
       sizeBytes: stat.size,
       previewBytes: bytesRead,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function gatewayLogManifest(
+  configuredRoot: string | undefined,
+  threadId: string,
+  logId: string,
+): Promise<GatewayLogManifest> {
+  const { handle, stat } = await ownedLog(configuredRoot, threadId, logId);
+  try {
+    const hash = createHash("sha256");
+    let bytes = 0;
+    const buffer = Buffer.alloc(65536);
+    while (bytes < stat.size) {
+      const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, stat.size - bytes), bytes);
+      if (bytesRead === 0) throw notReady();
+      hash.update(buffer.subarray(0, bytesRead));
+      bytes += bytesRead;
+    }
+    if (!sameFile(stat, await handle.stat())) throw notReady();
+    return {
+      id: logId,
+      threadId,
+      source: "cpa-request-log",
+      representation: "raw",
+      sizeBytes: bytes,
+      sha256: hash.digest("hex"),
+      integrity: "retained-file-only",
+      completeness: "unverified",
+      redaction: "unverified",
+      deliveryAck: null,
     };
   } finally {
     await handle.close();
