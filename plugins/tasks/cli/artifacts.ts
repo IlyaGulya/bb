@@ -70,8 +70,12 @@ export function artifactCommands(
     }),
     "artifact remove": cliCommand({
       summary: "Explicitly remove one retained artifact; the existing task attachment is not deleted",
+      description: "Outside a thread, the explicit task and artifact identify erasure without a live context. If --context is supplied it must still match. Agent threads keep their frozen context checks.",
       positionals: [task, artifact], options,
       run: (input, ctx) => emit(async () => {
+        if (!ctx.threadId && input.options.context === undefined) {
+          return service.removeForOperator((await resolveTask(input.positionals.task)).id, input.positionals.artifact);
+        }
         const target = await scope(input.positionals.task, input.options.context, ctx);
         if (ctx.threadId) {
           const retained = await service.authorizeForThread(input.positionals.artifact, ctx.threadId);

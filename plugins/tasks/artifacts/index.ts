@@ -50,11 +50,30 @@ export function taskArtifactHandlers(bb: BbPluginApi, store: TasksApiStore) {
     return { thread, context };
   }
 
+  function ownedArtifact(target: { taskId: string; artifactId: string }): TaskArtifact {
+    const artifact = artifacts.get(target.artifactId);
+    if (!artifact || artifact.taskId !== target.taskId) throw unavailable();
+    const task = store.tasks.getTask(target.taskId);
+    if (!task || !store.tasks.getProject(task.projectId)) throw unavailable();
+    return artifact;
+  }
+
+  function scopedArtifact(scope: Scope & { artifactId: string }): TaskArtifact {
+    const artifact = ownedArtifact(scope);
+    if (artifact.executionContextId !== scope.executionContextId) throw unavailable();
+    return artifact;
+  }
+
   async function retained(scope: Scope & { artifactId: string }) {
-    const artifact = artifacts.get(scope.artifactId);
-    if (!artifact || artifact.taskId !== scope.taskId || artifact.executionContextId !== scope.executionContextId || !store.tasks.getTask(scope.taskId)) throw unavailable();
+    const artifact = scopedArtifact(scope);
     await contextProject(artifact.executionContextId, artifact.bbProjectId);
     return artifact;
+  }
+
+  function removeOwnedArtifact(artifact: TaskArtifact) {
+    const deleted = artifacts.delete(artifact.id);
+    if (deleted) bb.realtime.publish("task-artifacts:changed", { taskId: artifact.taskId, executionContextId: artifact.executionContextId });
+    return { deleted };
   }
 
   async function inspectImage(scope: Scope & { attachmentId: string }) {
@@ -164,10 +183,7 @@ export function taskArtifactHandlers(bb: BbPluginApi, store: TasksApiStore) {
       return sourceView(await retained(input));
     },
     async deleteTaskArtifact(input) {
-      const artifact = await retained(input);
-      const deleted = artifacts.delete(artifact.id);
-      if (deleted) bb.realtime.publish("task-artifacts:changed", { taskId: artifact.taskId, executionContextId: artifact.executionContextId });
-      return { deleted };
+      return removeOwnedArtifact(scopedArtifact(input));
     },
   } satisfies PluginRpcHandlers<TaskArtifactRpcContract>;
 
@@ -203,7 +219,11 @@ export function taskArtifactHandlers(bb: BbPluginApi, store: TasksApiStore) {
     return { view, image };
   }
 
-  return { handlers, readForThread, authorizeForThread, listForThread };
+  function removeForOperator(taskId: string, artifactId: string) {
+    return removeOwnedArtifact(ownedArtifact({ taskId, artifactId }));
+  }
+
+  return { handlers, readForThread, authorizeForThread, listForThread, removeForOperator };
 }
 export type TaskArtifactService = ReturnType<typeof taskArtifactHandlers>;
 

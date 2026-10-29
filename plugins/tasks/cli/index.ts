@@ -8,7 +8,7 @@ import {
   type PluginCliResult,
 } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { authorizeAttachmentForThread } from "../artifacts/access.js";
+import { authorizeAttachmentForThread, filterReadableAttachments } from "../artifacts/access.js";
 
 import {
   createComment,
@@ -503,8 +503,7 @@ async function listTaskAttachments(
       ).attachments,
     );
   }
-  for (const attachment of attachments) await authorizeAttachmentForThread(bb, attachment.id, threadId);
-  return attachments;
+  return filterReadableAttachments(bb, attachments, threadId);
 }
 
 async function listPresets(domain: TasksDomain): Promise<Preset[]> {
