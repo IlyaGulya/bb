@@ -10,12 +10,12 @@ import { captureProductAnalyticsContext } from "@/lib/product-analytics";
 type CaptureAnalytics = ReturnType<typeof captureProductAnalyticsContext>;
 
 const api = sdk.experimental_privateCaptures;
-const fieldClass = "w-full rounded-md border bg-background px-2 py-1 text-sm";
+const fieldClass = "min-h-11 w-full rounded-md border bg-background px-2 py-1 text-sm md:min-h-0";
 function time(value: number | null): string { return value === null ? "unknown" : new Date(value).toLocaleString(); }
 export function PrivateCapturesAction({ threadId }: { threadId: string }) {
   const [open, setOpen] = useState(false);
   return <>
-    <div className="shrink-0 px-4 pb-2"><Button type="button" variant="outline" size="sm" className="w-full" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>Private capture</Button></div>
+    <div className="shrink-0 px-4 pb-2"><Button type="button" variant="outline" size="sm" className="min-h-11 w-full md:min-h-0" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>Private capture</Button></div>
     <ResponsiveDrawerShell open={open} onOpenChange={setOpen} srLabel="Private capture" contentClassName="h-[85dvh] min-w-0 md:inset-x-6 md:mx-auto md:max-w-5xl">
       <PrivateCapturesContent key={threadId} threadId={threadId} open={open} onClose={() => setOpen(false)} />
     </ResponsiveDrawerShell>
@@ -128,7 +128,7 @@ function PrivateCapturesContent({ threadId, open, onClose }: { threadId: string;
     if (!open) { preview.reset(); download.reset(); setFile(null); setFileKey(value => value + 1); setReviewed(false); setConsent(false); }
   }, [open]);
   const failure = create.isError || control.isError || associate.isError || upload.isError || preview.isError || download.isError;
-  return <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+  return <div className="flex min-h-0 min-w-0 flex-1 flex-col [&_button]:min-h-11 md:[&_button]:min-h-0">
     <header className="space-y-2 border-b px-4 py-3">
       <div className="flex items-center justify-between gap-2"><h3 className="text-sm font-semibold">Private capture data</h3><div className="flex gap-2"><Button type="button" variant="outline" size="sm" onClick={() => { preview.reset(); void refresh(); void eligibility.refetch(); }}>Refresh</Button><Button type="button" variant="ghost" size="sm" onClick={onClose}>Close</Button></div></div>
       <p className="text-xs text-muted-foreground">Protected full-content application data, not analytics. Context: {context?.name ?? "unavailable"}. Payer: {subject?.binding?.modelConnection?.name ?? "unknown"}; it does not select the data scope. No capture is enabled merely by opening this drawer.</p>
@@ -193,7 +193,7 @@ function PrivateCapturesContent({ threadId, open, onClose }: { threadId: string;
             <p>Stored SHA-256: {selectedArtifact.manifest.storedSha256}</p>
             <p>{selectedArtifact.manifest.fidelity} · {selectedArtifact.manifest.redactionPolicy} · stream {selectedArtifact.manifest.streamState}; payload secret absence is not guaranteed.</p>
             <p>Known source machine: {selectedArtifact.manifest.hostId ?? "unknown"} · Run: {selectedArtifact.manifest.runId ?? "unknown"} · Native session: {selectedArtifact.manifest.nativeSessionId ?? "unknown"} · Reported model labels: {selectedArtifact.manifest.models.join(", ") || "unknown"}. {selectedArtifact.manifest.indexLimited ? "Index bounded; inspect the full stored source for remaining labels/destinations." : "Reported labels are not payer or upstream-routing certification."}</p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button type="button" size="sm" variant="outline" disabled={selectedArtifact.completedAt === null || preview.isPending} onClick={() => preview.mutate(captureProductAnalyticsContext())}>Inspect bounded body</Button>
               <Button type="button" size="sm" variant="outline" disabled={selectedArtifact.completedAt === null || download.isPending} onClick={() => download.mutate(captureProductAnalyticsContext())}>Download and verify full file</Button>
             </div>

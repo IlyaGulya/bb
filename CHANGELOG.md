@@ -2,6 +2,8 @@
 
 ## AgentOS fork — unreleased
 
+- Keep private-capture inputs and buttons comfortably tappable on compact screens,
+  and wrap artifact actions within their card without changing desktop density.
 - Keep startup progress and cleanup diagnostics current without accumulating stale
   summaries or letting late progress replace a terminal attempt.
 - Name editable task descriptions and comments, keep saved comments out of input
