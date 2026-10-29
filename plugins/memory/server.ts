@@ -19,6 +19,7 @@ import {
 const CATALOG_MAX_CHARS = 3_900;
 const DEFAULT_RESULT_LIMIT = 20;
 const MAX_RESULT_LIMIT = 100;
+const bindingTaskKeysSchema = z.record(taskScopeSchema.shape.taskId, lineageSchema.shape.taskKey);
 const NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,79}$/;
 const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]{0,39}$/;
 
@@ -742,24 +743,49 @@ class MemoryStore {
     return isRecord(row) && typeof row.task_id === "string" ? row.task_id : null;
   }
 
+  bindingTaskKeys(projectId: string, threadId: string): Record<string, string> {
+    const row: unknown = this.db.prepare("SELECT task_keys_json FROM memory_task_bindings WHERE project_id = ? AND thread_id = ?").get(projectId, threadId);
+    if (row === undefined) return {};
+    return bindingTaskKeysSchema.parse(JSON.parse(z.object({ task_keys_json: z.string() }).parse(row).task_keys_json));
+  }
+
+  retainedBindingTaskId(projectId: string, threadId: string, taskKey: string, context: string): string | null {
+    const rows: unknown[] = this.db.prepare(`SELECT json_extract(bound.value, '$.taskId') AS task_id
+      FROM memory_task_bindings b
+      JOIN json_each(b.tasks_json) bound
+      JOIN json_each(b.task_keys_json) retained ON retained.key = json_extract(bound.value, '$.taskId')
+      WHERE b.project_id = ? AND b.thread_id = ? AND retained.value = ?
+        AND json_extract(bound.value, '$.context') = ? LIMIT 2`)
+      .all(projectId, threadId, taskKey, context);
+    if (rows.length > 1) throw new CliError("Bound task key is ambiguous in this thread/context");
+    const row = rows[0];
+    return row === undefined ? null : z.object({ task_id: taskScopeSchema.shape.taskId }).parse(row).task_id;
+  }
+
   bindings(projectId: string, threadId: string) {
     const row: unknown = this.db.prepare("SELECT version, tasks_json FROM memory_task_bindings WHERE project_id = ? AND thread_id = ?").get(projectId, threadId);
     return isRecord(row) ? bindingStateSchema.parse({ version: row.version, tasks: JSON.parse(String(row.tasks_json)) }) : { version: 0, tasks: [] };
   }
 
-  setBindings(projectId: string, threadId: string, expectedVersion: number, tasks: TaskScope[]) {
+  setBindings(projectId: string, threadId: string, expectedVersion: number, tasks: TaskScope[], taskKeys: Readonly<Record<string, string>>) {
     if (new Set(tasks.map((task) => `${task.taskId}:${task.context}`)).size !== tasks.length)
       throw new CliError("Duplicate task/context bindings are not allowed");
+    const retainedKeys: Record<string, string> = {};
+    for (const task of tasks) {
+      const key = taskKeys[task.taskId];
+      if (key !== undefined) retainedKeys[task.taskId] = key;
+    }
+    const taskKeysJson = JSON.stringify(bindingTaskKeysSchema.parse(retainedKeys));
     return this.db.transaction(() => {
       const current = this.bindings(projectId, threadId);
       if (current.version !== expectedVersion) throw new CliError("Task bindings changed; reload before saving");
       const next = bindingStateSchema.parse({ version: current.version + 1, tasks });
       if (current.version === 0) {
-        this.db.prepare("INSERT INTO memory_task_bindings(project_id, thread_id, version, tasks_json) VALUES (?, ?, ?, ?)")
-          .run(projectId, threadId, next.version, JSON.stringify(next.tasks));
+        this.db.prepare("INSERT INTO memory_task_bindings(project_id, thread_id, version, tasks_json, task_keys_json) VALUES (?, ?, ?, ?, ?)")
+          .run(projectId, threadId, next.version, JSON.stringify(next.tasks), taskKeysJson);
       } else {
-        const result = this.db.prepare("UPDATE memory_task_bindings SET version = ?, tasks_json = ? WHERE project_id = ? AND thread_id = ? AND version = ?")
-          .run(next.version, JSON.stringify(next.tasks), projectId, threadId, expectedVersion);
+        const result = this.db.prepare("UPDATE memory_task_bindings SET version = ?, tasks_json = ?, task_keys_json = ? WHERE project_id = ? AND thread_id = ? AND version = ?")
+          .run(next.version, JSON.stringify(next.tasks), taskKeysJson, projectId, threadId, expectedVersion);
         if (result.changes !== 1) throw new CliError("Task bindings changed; reload before saving");
       }
       return next;
@@ -1031,6 +1057,7 @@ export default async function plugin(bb: BbPluginApi) {
        context_name TEXT NOT NULL, proposal_json TEXT NOT NULL
      );
      CREATE INDEX memory_reflections_scope ON memory_reflections(project_id, task_id, context_name);`,
+    `ALTER TABLE memory_task_bindings ADD COLUMN task_keys_json TEXT NOT NULL DEFAULT '{}';`,
   ]);
   const store = new MemoryStore(db);
 
@@ -1097,6 +1124,18 @@ export default async function plugin(bb: BbPluginApi) {
     if (thread.projectId !== projectId) throw new CliError("Thread does not belong to this Core project");
   }
 
+  async function replaceTaskBindings(projectId: string, threadId: string, expectedVersion: number, tasks: TaskScope[]) {
+    const current = store.bindings(projectId, threadId);
+    if (current.version !== expectedVersion) throw new CliError("Task bindings changed; reload before saving");
+    const taskKeys = store.bindingTaskKeys(projectId, threadId);
+    for (const task of tasks) {
+      if (current.tasks.some((bound) => bound.taskId === task.taskId && bound.context === task.context)) continue;
+      const source = await taskFor({ projectId, task });
+      taskKeys[task.taskId] = source.key;
+    }
+    return store.setBindings(projectId, threadId, expectedVersion, tasks, taskKeys);
+  }
+
   async function proposeReflection(selection: MemorySelection, changes: ReflectionChange[]) {
     for (const change of changes) await validateSource(selection, change.source);
     return store.propose(selection, changes);
@@ -1147,7 +1186,7 @@ export default async function plugin(bb: BbPluginApi) {
     },
     async searchMemories(input) {
       const selection = memorySelectionFrom(input);
-      await validateSelection(selection);
+      await validateHistoricalSelection(selection);
       return { memories: store.search(input.query, selection.projectId ? "project" : "global", selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task) };
     },
     async listMemoryTasks({ projectId, search }) {
@@ -1164,7 +1203,7 @@ export default async function plugin(bb: BbPluginApi) {
     async listMemories(input) {
       const { offset } = input;
       const selection = memorySelectionFrom(input);
-      await validateSelection(selection);
+      await validateHistoricalSelection(selection);
       const page = store.list(selection.projectId ? "project" : "global", selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task, false, offset);
       return { memories: page.memories, total: page.total,
         previousOffset: offset === 0 ? null : Math.max(0, offset - MAX_RESULT_LIMIT),
@@ -1197,8 +1236,7 @@ export default async function plugin(bb: BbPluginApi) {
     },
     async setTaskBindings({ projectId, threadId, expectedVersion, tasks }) {
       await validateThread(projectId, threadId);
-      for (const task of tasks) await taskFor({ projectId, task });
-      return store.setBindings(projectId, threadId, expectedVersion, tasks);
+      return replaceTaskBindings(projectId, threadId, expectedVersion, tasks);
     },
     async proposeReflection(input) { return proposeReflection(memorySelectionFrom(input), input.changes); },
     async listReflections(selection) {
@@ -1264,7 +1302,7 @@ export default async function plugin(bb: BbPluginApi) {
     if (options.task || options.context) {
       if (!options.task || !options.context || !projectId) throw new CliError("--task and --context require each other and a Core project");
       if (historical) {
-        const taskId = store.retainedTaskId(projectId, options.task);
+        const taskId = (ctx.threadId ? store.retainedBindingTaskId(projectId, ctx.threadId, options.task, options.context) : null) ?? store.retainedTaskId(projectId, options.task);
         if (taskId) return validateHistoricalSelection(memorySelectionSchema.parse({ projectId, task: { taskId, context: options.context } }));
       }
       const resolved = await resolveTaskKey(options.task);
@@ -1320,7 +1358,7 @@ export default async function plugin(bb: BbPluginApi) {
             const tasks = input.options.remove
               ? current.tasks.filter((entry) => entry.taskId !== task.taskId || entry.context !== task.context)
               : [...current.tasks, task];
-            return { exitCode: 0, stdout: jsonOutput(store.setBindings(ctx.projectId, ctx.threadId, input.options["expected-version"], tasks)) };
+            return { exitCode: 0, stdout: jsonOutput(await replaceTaskBindings(ctx.projectId, ctx.threadId, input.options["expected-version"], tasks)) };
           },
         }),
         remember: cliCommand({
