@@ -1,6 +1,6 @@
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { buildReviewInspectionSchema } from "../workflow/remote-contract.js";
+import { buildReviewInspectionSchema } from "../../workflows/src/build-review-contract.js";
 
 const id = z.string().min(1).max(200);
 export const taskWorkflowLaunchSchema = z

@@ -117,11 +117,12 @@ kinds are reserved; source links are HTTP(S) and source text remains untrusted.
    targets the prior latest responder rather than the new comment itself.
 
 4. Attach result artifacts that belong with the task, such as reports,
-   screenshots, patches, or generated files:
+   videos, screenshots, patches, or generated files:
 
    ```sh
    bb tasks attachment add ABC-12 --file ./report.md
    bb tasks attachment add ABC-12 --file ./screenshot.png
+   bb tasks attachment add ABC-12 --file ./demo.mp4
    ```
 
    Read `references/attachments.md` for comment attachments, initial files,
@@ -428,7 +429,7 @@ the original evidence. The same writer reruns regression/smoke/review.
 ```sh
 bb tasks workflow draft set TASK --template development-review \
   --machine "Execution machine" --writer "Personal OMP Sol" \
-  --reviewer "Personal OMP Sol" --checks '["./scripts/platform-smoke"]' --ui --json
+  --reviewer "Personal OMP Sol" --checks '["./scripts/platform-smoke"]' --task-kind ui --json
 bb tasks workflow draft show TASK --json
 bb tasks workflow prepare TASK --json
 bb tasks workflow preparation TASK --json
@@ -470,11 +471,44 @@ uses the same receipt automatically, including retries; no origin or UUID entry
 is required. Source refs and technical IDs are copyable diagnostics.
 
 Checks must be explicitly configured for the project/template; there are no
-invented passing results. UI work requires inspectable screenshots/previews.
+invented passing results. Select the task surface explicitly: new UI/interactive
+work uses `--task-kind ui`, which writes `evidencePolicy:{version:1,requirement:"video"}`.
+Backend/CLI work uses `--task-kind backend` and technical smoke, without inferred
+classification from task text, filenames, executor, model or account. An explicit
+backend video requirement also needs a real recorded CLI/API scenario.
+`--evidence-policy technical|ui|video` is an explicit override; `ui` accepts a
+screenshot/preview instead of requiring video. Legacy `--ui` / persisted
+`uiRequired` keep their old screenshot/preview semantics and cannot be combined
+with the new flags. Missing `evidencePolicy` means legacy, never a silent upgrade.
+The UI exposes the same policy, and saved project/template choices apply only
+when explicitly saved/applied. Return retains the original policy.
+
+Video is a short real action → visible result on the exact reviewed commit,
+including before/after and Return where relevant. Reuse only the existing
+approved recorder. If safe recording is unavailable, report a blocker; never
+replace required video with a screenshot, preview URL, /tmp path, fake card,
+invented run, or inaccessible attachment. Exclude secrets and others' work data.
+Attach MP4 / H.264 or WebM to the task (25 MiB maximum). Preserve the original
+server attachment and disclose any editing or speed change. `uiEvidence` accepts
+`{kind:"video",attachmentId,description,recording:{commit,runId,scenario,
+sourceAttachmentId,transformation}}`; `transformation:null` means the attached
+file is its own unedited original. Video entries do not accept arbitrary URLs.
+Task ownership, accessible files, container structure, reviewed commit and
+consistency with previously published recording/original/editing claims are gates.
+Claims retained through Return are not authenticated capture provenance; metadata
+already discarded before the lineage upgrade cannot be reconstructed. Structural
+validation is not decoder or real-demo proof. Independently play and inspect the
+actual clip. The in-task player has
+native controls, no autoplay, and a separate file download. Close/Esc releases
+playback; a loading/unsupported/error state is not successful evidence.
+
 The same writer session plans, builds and runs actual platform smoke; a separate
 reviewer inspects the committed checkout. The result includes branch/commit,
-diff, observed command/output/exit codes, UI locations, limitations and findings.
-Inspect native logs/artifacts: structured model claims alone are not proof.
+diff, observed command/output/exit codes, visual evidence, limitations and findings.
+Inspect native logs/artifacts: structured model claims and a polished video
+are not substitutes for technical smoke or independent review. Integrated
+desktop/mobile playback, authorized Range/seek, actual Build/Review admission
+and analytics delivery still require observed candidate-version qualification.
 Core/Workflows checks authoritative clean checkout identity before/after review
 and again at human Accept. Result publication sets `in_review`, never Done.
 

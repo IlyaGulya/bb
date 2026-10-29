@@ -1,3 +1,4 @@
+import { observeAnalyticsTurn } from "../services/system/product-analytics-turns.js";
 import { performance } from "node:perf_hooks";
 import { Buffer } from "node:buffer";
 import { and, desc, eq, gt, lt, sql } from "drizzle-orm";
@@ -419,6 +420,7 @@ async function applyEventEffects(
         if (!isRootTurnStartedEvent(event)) {
           continue;
         }
+        observeAnalyticsTurn(deps, entry.threadId, turnId, { stage: "started" });
         followUps.push({
           kind: "queued-message-dispatch",
           wake: { kind: "turn-started", threadId: entry.threadId },
@@ -475,6 +477,7 @@ async function applyEventEffects(
           ...event,
           threadId: entry.threadId,
         });
+        if (turnCompleted.isRootTurnCompletion) observeAnalyticsTurn(deps, entry.threadId, turnId, { stage: "completed", status: event.status });
         if (
           turnCompleted.thread &&
           turnCompleted.isRootTurnCompletion &&

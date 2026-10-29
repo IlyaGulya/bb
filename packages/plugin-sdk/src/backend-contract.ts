@@ -1,3 +1,4 @@
+import type { ProductAnalyticsActionDeclaration, ProductAnalyticsEvent, ProductAnalyticsReceipt } from "@bb/server-contract";
 import type { EnvironmentRemoval } from "@bb/domain";
 import type { MachineBootstrapApi } from "./machine-bootstrap.js";
 import type Database from "better-sqlite3";
@@ -2093,6 +2094,10 @@ export type PluginBbSdk = Omit<BbSdk, "threads"> & {
  * against.
  */
 export interface BbPluginApi {
+  readonly experimental_productAnalytics: {
+    declareAction(declaration: ProductAnalyticsActionDeclaration): { featureId: string; action: string; version: 1 };
+    record(event: Omit<ProductAnalyticsEvent, "featureId" | "version">): ProductAnalyticsReceipt;
+  };
   /** The plugin's own id (namespaces storage, routes, commands). */
   readonly pluginId: string;
   /** Leveled, plugin-scoped logger. */

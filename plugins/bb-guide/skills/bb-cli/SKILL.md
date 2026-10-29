@@ -34,6 +34,7 @@ bb status --json
 | Providers, models, service tiers, custom models                         | `bb guide providers`           |
 | Dev servers and other long-running commands                             | `bb guide terminals`           |
 | Settings, keyboard shortcuts, sidebar preferences, themes, files, voice | `bb guide customization`       |
+| Private feature usage, outcomes, coverage and delivery health            | `bb guide customization`       |
 | `AGENTS.md` and skills                                                  | `bb guide agent-configuration` |
 | Plugins and marketplaces                                                | `bb guide plugins`             |
 | Scheduled work                                                          | the `automations` skill        |

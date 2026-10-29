@@ -65,12 +65,30 @@ function formatGrant(grant: Grant): string {
 }
 
 export default async function mcpPlugin(bb: BbPluginApi): Promise<void> {
+  for (const action of ["search", "read", "run"]) bb.experimental_productAnalytics.declareAction({ action: `mcp.${action}`, surfaces: ["mcp"], completionSource: "server" });
   const runCli = createCliRunner({
     env: process.env,
     serverUrl: () => bb.server.loopbackBaseUrl,
   });
   const handler = createBbMcpHttpHandler(
-    { runCli, loadCommandIndex: createCommandIndexLoader(runCli) },
+    {
+      runCli,
+      loadCommandIndex: createCommandIndexLoader(runCli),
+      async observeAnalytics(action, run) {
+        const operationId = crypto.randomUUID();
+        const startedAt = Date.now();
+        const event = { operationId, action: `mcp.${action}`, scope: { kind: "instance" as const }, actorKind: "unknown" as const, actorSessionId: null, surface: "mcp" as const, mode: "production" as const };
+        bb.experimental_productAnalytics.record({ ...event, stage: "started", outcome: "none", errorCode: "none", timestamp: startedAt, durationMs: null });
+        let succeeded = false;
+        try {
+          const result = await run();
+          succeeded = !result.isError;
+          return result;
+        } finally {
+          bb.experimental_productAnalytics.record({ ...event, stage: "completed", outcome: succeeded ? "succeeded" : "failed", errorCode: succeeded ? "none" : "internal", timestamp: Date.now(), durationMs: Math.min(86_400_000, Math.max(0, Date.now() - startedAt)) });
+        }
+      },
+    },
     MCP_SERVER_VERSION,
     (error) => bb.log.warn(`MCP request failed: ${error.message}`),
   );

@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import type { Attachment, TasksStore } from "../db";
@@ -7,6 +7,8 @@ import {
   MAX_ATTACHMENT_SIZE_BYTES,
 } from "../shared/attachments";
 import { errorMessage } from "../shared/errors";
+import { attachmentMediaResponse, verifyVideoFile, videoMimeFromHeader } from "./media.js";
+import { isVideoMime } from "../shared/attachments.js";
 
 const INLINE_RASTER_MIMES = new Set([
   "image/png",
@@ -246,6 +248,8 @@ function sniffRasterMime(bytes: Uint8Array): string | undefined {
 }
 
 function inferMimeFromBytes(bytes: Uint8Array, fileName: string): string {
+  const video = videoMimeFromHeader(bytes.subarray(0, 64));
+  if (video) return video;
   const sniffed = sniffRasterMime(bytes.subarray(0, 12));
   if (sniffed) return sniffed;
   const extension = fileName.toLowerCase().match(/\.[^.]+$/u)?.[0];
@@ -401,6 +405,14 @@ export async function readAttachmentContent(
   return { attachment, content: await readFile(sourcePath) };
 }
 
+export async function verifyTaskVideoAttachment(store: TasksStore, taskId: string, attachmentId: string): Promise<void> {
+  const attachment = store.getAttachment(attachmentId);
+  const ownerTaskId = attachment?.taskId ?? (attachment?.commentId ? store.getComment(attachment.commentId)?.taskId : undefined);
+  if (!store.getTask(taskId) || !attachment || ownerTaskId !== taskId)
+    throw new Error("Video artifact is unavailable or belongs to another task");
+  await verifyVideoFile(pathInside(requireStoreRoot(store), attachment.blobPath), attachment.mime, attachment.sizeBytes);
+}
+
 function errorResponse(context: PluginHttpContext, error: unknown): Response {
   if (error instanceof AttachmentRequestError) {
     return context.json({ error: error.message }, error.status);
@@ -522,35 +534,23 @@ export function registerAttachments(
     { auth: "token" },
   );
 
-  bb.http.route("GET", DOWNLOAD_PATH, async (context) => {
+  const download = async (context: PluginHttpContext) => {
     const attachmentId = context.req.query("attachmentId")?.trim();
-    const attachment = attachmentId
-      ? store.getAttachment(attachmentId)
-      : undefined;
-    if (!attachment)
-      return context.json({ error: "attachment not found" }, 404);
-
+    const attachment = attachmentId ? store.getAttachment(attachmentId) : undefined;
+    if (!attachment) return context.req.raw.method === "HEAD" ? new Response(null, { status: 404 }) : context.json({ error: "attachment not found" }, 404);
     const absolutePath = pathInside(root, attachment.blobPath);
-    try {
-      await stat(absolutePath);
-    } catch {
-      return context.json({ error: "attachment not found" }, 404);
-    }
-    const disposition = isInlineRasterMime(attachment.mime)
-      ? "inline"
-      : "attachment";
-    return new Response(new Uint8Array(await readFile(absolutePath)), {
-      headers: {
-        "Content-Type": attachment.mime,
-        "Content-Length": String(attachment.sizeBytes),
-        "Content-Disposition": buildContentDisposition(
-          disposition,
-          attachment.fileName,
-        ),
-        "X-Content-Type-Options": "nosniff",
-      },
-    });
-  });
+    const forceDownload = context.req.query("download") === "1";
+    const inline = !forceDownload && (isInlineRasterMime(attachment.mime) || isVideoMime(attachment.mime));
+    const unsafeMime = /^(?:text\/html|application\/(?:xhtml\+xml|xml)|image\/svg\+xml)$/i.test(attachment.mime);
+    const mime = unsafeMime ? "application/octet-stream" : attachment.mime;
+    return attachmentMediaResponse(context.req.raw, absolutePath, mime, new Headers({
+      "Content-Type": mime,
+      "Content-Disposition": buildContentDisposition(inline ? "inline" : "attachment", attachment.fileName),
+      "X-Content-Type-Options": "nosniff",
+    }), !forceDownload);
+  };
+  bb.http.route("HEAD", DOWNLOAD_PATH, download);
+  bb.http.route("GET", DOWNLOAD_PATH, download);
 
   bb.http.route("DELETE", DELETE_PATH, async (context) => {
     const attachmentId = context.req.query("attachmentId")?.trim();

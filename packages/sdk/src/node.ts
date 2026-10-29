@@ -1,3 +1,4 @@
+import { experimental_createProductAnalyticsFetch } from "./product-analytics.js";
 import { loadCliConfig, type CliConfig } from "@bb/config/cli";
 import {
   createHostDaemonLocalClient,
@@ -52,9 +53,9 @@ export function createNodeTransport(
     baseUrl: args.baseUrl ?? resolveCliConfig(args.cliConfig).BB_SERVER_URL,
     fetch:
       args.fetch ??
-      createRequestTimeoutFetch({
+      experimental_createProductAnalyticsFetch({ actorKind: "unknown", surface: "sdk" }, createRequestTimeoutFetch({
         timeoutMs: args.timeoutMs ?? DEFAULT_BB_REQUEST_TIMEOUT_MS,
-      }),
+      })),
     realtimeUrl: args.realtimeUrl,
     runtime: "node",
     websocket: args.websocket ?? createNodeWebsocketFactory(),
@@ -121,3 +122,6 @@ export type {
 } from "./transport.js";
 export type { BbHttpErrorArgs } from "./response.js";
 export type * from "./public-types.js";
+export * from "./product-analytics.js";
+export type * from "./areas/product-analytics.js";
+export * from "./product-analytics-outbox.js";

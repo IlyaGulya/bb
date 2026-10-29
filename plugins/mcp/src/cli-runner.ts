@@ -92,6 +92,7 @@ export function cliEnvironment(
   next.BB_SERVER_URL = serverUrl;
   next.NO_COLOR = "1";
   next.FORCE_COLOR = "0";
+  next.BB_PRODUCT_ANALYTICS_SURFACE = "mcp";
   return next;
 }
 

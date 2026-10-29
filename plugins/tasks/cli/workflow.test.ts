@@ -49,4 +49,24 @@ describe("named workflow CLI choices", () => {
       expect(harness.sdk.callsTo("threads.spawn")).toEqual([]);
     } finally { await harness.dispose(); }
   });
+  it("defaults explicitly classified new UI work to video without reinterpreting legacy --ui or backend work", async () => {
+    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(bb);
+    try {
+      const store = createStore(bb);
+      const project = store.tasks.createProject({ name: "Video policy", prefix: "VP", color: "blue" });
+      const task = store.tasks.createTask({ projectId: project.id, title: "Explicit classification only" });
+      const set = async (...flags: string[]) => workflowDraftSchema.parse(output(await harness.runCli(["workflow", "draft", "set", task.key, ...flags, "--json"])));
+      const ui = await set("--task-kind", "ui");
+      expect(ui.selection.evidencePolicy).toEqual({ version: 1, requirement: "video" });
+      const legacy = await set("--ui");
+      expect(legacy.selection.evidencePolicy).toBeUndefined();
+      expect(legacy.selection.uiRequired).toBe(true);
+      const backend = await set("--task-kind", "backend");
+      expect(backend.selection.evidencePolicy).toEqual({ version: 1, requirement: "technical" });
+      const conflict = await harness.runCli(["workflow", "draft", "set", task.key, "--ui", "--evidence-policy", "video", "--json"]);
+      expect(conflict.exitCode).toBe(1);
+      expect(workflowDraftSchema.parse(output(await harness.runCli(["workflow", "draft", "show", task.key, "--json"]))).selection).toEqual(backend.selection);
+    } finally { await harness.dispose(); }
+  });
 });

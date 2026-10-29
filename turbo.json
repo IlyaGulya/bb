@@ -244,7 +244,23 @@
     "bb-plugin-tasks#build": {
       // The tasks plugin's app bundle imports the @get-bb/plugin-sdk root at
       // runtime (shared RPC contract), so the SDK dist must exist first.
-      "dependsOn": ["topo", "@get-bb/plugin-sdk#build"]
+      "dependsOn": ["topo", "@get-bb/plugin-sdk#build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/plugins/workflows/src/build-review-contract.ts",
+        "$TURBO_ROOT$/apps/server/src/services/hosts/file-byte-range.ts",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "bb-plugin-tasks#prepare:bundled": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!.bundled-runtime/**",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**",
+        "$TURBO_ROOT$/plugins/workflows/src/build-review-contract.ts",
+        "$TURBO_ROOT$/apps/server/src/services/hosts/file-byte-range.ts"
+      ]
     },
     "@bb/desktop#build": {
       "dependsOn": ["bb-app#build"],
@@ -1523,6 +1539,9 @@
       "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/plugins/workflows/src/build-review-contract.ts",
+        "$TURBO_ROOT$/apps/server/src/services/hosts/file-byte-range.ts",
+        "$TURBO_ROOT$/vitest.shared.ts",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
@@ -1535,6 +1554,10 @@
       ],
       "inputs": [
         "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/plugins/workflows/src/build-review-contract.ts",
+        "$TURBO_ROOT$/apps/server/src/services/hosts/file-byte-range.ts",
+        "$TURBO_ROOT$/apps/web/public/blog/tweets/tiling.mp4",
+        "$TURBO_ROOT$/vitest.shared.ts",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },

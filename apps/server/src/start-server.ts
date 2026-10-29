@@ -1,3 +1,4 @@
+import { analyticsMode, initializePrivateProductAnalytics } from "./services/system/product-analytics.js";
 import { createDesktopAppUpdateService } from "./services/system/desktop-app-update.js";
 import { createDesktopUpdateChannel } from "./services/system/desktop-update-channel.js";
 import { serve } from "@hono/node-server";
@@ -217,6 +218,12 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     enabled:
       serverConfig.BB_TELEMETRY && isProduction && pendingServerMove === null,
     telemetryEnabled: getAppSettings(db).telemetryEnabled,
+    logger,
+  });
+  initializePrivateProductAnalytics({
+    db,
+    release: runtimeConfig.appVersion,
+    mode: serverConfig.BB_PRODUCT_ANALYTICS_MODE ?? analyticsMode(runtimeConfig.isDevelopment),
     logger,
   });
 

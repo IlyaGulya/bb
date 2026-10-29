@@ -6,6 +6,7 @@ export const MAX_CLI_ARGUMENT_CHARS = 200_000;
 export const READ_ONLY_COMMAND_PATHS: ReadonlySet<string> = new Set([
   "status",
   "guide",
+  "analytics",
   "settings show",
   "settings version",
   "settings keyboard list",

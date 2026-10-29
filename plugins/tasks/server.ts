@@ -30,6 +30,9 @@ function statusPayload() {
 
 export default async function plugin(bb: BbPluginApi) {
   bb.log.info(`${TASKS_PLUGIN_NAME} ${TASKS_PLUGIN_VERSION} loaded`);
+  for (const action of ["video.open", "video.play", "video.seek", "video.close", "video.error"]) {
+    bb.experimental_productAnalytics.declareAction({ action, surfaces: ["web", "compact", "mobile", "desktop"], completionSource: "client" });
+  }
 
   const store = createStore(bb);
   registerTasksApi(bb, store);

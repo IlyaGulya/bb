@@ -14,6 +14,44 @@ question.
 [provider-bridge-protocol.md](provider-bridge-protocol.md). An entry without
 a "Docs:" line has no owning doc, so it keeps the essential contract itself.
 
+## Private product analytics
+
+`BbPluginApi.experimental_productAnalytics.declareAction` registers an
+allowlisted action in the calling plugin's namespace, including its entry
+surfaces and whether client-local completion is authoritative. `record` uses
+the same validated, committed admission as Core instrumentation; it does not
+send payloads to an external service. Registration is retired when its plugin
+handle is disposed. Framework RPC/CLI/tool/transport identities cannot be
+redeclared. Client-local command admission may declare `command.<id>`.
+
+`sdk.experimental_productAnalytics.record/report`,
+`experimental_productAnalyticsRequestInit`,
+`experimental_createProductAnalyticsFetch` and
+`ExperimentalProductAnalyticsOutbox` expose the same collection/report path.
+Core navigation and shared command dispatch use the outbox; Core routes,
+plugin RPC/CLI/HTTP/tools, schedules/services, native root turns and MCP use
+the same private server collector. Monaco and Prompt Library declare their
+actual shared command identities rather than implementing separate trackers.
+
+`experimental_useProductAnalytics` binds local plugin events to Core's existing
+acknowledged browser outbox. Core navigation/commands and Tasks video controls
+share `recordProductAnalytics`, including actual Core scope, input provenance,
+surface, QA mode, session hashing and bounded retries. The hook accepts only
+action/stage and bounded operation/outcome/error/duration options, not payloads
+or scope/account overrides. Its return is enqueue intent, never an admission
+receipt. Before stabilization: qualify Tasks open/play/seek/close/error through
+lost ACK, offline/reconnect and the projected private report; confirm completion
+authority, asynchronous media outcomes and privacy on desktop/compact/mobile.
+
+Docs: Plugin Guide, `private-analytics` surface in
+`plugins/plugin-api-docs/src/surfaces.ts`.
+Before stabilization: qualify actual web/compact/mobile, CLI, SDK and native
+agent delivery on the integrated candidate; browser offline/reconnect/restart
+and lost ACK; projection/storage failure, overflow and retention; action
+retirement and completion authority; Work/Personal isolation and QA/production
+separation; real owner decision/report and version-bound video evidence.
+Source declarations and tests alone are not live acceptance.
+
 ## Scoped execution context roots and launch bindings
 
 `PluginProviderDeclaration.experimental_executionBindings` declares independent

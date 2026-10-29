@@ -36,10 +36,15 @@ optional, not the definition of independence.
 
 The task card and `bb tasks workflow start/list/return/accept` expose the same
 workflow. The package includes branch, commit, diff summary, command results,
-UI screenshot/preview locations when required, limitations, review findings,
-and next decision. Actual platform smoke is mandatory; unit tests are not a
-substitute. BB checks authoritative branch/commit identity and a clean working
-tree before/after review and again at acceptance.
+visual evidence, limitations, review findings, and next decision. New explicitly
+classified UI/interactive tasks require video; legacy `uiRequired` keeps its
+screenshot/preview meaning. Video references task-owned MP4/WebM attachments
+with commit/run/scenario and original/editing provenance, not URLs or local paths.
+Unavailable safe recording is a blocker. Actual platform smoke remains mandatory;
+neither unit tests nor a polished video are a substitute. BB checks authoritative
+branch/commit identity, clean workspace and accessible artifacts before/after
+review and again at acceptance. Playback/decoder and integrated analytics
+qualification remain actual-runtime gates, not source-metadata claims.
 
 Human Accept names the exact revision; generic `done` cannot accept a pending
 workflow. Return continues the retained writer/provider session and workspace.

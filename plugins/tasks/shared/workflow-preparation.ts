@@ -1,6 +1,6 @@
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { buildReviewStartSchema } from "../workflow/remote-contract.js";
+import { buildReviewStartSchema, evidencePolicySchema } from "../../workflows/src/build-review-contract.js";
 
 const id = z.string().min(1).max(200);
 export const workflowTemplateSchema = z.enum(["development-review", "bugfix"]);
@@ -17,6 +17,7 @@ export const workflowSelectionSchema = z.object({
   reviewer: draftRoleSchema.nullable(),
   smokeCommands: z.array(z.string().trim().min(1).max(4000)).max(30),
   uiRequired: z.boolean(),
+  evidencePolicy: evidencePolicySchema.optional(),
 }).strict();
 export type WorkflowSelection = z.infer<typeof workflowSelectionSchema>;
 export const EMPTY_WORKFLOW_ROLE: NonNullable<WorkflowSelection["writer"]> = { provider: "", model: "", executionContextId: "", modelConnectionId: "", reasoningLevel: "medium", permissionMode: "auto", serviceTier: null, instructions: "" };

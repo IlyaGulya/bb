@@ -1,3 +1,4 @@
+import { ProductAnalyticsSettingsSection } from "@/components/settings/ProductAnalyticsSettingsSection";
 import { MobileAppSection } from "@/components/settings/MobileAppSection";
 import { MachineEnvironmentSettings } from "@/components/settings/MachineEnvironmentSettings";
 import { MachineAccessSettings } from "@/components/settings/MachineAccessSettings";
@@ -1238,6 +1239,8 @@ export function SettingsView() {
     content = <ExecutionContextsSettingsSection />;
   } else if (activeSection === "ai-services") {
     content = <AiServicesSettingsSection />;
+  } else if (activeSection === "analytics") {
+    content = <ProductAnalyticsSettingsSection />;
   } else if (activeSection === "appearance") {
     content = (
       <AppearanceSettingsSection

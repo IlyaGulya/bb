@@ -112,7 +112,7 @@ instead of composing another scheduler or an open-ended agent council:
 ```sh
 bb tasks workflow draft set TASK --template development-review \
   --machine "Execution machine" --writer "Personal OMP Sol" \
-  --reviewer "Personal OMP Sol" --checks '["./scripts/platform-smoke"]' --ui --json
+  --reviewer "Personal OMP Sol" --checks '["./scripts/platform-smoke"]' --task-kind ui --json
 bb tasks workflow prepare TASK --json
 bb tasks workflow preparation TASK --json
 bb tasks workflow start TASK --json
@@ -128,10 +128,24 @@ do not reconnect accounts, change payers implicitly or bypass readiness checks.
 
 The native sequence is plan → same writer implementation and actual platform
 smoke → independent reviewer → `in_review`. Required smoke commands must really
-run and succeed; unit tests alone are not a platform smoke. UI tasks need
-inspectable screenshot/preview evidence. Inspect native worker logs and the
-result package, not merely a model's claim. BB checks the package's branch and
-commit against authoritative checkout status and requires a clean working tree.
+run and succeed; unit tests and human-demo videos do not replace platform smoke.
+New explicitly classified UI/interactive work defaults to the version-1 video
+policy through `--task-kind ui`; backend work uses `--task-kind backend` and
+technical evidence. `--evidence-policy technical|ui|video` is an explicit override.
+Saved legacy `uiRequired` / `--ui` keep their screenshot/preview meaning and
+existing results stay readable. Never infer task type from text/model/account.
+When video is required, attach a real short MP4 / H.264 or WebM scenario to the
+owning Tasks task (25 MiB maximum), identify the exact reviewed commit, source
+run and scenario, retain the original server attachment and disclose editing or
+speed changes. Video evidence uses attachment IDs, not arbitrary URLs or /tmp
+paths. Unavailable approved safe capture is an honest blocker, not a fallback to
+screenshots or previews. Exclude secrets and unrelated work from the recording.
+The writer/reviewer receive the explicit policy, and Return cannot weaken it.
+Inspect actual playback, native worker logs and the technical result package,
+not merely model claims or successful structural validation. BB verifies the
+authoritative clean checkout and accessible task-owned artifacts before review.
+Decoder/playback, desktop/mobile/auth/Range and analytics acceptance require
+observed candidate-version qualification; source contracts are not live proof.
 
 Do not accept automatically. Only after the human's explicit decision, use
 `bb tasks workflow accept twf_receipt --revision N --json`. A generic task

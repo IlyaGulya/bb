@@ -3,6 +3,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { EDITOR_COMMAND_IDS } from "./lib/command-ids.js";
 
 const MAX_EDITABLE_BYTES = 8 * 1024 * 1024;
 
@@ -124,6 +125,7 @@ async function ensureMonacoBundleDir(
 }
 
 export default async function plugin(bb: BbPluginApi) {
+  for (const id of Object.values(EDITOR_COMMAND_IDS).flat()) bb.experimental_productAnalytics.declareAction({ action: `command.${id}`, surfaces: ["web", "compact", "mobile", "desktop"], completionSource: "client" });
   let assetLease: { baseUrl: string; expiresAtMs: number } | null = null;
 
   async function assets() {

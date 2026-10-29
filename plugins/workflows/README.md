@@ -171,13 +171,21 @@ failure or workflow cancellation cannot turn it into success. Generic unmanaged
 workflows keep their existing structured-result completion behavior.
 
 The result package records the plan, branch, full commit, diff summary, command
-text/output/exit codes, UI evidence locations, limitations, independent review
+text/output/exit codes, visual evidence, limitations, independent review
 findings/verdict, and next decision. Every required smoke command must appear
-in the evidence, and recorded commands must exit successfully. Unit tests alone
-are not a substitute for the requested platform smoke. UI tasks require a
-screenshot or preview location and description. Inspect the actual worker
-logs and artifacts: structured model output is not, by itself, proof that a
-command ran or a screenshot exists.
+in the evidence, and recorded commands must exit successfully. Unit tests and
+video demos do not replace the requested platform smoke. New explicitly
+classified UI/interactive work uses `evidencePolicy:{version:1,requirement:"video"}`;
+legacy `uiRequired` still accepts screenshot/preview and saved results stay readable.
+`technical` requires technical smoke only; explicit `ui` permits screenshot/preview.
+The generated worker JSON Schema and Tasks bridge use one canonical contract.
+Video entries reference task-owned attachments with exact commit/run/scenario,
+original attachment and truthful editing disclosure, never arbitrary URLs or
+local paths. Safe recording unavailability is a blocker, not a screenshot fallback.
+The artifact must be available and structurally valid before independent review,
+and Tasks rechecks it before publication/Accept. Decoder support and real demo
+content require actual playback/inspection; source validation is not live proof.
+Human Accept and publication/deployment remain separate.
 
 BB checks authoritative workspace status before the reviewer, after review,
 before successful completion, and again on Accept. The reported branch and
@@ -190,7 +198,7 @@ commands below are illustrative:
 ```sh
 bb tasks workflow draft set TASK --template development-review \
   --machine "Execution machine" --writer "Personal OMP Sol" \
-  --reviewer "Personal OMP Sol" --checks '["./scripts/platform-smoke"]' --ui --json
+  --reviewer "Personal OMP Sol" --checks '["./scripts/platform-smoke"]' --task-kind ui --json
 bb tasks workflow prepare TASK --json
 bb tasks workflow preparation TASK --json
 bb tasks workflow start TASK --json

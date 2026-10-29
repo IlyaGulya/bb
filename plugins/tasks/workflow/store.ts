@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import type { TasksApiStore } from "../api/index.js";
 import {
   taskWorkflowSchema,
@@ -6,8 +7,11 @@ import {
 } from "../shared/workflow-contract.js";
 import {
   buildReviewStartSchema,
+  assertBuildEvidencePolicy,
   type BuildReviewStart,
-} from "./remote-contract.js";
+  uiEvidenceSchema,
+  type BuildReviewResult,
+} from "../../workflows/src/build-review-contract.js";
 
 export const taskWorkflowMigration = `CREATE TABLE task_workflow_runs (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -25,8 +29,85 @@ export function assertTaskWorkflowExecutionAvailable(store: TasksApiStore, taskI
   if (owner) throw new Error(`Task is owned by workflow ${owner.id}; use its retained Return or complete explicit acceptance/release before independent execution`);
 }
 
+export const taskWorkflowVideoLineageMigration = `
+ALTER TABLE task_workflow_runs ADD COLUMN video_lineage_json TEXT NOT NULL DEFAULT '[]';
+UPDATE task_workflow_runs SET video_lineage_json = (
+  SELECT COALESCE(json_group_array(json_object(
+    'attachmentId', json_extract(evidence.value, '$.attachmentId'),
+    'recording', json(json_extract(evidence.value, '$.recording'))
+  )), '[]')
+  FROM json_each(task_workflow_runs.view_json, '$.native.result.build.uiEvidence') AS evidence
+  WHERE json_extract(evidence.value, '$.kind') = 'video'
+)
+WHERE published_revision = revision AND state IN ('in_review', 'accepted')
+  AND json_type(view_json, '$.native.result.build.uiEvidence') = 'array';`;
+
+const videoLineageSchema = uiEvidenceSchema.options[2].pick({ attachmentId: true, recording: true });
+const videoLineagesSchema = z.array(videoLineageSchema);
+type RecordingClaim = z.infer<typeof videoLineageSchema>["recording"];
+
+function assertSameRecordingRun(previous: RecordingClaim, next: RecordingClaim): void {
+  if (previous.commit !== next.commit || previous.runId !== next.runId)
+    throw new Error("Recording attachment has different persisted commit or run lineage");
+}
+
+function assertSameRecordingOriginal(previous: RecordingClaim, next: RecordingClaim): void {
+  if (previous.sourceAttachmentId !== next.sourceAttachmentId || previous.transformation !== next.transformation)
+    throw new Error("Original attachment or editing disclosure differs from persisted recording lineage");
+}
+
 export class TaskWorkflowStore {
   constructor(readonly store: TasksApiStore) {}
+  assertRecordingLineage(taskId: string, build: BuildReviewResult["build"]): void {
+    if (!build.uiEvidence.some(evidence => evidence.kind === "video")) return;
+    const versions = new Map<string, RecordingClaim>();
+    const originals = new Map<string, RecordingClaim>();
+    const recorded = this.store.database.prepare<[string, string, string, string, string], { attachment_id: string; recording_json: string }>(`
+      SELECT json_extract(lineage.value, '$.attachmentId') AS attachment_id,
+        json_extract(lineage.value, '$.recording') AS recording_json
+      FROM task_workflow_runs AS workflow JOIN json_each(workflow.video_lineage_json) AS lineage
+      WHERE workflow.task_id = ? AND (
+        json_extract(lineage.value, '$.attachmentId') IN (?, ?)
+        OR json_extract(lineage.value, '$.recording.sourceAttachmentId') IN (?, ?)
+      )
+    `);
+    for (const evidence of build.uiEvidence) {
+      if (evidence.kind !== "video") continue;
+      const { attachmentId, recording } = evidence;
+      for (const id of [attachmentId, recording.sourceAttachmentId]) {
+        const previous = versions.get(id);
+        if (previous) assertSameRecordingRun(previous, recording);
+        else versions.set(id, recording);
+      }
+      const previousOriginal = originals.get(attachmentId);
+      if (previousOriginal) assertSameRecordingOriginal(previousOriginal, recording);
+      else originals.set(attachmentId, recording);
+      for (const row of recorded.iterate(taskId, attachmentId, recording.sourceAttachmentId, attachmentId, recording.sourceAttachmentId)) {
+        const previous = videoLineageSchema.shape.recording.parse(JSON.parse(row.recording_json));
+        assertSameRecordingRun(previous, recording);
+        if (row.attachment_id === attachmentId) assertSameRecordingOriginal(previous, recording);
+      }
+    }
+  }
+  private rememberRecordingLineage(id: string, build: BuildReviewResult["build"]): void {
+    if (!build.uiEvidence.some(evidence => evidence.kind === "video")) return;
+    const row = this.store.database.prepare<[string], { video_lineage_json: string }>(
+      "SELECT video_lineage_json FROM task_workflow_runs WHERE id = ?",
+    ).get(id);
+    if (!row) throw new Error("Unknown task workflow");
+    const lineage = videoLineagesSchema.parse(JSON.parse(row.video_lineage_json));
+    const known = new Set(lineage.map(evidence => evidence.attachmentId));
+    let changed = false;
+    for (const evidence of build.uiEvidence) {
+      if (evidence.kind !== "video" || known.has(evidence.attachmentId)) continue;
+      lineage.push({ attachmentId: evidence.attachmentId, recording: evidence.recording });
+      known.add(evidence.attachmentId);
+      changed = true;
+    }
+    if (changed) this.store.database.prepare(
+      "UPDATE task_workflow_runs SET video_lineage_json = ? WHERE id = ?",
+    ).run(JSON.stringify(lineage), id);
+  }
   get(id: string): TaskWorkflow {
     const row = this.store.database
       .prepare<[string], { view_json: string }>(
@@ -96,7 +177,8 @@ export class TaskWorkflowStore {
     return this.store.transaction(() => {
       const view = this.get(id);
       if (view.state === "accepted") return view;
-      if (native.key !== this.request(id).key) return view;
+      const request = this.request(id);
+      if (native.key !== request.key) return view;
       if (native.status !== "succeeded")
         return this.save({
           ...view,
@@ -108,6 +190,9 @@ export class TaskWorkflowStore {
         });
       if (!native.result)
         throw new Error("Completed workflow has no result package");
+      assertBuildEvidencePolicy(request, native.result.build);
+      this.assertRecordingLineage(view.taskId, native.result.build);
+      this.rememberRecordingLineage(id, native.result.build);
       const claimed = this.store.database
         .prepare(
           "UPDATE task_workflow_runs SET published_revision = ? WHERE id = ? AND published_revision < ?",
@@ -141,6 +226,7 @@ export class TaskWorkflowStore {
       if (view.state === "accepted") return view;
       if (view.state !== "in_review")
         throw new Error("Only a published result can be accepted");
+      if (view.native?.result) this.assertRecordingLineage(view.taskId, view.native.result.build);
       this.store.tasks.updateTask(view.taskId, { status: "done" });
       this.store.tasks.createComment({
         taskId: view.taskId,

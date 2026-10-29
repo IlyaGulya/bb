@@ -1433,6 +1433,17 @@ const testPluginSdkApp = {
   useSdk(): PluginBrowserBbSdk {
     return useSlotEnv("useSdk").sdk;
   },
+  experimental_useProductAnalytics() {
+    const env = useSlotEnv("experimental_useProductAnalytics");
+    return useMemo<ReturnType<PluginSdkApp["experimental_useProductAnalytics"]>>(() => (action, stage, options = {}) => {
+      void env.sdk.experimental_productAnalytics.record({ events: [{
+        operationId: options.operationId ?? crypto.randomUUID(), featureId: `plugin.${env.pluginId}`, action, version: 1,
+        scope: env.bbContext.projectId ? { kind: "project", projectId: env.bbContext.projectId } : { kind: "instance" },
+        actorKind: "unknown", actorSessionId: null, surface: "web", mode: "test", stage,
+        outcome: options.outcome ?? "none", errorCode: options.errorCode ?? "none", durationMs: options.durationMs === undefined ? null : Math.min(86_400_000, Math.max(0, Math.round(options.durationMs))), timestamp: Date.now(),
+      }] });
+    }, [env]);
+  },
   experimental_useSidebarThreadPullRequest(
     threadId,
   ): PluginSidebarThreadPullRequestState {

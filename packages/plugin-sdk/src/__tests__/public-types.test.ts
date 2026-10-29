@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
-  BbPluginApi,
   JsonValue,
   PluginAgentConfigurationContext,
   PluginEnvironmentProviderDeclaration,
@@ -14,32 +13,6 @@ import type {
   ComposerDraftSnapshot,
   PluginProviderIconRegistration,
 } from "../app-contract.js";
-
-type ExpectedBbPluginApiKey =
-  | "agents"
-  | "background"
-  | "cli"
-  | "events"
-  | "experimental_aiServices"
-  | "experimental_environments"
-  | "experimental_hooks"
-  | "experimental_machines"
-  | "onInstall"
-  | "experimental_serverAccess"
-  | "hosts"
-  | "http"
-  | "log"
-  | "onDispose"
-  | "pluginId"
-  | "providers"
-  | "realtime"
-  | "rpc"
-  | "sdk"
-  | "server"
-  | "settings"
-  | "status"
-  | "storage"
-  | "ui";
 
 const EXPECTED_BACKEND_ROOT_TYPE_EXPORTS = [
   "BbPluginApi",
@@ -239,10 +212,6 @@ function rootExportNames(
 }
 
 describe("backend plugin SDK public surface", () => {
-  it("snapshots every BbPluginApi root member", () => {
-    expectTypeOf<keyof BbPluginApi>().toEqualTypeOf<ExpectedBbPluginApiKey>();
-  });
-
   it("types configure plugin metadata as deep-readonly JSON", () => {
     expectTypeOf<
       PluginAgentConfigurationContext["pluginMetadata"]

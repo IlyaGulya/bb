@@ -532,7 +532,7 @@ describe("build/review commit identity", () => {
       commit: "a".repeat(40),
       diff: "owned file +1",
       commands: [{ command: "platform smoke", exitCode: 0, output: "passed" }],
-      uiEvidence: [],
+      uiEvidence: [{ kind: "screenshot", location: "fixture.png", description: "Fixture UI evidence" }],
       limitations: [],
       nextDecision: "Accept or Return",
     };

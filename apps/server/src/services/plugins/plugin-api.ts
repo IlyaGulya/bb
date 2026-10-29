@@ -1,3 +1,5 @@
+import { getPrivateProductAnalytics } from "../system/product-analytics.js";
+import { declarePluginAnalyticsAction } from "../system/product-analytics-declaration.js";
 import {
   environmentCompositionSchema,
   validateServerAccessProviderDeclaration,
@@ -1323,6 +1325,18 @@ export function createPluginApi(options: {
   };
 
   const api: BbPluginApi = {
+    experimental_productAnalytics: {
+      declareAction(declaration) {
+        assertLive();
+        const registration = declarePluginAnalyticsAction(getPrivateProductAnalytics(db), pluginId, declaration);
+        disposeHooks.push(registration.dispose);
+        return registration.identity;
+      },
+      record(event) {
+        assertLive();
+        return getPrivateProductAnalytics(db).admit({ ...event, featureId: `plugin.${pluginId}`, version: 1 }, "server");
+      },
+    },
     pluginId,
     log,
     settings,

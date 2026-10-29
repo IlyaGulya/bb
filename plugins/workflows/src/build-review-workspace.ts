@@ -1,6 +1,7 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import type { Db, WorkflowRunRow } from "./data.js";
-import { buildEvidenceSchema } from "./build-review-contract.js";
+import { assertBuildEvidencePolicy, buildEvidenceSchema, taskBuildEvidenceContract } from "./build-review-contract.js";
+import { managedRequest } from "./build-review-policy.js";
 
 export async function verifyBuildReviewWorkspace(
   bb: BbPluginApi,
@@ -15,6 +16,18 @@ export async function verifyBuildReviewWorkspace(
   if (!row?.result_json)
     throw new Error("Writer has no durable build evidence");
   const build = buildEvidenceSchema.parse(JSON.parse(row.result_json));
+  const request = managedRequest(db, run.id);
+  if (!request) throw new Error("Build review request is unavailable");
+  assertBuildEvidencePolicy(request, build);
+  if (build.uiEvidence.some(evidence => evidence.kind === "video")) {
+    if (!request.evidenceTaskId) throw new Error("Video evidence requires its owning Tasks task; local paths and external URLs are not reviewable artifacts");
+    await bb.sdk.plugins.callRpc({
+      pluginId: "tasks",
+      method: "validateTaskBuildEvidence",
+      input: { taskId: request.evidenceTaskId, uiRequired: request.uiRequired, ...(request.evidencePolicy ? { evidencePolicy: request.evidencePolicy } : {}), build },
+      outputSchema: taskBuildEvidenceContract.validateTaskBuildEvidence.output,
+    });
+  }
   const status = await bb.sdk.environments.status({
     environmentId: run.environmentId,
   });

@@ -1,3 +1,4 @@
+import { createFakeProductAnalytics } from "./fake-product-analytics.js";
 import {
   environmentCompositionSchema,
   validateServerAccessProviderDeclaration,
@@ -1499,6 +1500,7 @@ function createFakePluginHostInternal(
   };
 
   const bb: BbPluginApi = {
+    experimental_productAnalytics: createFakeProductAnalytics(pluginId),
     pluginId,
     log,
     settings,

@@ -1,6 +1,7 @@
 import { toast } from "sonner";
 import { experimental_copyToClipboard } from "@get-bb/plugin-sdk/app";
 import type * as MonacoNs from "monaco-editor";
+import { EDITOR_COMMAND_IDS } from "./command-ids.js";
 
 type Editor = MonacoNs.editor.IStandaloneCodeEditor;
 
@@ -73,42 +74,42 @@ export async function copy(text: string, successMessage: string): Promise<void> 
 export const EDITOR_COMMANDS: readonly EditorCommand[] = [
   ...[1, 2, 3, 4, 5].map((level) =>
     monacoAction(
-      `fold-level-${level}`,
+      EDITOR_COMMAND_IDS.foldLevels[level - 1]!,
       `Monaco: fold level ${level}`,
       `editor.foldLevel${level}`,
     ),
   ),
   monacoAction(
-    "fold-recursively",
+    EDITOR_COMMAND_IDS.foldRecursively,
     "Monaco: fold recursively",
     "editor.foldRecursively",
   ),
-  monacoAction("unfold-all", "Monaco: unfold all", "editor.unfoldAll"),
+  monacoAction(EDITOR_COMMAND_IDS.unfoldAll, "Monaco: unfold all", "editor.unfoldAll"),
   monacoAction(
-    "unfold-recursively",
+    EDITOR_COMMAND_IDS.unfoldRecursively,
     "Monaco: unfold recursively",
     "editor.unfoldRecursively",
   ),
-  monacoAction("unfold", "Monaco: unfold at cursor", "editor.unfold"),
+  monacoAction(EDITOR_COMMAND_IDS.unfold, "Monaco: unfold at cursor", "editor.unfold"),
   monacoAction(
-    "sort-lines-ascending",
+    EDITOR_COMMAND_IDS.sortAscending,
     "Monaco: sort selected lines ascending",
     "editor.action.sortLinesAscending",
     hasMultiLineSelection,
   ),
   monacoAction(
-    "sort-lines-descending",
+    EDITOR_COMMAND_IDS.sortDescending,
     "Monaco: sort selected lines descending",
     "editor.action.sortLinesDescending",
     hasMultiLineSelection,
   ),
   {
-    id: "copy-path",
+    id: EDITOR_COMMAND_IDS.copyPath,
     title: "Monaco: copy path of current file",
     run: ({ absolutePath }) => copy(absolutePath, "Absolute path copied"),
   },
   {
-    id: "copy-relative-path",
+    id: EDITOR_COMMAND_IDS.copyRelativePath,
     title: "Monaco: copy relative path of current file",
     run: ({ relativePath }) => copy(relativePath, "Relative path copied"),
   },

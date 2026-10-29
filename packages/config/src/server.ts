@@ -1,4 +1,5 @@
 import type { FeatureFlags } from "@bb/domain";
+import type { ProductAnalyticsMode } from "@bb/domain";
 import type { AppInstallKind, AppSourceOrigin } from "./app-install.js";
 import type { AppSurface } from "./app-surface.js";
 import type { AppUpdateMode } from "./app-update.js";
@@ -31,6 +32,7 @@ import {
   BB_CLI_LAUNCHER_ENV,
   BB_TELEMETRY_ENV,
   BB_PERF_DIAGNOSTICS_ENV,
+  BB_PRODUCT_ANALYTICS_MODE_ENV,
   DEFAULT_BB_APP_URL,
   DEFAULT_BB_APP_SURFACE,
   DEFAULT_BB_APP_VERSION,
@@ -67,6 +69,7 @@ export interface ServerConfig
   BB_CLI_LAUNCHER?: string;
   BB_TELEMETRY: boolean;
   BB_PERF_DIAGNOSTICS: boolean;
+  BB_PRODUCT_ANALYTICS_MODE?: ProductAnalyticsMode;
   featureFlags: FeatureFlags;
 }
 
@@ -179,6 +182,11 @@ export function loadServerConfig(
       mode: loader.mode,
     }),
   };
+  assignIfDefined({
+    key: "BB_PRODUCT_ANALYTICS_MODE",
+    target: config,
+    value: readOptionalEnvVar({ context: loader.context, definition: BB_PRODUCT_ANALYTICS_MODE_ENV, env: loader.env }),
+  });
 
   assignIfDefined({
     key: "BB_DEV_APP_PORT",

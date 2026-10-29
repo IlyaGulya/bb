@@ -17,6 +17,14 @@ Raw logs may contain sensitive prompts and tool results; keep them outside Git.
 
 - `bb status`
 
+## analytics
+
+- `bb analytics`
+
+Owner-local usage, outcomes, coverage and delivery health. See `bb guide
+customization`; use `--project` for exactly one logical project and `--json`
+for the full report. The omitted scope is instance-only, not all projects.
+
 ## settings
 
 - `bb settings`

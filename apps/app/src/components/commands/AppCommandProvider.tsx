@@ -1,3 +1,4 @@
+import { observeProductAnalyticsAction } from "@/lib/product-analytics";
 import {
   createContext,
   useCallback,
@@ -222,7 +223,7 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const dispatch = useCallback(
-    (command: KeyboardCommandId, target: EventTarget | null): boolean => {
+    (command: KeyboardCommandId, target: EventTarget | null): boolean => observeProductAnalyticsAction("ui.commands", command, () => {
       const registrations = handlersRef.current.get(command);
       if (!registrations) return false;
       const ordered = [...registrations.values()].sort(
@@ -234,7 +235,7 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
         if (registration.handler({ target })) return true;
       }
       return false;
-    },
+    }, (handled) => handled),
     [],
   );
 

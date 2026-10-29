@@ -29,6 +29,7 @@ import type {
   ExperimentalFixedTabTargetState,
   ExperimentalPluginFixedTabReference,
   JsonValue,
+  ExperimentalPluginProductAnalytics,
 } from "@get-bb/plugin-sdk";
 import { jsonValueSchema } from "@bb/domain";
 import {
@@ -98,6 +99,7 @@ import {
   useAppFixedTabTarget,
 } from "@/lib/app-fixed-tab-navigation";
 
+import { recordProductAnalytics } from "./product-analytics";
 type FetchLike = (
   input: string,
   init?: RequestInit,
@@ -322,6 +324,20 @@ export function useSdk(): PluginBrowserBbSdk {
   const pluginId = usePluginId();
   const queryClient = useQueryClient();
   return getPluginBoundSdk(sdk, pluginId, queryClient);
+}
+
+export function experimental_useProductAnalytics(): ExperimentalPluginProductAnalytics {
+  const pluginId = usePluginId();
+  const { projectId } = useBbContext();
+  return useCallback<ExperimentalPluginProductAnalytics>((action, stage, options) => {
+    recordProductAnalytics(`plugin.${pluginId}`, action, stage, {
+      operationId: options?.operationId,
+      outcome: options?.outcome,
+      errorCode: options?.errorCode,
+      durationMs: options?.durationMs,
+      scope: projectId === null ? { kind: "instance" } : { kind: "project", projectId },
+    });
+  }, [pluginId, projectId]);
 }
 
 const EMPTY_ENVIRONMENT_PROVIDERS: readonly PluginEnvironmentProvider[] = [];

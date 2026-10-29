@@ -13,6 +13,8 @@ import { useIsCompactViewport } from "@/components/ui/hooks/use-compact-viewport
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { evidenceRequirement } from "../../../workflows/src/build-review-contract.js";
+import { WorkflowEvidence } from "./workflow-evidence.js";
 
 export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profiles: Preset[] }) {
   const rpc = useRpc<TaskWorkflowRpcContract>();
@@ -88,6 +90,7 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
   const rolesAvailable = !!selection?.hostId && !!project.data && machines.data?.some(machine => machine.id === selection.hostId) && [selection.writer, selection.reviewer].every(role => role && role.executionContextId && role.modelConnectionId && role.model && executionSelectionsValid(selections, role.executionContextId, role.modelConnectionId, role.provider, selection.hostId ?? undefined, project.data?.id));
   const runDetails = runs.map(run => { const result = run.native?.result; return <article key={run.id} className="space-y-3 border-t border-border pt-4 max-sm:[&_button]:min-h-11">
       <p className="text-sm font-medium">{run.state === "in_review" ? "Waiting for human review" : run.state === "failed" ? "Workflow needs attention" : `Workflow · ${run.state.replaceAll("_", " ")}`}{run.native?.phase ? ` · ${run.native.phase.replaceAll("_", " ")}` : ""} · revision {run.revision}</p>
+      <p className="text-xs text-muted-foreground">Evidence policy: {run.native?.evidencePolicy ? `v1 · ${run.native.evidencePolicy.requirement === "video" ? "video required" : run.native.evidencePolicy.requirement === "ui" ? "screenshot or preview accepted" : "technical smoke required"}` : run.native?.uiRequired !== undefined ? `legacy · ${run.native.uiRequired ? "screenshot or preview required" : "technical smoke required"}` : "legacy · not recorded in this saved result"}</p>
       {run.error && <p role="alert" className="text-sm text-destructive">{run.error}</p>}
       <div className="flex flex-wrap gap-2">{run.native?.workers.map(worker => <Button key={worker.threadId} size="sm" variant="outline" onClick={() => navigate.toThread(worker.threadId)}>Open {worker.role === "writer" ? "writer" : "independent reviewer"}</Button>)}</div>
       {result && <section className="min-w-0 space-y-3" aria-label="Reviewed result package">
@@ -97,7 +100,7 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
         <dl className="space-y-1 text-sm"><div><dt className="inline font-medium">Branch: </dt><dd className="inline break-all">{result.build.branch}</dd></div><div><dt className="inline font-medium">Reviewed commit: </dt><dd className="inline break-all font-mono text-xs">{result.build.commit}</dd></div></dl>
         <details><summary className="cursor-pointer py-2 text-sm font-medium">Plan and changes</summary><p className="whitespace-pre-wrap break-words text-sm">{result.plan}</p><pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs">{result.build.diff}</pre></details>
         <div className="space-y-2"><h4 className="text-sm font-medium">Observed verification</h4>{result.build.commands.map((command, index) => <details key={index}><summary className="cursor-pointer break-words py-2 text-sm">{command.exitCode === 0 ? "Passed" : "Failed"} · {command.command} · exit {command.exitCode}</summary><pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs">{command.output}</pre></details>)}</div>
-        {result.build.uiEvidence.map((evidence, index) => <div key={index} className="space-y-1 text-sm"><p className="break-words">{evidence.kind}: {evidence.description}</p><p className="break-all text-xs text-muted-foreground">{evidence.location}</p></div>)}
+        <WorkflowEvidence taskId={taskId} build={result.build} />
         {result.build.limitations.map((limitation, index) => <p key={index} className="break-words text-sm text-warning-text">{limitation}</p>)}
         <p className="break-words text-sm"><span className="font-medium">Next decision: </span>{result.build.nextDecision}</p>
         <details><summary className="cursor-pointer py-2 text-sm">Result diagnostics</summary><Button size="sm" variant="ghost" onClick={() => void act(async () => { await navigator.clipboard.writeText(JSON.stringify(result, null, 2)); })}>Copy result diagnostics</Button><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(result, null, 2)}</pre></details>
@@ -147,7 +150,13 @@ export function TaskWorkflowPanel({ taskId, profiles }: { taskId: string; profil
               <p className="text-sm text-muted-foreground">Checks come from this project and template. Nothing has passed until the native writer executes them. Saving project settings is always explicit.</p>
               {settings?.selection && <Button type="button" variant="outline" size="sm" disabled={frozen} onClick={() => { draft.change(settings.selection!); setChecksText(null); }}>Use saved project settings</Button>}
               <label className="block space-y-1 text-sm"><span>Required platform smoke commands · one per line</span><Textarea disabled={frozen} value={checksText ?? selection.smokeCommands.join("\n")} onChange={event => { setChecksText(event.target.value); change({ smokeCommands: event.target.value.split("\n").map(command => command.trim()).filter(Boolean) }); }} rows={4} /></label>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={frozen} checked={selection.uiRequired} onChange={event => change({ uiRequired: event.target.checked })} />Require real UI screenshot or preview evidence</label>
+              <label className="block space-y-1 text-sm"><span>Human-review evidence policy</span><ExecutionPicker label="Human-review evidence policy" value={selection.evidencePolicy?.requirement ?? (selection.uiRequired ? "legacy-ui" : "legacy-technical")} options={[
+                { value: "technical", label: "Backend / CLI · technical smoke required" },
+                { value: "video", label: "UI / interactive · video required (default for new UI work)" },
+                { value: "ui", label: "Explicit exception · screenshot or preview accepted" },
+                ...(!selection.evidencePolicy ? [{ value: selection.uiRequired ? "legacy-ui" : "legacy-technical", label: selection.uiRequired ? "Saved legacy policy · screenshot or preview required" : "Saved legacy policy · technical smoke required" }] : []),
+              ]} dialogOpen={open} disabled={frozen} onChange={value => { if (value === "technical" || value === "ui" || value === "video") change({ evidencePolicy: { version: 1, requirement: value } }); }} /></label>
+              <p className="text-xs text-muted-foreground">{evidenceRequirement(selection) === "video" ? "A short real recording on the reviewed commit is required. Attach MP4 or WebM (up to 25 MiB); screenshots, previews and local paths cannot replace it. If safe recording is unavailable, the workflow is blocked." : "Technical smoke and independent review remain required. New UI / interactive work defaults to video when selected; saved legacy choices are unchanged."} Human Accept is separate from merge or deployment.</p>
               <Button type="button" variant="outline" size="sm" disabled={frozen || !settings || !!draft.error || draft.saving} onClick={() => void act(async () => {
                 if (!await draft.flush() || !settings) return;
                 const saved = await setup.call("saveProjectWorkflowSettings", { taskId, revision: settings.revision, selection });

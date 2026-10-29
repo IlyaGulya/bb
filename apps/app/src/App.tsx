@@ -1,3 +1,4 @@
+import { ProductAnalyticsLifecycle } from "./components/ProductAnalyticsLifecycle";
 import { PluginUpdateJobsHost } from "./components/plugin/PluginUpdateJobsHost";
 import { LazyThreadDetailView } from "./views/thread-detail/LazyThreadDetailView";
 import { LazyRootComposeView } from "./views/LazyRootComposeView";
@@ -479,6 +480,7 @@ export function App() {
               <HashNavigationScroll />
               <NativeShellReporter />
               <UiPreferencesSync />
+              <ProductAnalyticsLifecycle />
               <Routes>
                 <Route
                   path={AUTH_CALLBACK_ROUTE_PATH}

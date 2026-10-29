@@ -14,6 +14,7 @@
 - Keep one-off types local; share types only for real cross-package contracts.
 - Optional or nullable fields must represent meaningful absence. Fill defaults once at the server boundary and pass explicit values through internal routes, commands, and persisted events.
 - Delete accepted-but-ignored route or command fields, or implement them end to end. Document route and command behavior when it is non-obvious.
+- Product analytics is part of feature completion. Reuse the private Core collector and SDK/plugin declarations, publish stable feature/action/version and actual entrypoints in its coverage catalog, and verify delivery through the real entry surface. Keep intent, admission, asynchronous completion and background observations distinct; unknown coverage or availability is not zero usage. Never collect payloads, arbitrary properties or raw errors, infer logical scope from a model account, or count owned QA as production popularity. See [docs/product-analytics.md](docs/product-analytics.md).
 
 ## Server And Daemon
 

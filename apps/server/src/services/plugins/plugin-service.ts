@@ -1,3 +1,10 @@
+import { withProductAnalyticsJsonResult } from "../system/product-analytics-result.js";
+import { pluginAnalyticsFeature } from "../system/product-analytics-catalog.js";
+import type { ProductAnalyticsFeature } from "@bb/server-contract";
+import { analyticsMode, initializePrivateProductAnalytics, productAnalyticsContext } from "../system/product-analytics.js";
+import { observePluginAnalytics } from "../system/product-analytics-plugin.js";
+import { pluginAnalyticsAction, pluginCliAnalyticsAction } from "../system/product-analytics-plugin-catalog.js";
+import { analyticsScopeFromSelectors } from "../system/product-analytics-http.js";
 import type {
   PluginRpcDiscoveryQuery,
   PublishedPluginRpcMethod,
@@ -254,6 +261,7 @@ export interface PluginService {
   stop(): Promise<void>;
   handleUncaughtException(error: unknown): boolean;
   list(): InstalledPlugin[];
+  listAnalyticsFeatures(): ProductAnalyticsFeature[];
   getDisplayName(id: string): string;
   providerCatalog(): Array<{
     id: string;
@@ -574,6 +582,7 @@ function normalizeMentionSearchItems(
 
 export function createPluginService(deps: PluginServiceDeps): PluginService {
   const logger = deps.logger;
+  const analytics = initializePrivateProductAnalytics({ db: deps.db, release: deps.appVersion, mode: analyticsMode(false), logger });
   const installHandlerTimeoutMs = deps.installHandlerTimeoutMs ?? 30_000;
 
   async function runInstallHandlers(id: string): Promise<void> {
@@ -2055,6 +2064,21 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       );
     },
 
+    listAnalyticsFeatures() {
+      const features: ProductAnalyticsFeature[] = [];
+      for (const [pluginId, plugin] of loaded) {
+        for (const method of plugin.handle.rpcHandlers.keys()) features.push(pluginAnalyticsFeature(pluginId, pluginAnalyticsAction("rpc", method), ["web", "compact", "mobile", "desktop", "sdk", "agent", "mcp"]));
+        for (const route of plugin.handle.httpRoutes) features.push(pluginAnalyticsFeature(pluginId, pluginAnalyticsAction("http", `${route.method}.${route.path}`), ["web", "compact", "mobile", "desktop", "cli", "sdk", "agent", "mcp"], route.method === "GET" ? "observation" : "admission"));
+        for (const route of plugin.handle.websocketRoutes) features.push({ ...pluginAnalyticsFeature(pluginId, pluginAnalyticsAction("websocket", route.path), ["web", "compact", "mobile", "desktop", "sdk"], "observation"), limitation: "Connection negotiation; semantic message actions require a declaration. Payloads and frame contents are never collected." });
+        for (const service of plugin.handle.backgroundServices) features.push({ ...pluginAnalyticsFeature(pluginId, pluginAnalyticsAction("service", service.name), ["system"], "observation"), limitation: "Background service availability, not intentional human use." });
+        for (const schedule of plugin.handle.schedules) features.push({ ...pluginAnalyticsFeature(pluginId, pluginAnalyticsAction("schedule", schedule.name), ["system"], "observation"), limitation: "Scheduled background execution, not intentional human use." });
+        for (const provider of plugin.handle.listProviderDeclarations()) features.push({ ...pluginAnalyticsFeature(pluginId, pluginAnalyticsAction("provider", provider.id), ["system"], "lifecycle"), availability: "unknown", limitation: "Actual root turn lifecycle; registration does not prove current host readiness or intentional human selection." });
+        for (const provider of plugin.handle.environmentProviders.values()) features.push({ ...pluginAnalyticsFeature(pluginId, pluginAnalyticsAction("environment", provider.id), ["web", "compact", "cli", "sdk", "agent"], "observation"), availability: "unknown", limitation: "Provider registration; actual provisioning admission is reported separately by Core environments and threads." });
+        for (const provider of plugin.handle.machineProviders.values()) features.push({ ...pluginAnalyticsFeature(pluginId, pluginAnalyticsAction("machine", provider.id), ["web", "compact", "cli", "sdk", "agent"], "observation"), availability: "unknown", limitation: "Provider registration does not prove a machine is available." });
+      }
+      return features;
+    },
+
     discoverRpc(query) {
       return [...loaded.entries()]
         .flatMap(([pluginId, plugin]) => {
@@ -2088,6 +2112,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     resolveRpcCaller,
 
     async invokeHttpRoute(id, route, context) {
+      return withProductAnalyticsJsonResult(context, (classify) => observePluginAnalytics(analytics, id, pluginAnalyticsAction("http", `${route.method}.${route.path}`), async () => {
       const outcome = await invokeWrapped(
         id,
         `http ${route.method} ${route.path}`,
@@ -2101,9 +2126,11 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         { ok: false, error: `plugin route failed: ${outcome.error}` },
         500,
       );
+      }, undefined, classify));
     },
 
     async invokeWebSocketRoute(id, route, context) {
+      return observePluginAnalytics(analytics, id, pluginAnalyticsAction("websocket", route.path), async () => {
       const outcome = await invokeWrapped(
         id,
         `websocket ${route.path} connect`,
@@ -2135,6 +2162,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       return outcome.ok
         ? { ok: true, handlers: outcome.value }
         : { ok: false, error: outcome.error };
+      });
     },
 
     async invokeWebSocketEvent(id, route, event, run) {
@@ -2142,6 +2170,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     },
 
     async invokeRpcHandler(id, method, handler, input, caller) {
+      return observePluginAnalytics(analytics, id, pluginAnalyticsAction("rpc", method), async () => {
       const outcome = await invokeWrapped(id, `rpc ${method}`, async () => {
         const parsedInput = await validateRpcValue(
           handler.inputSchema,
@@ -2168,6 +2197,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         ok: false,
         error: { code: "handler_error", message: outcome.error },
       };
+      });
     },
 
     async httpToken(id, options) {
@@ -2189,6 +2219,9 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     },
 
     async runCliCommand(id, argv, ctx) {
+      const action = pluginCliAnalyticsAction(loaded.get(id)?.handle.cli.registration, argv);
+      const scope = analyticsScopeFromSelectors(deps.db, { projectId: ctx.projectId, threadId: ctx.threadId });
+      return observePluginAnalytics(analytics, id, action, async () => {
       const fail = (stderr: string) =>
         enforcePluginCliOutputLimit(
           { exitCode: 1, stdout: "", stderr },
@@ -2229,6 +2262,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       );
       if (outcome.ok) return outcome.value;
       return fail(`bb ${registration.name} failed: ${outcome.error}`);
+      }, { ...(scope === null ? { scopeKnown: false } : scope.kind === "project" ? { scope, scopeKnown: true } : {}), surface: productAnalyticsContext()?.surface ?? "cli", actorKind: ctx.threadId ? "agent" : productAnalyticsContext()?.actorKind ?? "unknown" });
     },
 
     listSkillRootContributions() {
@@ -2424,6 +2458,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     },
 
     async invokeAgentTool({ pluginId, record, input, ctx }) {
+      return observePluginAnalytics(analytics, pluginId, pluginAnalyticsAction("agent-tool", record.name), async () => {
       const parsed = record.parse(input);
       if (!parsed.ok) {
         return {
@@ -2454,6 +2489,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           },
         ],
       };
+      }, { scope: { kind: "project", projectId: ctx.projectId }, actorKind: "agent", surface: "agent" });
     },
 
     listMentionProviderContributions() {
@@ -2715,11 +2751,11 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           now,
         });
         if (!claimed) continue;
-        const outcome = await invokeWrapped(
+        const outcome = await observePluginAnalytics(analytics, row.pluginId, pluginAnalyticsAction("schedule", row.name), () => invokeWrapped(
           row.pluginId,
           `schedule ${row.name}`,
           () => schedule.fn(),
-        );
+        ), { operationId: randomUUID(), scope: { kind: "instance" }, scopeKnown: true, actorKind: "system", actorSessionId: null, surface: "system", mode: analytics.mode, intent: false });
         recordPluginScheduleResult(deps.db, {
           pluginId: row.pluginId,
           name: row.name,

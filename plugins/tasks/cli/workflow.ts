@@ -4,6 +4,7 @@ import type { TasksApiStore } from "../api/index.js";
 import type { Task } from "../shared/contract.js";
 import { workflowRpcContract } from "../shared/workflow-contract.js";
 import { EMPTY_WORKFLOW_ROLE, workflowSelectionSchema, type WorkflowSelection } from "../shared/workflow-preparation.js";
+import { evidencePolicySchema } from "../../workflows/src/build-review-contract.js";
 
 export function workflowCommands(
   handlers: TaskWorkflowHandlers,
@@ -53,7 +54,9 @@ export function workflowCommands(
         "writer-instructions": { type: "string", description: "Task-scoped writer instructions" },
         "reviewer-instructions": { type: "string", description: "Task-scoped reviewer instructions" },
         checks: { type: "string", description: "JSON array of configured real platform smoke commands" },
-        ui: { type: "boolean", description: "Require real UI evidence" },
+        ui: { type: "boolean", description: "Legacy screenshot/preview requirement; does not opt into video policy" },
+        "task-kind": { type: "string", description: "Explicit ui or backend classification; ui defaults to video-required, backend to technical smoke" },
+        "evidence-policy": { type: "string", description: "Explicit version-1 policy: technical, ui (screenshot/preview exception), or video" },
         selection: { type: "string", description: "Complete typed selection JSON for SDK/automation parity; named flags override it" },
       },
       run(input) {
@@ -97,7 +100,17 @@ export function workflowCommands(
             selection[role] = updated;
           }
           if (input.options.checks) selection.smokeCommands = JSON.parse(input.options.checks);
-          if (input.options.ui !== undefined) selection.uiRequired = input.options.ui;
+          if (input.options.ui !== undefined) {
+            if (input.options["task-kind"] || input.options["evidence-policy"]) throw new Error("Choose legacy --ui or explicit --task-kind/--evidence-policy, not both");
+            selection.uiRequired = input.options.ui;
+            delete selection.evidencePolicy;
+          }
+          if (input.options["task-kind"] !== undefined) {
+            const kind = input.options["task-kind"];
+            if (kind !== "ui" && kind !== "backend") throw new Error("task-kind must be ui or backend; classification is never inferred from task text");
+            selection.evidencePolicy = { version: 1, requirement: kind === "ui" ? "video" : "technical" };
+          }
+          if (input.options["evidence-policy"] !== undefined) selection.evidencePolicy = evidencePolicySchema.parse({ version: 1, requirement: input.options["evidence-policy"] });
           return handlers.saveTaskWorkflowDraft({ ...address, revision: draft.revision, selection: workflowSelectionSchema.parse(selection) });
         });
       },

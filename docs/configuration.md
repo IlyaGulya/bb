@@ -27,6 +27,33 @@ Launcher status output is plain when stdout is redirected, including in CI.
 Set `FORCE_COLOR=1` to request color or `NO_COLOR=1` to disable it; `NO_COLOR`
 takes precedence. In-place progress updates require a stdout TTY.
 
+## Private product analytics
+
+Private feature analytics is stored in the owner's BB database and is separate
+from anonymous, optional vendor telemetry. Settings → Private analytics,
+`bb analytics` and the typed SDK use the same collector and report. No analytics
+vendor endpoint, API key, proxy, CA or account configuration is required.
+
+`BB_PRODUCT_ANALYTICS_MODE=production|preview|smoke|test` sets the server's
+collection plane and requires a restart. The default is production for a
+packaged server, preview for development and test under the test runner. Use
+smoke or preview for an owned QA candidate; do not change production settings
+to run a verification. A production-tagged client cannot promote events out of
+that server's non-production plane. Explicit non-production client events also
+stay non-production. A late completion preserves its already admitted start's
+mode, actor and surface across a server promotion.
+
+This setting is not a collection opt-out and never changes `BB_TELEMETRY` or
+the existing anonymous telemetry setting. Logical scope comes from the actual
+Core project/thread/environment or explicit project context, never from a
+Personal/Work model connection. Reports select one existing logical project or
+instance-only actions; there is no implicit all-project aggregate. Missing
+plugin scope becomes an instance-level diagnostic gap, not a guessed project.
+
+See [product-analytics.md](product-analytics.md) for retention, delivery limits
+and the runtime acceptance procedure. `bb guide customization` documents CLI
+filters and output.
+
 ## Independent execution contexts and model connections
 
 Settings → **Contexts & connections** manages logical context definitions,
@@ -1272,6 +1299,16 @@ for that tracker project and template; applying them to another existing draft
 is also explicit. Neither task edits nor Start save global presets or defaults.
 Required platform smoke commands must be configured; there are no fabricated
 passing checks. Logical context and model account are independent explicit picks.
+
+Task drafts optionally carry explicit `evidencePolicy:{version:1,requirement:
+"technical"|"ui"|"video"}`. New explicitly classified UI/interactive requests
+default to `video` through `--task-kind ui` or the dialog's UI choice; backend
+classification uses `technical`. `--evidence-policy` overrides deliberately.
+Missing policy preserves legacy `uiRequired` screenshot/preview meaning; old
+saved settings/results are not rewritten. This is task/project-template policy,
+not an account/model/global default. Safe recording unavailability blocks required
+video. Technical smoke remains mandatory, and Return retains the selected policy.
+These are configuration contracts, not a runtime acceptance or deployment claim.
 
 Core prepares an isolated single-root git worktree and native internal contexts
 without a donor origin or model initialization turn. Preparation is observable,
