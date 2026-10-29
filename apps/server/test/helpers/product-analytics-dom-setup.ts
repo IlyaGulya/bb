@@ -47,7 +47,8 @@ export default function plugin(bb) {
 }` : options.pluginSource;
       const appSource = options.appSource ?? (options.notifications ? `import { definePluginApp } from "@get-bb/plugin-sdk/app"; import { notificationsThreadAction } from "./notificationsAction.js"; export default definePluginApp((app) => { app.slots.experimental_threadAction(notificationsThreadAction); });` : undefined);
       const sourceFiles = options.notifications ? ["preferences.ts", "contract.ts", "notificationsAction.ts"].map((name) => new URL(`../../../../plugins/push-notifications/${name}`, import.meta.url)) : [];
-      const pluginId = serverSource === undefined ? null : (await installConsumerPlugin(fixture.harness, serverSource, { appSource, sourceFiles })).pluginId;
+      const nodeModules = options.notifications ? new URL("../../../../plugins/push-notifications/node_modules", import.meta.url) : undefined;
+      const pluginId = serverSource === undefined ? null : (await installConsumerPlugin(fixture.harness, serverSource, { appSource, sourceFiles, nodeModules })).pluginId;
       const personalEnvironment = seedEnvironment(fixture.harness.deps, { hostId: fixture.host.id, projectId: fixture.personal.id, status: "ready" });
       const personalThread = seedThread(fixture.harness.deps, { projectId: fixture.personal.id, environmentId: personalEnvironment.id, status: "idle" });
       const secondWorkThread = seedThread(fixture.harness.deps, { projectId: fixture.work.id, environmentId: fixture.environment.id, status: "idle" });
