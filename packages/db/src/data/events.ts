@@ -1991,6 +1991,7 @@ export function getLatestStoredThreadEventOfTypes(
     threadId: string;
     types: readonly ThreadEventType[];
     afterSequence: number;
+    operation?: string;
   },
 ): StoredThreadEventDataRow | null {
   if (args.types.length === 0) {
@@ -2010,6 +2011,7 @@ export function getLatestStoredThreadEventOfTypes(
           eq(events.threadId, args.threadId),
           inArray(events.type, [...args.types]),
           gt(events.sequence, args.afterSequence),
+          args.operation === undefined ? undefined : sql`json_extract(${events.data}, '$.operation') = ${args.operation}`,
         ),
       )
       .orderBy(desc(events.sequence))

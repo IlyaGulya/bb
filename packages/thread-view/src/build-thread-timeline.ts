@@ -18,6 +18,7 @@ import type {
 import {
   isBackgroundAgentTaskType,
   readTerminalOutputLines,
+  providerStartupDiagnosticSchema,
   type ActiveThinking,
   type CompletedTurnDisplay,
   type Thread,
@@ -233,6 +234,8 @@ function buildGenericOperationSystemRow({
   message,
   operationKind,
 }: BuildGenericOperationSystemRowArgs): TimelineSystemRow {
+  const startup = message.threadOperation?.rawOperation === "provider_startup"
+    ? providerStartupDiagnosticSchema.safeParse(message.threadOperation.metadata) : null;
   return {
     ...base,
     kind: "system",
@@ -243,6 +246,7 @@ function buildGenericOperationSystemRow({
     detail: buildTimelineOperationDetail(message),
     status: message.status ?? null,
     completedAt: message.completedAt,
+    ...(startup?.success ? { providerStartup: startup.data } : {}),
   };
 }
 

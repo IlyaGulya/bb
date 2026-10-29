@@ -1,13 +1,20 @@
 import { z } from "zod";
 import { providerRecoveryHintSchema } from "./errors.js";
+import { providerStartupSignalSchema } from "@bb/domain";
 
 export const BRIDGE_NOTIFICATION_METHODS = {
   threadIdentity: "thread/identity",
+  threadStartup: "thread/startup",
   sessionReplaced: "session/replaced",
   providerRaw: "provider/raw",
   providerRecovery: "provider/recovery",
   error: "error",
 } as const;
+
+export const threadStartupNotificationSchema = providerStartupSignalSchema.extend({
+  threadId: z.string().min(1),
+}).strict();
+export type ThreadStartupNotification = z.infer<typeof threadStartupNotificationSchema>;
 
 export const threadIdentityNotificationSchema = z
   .object({

@@ -13,6 +13,7 @@ interface StopProcessGroupLeaderFirstArgs {
   child: ChildProcess;
   timeoutMs: number;
   killGraceMs: number;
+  identityMatches?: () => boolean;
 }
 
 export interface ProcessStopResult {
@@ -76,6 +77,7 @@ export function stopProcessGroupLeaderFirst(
   if (hasChildExited(child) && !isProcessGroupAlive(child)) {
     return Promise.resolve({ treeTermination: "confirmed" });
   }
+  if (args.identityMatches && !args.identityMatches()) return Promise.resolve({ treeTermination: "unverified" });
   return new Promise<ProcessStopResult>((resolveStop) => {
     let settled = false;
     let hardTimer: NodeJS.Timeout | undefined;
@@ -104,6 +106,7 @@ export function stopProcessGroupLeaderFirst(
         finish();
         return;
       }
+      if (args.identityMatches && !args.identityMatches()) { finish(); return; }
       killProcessGroup({ child, signal: "SIGKILL" });
       if (killGraceMs <= 0) {
         finish();
@@ -117,6 +120,7 @@ export function stopProcessGroupLeaderFirst(
         finish();
         return;
       }
+      if (args.identityMatches && !args.identityMatches()) { finish(); return; }
       killProcessGroup({ child, signal: "SIGTERM" });
       poll = setInterval(() => {
         if (!isProcessGroupAlive(child)) {

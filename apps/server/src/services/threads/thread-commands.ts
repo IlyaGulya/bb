@@ -54,6 +54,7 @@ import {
   resolveBridgeLaunchForProviderId,
 } from "../system/provider-bridge-launch.js";
 import { assertThreadExecutionBindingAvailable } from "../execution-contexts.js";
+import { assertThreadStartupAvailable } from "./thread-startup-policy.js";
 
 type ExecutionOptionsRequest = ExistingThreadExecutionInputRequest;
 
@@ -200,6 +201,7 @@ function resolvePromptMode(
 function toRuntimeExecutionOptions(
   args: RuntimeExecutionOptionsArgs,
 ): RuntimeThreadExecutionOptions {
+  assertThreadStartupAvailable(args.deps.db, args.threadId);
   const permissionMode = clampPermissionModeToHost(args.deps, {
     hostId: args.hostId,
     permissionMode: args.execution.permissionMode,

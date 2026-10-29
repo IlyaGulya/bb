@@ -94,6 +94,62 @@ describe("SdkSession", () => {
     vi.restoreAllMocks();
   });
 
+  it.each(["needs-auth", "failed", "disabled"] as const)("withholds model input when a required MCP capability reports %s", async (status) => {
+    keepSdkStreamOpen();
+    mockQueryInstance.initializationResult.mockResolvedValue({ account: {} });
+    mockQueryInstance.mcpServerStatus.mockResolvedValue([{ name: "required", status }]);
+    const session = new SdkSession({ ...defaultOptions, startup: { requiredMcpServers: ["required"], optionalMcpServers: [] } }, vi.fn(), vi.fn());
+    const consumed = session.pushInput("fixture private input");
+    const rejected = expect(consumed).rejects.toMatchObject({ code: status === "needs-auth" ? "auth_required" : "capability_unavailable" });
+    session.start();
+    const next = getLatestPrompt()[Symbol.asyncIterator]().next();
+    const denied = expect(next).rejects.toThrow();
+    await Promise.all([rejected, denied]);
+    session.stop();
+  });
+
+  it("withholds input until required capability readiness, but permits explicitly optional unavailable capabilities", async () => {
+    keepSdkStreamOpen();
+    mockQueryInstance.initializationResult.mockResolvedValue({ account: {} });
+    let connect!: (value: { name: string; status: string }[]) => void;
+    mockQueryInstance.mcpServerStatus.mockReturnValue(new Promise((resolve) => { connect = resolve; }));
+    const session = new SdkSession({ ...defaultOptions, startup: { requiredMcpServers: ["required"], optionalMcpServers: ["optional"] } }, vi.fn(), vi.fn());
+    let delivered = false;
+    const consumed = session.pushInput("owned fixture").then(() => { delivered = true; });
+    session.start();
+    const next = getLatestPrompt()[Symbol.asyncIterator]().next();
+    await waitForAsyncWork();
+    expect(delivered).toBe(false);
+    connect([{ name: "required", status: "connected" }, { name: "optional", status: "needs-auth" }]);
+    await consumed;
+    expect((await next).value?.message.content).toBe("owned fixture");
+    session.stop();
+  });
+
+  it("reports only opaque startup hook metadata and never forwards native hook or authentication output", async () => {
+    const messages: SDKMessage[] = [
+      { type: "system", subtype: "hook_started", hook_id: "native-private-id", hook_name: "/private/vault/fixture", hook_event: "SessionStart", uuid: "00000000-0000-0000-0000-000000000001", session_id: "fixture-session" },
+      { type: "system", subtype: "hook_progress", hook_id: "native-private-id", hook_name: "/private/vault/fixture", hook_event: "SessionStart", stdout: "SENSITIVE_FIXTURE", stderr: "SENSITIVE_FIXTURE", output: "SENSITIVE_FIXTURE", uuid: "00000000-0000-0000-0000-000000000002", session_id: "fixture-session" },
+      { type: "auth_status", isAuthenticating: false, output: ["SENSITIVE_FIXTURE"], error: "SENSITIVE_FIXTURE", uuid: "00000000-0000-0000-0000-000000000003", session_id: "fixture-session" },
+      { type: "system", subtype: "hook_response", hook_id: "native-private-id", hook_name: "/private/vault/fixture", hook_event: "SessionStart", stdout: "SENSITIVE_FIXTURE", stderr: "SENSITIVE_FIXTURE", output: "SENSITIVE_FIXTURE", outcome: "success", uuid: "00000000-0000-0000-0000-000000000004", session_id: "fixture-session" },
+      { type: "system", subtype: "init", apiKeySource: "none", claude_code_version: "fixture", cwd: "/tmp/fixture", tools: [], mcp_servers: [], model: "fixture", permissionMode: "default", slash_commands: [], output_style: "default", skills: [], plugins: [], uuid: "00000000-0000-0000-0000-000000000005", session_id: "fixture-session" },
+    ];
+    mockQueryInstance.initializationResult.mockResolvedValue({ account: {} });
+    mockQueryInstance[Symbol.asyncIterator].mockImplementation(async function* () { yield* messages; await new Promise<void>(() => {}); });
+    const onStartup = vi.fn();
+    const onMessage = vi.fn();
+    const session = new SdkSession({ ...defaultOptions, startup: { requiredMcpServers: [], optionalMcpServers: [] }, onStartup }, onMessage, vi.fn());
+    session.start();
+    await session.waitForStartup();
+    const hooks = onStartup.mock.calls.map(([event]) => event).filter((event) => event.phase === "hook");
+    expect(hooks.map((event) => event.hookState)).toEqual(["started", "progress", "success"]);
+    expect(hooks[0].hookId).toMatch(/^[a-f0-9]{16}$/);
+    expect(new Set(hooks.map((event) => event.hookId)).size).toBe(1);
+    expect(onMessage.mock.calls.map(([message]) => message.type)).toEqual(["system"]);
+    expect(JSON.stringify([onStartup.mock.calls, onMessage.mock.calls])).not.toMatch(/SENSITIVE_FIXTURE|private\/vault|native-private-id/);
+    session.stop();
+  });
+
   it("withholds native model input until the explicit MCP profile proves local OAuth and a connected Cloud connector", async () => {
     keepSdkStreamOpen();
     let initialize!: (value: {

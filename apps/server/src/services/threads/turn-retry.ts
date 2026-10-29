@@ -14,6 +14,7 @@ import type {
 import { ApiError } from "../../errors.js";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { attemptDispatch } from "./dispatch-attempt.js";
+import { assertThreadStartupAvailable } from "./thread-startup-policy.js";
 import {
   loadFailedTurn,
   retryChain,
@@ -55,6 +56,7 @@ function requireFailedTurn(
   args: { thread: Thread; turnRequestId: ClientTurnRequestId | null },
 ) {
   const { thread } = args;
+  assertThreadStartupAvailable(deps.db, thread.id);
   if (thread.status !== "error") {
     throw new ApiError(
       409,

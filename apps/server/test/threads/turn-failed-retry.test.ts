@@ -437,6 +437,95 @@ describe("the turn.failed announcement", () => {
 });
 
 describe("retrying a failed turn", () => {
+  it("retains an unverified startup ownership blocker across unrelated events without queuing another executor", async () => {
+    await withTestHarness(async (harness) => {
+      const { environment, requestId, thread } = seedFailableThread(harness, "host-startup-stop");
+      failThread(harness, thread.id);
+      for (const operation of ["provider_startup", "unrelated_operation"]) {
+        seedEvent(harness.deps, {
+          threadId: thread.id, environmentId: environment.id,
+          sequence: getLatestThreadSequence(harness.db, { threadId: thread.id }) + 1,
+          type: "system/operation", scope: { kind: "thread" },
+          data: { operation, operationId: operation, status: "failed", message: "Owned fixture cleanup is unverified", metadata: {
+            phase: "stopped", elapsedMs: 1000, deadlineMs: 1000, hookEvent: null, hookId: null, hookState: null,
+            code: "provider_startup_stop_unverified", retryBlocked: operation === "provider_startup", optionalMcpServerCount: 0,
+          } },
+        });
+      }
+      await expect(retryFailedTurn(harness.deps, {
+        thread: requireThread(harness, thread.id),
+        request: { turnRequestId: requestId, sendAt: Date.now() + 60_000, reason: "Prerequisites changed" },
+      })).rejects.toMatchObject({ status: 409, body: { code: "provider_startup_stop_unverified" } });
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
+      expect(turnRequests(harness, thread.id).map((row) => turnRequestData(row).requestId)).toEqual([requestId]);
+    });
+  });
+  it.each([
+    { phase: "initializing", status: "running", code: null },
+    { phase: "hook", status: "running", code: null },
+    { phase: "stopping", status: "running", code: "provider_startup_timeout" },
+    { phase: "stopped", status: "failed", code: "provider_startup_stop_unverified" },
+  ] as const)("refuses a delayed retry when persisted $phase ownership has no confirmed cleanup despite retryBlocked false", async ({ phase, status, code }) => {
+    await withTestHarness(async (harness) => {
+      const { environment, requestId, thread } = seedFailableThread(harness, "host-startup-lost-owner");
+      failThread(harness, thread.id);
+      seedEvent(harness.deps, {
+        threadId: thread.id, environmentId: environment.id,
+        sequence: getLatestThreadSequence(harness.db, { threadId: thread.id }) + 1,
+        type: "system/operation", scope: { kind: "thread" },
+        data: {
+          operation: "provider_startup", operationId: "abandoned-startup", status, message: "Synthetic persisted startup receipt",
+          metadata: {
+            phase, elapsedMs: 500, deadlineMs: 1000,
+            hookEvent: phase === "hook" ? "SessionStart" : null,
+            hookId: phase === "hook" ? "0123456789abcdef" : null,
+            hookState: phase === "hook" ? "started" : null,
+            code, retryBlocked: false, optionalMcpServerCount: 0,
+          },
+        },
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id, environmentId: environment.id,
+        sequence: getLatestThreadSequence(harness.db, { threadId: thread.id }) + 1,
+        type: "system/operation", scope: { kind: "thread" },
+        data: { operation: "unrelated_operation", operationId: "unrelated", status: "completed", message: "Unrelated operation completed" },
+      });
+      await expect(retryFailedTurn(harness.deps, {
+        thread: requireThread(harness, thread.id),
+        request: { turnRequestId: requestId, sendAt: Date.now() + 60_000, reason: "Retry after daemon loss" },
+      })).rejects.toMatchObject({ status: 409, body: { code: "provider_startup_stop_unverified" } });
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
+      expect(turnRequests(harness, thread.id).map((row) => turnRequestData(row).requestId)).toEqual([requestId]);
+    });
+  });
+
+  it.each([
+    { phase: "ready", status: "completed", code: null },
+    { phase: "stopped", status: "failed", code: "provider_startup_timeout" },
+  ] as const)("permits same-task retry after a confirmed $phase startup receipt", async ({ phase, status, code }) => {
+    await withTestHarness(async (harness) => {
+      const { environment, requestId, thread } = seedFailableThread(harness, "host-startup-confirmed");
+      failThread(harness, thread.id);
+      seedEvent(harness.deps, {
+        threadId: thread.id, environmentId: environment.id,
+        sequence: getLatestThreadSequence(harness.db, { threadId: thread.id }) + 1,
+        type: "system/operation", scope: { kind: "thread" },
+        data: { operation: "provider_startup", operationId: "confirmed-startup", status, message: "Synthetic confirmed startup receipt", metadata: {
+          phase, elapsedMs: 1000, deadlineMs: 1000, hookEvent: null, hookId: null, hookState: null,
+          code, retryBlocked: false, optionalMcpServerCount: 0,
+        } },
+      });
+      await expect(retryFailedTurn(harness.deps, {
+        thread: requireThread(harness, thread.id),
+        request: { turnRequestId: requestId, sendAt: Date.now() + 60_000, reason: "Confirmed startup settlement" },
+      })).resolves.toMatchObject({ delivery: "queued", turnRequestId: requestId, attempt: 2 });
+      expect(onlyQueuedRow(harness, thread.id).payload).toEqual({
+        kind: "retry", retryOfTurnRequestId: requestId, attempt: 2, reason: "Confirmed startup settlement",
+      });
+      expect(turnRequests(harness, thread.id).map((row) => turnRequestData(row).requestId)).toEqual([requestId]);
+    });
+  });
+
   it("queues a by-reference row on the clock and re-submits the original turn", async () => {
     await withTestHarness(async (harness) => {
       const sendAt = Date.now() + 60_000;

@@ -75,6 +75,7 @@ import { ThreadPromptModeCard } from "@/components/promptbox/banner/ThreadPrompt
 import { ThreadWorkflowStack } from "@/components/promptbox/banner/ThreadWorkflowStack";
 import { ThreadBackgroundCommandsCard } from "@/components/promptbox/banner/ThreadBackgroundCommandsCard";
 import { ThreadModelFallbackCard } from "@/components/promptbox/banner/ThreadModelFallbackCard";
+import { ThreadStartupBanner } from "@/components/promptbox/banner/ThreadStartupBanner";
 import { InlineMessageEditorFrame } from "@/components/promptbox/InlineMessageEditorFrame";
 import type { ModelReasoningPickerHandoffSelection } from "@/components/pickers/ModelReasoningPicker";
 import {
@@ -2159,6 +2160,7 @@ export function ThreadDetailPromptArea({
   const promptStack = useMemo(
     () => (
       <>
+        <ThreadStartupBanner key={`startup:${thread.id}`} threadId={thread.id} />
         <ThreadWorkflowStack
           workflows={activeWorkflows}
           isStackExpanded={isWorkflowStackExpanded}

@@ -2474,6 +2474,9 @@ importers:
         specifier: 0.1.0
         version: 0.1.0
     devDependencies:
+      '@bb/test-helpers':
+        specifier: workspace:*
+        version: link:../test-helpers
       '@bb/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
@@ -5680,6 +5683,9 @@ importers:
 
   tests/integration:
     dependencies:
+      '@bb/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
       '@bb/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -5695,6 +5701,9 @@ importers:
       '@bb/host-daemon-contract':
         specifier: workspace:*
         version: link:../../packages/host-daemon-contract
+      '@bb/process-utils':
+        specifier: workspace:*
+        version: link:../../packages/process-utils
       '@bb/server':
         specifier: workspace:*
         version: link:../../apps/server

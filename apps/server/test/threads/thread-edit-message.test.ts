@@ -1,15 +1,20 @@
+import { createAgentRuntime } from "@bb/agent-runtime";
+import { spawnManagedProcess } from "@bb/process-utils";
+import { MemoryBridge } from "@bb/agent-runtime/test";
 import {
   claimQueuedThreadMessageGroup,
   createQueuedThreadMessage,
   createPendingInteraction,
   createPromptHistoryEntry,
   getThread,
+  getLatestThreadSequence,
   listEvents,
   listQueuedThreadMessages,
   listStoredProjectPromptHistoryRows,
   listStoredThreadPromptHistoryRows,
 } from "@bb/db";
 import {
+  executionContextSnapshotSchema,
   encodeClientTurnRequestIdNumber,
   threadScope,
   turnScope,
@@ -18,6 +23,7 @@ import {
   type ThreadStatus,
 } from "@bb/domain";
 import { describe, expect, it, vi } from "vitest";
+
 import { editThreadMessage } from "../../src/services/threads/thread-edit-message.js";
 import { requestThreadStopForCurrentState } from "../../src/services/threads/thread-lifecycle.js";
 import {
@@ -36,6 +42,10 @@ import {
   seedThread,
 } from "../helpers/seed.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
+vi.mock("@bb/process-utils", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@bb/process-utils")>(),
+  spawnManagedProcess: vi.fn(),
+}));
 
 const MESSAGE_EDIT_PROVIDERS = ["codex", "pi", "claude-code"] as const;
 const MESSAGE_EDIT_SCENARIOS = [
@@ -636,6 +646,86 @@ describe("editThreadMessage", () => {
       });
     },
   );
+
+  it("commits an edit after bounded staged rewind startup without a false history concurrency conflict", async () => {
+    await withTestHarness(async (harness) => {
+      const { environment, thread } = seedEditableThread(harness);
+      const bridge = new MemoryBridge();
+      vi.mocked(spawnManagedProcess).mockReturnValue({ child: bridge, stop: bridge.stop });
+      const processSignal = vi.spyOn(process, "kill").mockImplementation(() => {
+        throw new Error("The staged rewind fixture must never signal processes");
+      });
+      const runtime = createAgentRuntime({
+        workspacePath: "/memory-fixture", bridgeBundleDir: "/memory-fixture",
+        onToolCall: async () => { throw new Error("The staged rewind fixture must not invoke tools"); },
+        onEvent: (event) => {
+          if (event.threadId !== thread.id || event.type !== "system/operation") return;
+          seedStoredEvent(harness.deps, {
+            threadId: thread.id, environmentId: environment.id,
+            sequence: getLatestThreadSequence(harness.db, { threadId: thread.id }) + 1,
+            type: event.type, scope: event.scope,
+            data: { operation: event.operation, operationId: event.operationId, status: event.status, message: event.message, metadata: event.metadata },
+          });
+        },
+      });
+      const edit = editThreadMessage(harness.deps, {
+        environment, thread,
+        payload: { operationId: "edit-op-bounded-startup", expectedRequestSequence: 7, input: [{ type: "text", text: "Replacement after bounded rewind", mentions: [] }] },
+      }).then((result) => ({ status: "fulfilled" as const, result }), (error: unknown) => ({ status: "rejected" as const, error }));
+      let editSettled = false;
+      const observedEdit = edit.then((result) => { editSettled = true; return result; });
+      try {
+        const rewind = await waitForQueuedCommand(harness, (queued) => queued.command.type === "thread.rewind.prepare");
+        if (rewind.command.type !== "thread.rewind.prepare") throw new Error("Expected rewind preparation");
+        const before = listEvents(harness.db, { threadId: thread.id });
+        const prepared = await runtime.prepareThreadRewind({
+          environmentId: environment.id, projectId: thread.projectId, threadId: thread.id,
+          leaseId: rewind.command.leaseId, sourceProviderThreadId: rewind.command.sourceProviderThreadId,
+          retainThroughProviderCheckpoint: rewind.command.retainThroughProviderCheckpoint, providerId: "codex",
+          bridgeLaunch: {
+            pluginId: "memory-startup-fixture", dataDir: "/memory-fixture/data",
+            source: { kind: "artifact", digest: "memory-startup-fixture", artifactPath: "/memory-fixture/bridge.mjs" },
+            capabilities: { providerInstallation: false, supportsServiceTier: false, permissionModes: ["full"], supportsThreadArchive: false, supportsThreadRename: false, fork: "checkpoint" },
+            providerOptions: {}, envPassthrough: [],
+          },
+          options: {
+            model: "fixture", serviceTier: "default", reasoningLevel: "medium",
+            permissionMode: "full", permissionScope: "full", approvalReviewer: null, permissionEscalation: null,
+            providerOptions: { executionContext: executionContextSnapshotSchema.parse({
+              id: "fixture-context", name: "Fixture", createdAt: 1, updatedAt: 1,
+              startupPolicy: { deadlineMs: 1000, optionalMcpServers: [] },
+            }) },
+          },
+        });
+        await reportQueuedCommandSuccess(harness, rewind, prepared);
+        await vi.waitFor(async () => {
+          const discard = listQueuedThreadCommands(harness, "thread.rewind.discard", thread.id)[0];
+          if (discard?.type === "thread.rewind.discard") {
+            const queuedDiscard = await waitForQueuedCommand(harness, (queued) => queued.command.type === "thread.rewind.discard");
+            await reportQueuedCommandSuccess(harness, queuedDiscard, {});
+          }
+          expect(editSettled).toBe(true);
+        });
+        expect(await observedEdit).toMatchObject({ status: "fulfilled", result: { ok: true, operationId: "edit-op-bounded-startup" } });
+        const stored = listEvents(harness.db, { threadId: thread.id });
+        expect(stored.filter((event) => event.sequence <= 6)).toEqual(before.filter((event) => event.sequence <= 6));
+        const replacement = stored.filter((event) => event.type === "client/turn/requested").map((event) => JSON.parse(event.data));
+        expect(replacement).toEqual([
+          expect.objectContaining({ input: [{ type: "text", text: "First message", mentions: [] }] }),
+          expect.objectContaining({ input: [{ type: "text", text: "Replacement after bounded rewind", mentions: [] }] }),
+        ]);
+        const replacementStart = await waitForQueuedCommand(harness, (queued) => queued.command.type === "thread.start" && queued.command.threadId === thread.id);
+        await reportQueuedCommandSuccess(harness, replacementStart, { providerThreadId: "native-replacement" });
+      } finally {
+        await runtime.shutdown();
+        bridge.stdin.destroy();
+        bridge.stdout.destroy();
+        bridge.stderr.destroy();
+        processSignal.mockRestore();
+        vi.mocked(spawnManagedProcess).mockReset();
+      }
+    });
+  });
 
   it("keeps history intact until the staged Codex rewind succeeds, then replaces the suffix", async () => {
     await withTestHarness(async (harness) => {

@@ -8,6 +8,7 @@ import {
   pendingInteractionUserQuestionQuestionSchema,
   promptTextMentionSchema,
   systemMessageKindSchema,
+  providerStartupDiagnosticSchema,
   systemMessageSubjectSchema,
   threadEventItemPresentationSchema,
   threadEventPlanStepSchema,
@@ -211,6 +212,7 @@ export const timelineGenericOperationSystemRowSchema =
     systemKind: z.literal("operation"),
     operationKind: timelineGenericSystemOperationKindSchema,
     reasoningId: z.string().optional(),
+    providerStartup: providerStartupDiagnosticSchema.optional(),
     completedAt: z.number().nullable(),
     ...timelineContentDeferredField,
   });

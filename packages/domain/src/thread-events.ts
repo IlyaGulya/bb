@@ -166,6 +166,27 @@ export const THREAD_CONTEXT_CLEAR_OPERATION = "context_clear";
 export const THREAD_CONTEXT_CLEARED_DETAIL =
   "New prompts won’t include messages above. Thread history and workspace are unchanged.";
 
+export const providerStartupSignalSchema = z.object({
+  phase: z.enum(["initializing", "hook", "capabilities", "ready"]),
+  hookEvent: z.enum(["SessionStart", "Setup"]).nullable(),
+  hookId: z.string().regex(/^[a-f0-9]{16}$/).nullable(),
+  hookState: z.enum(["started", "progress", "success", "error", "cancelled"]).nullable(),
+}).strict();
+export const providerStartupCodeSchema = z.enum([
+  "provider_startup_timeout", "provider_startup_cancelled", "provider_startup_failed",
+  "provider_startup_stop_unverified", "provider_startup_capability_unverified", "provider_startup_auth_required",
+]);
+export type ProviderStartupCode = z.infer<typeof providerStartupCodeSchema>;
+export const providerStartupDiagnosticSchema = providerStartupSignalSchema.extend({
+  phase: z.enum([...providerStartupSignalSchema.shape.phase.options, "stopping", "stopped"]),
+  elapsedMs: z.number().int().nonnegative(),
+  deadlineMs: z.number().int().min(1_000).max(30 * 60_000),
+  code: providerStartupCodeSchema.nullable(),
+  retryBlocked: z.boolean(),
+  optionalMcpServerCount: z.number().int().nonnegative(),
+}).strip();
+export type ProviderStartupDiagnostic = z.infer<typeof providerStartupDiagnosticSchema>;
+
 export const systemOperationEventDataSchema = z.object({
   operation: z.string(),
   status: z.string(),
