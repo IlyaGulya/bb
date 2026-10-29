@@ -36,7 +36,10 @@ export function artifactCommands(
     "artifact list": cliCommand({
       summary: "List retained task decisions and screenshot annotations in the invoking logical context",
       positionals: [task], options,
-      run: (input, ctx) => emit(async () => service.handlers.listTaskArtifacts(await scope(input.positionals.task, input.options.context, ctx))),
+      run: (input, ctx) => emit(async () => {
+        const target = await scope(input.positionals.task, input.options.context, ctx);
+        return ctx.threadId ? service.listForThread(target.taskId, ctx.threadId) : service.handlers.listTaskArtifacts(target);
+      }),
     }),
     "artifact show": cliCommand({
       summary: "Read retained text/coordinates and current source availability; fetch the image with attachment get",
@@ -68,9 +71,14 @@ export function artifactCommands(
     "artifact remove": cliCommand({
       summary: "Explicitly remove one retained artifact; the existing task attachment is not deleted",
       positionals: [task, artifact], options,
-      run: (input, ctx) => emit(async () => service.handlers.deleteTaskArtifact(taskArtifactRpcContract.deleteTaskArtifact.input.parse({
-        ...await scope(input.positionals.task, input.options.context, ctx), artifactId: input.positionals.artifact,
-      }))),
+      run: (input, ctx) => emit(async () => {
+        const target = await scope(input.positionals.task, input.options.context, ctx);
+        if (ctx.threadId) {
+          const retained = await service.authorizeForThread(input.positionals.artifact, ctx.threadId);
+          if (retained.taskId !== target.taskId) throw new Error("Artifact belongs to another task");
+        }
+        return service.handlers.deleteTaskArtifact(taskArtifactRpcContract.deleteTaskArtifact.input.parse({ ...target, artifactId: input.positionals.artifact }));
+      }),
     }),
   };
 }

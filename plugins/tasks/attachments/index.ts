@@ -7,6 +7,7 @@ import {
   MAX_ATTACHMENT_SIZE_BYTES,
 } from "../shared/attachments";
 import { errorMessage } from "../shared/errors";
+import { authorizeAttachmentForThread } from "../artifacts/access.js";
 
 const INLINE_RASTER_MIMES = new Set([
   "image/png",
@@ -563,6 +564,11 @@ export function registerAttachments(
       : undefined;
     if (!attachment)
       return context.json({ error: "attachment not found" }, 404);
+    try {
+      await authorizeAttachmentForThread(bb, attachment.id, null);
+    } catch {
+      return context.json({ error: "attachment not found" }, 404);
+    }
 
     const absolutePath = pathInside(root, attachment.blobPath);
     try {

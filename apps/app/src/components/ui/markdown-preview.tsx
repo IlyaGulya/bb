@@ -35,8 +35,7 @@ import type {
 } from "react-markdown";
 import { LazyMarkdownHtml } from "./lazy-markdown-html";
 import remarkBreaks from "remark-breaks";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
+import { markdownBaseRemarkPlugins } from "@bb/text-utils/markdown-plugins";
 import { ImageLightbox, getWrappedImageIndex } from "./image-lightbox.js";
 import { InlineImageGalleryContext } from "./inline-image-gallery-context.js";
 import { normalizeMathFences } from "./markdown-math-fences.js";
@@ -1864,10 +1863,7 @@ function MarkdownPreviewComponent({
   );
   const hasMessageDirectives = messageDirectiveMounts !== null;
   const baseRemarkPlugins = useMemo((): MarkdownRemarkPlugins => {
-    const plugins: MarkdownRemarkPlugins = [
-      remarkGfm,
-      [remarkMath, { singleDollarTextMath: false }],
-    ];
+    const plugins: MarkdownRemarkPlugins = [...markdownBaseRemarkPlugins];
     if (
       threadMentions?.preserveSoftBreaks === true ||
       promptMentions !== undefined

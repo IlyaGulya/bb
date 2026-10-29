@@ -21,6 +21,7 @@ const NATIVE_EXTERNAL_PACKAGES = [
   "pino",
   "pino-pretty",
   "pino-roll",
+  "sharp",
   "thread-stream",
   "utf-8-validate",
 ];

@@ -114,14 +114,15 @@ export function TaskArtifactsSection({ taskId, bbProjectId, attachments }: { tas
     const change = systemSchema.safeParse(payload);
     if (change.success && change.data.changes.includes("execution-contexts-changed")) { setRevision(value => value + 1); contexts.refresh(); }
   });
-  const choices = contexts.data?.filter(context => bbProjectId && context.enabled && context.projectIds.includes(bbProjectId)) ?? [];
+  const choices = contexts.data?.filter(context => context.enabled && context.projectIds.length > 0) ?? [];
   const selected = choices.find(context => context.id === contextId);
   return <section aria-label="Retained decisions and annotations" className="mt-6 space-y-3">
     <h2 className="text-base font-semibold">Decisions &amp; annotations</h2>
-    <p className="text-sm text-muted-foreground">Task-owned snapshots survive closing the client, server restart and source-thread archival or deletion. Context is independent of the model account.</p>
-    {!bbProjectId ? <p className="text-sm text-muted-foreground">Link this task project to its BB code project before retaining source artifacts.</p> : contexts.error ? <p role="alert" className="text-sm text-destructive">Contexts could not load. <button type="button" className="underline" onClick={contexts.refresh}>Retry</button></p> : contexts.data === undefined ? <Skeleton className="h-11 w-full" /> : <>
+    <p className="text-sm text-muted-foreground">Task-owned snapshots survive closing the client, server restart and source-thread archival or deletion. Moving a task or relinking its project does not change a snapshot's original context or code project.</p>
+    {!bbProjectId && <p className="text-sm text-muted-foreground">Link this task project to its BB code project before retaining new source artifacts. Existing history remains in its original context.</p>}
+    {contexts.error ? <p role="alert" className="text-sm text-destructive">Contexts could not load. <button type="button" className="underline" onClick={contexts.refresh}>Retry</button></p> : contexts.data === undefined ? <Skeleton className="h-11 w-full" /> : <>
       <ExecutionPicker label="Artifact context" value={contextId} dialogOpen options={choices.map(context => ({ value: context.id, label: context.name }))} onChange={setContextId} />
-      {!selected && <p className="text-sm text-muted-foreground">Choose a permitted logical context to read its retained artifacts. Disabled, deleted or non-member contexts are not substituted.</p>}
+      {!selected && <p className="text-sm text-muted-foreground">Choose a permitted logical context to read its original retained history, including after a task move or project relink. Disabled, deleted or non-member contexts are not substituted.</p>}
       {selected && <ScopedArtifacts key={`${taskId}:${selected.id}:${revision}`} taskId={taskId} contextId={selected.id} attachments={attachments} />}
     </>}
   </section>;

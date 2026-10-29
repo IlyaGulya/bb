@@ -32,6 +32,7 @@ import {
   assertTaskWorkflowStatusTransition,
   releaseTaskWorkflowContexts,
 } from "../workflow/index.js";
+import { authorizeAttachmentForThread } from "../artifacts/access.js";
 
 interface TaskLabelIdRow {
   task_id: string;
@@ -914,7 +915,7 @@ export function registerHandlers(
         }),
       };
     },
-    listAttachments(input) {
+    async listAttachments(input) {
       const attachments =
         "taskId" in input
           ? store.tasks.listAttachmentsForTask(input.taskId)
@@ -923,6 +924,7 @@ export function registerHandlers(
             : store.tasks.listAttachmentsForTaskComments(
                 input.commentsOfTaskId,
               );
+      for (const attachment of attachments) await authorizeAttachmentForThread(bb, attachment.id, null);
       return {
         attachments: attachments.map(attachmentMetadata),
       };

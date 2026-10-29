@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { markdownSelectionText } from "@bb/text-utils/markdown";
 import type { TasksApiStore } from "../api/index.js";
 import { readAttachmentContent, withAttachmentLock } from "../attachments/index.js";
 import { escapeLike } from "../db/index.js";
@@ -16,6 +17,7 @@ import {
 } from "../shared/artifacts.js";
 import { inspectArtifactImage } from "./image.js";
 import { TaskArtifactStore } from "./store.js";
+import { authorizeRetainedImage } from "./access.js";
 
 type Scope = { taskId: string; executionContextId: string };
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -49,18 +51,19 @@ export function taskArtifactHandlers(bb: BbPluginApi, store: TasksApiStore) {
   }
 
   async function retained(scope: Scope & { artifactId: string }) {
-    const projectId = await taskScope(scope);
     const artifact = artifacts.get(scope.artifactId);
-    if (!artifact || artifact.taskId !== scope.taskId || artifact.executionContextId !== scope.executionContextId || artifact.bbProjectId !== projectId) throw unavailable();
+    if (!artifact || artifact.taskId !== scope.taskId || artifact.executionContextId !== scope.executionContextId || !store.tasks.getTask(scope.taskId)) throw unavailable();
+    await contextProject(artifact.executionContextId, artifact.bbProjectId);
     return artifact;
   }
 
   async function inspectImage(scope: Scope & { attachmentId: string }) {
-    await taskScope(scope);
+    const projectId = await taskScope(scope);
+    await authorizeRetainedImage(bb, scope.attachmentId, { executionContextId: scope.executionContextId, bbProjectId: projectId });
     const attachment = store.tasks.getAttachment(scope.attachmentId);
     if (!attachment || attachment.taskId !== scope.taskId || !attachment.isImage) throw unavailable();
     const { content } = await readAttachmentContent(store.tasks, attachment.id);
-    const image = inspectArtifactImage(attachment.id, content);
+    const image = await inspectArtifactImage(attachment.id, content);
     if (image.mime !== attachment.mime) throw new Error("The attachment MIME type does not match its image bytes");
     return { image, content };
   }
@@ -104,16 +107,16 @@ export function taskArtifactHandlers(bb: BbPluginApi, store: TasksApiStore) {
     },
     async createTaskArtifact(request) {
       const input = taskArtifactCreateSchema.parse(request);
-      const projectId = await taskScope(input);
       const existing = artifacts.get(input.artifactId);
       if (existing) {
-        if (!matches(existing, input) || existing.bbProjectId !== projectId) throw new Error("Artifact ID is already used by another retained selection");
-        return existing;
+        if (!matches(existing, input)) throw new Error("Artifact ID is already used by another retained selection");
+        return retained({ ...input, artifactId: existing.id });
       }
+      const projectId = await taskScope(input);
       const { thread, context } = await threadScope(input.source.threadId);
       if (thread.projectId !== projectId || context.id !== input.executionContextId) throw unavailable();
       const { message } = await bb.sdk.threads.message({ threadId: thread.id, seq: input.source.eventSeq, before: 0, after: 0 });
-      if (message.messageSeq !== input.source.eventSeq || !message.text.includes(input.source.quote)) throw new Error("Select a bounded quote from the actual source message");
+      if (message.messageSeq !== input.source.eventSeq || !markdownSelectionText(message.text).includes(input.source.quote)) throw new Error("Select a bounded quote from the actual source message");
       const artifact: TaskArtifact = {
         id: input.artifactId,
         taskId: input.taskId,
@@ -152,8 +155,10 @@ export function taskArtifactHandlers(bb: BbPluginApi, store: TasksApiStore) {
       return saved;
     },
     async listTaskArtifacts(input) {
-      const projectId = await taskScope(input);
-      return artifacts.list(input.taskId, input.executionContextId, projectId);
+      if (!store.tasks.getTask(input.taskId)) throw unavailable();
+      const context = await bb.sdk.experimental_executionContexts.get({ id: input.executionContextId });
+      if (!context.enabled) throw unavailable();
+      return artifacts.list(input.taskId, input.executionContextId, context.projectIds);
     },
     async getTaskArtifact(input) {
       return sourceView(await retained(input));
@@ -166,24 +171,39 @@ export function taskArtifactHandlers(bb: BbPluginApi, store: TasksApiStore) {
     },
   } satisfies PluginRpcHandlers<TaskArtifactRpcContract>;
 
-  async function readForThread(artifactId: string, threadId: string) {
+  async function authorizeForThread(artifactId: string, threadId: string) {
     const artifact = artifacts.get(artifactId);
     if (!artifact) throw unavailable();
     const { thread, context } = await threadScope(threadId);
     if (thread.projectId !== artifact.bbProjectId || context.id !== artifact.executionContextId) throw unavailable();
-    const view = await handlers.getTaskArtifact({ taskId: artifact.taskId, executionContextId: context.id, artifactId });
+    return retained({ taskId: artifact.taskId, executionContextId: context.id, artifactId });
+  }
+
+  async function listForThread(taskId: string, threadId: string) {
+    if (!store.tasks.getTask(taskId)) throw unavailable();
+    const { thread, context } = await threadScope(threadId);
+    return artifacts.list(taskId, context.id, [thread.projectId]);
+  }
+
+  async function readForThread(artifactId: string, threadId: string) {
+    const artifact = await authorizeForThread(artifactId, threadId);
+    const view = await sourceView(artifact);
     const annotation = artifact.annotation;
     const image = annotation
       ? await withAttachmentLock(store.tasks, annotation.image.attachmentId, async () => {
-          const inspected = await inspectImage({ taskId: artifact.taskId, executionContextId: context.id, attachmentId: annotation.image.attachmentId });
-          if (inspected.image.sha256 !== annotation.image.sha256) throw new Error("Retained screenshot integrity check failed");
-          return inspected;
+          await authorizeRetainedImage(bb, annotation.image.attachmentId, { executionContextId: artifact.executionContextId, bbProjectId: artifact.bbProjectId });
+          const { attachment, content } = await readAttachmentContent(store.tasks, annotation.image.attachmentId);
+          if (attachment.taskId !== artifact.taskId) throw unavailable();
+          if (createHash("sha256").update(content).digest("hex") !== annotation.image.sha256) throw new Error("Retained screenshot integrity check failed");
+          const image = await inspectArtifactImage(attachment.id, content);
+          if (JSON.stringify(image) !== JSON.stringify(annotation.image) || image.mime !== attachment.mime) throw new Error("Retained screenshot integrity check failed");
+          return { image, content };
         })
       : null;
     return { view, image };
   }
 
-  return { handlers, readForThread };
+  return { handlers, readForThread, authorizeForThread, listForThread };
 }
 export type TaskArtifactService = ReturnType<typeof taskArtifactHandlers>;
 

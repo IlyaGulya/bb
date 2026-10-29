@@ -8,6 +8,7 @@ import {
   type PluginCliResult,
 } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { authorizeAttachmentForThread } from "../artifacts/access.js";
 
 import {
   createComment,
@@ -480,6 +481,8 @@ function resolvePreset(presets: readonly Preset[], address: string): Preset {
 
 async function listTaskAttachments(
   domain: TasksDomain,
+  bb: BbPluginApi,
+  threadId: string | null,
   taskId: string,
   comments: readonly { id: string }[],
 ): Promise<Attachment[]> {
@@ -501,6 +504,7 @@ async function listTaskAttachments(
       ).attachments,
     );
   }
+  for (const attachment of attachments) await authorizeAttachmentForThread(bb, attachment.id, threadId);
   return attachments;
 }
 
@@ -1648,7 +1652,7 @@ export function registerTasksCli(
           suggestFor: ["view", "read", "info", "detail", "details", "describe"],
           positionals: [KEY_POSITIONAL],
           options: { json: JSON_OPTION },
-          run(input) {
+          run(input, ctx) {
             return guard(async () => {
               const task = await resolveTask(
                 domain,
@@ -1677,6 +1681,8 @@ export function registerTasksCli(
               ).comments;
               const attachments = await listTaskAttachments(
                 domain,
+                bb,
+                ctx.threadId ?? null,
                 task.id,
                 comments,
               );
@@ -2290,6 +2296,7 @@ export function registerTasksCli(
                 input.options.machine,
                 ctx,
               );
+              await authorizeAttachmentForThread(bb, input.positionals["attachment-id"], ctx.threadId ?? null);
               const { attachment, content } = await readAttachmentContent(
                 store.tasks,
                 input.positionals["attachment-id"],
@@ -2305,7 +2312,7 @@ export function registerTasksCli(
           summary: "List a task's attachments",
           positionals: [KEY_POSITIONAL],
           options: { json: JSON_OPTION },
-          run(input) {
+          run(input, ctx) {
             return guard(async () => {
               const task = await resolveTask(
                 domain,
@@ -2320,6 +2327,8 @@ export function registerTasksCli(
               ).comments;
               const attachments = await listTaskAttachments(
                 domain,
+                bb,
+                ctx.threadId ?? null,
                 task.id,
                 comments,
               );

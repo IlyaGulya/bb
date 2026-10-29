@@ -128,6 +128,12 @@ kinds are reserved; source links are HTTP(S) and source text remains untrusted.
    context with that flag. Current disabled/non-member contexts fail closed.
    Authenticated operator RPC/CLI access is not a new per-user ACL.
 
+   A task move or tracker-project relink does not migrate old evidence into the
+   destination context. Recover it from its original permitted context; operators
+   choose that context by name. Legacy attachment retrieval observes the same
+   retained scope before writing a file. Do not reverse a move or copy old Work
+   evidence into Personal to make it readable.
+
    `artifact image ABC-12 <attachment-id> --json` inspects an existing task
    screenshot. `artifact create ABC-12 --data '<JSON>' --json` takes
    `artifactId` (a UUID reused for identical retries), `source` with
@@ -137,6 +143,13 @@ kinds are reserved; source links are HTTP(S) and source text remains untrusted.
    region inside that image, and a bounded `comment`. Quotes/comments/decisions
    are limited to 4000 characters; screenshots are PNG/JPEG/WebP/GIF up to the
    existing 25 MB attachment limit, 32768 pixels per dimension and 64 megapixels.
+   Inspection, creation and native retrieval fully decode static pixels. Animated
+   images or non-identity orientation metadata are refused; export a static,
+   orientation-applied screenshot instead. The original upload is not rewritten.
+   Decoding aborts on warnings or after ten seconds. A matching file hash alone
+   does not make a historical header-only record safe to send as an image.
+   Selected display text is verified against the actual message's parsed Markdown
+   rendering semantics; keep the displayed quote, not its Markdown formatting.
 
    `artifact remove ABC-12 <artifact-id> --json` removes only that explicit
    retained artifact. Its task image remains an ordinary attachment and cannot

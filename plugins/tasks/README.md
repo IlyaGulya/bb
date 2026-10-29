@@ -272,8 +272,12 @@ Tasks owns retained decision metadata in `task_artifacts` and keeps screenshot
 bytes in its existing attachment storage. The source reference is the real
 `threadId` plus canonical message `eventSeq` (`experimental_messageSeq` in the
 rendered message action), not the provider fork/acceptance anchor. Source text
-is retained only as an explicitly confirmed quote of up to 4000 characters,
-with a hash of the original text rather than a full prompt dump.
+is retained only as an explicitly confirmed quote of up to 4000 characters.
+Quote verification parses the actual message with the renderer's shared GFM/math
+configuration and Markdown-to-render-tree semantics, so emphasis, links, inline
+code and decoded entities do not require a raw Markdown substring match. The
+saved quote remains display text, alongside a hash of the original raw message
+rather than a full prompt dump.
 
 The typed `taskArtifactRpcContract` in `shared/artifacts.ts` defines
 `taskArtifactTargets`, `inspectTaskArtifactImage`, `createTaskArtifact`,
@@ -288,16 +292,38 @@ Authenticated operator RPC/CLI context selection is organizational scoping,
 not a new per-user security boundary. Artifact reads do not spawn, resume,
 fork, dispatch, or accept work; the existing task execution owner is unchanged.
 
+Retention pins the original BB code project and logical context. Moving the
+task or relinking its tracker project does not rewrite that provenance or grant
+the destination context access. List/read/remove use the original project
+membership; new retention still requires the task's current linked project.
+The Artifact context picker can recover permitted original history even when
+the current task project is unlinked. The legacy attachment list/download CLI
+also checks retained-image provenance before disclosing metadata or writing
+bytes; the compatible original thread and authenticated operator remain usable.
+Revoked original context/project permission denies retained image downloads.
+
 The source UI entry is **Save decision to task** on a source message or
 selected passage. It uses readable task/image pickers and a bounded rectangle
 selection over an uploaded/existing screenshot, with equivalent keyboard pixel
 fields. No canvas/editor engine or capture mechanism is added. Live element
 picking remains in the native desktop Agent Annotations plugin; uploading a
 task screenshot does not require that desktop-only capability or enabling a
-different plugin. PNG/JPEG/WebP/GIF inspection is bounded to 32768 pixels per
-dimension, 64 megapixels and the existing 25 MB attachment limit. JPEG dimensions
-account for EXIF orientation. Other image types may remain task attachments,
-but are not accepted as coordinate-bound screenshots by this contract.
+different plugin. PNG/JPEG/WebP/GIF inspection fully decodes pixels with strict
+warning rejection, bounded to 32768 pixels per dimension, 64 megapixels, the
+existing 25 MB attachment limit and a ten-second decode timeout. Animated images
+and non-identity EXIF orientations are explicitly refused: export a static,
+orientation-applied screenshot before selecting coordinates. Originals are not
+rewritten. Inspection, creation and native image reads share that decoder; old
+header-only records cannot bypass it even when the retained hash matches.
+Other image types may remain ordinary task attachments, but are not accepted
+as coordinate-bound screenshots by this contract.
+
+The decoder is Sharp `0.34.5` (Apache-2.0), declared as a Tasks, server and
+packaged `bb-app` runtime dependency rather than relying on the app's development
+dependency. Plugin/server bundling leaves the native module external, and the
+plugin runtime resolves it from the host runtime alongside SQLite. Production
+packaging must retain Sharp's platform-specific optional `@img` dependencies;
+source work alone does not prove a packaged native load.
 
 The exact external reuse pin reviewed is
 [`rebryk/bb-plugins@1f123e5ecf7e6ac42f865f8d230de8ed2ce44049`](https://github.com/rebryk/bb-plugins/tree/1f123e5ecf7e6ac42f865f8d230de8ed2ce44049).

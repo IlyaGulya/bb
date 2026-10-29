@@ -8,6 +8,16 @@
       "source": "./src/index.ts",
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./markdown": {
+      "source": "./src/markdown.ts",
+      "types": "./src/markdown.ts",
+      "default": "./src/markdown.ts"
+    },
+    "./markdown-plugins": {
+      "source": "./src/markdown-plugins.ts",
+      "types": "./src/markdown-plugins.ts",
+      "default": "./src/markdown-plugins.ts"
     }
   },
   "types": "./src/index.ts",
@@ -15,6 +25,13 @@
     "clean": "rimraf dist tsconfig.tsbuildinfo",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts"
+  },
+  "dependencies": {
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "unified": "^11.0.5"
   },
   "devDependencies": {
     "@bb/tsconfig": "workspace:*",

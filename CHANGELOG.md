@@ -2,6 +2,12 @@
 
 ## AgentOS fork — unreleased
 
+- Keep retained Tasks decisions and screenshots in their original context after
+  task moves or project relinks, with original-history recovery and retained
+  image checks on legacy attachment downloads. Verify selected display quotes
+  through shared Markdown parsing, and require a full strict static-image
+  decode rather than header-only dimensions. Animated or orientation-dependent
+  screenshots require an explicitly exported static image; originals stay intact.
 - Give Tasks one header workflow action backed by the shared persistent drawer;
   retain single-agent dispatch as a secondary action. Keep draft selections and
   explicit unavailable choices while Core definition/account catalog events and

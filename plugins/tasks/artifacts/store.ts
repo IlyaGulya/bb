@@ -18,7 +18,7 @@ export const taskArtifactMigration = `
 type ArtifactRow = { artifact_json: string };
 
 export class TaskArtifactStore {
-  constructor(private readonly store: TasksApiStore) {}
+  constructor(private readonly store: Pick<TasksApiStore, "database">) {}
 
   get(id: string): TaskArtifact | null {
     const row = this.store.database.prepare<[string], ArtifactRow>(
@@ -27,10 +27,18 @@ export class TaskArtifactStore {
     return row ? taskArtifactSchema.parse(JSON.parse(row.artifact_json)) : null;
   }
 
-  list(taskId: string, contextId: string, bbProjectId: string): TaskArtifact[] {
-    return this.store.database.prepare<[string, string, string], ArtifactRow>(
-      "SELECT artifact_json FROM task_artifacts WHERE task_id = ? AND execution_context_id = ? AND bb_project_id = ? ORDER BY created_at, id",
-    ).all(taskId, contextId, bbProjectId).map(row => taskArtifactSchema.parse(JSON.parse(row.artifact_json)));
+  list(taskId: string, contextId: string, projectIds: readonly string[]): TaskArtifact[] {
+    if (projectIds.length === 0) return [];
+    const placeholders = projectIds.map(() => "?").join(", ");
+    return this.store.database.prepare<string[], ArtifactRow>(
+      `SELECT artifact_json FROM task_artifacts WHERE task_id = ? AND execution_context_id = ? AND bb_project_id IN (${placeholders}) ORDER BY created_at, id`,
+    ).all(taskId, contextId, ...projectIds).map(row => taskArtifactSchema.parse(JSON.parse(row.artifact_json)));
+  }
+
+  forImage(attachmentId: string): TaskArtifact[] {
+    return this.store.database.prepare<[string], ArtifactRow>(
+      "SELECT artifact_json FROM task_artifacts WHERE image_attachment_id = ? ORDER BY created_at, id",
+    ).all(attachmentId).map(row => taskArtifactSchema.parse(JSON.parse(row.artifact_json)));
   }
 
   create(artifact: TaskArtifact): TaskArtifact {
