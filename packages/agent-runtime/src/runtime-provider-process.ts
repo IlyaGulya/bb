@@ -69,6 +69,7 @@ interface RuntimeProviderProcessManagerArgs {
   handleDeferredEvents: (args: RuntimeProviderDeferredEventsArgs) => void;
   handleStdoutLine: (args: RuntimeProviderProcessLineArgs) => void;
   onProcessExit: AgentRuntimeOptions["onProcessExit"];
+  onOwnedProcessExit?: (threadId: string) => void;
   onProviderThreadDetached: (threadId: string) => void;
   onStderr: AgentRuntimeOptions["onStderr"];
   skillRoots: readonly AgentRuntimeSkillRoot[];
@@ -310,6 +311,10 @@ export class RuntimeProviderProcessManager {
           .map((proc) => proc.providerId),
       ),
     ];
+  }
+
+  hasPendingCleanup(): boolean {
+    return this.providerRetiring.size > 0 || this.unverifiedRetirements.size > 0;
   }
 
   async shutdownProvider(args: ShutdownRuntimeProviderArgs): Promise<void> {
@@ -632,6 +637,7 @@ export class RuntimeProviderProcessManager {
         });
         this.providerRetiring.set(processKey, retirement);
         void retirement.catch(() => undefined);
+        for (const threadId of args.providerProcess.identity.threadIds) this.args.onOwnedProcessExit?.(threadId);
       } else {
         void this.terminateProviderProcess({ providerProcess: args.providerProcess }).catch((error: Error) => {
           this.args.onStderr?.(`Provider process cleanup failed: ${error.message}`);

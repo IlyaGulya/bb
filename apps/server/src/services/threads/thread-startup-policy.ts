@@ -15,7 +15,9 @@ export function assertThreadStartupAvailable(db: DbQueryConnection, threadId: st
   }
   const parsed = systemOperationEventDataSchema.safeParse(value);
   const diagnostic = providerStartupDiagnosticSchema.safeParse(parsed.success ? parsed.data.metadata : null);
-  if (!diagnostic.success || diagnostic.data.retryBlocked) {
+  const ready = parsed.success && diagnostic.success && parsed.data.status === "completed" && diagnostic.data.phase === "ready" && diagnostic.data.code === null;
+  const stopped = parsed.success && diagnostic.success && parsed.data.status === "failed" && diagnostic.data.phase === "stopped" && diagnostic.data.code !== null && diagnostic.data.code !== "provider_startup_stop_unverified";
+  if (!diagnostic.success || diagnostic.data.retryBlocked || (!ready && !stopped)) {
     throw new ApiError(409, "provider_startup_stop_unverified", "The previous startup could not confirm that its owned processes stopped. Retry and continuation remain blocked; operator verification is required.");
   }
 }

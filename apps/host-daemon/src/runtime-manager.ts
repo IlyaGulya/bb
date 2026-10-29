@@ -1438,7 +1438,8 @@ export class RuntimeManager {
         if (
           !info.expected &&
           current?.runtime === runtime &&
-          runtime.listRunningProviders().length === 0
+          runtime.listRunningProviders().length === 0 &&
+          !runtime.hasOpenBackgroundWork()
         ) {
           this.entries.delete(args.environmentId);
         }

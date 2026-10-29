@@ -405,14 +405,15 @@ function ContextEditor({
       title={value ? "Edit execution context" : "New execution context"}
       onCancel={onCancel}
       onSave={() => {
-        const seconds = Number(deadlineSeconds);
-        if (draft.startupPolicy && (!Number.isSafeInteger(seconds) || seconds < 1 || seconds > 1800)) {
-          throw new Error("Startup deadline must be a whole number from 1 to 1800 seconds.");
+        const deadline = /^(\d+)(?:\.(\d{0,3})0*)?$/.exec(deadlineSeconds.trim());
+        const deadlineMs = deadline ? Number(deadline[1]) * 1000 + Number((deadline[2] ?? "").padEnd(3, "0")) : Number.NaN;
+        if (draft.startupPolicy && (!Number.isSafeInteger(deadlineMs) || deadlineMs < 1000 || deadlineMs > 1_800_000)) {
+          throw new Error("Startup deadline must be from 1 to 1800 seconds, with whole-millisecond precision.");
         }
         return onSave({
           ...draft,
           startupPolicy: draft.startupPolicy ? {
-            deadlineMs: seconds * 1000,
+            deadlineMs,
             optionalMcpServers: draft.startupPolicy.optionalMcpServers.filter((name) => draft.mcpServers.some((server) => server.name === name)),
           } : null,
           name: draft.name.trim(),
@@ -516,7 +517,7 @@ function ContextEditor({
       {draft.startupPolicy ? (
         <div className="space-y-3">
           <Field label="Startup deadline (seconds)">
-            <Input type="number" inputMode="numeric" min={1} max={1800} step={1} required value={deadlineSeconds} onChange={(event) => setDeadlineSeconds(event.target.value)} />
+            <Input type="number" inputMode="decimal" min={1} max={1800} step={0.001} required value={deadlineSeconds} onChange={(event) => setDeadlineSeconds(event.target.value)} />
             <p className="text-xs text-muted-foreground">
               Stops only this thread’s owned startup processes. The deadline ends at provider readiness, not at the model’s response. Hooks remain enabled; authentication setup is a separate operator action.
             </p>

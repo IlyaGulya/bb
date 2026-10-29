@@ -20,6 +20,8 @@ interface StartupRun {
   heartbeat: ReturnType<typeof setInterval> | null;
   stopSettled: boolean;
   failureCode: ProviderStartupCode | null;
+  work: Set<Promise<unknown>>;
+  readyWaiters: Set<() => void> | null;
 }
 
 export class ProviderStartupError extends Error {
@@ -50,6 +52,8 @@ export function readStartupPolicy(providerOptions: Record<string, unknown> | und
 export class RuntimeStartup {
   private readonly active = new Map<string, StartupRun>();
   private readonly blocked = new Set<string>();
+  private readonly nativeReady = new Set<string>();
+  private readonly readyRuns = new Map<string, StartupRun>();
 
   signal(threadId: string): AbortSignal | undefined {
     return this.active.get(threadId)?.controller.signal;
@@ -65,7 +69,10 @@ export class RuntimeStartup {
     run.hookState = null;
     if (run.deadline) clearTimeout(run.deadline);
     if (run.heartbeat) clearInterval(run.heartbeat);
+    this.readyRuns.set(threadId, run);
     this.publish(threadId, run, "completed");
+    run.readyWaiters?.forEach((resolve) => resolve());
+    this.releaseIfSettled(threadId, run);
   }
 
   constructor(private readonly emit: (event: ThreadEvent) => void) {}
@@ -81,6 +88,7 @@ export class RuntimeStartup {
 
   assertAvailable(threadId: string): void {
     if (this.blocked.has(threadId)) throw new ProviderStartupError("provider_startup_stop_unverified");
+    this.active.get(threadId)?.controller.signal.throwIfAborted();
   }
 
   hasOwnedWork(): boolean {
@@ -89,18 +97,78 @@ export class RuntimeStartup {
 
   observe(threadId: string, value: unknown): void {
     const run = this.active.get(threadId);
-    if (!run || run.controller.signal.aborted) return;
+    if (run?.controller.signal.aborted) return;
     const parsed = threadStartupNotificationSchema.safeParse(value);
     if (!parsed.success || parsed.data.threadId !== threadId) return;
     if (parsed.data.phase === "ready") {
+      this.nativeReady.add(threadId);
       this.ready(threadId);
       return;
     }
+    this.nativeReady.delete(threadId);
+    if (!run || run.ready) return;
     run.phase = parsed.data.phase;
     run.hookEvent = parsed.data.hookEvent;
     run.hookId = parsed.data.hookId;
     run.hookState = parsed.data.hookState;
     this.publish(threadId, run, "running");
+  }
+
+  forgetReadiness(threadId: string): void {
+    this.nativeReady.delete(threadId);
+    this.readyRuns.delete(threadId);
+  }
+
+  async waitForReady(threadId: string): Promise<void> {
+    const run = this.active.get(threadId);
+    if (!run) throw new Error("Provider startup ownership is unavailable while waiting for readiness.");
+    if (run.ready) return;
+    const signal = run.controller.signal;
+    signal.throwIfAborted();
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        signal.removeEventListener("abort", onAbort);
+        run.readyWaiters?.delete(onReady);
+        if (run.readyWaiters?.size === 0) run.readyWaiters = null;
+      };
+      const onReady = () => { cleanup(); resolve(); };
+      const onAbort = () => { cleanup(); reject(signal.reason); };
+      (run.readyWaiters ??= new Set()).add(onReady);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  requireCleanup(threadId: string): void {
+    const run = this.active.get(threadId) ?? this.readyRuns.get(threadId);
+    if (!run) return;
+    this.forgetReadiness(threadId);
+    if (run.ready) {
+      run.operationId = randomUUID();
+      run.startedAt = performance.now();
+    }
+    run.ready = false;
+    this.active.set(threadId, run);
+    void this.interrupt(threadId, run, "provider_startup_failed");
+  }
+
+  async track<T>(threadId: string, work: () => Promise<T>): Promise<T> {
+    const run = this.active.get(threadId);
+    if (!run) return work();
+    run.controller.signal.throwIfAborted();
+    const task = Promise.resolve().then(() => {
+      run.controller.signal.throwIfAborted();
+      return work();
+    });
+    run.work.add(task);
+    try {
+      return await task;
+    } catch (error) {
+      if (!run.ready) void this.fail(threadId, run, error);
+      throw error;
+    } finally {
+      run.work.delete(task);
+      this.releaseIfSettled(threadId, run);
+    }
   }
 
   async run<T>(args: {
@@ -119,6 +187,8 @@ export class RuntimeStartup {
       startedAt: performance.now(), stop: args.stop, stopPromise: null, reject, ready: false, deadline: null,
       stopSettled: false, failureCode: null,
       heartbeat: null,
+      work: new Set(),
+      readyWaiters: null,
     };
     this.active.set(args.threadId, run);
     this.publish(args.threadId, run, "running");
@@ -133,28 +203,23 @@ export class RuntimeStartup {
     timer.unref?.();
     heartbeat.unref?.();
     try {
-      const value = await Promise.race([args.work(run.controller.signal), interrupted]);
+      const value = await Promise.race([
+        this.track(args.threadId, () => args.work(run.controller.signal)),
+        interrupted,
+      ]);
       run.controller.signal.throwIfAborted();
-      this.ready(args.threadId);
+      if (this.nativeReady.has(args.threadId)) this.ready(args.threadId);
       return value;
     } catch (error) {
-      if (run.ready) throw error;
-      if (run.controller.signal.aborted) {
-        await run.stopPromise;
-        throw this.blocked.has(args.threadId)
-          ? new ProviderStartupError("provider_startup_stop_unverified")
-          : run.controller.signal.reason;
+      if (!run.ready) {
+        await this.fail(args.threadId, run, error);
+        if (this.blocked.has(args.threadId)) throw new ProviderStartupError("provider_startup_stop_unverified");
+        if (error instanceof Error && "code" in error && error.code === "auth_required" && run.failureCode === "provider_startup_auth_required") throw error;
+        run.controller.signal.throwIfAborted();
       }
-      const authRequired = error instanceof Error && "code" in error && error.code === "auth_required";
-      const code = error instanceof ProviderStartupError ? error.code : authRequired ? "provider_startup_auth_required" : "provider_startup_failed";
-      await this.interrupt(args.threadId, run, code);
-      if (this.blocked.has(args.threadId)) throw new ProviderStartupError("provider_startup_stop_unverified");
-      if (authRequired) throw error;
-      throw new ProviderStartupError(code);
+      throw error;
     } finally {
-      clearTimeout(timer);
-      clearInterval(heartbeat);
-      if (this.active.get(args.threadId) === run) this.active.delete(args.threadId);
+      this.releaseIfSettled(args.threadId, run);
     }
   }
 
@@ -171,15 +236,29 @@ export class RuntimeStartup {
     await Promise.all([...this.active.keys()].map((threadId) => this.cancel(threadId)));
   }
 
+  private releaseIfSettled(threadId: string, run: StartupRun): void {
+    if (!run.stopSettled && (!run.ready || run.work.size > 0)) return;
+    if (run.deadline) clearTimeout(run.deadline);
+    if (run.heartbeat) clearInterval(run.heartbeat);
+    if (this.active.get(threadId) === run) this.active.delete(threadId);
+  }
+
+  private fail(threadId: string, run: StartupRun, error: unknown): Promise<void> {
+    const authRequired = error instanceof Error && "code" in error && error.code === "auth_required";
+    const code = error instanceof ProviderStartupError ? error.code : authRequired ? "provider_startup_auth_required" : "provider_startup_failed";
+    return this.interrupt(threadId, run, code);
+  }
+
   private async interrupt(threadId: string, run: StartupRun, code: ProviderStartupError["code"]): Promise<void> {
+    if (run.ready) return;
     if (run.stopPromise) return run.stopPromise;
     const failure = new ProviderStartupError(code);
     run.phase = "stopping";
     run.failureCode = code;
     run.stopPromise = Promise.resolve().then(async () => {
-      this.publish(threadId, run, "running", code);
       try {
         await run.stop();
+        await Promise.allSettled([...run.work]);
       } catch {
         this.blocked.add(threadId);
       }
@@ -189,8 +268,10 @@ export class RuntimeStartup {
         ? new ProviderStartupError("provider_startup_stop_unverified") : failure;
       this.publish(threadId, run, "failed", settled.code);
       run.reject(settled);
+      this.releaseIfSettled(threadId, run);
     });
     run.controller.abort(failure);
+    this.publish(threadId, run, "running", code);
     return run.stopPromise;
   }
 
@@ -212,7 +293,7 @@ export class RuntimeStartup {
       metadata: {
         phase: run.phase, elapsedMs, deadlineMs: run.policy.deadlineMs,
         hookEvent: run.hookEvent, hookId: run.hookId, hookState: run.hookState,
-        code, retryBlocked: this.blocked.has(threadId) || (run.controller.signal.aborted && !run.stopSettled),
+        code, retryBlocked: this.blocked.has(threadId) || (!run.ready && !run.stopSettled),
         optionalMcpServerCount: run.policy.optionalMcpServers.length,
         feature: "provider-startup", action: "startup", intent: "execute", scope: "thread",
       },

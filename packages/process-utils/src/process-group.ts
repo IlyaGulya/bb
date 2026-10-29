@@ -74,10 +74,10 @@ export function stopProcessGroupLeaderFirst(
 ): Promise<ProcessStopResult> {
   const { child, timeoutMs, killGraceMs } = args;
   if (process.platform === "win32") return stopWindowsProcessTree(child);
-  if (args.identityMatches && !args.identityMatches()) return Promise.resolve({ treeTermination: "unverified" });
   if (hasChildExited(child) && !isProcessGroupAlive(child)) {
     return Promise.resolve({ treeTermination: "confirmed" });
   }
+  if (args.identityMatches && !args.identityMatches()) return Promise.resolve({ treeTermination: "unverified" });
   return new Promise<ProcessStopResult>((resolveStop) => {
     let settled = false;
     let hardTimer: NodeJS.Timeout | undefined;

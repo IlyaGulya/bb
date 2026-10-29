@@ -36,7 +36,7 @@ export function createProcessStop(child: ChildProcess, fenceIdentity = false): M
   const identityMatches = fenceIdentity ? () => {
     if (child.pid === undefined || originalIdentity === null) return false;
     const current = readGroupIdentity(child.pid);
-    if (current === null) return child.exitCode !== null || child.signalCode !== null;
+    if (current === null) return false;
     return current.birth === originalIdentity.birth && current.group === child.pid;
   } : undefined;
   let stopping: Promise<ProcessStopResult> | undefined;
