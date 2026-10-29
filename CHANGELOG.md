@@ -71,6 +71,10 @@
   through the shared UI/SDK/CLI archive path. Decode UTF-8 incrementally across
   chunk boundaries, verify complete spill checksums and native-record authority,
   and preserve query windows/cursors without searching images or arbitrary files.
+- Restore Core timelines for ready native archives, including already-retained
+  legacy thread-scoped import events. Emit valid closed historical display frames
+  for new records and adapt proven owned legacy rows read-only, without relaxing
+  normal validation, resetting archives, rewriting native bytes or starting a writer.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact

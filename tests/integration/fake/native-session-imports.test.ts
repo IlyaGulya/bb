@@ -2,14 +2,17 @@ import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-import { createProject, events, noopNotifier, upsertHost } from "@bb/db";
+import { z } from "zod";
+import { createProject, events, getLatestThreadSequence, getThread, insertEvents, noopNotifier, upsertHost } from "@bb/db";
 import { createMigratedConnection } from "@bb/db/testing";
 import { threadEventItemSchema, type JsonValue } from "@bb/domain";
 import type { NativeEngine, NativeRead } from "@bb/host-daemon-contract";
+import { threadTimelineResponseSchema, timelineRowChildren, type TimelineRow } from "@bb/server-contract";
 import { discoverNativeSessions, readNativeSession } from "../../../apps/host-daemon/src/command-handlers/native-sessions.js";
 import { NativeSessionImports } from "../../../apps/server/src/services/threads/native-session-imports.js";
+import { buildThreadTimelineWithProfile } from "../../../apps/server/src/services/threads/timeline.js";
 
 const checksum = (bytes: string | Buffer) => createHash("sha256").update(bytes).digest("hex");
 const fixtures: { dispose(): Promise<void> }[] = [];
@@ -170,5 +173,40 @@ describe("durable native session imports", () => {
     const retried = await imports.settle(ready.id);
     expect(retried.artifacts).toMatchObject([{ reference: "result.bin", status: "ready", sha256: checksum(saved.artifact) }]);
     expect(await readFile(join(imports.directory(ready.id), "native.jsonl"))).toEqual(Buffer.from(saved.original));
+  });
+
+  it("opens a persisted native archive idempotently without rewriting legacy rows or accepting unrelated invalid events", async () => {
+    const saved = await fixture("omp");
+    const imports = saved.service();
+    const ready = await imports.settle((await imports.start(saved.selection)).id);
+    const thread = ready.threadId === null ? null : getThread(saved.db, ready.threadId);
+    if (!thread) throw new Error("Ready archive must retain its original Core thread.");
+    const stored = () => saved.db.select().from(events).where(eq(events.threadId, thread.id)).orderBy(events.sequence).all();
+    const payloadSchema = z.object({ providerThreadId: z.string(), item: threadEventItemSchema, nativeImportRecord: z.object({ importId: z.string(), ordinal: z.number(), sha256: z.string(), eventCount: z.number() }) });
+    for (const row of stored()) {
+      if (row.type !== "item/started" && row.type !== "item/completed") continue;
+      const payload = payloadSchema.parse(JSON.parse(row.data));
+      saved.db.update(events).set({ scopeKind: "thread", turnId: null, data: JSON.stringify({ ...payload, nativeImportRecord: { ...payload.nativeImportRecord, eventCount: payload.nativeImportRecord.eventCount - 2 } }) }).where(eq(events.id, row.id)).run();
+    }
+    saved.db.delete(events).where(and(eq(events.threadId, thread.id), inArray(events.type, ["turn/started", "turn/completed"]))).run();
+    const before = stored();
+    const read = () => threadTimelineResponseSchema.parse(buildThreadTimelineWithProfile(saved.db, thread, {
+      completedTurnDisplay: "collapse", deferContent: true, eventBudget: 1_000_000,
+      includeClearedContextHistory: false, includeDiagnosticOperations: false, includeNestedRows: false,
+      maxInlineOutputChars: 32_000, maxSeq: getLatestThreadSequence(saved.db, { threadId: thread.id }),
+      page: { kind: "latest", segmentLimit: 8 },
+    }).response);
+    function flatten(rows: readonly TimelineRow[]): TimelineRow[] { return rows.flatMap((row) => [row, ...flatten(timelineRowChildren(row) ?? [])]); }
+    const first = read();
+    expect(flatten(first.rows)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "conversation", role: "user", text: "Inspect the saved project" }),
+      expect.objectContaining({ kind: "work", status: "completed", output: "Saved tool result" }),
+    ]));
+    expect(read()).toEqual(first);
+    expect(stored()).toEqual(before);
+    expect(await imports.get(ready.id)).toEqual(ready);
+    expect(Buffer.from(await (await imports.download(ready.id, "native")).arrayBuffer())).toEqual(Buffer.from(saved.original));
+    insertEvents(saved.db, noopNotifier, [{ threadId: thread.id, sequence: getLatestThreadSequence(saved.db, { threadId: thread.id }) + 1, scope: { kind: "thread" }, type: "item/completed", providerThreadId: saved.selection.source.sessionId, itemId: "unrelated-invalid-item", itemKind: "agentMessage", parentToolCallId: null, data: JSON.stringify({ item: { type: "agentMessage", id: "unrelated-invalid-item", text: "Not imported history" } }) }]);
+    expect(read).toThrow("item/completed requires turn scope but received thread scope");
   });
 });

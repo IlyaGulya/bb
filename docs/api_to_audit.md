@@ -77,6 +77,29 @@ archive retains original bytes, source identities, parent links and native state
 OMP and Claude external takeover currently refuse because these adapters cannot
 prove external ownership and original scoped receipts; no receipt is fabricated.
 
+Core projects copied native records into deterministic, closed historical display
+frames (`native:<importId>:record:<ordinal>`), with valid turn-scoped item events
+and versioned provenance. These are Core display identities, not newly allocated
+native sessions or provider executions. Raw native IDs, records/state, ordering,
+original bytes and artifact proofs remain unchanged; tool argument inheritance
+uses the existing stored call identity across record frames.
+
+Existing archives with the older thread-scoped item events are repaired on read,
+not reset or reimported. Timeline, conversation outline/message and public event
+reads require Core's native-history ownership metadata, matching native session
+and import ID, validated record-ordinal/checksum provenance and the stored item
+namespace before deriving display scopes. The adapter is deterministic and read-only: it does not
+rewrite stored events/sequences, manifests, raw records or artifacts, register a
+writer, select an account, resume a native session or change archive/admission mode.
+The general event validator remains strict; unrelated invalid events and corrupt
+or conflicting ownership evidence are not exempted. Historical frame wrappers
+are flattened for the Core conversation and do not become active provider work.
+Partially committed pre-cutover records retain their original projection count
+and sequence range during crash recovery rather than receiving duplicate events.
+For a ready owned archive, open its existing Core conversation after deploying
+the corrected server. No import retry, resume/admission action, manual SQL or
+archive deletion is required; the original thread and native identity are kept.
+
 Artifact authority comes from structured native attachment/checkpoint fields,
 not arbitrary message text or tool arguments. Separate authentication/configuration
 files are excluded. Reads traverse no-follow directory descriptors and validate
