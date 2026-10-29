@@ -76,6 +76,35 @@ function structuredNativeArtifacts(record: NativeRecordObject, body: NativeRecor
       else if (child && typeof child === "object" && !Array.isArray(child)) { add(child.path); add(child.filePath); }
     }
   };
+  const images = (values: JsonValue | undefined, requireImageType: boolean) => {
+    if (!Array.isArray(values)) return;
+    for (const image of values) {
+      if (!image || typeof image !== "object" || Array.isArray(image)) continue;
+      if (image.type !== "image" && (requireImageType || typeof image.mimeType !== "string" || !/^image\//i.test(image.mimeType))) continue;
+      if (typeof image.data !== "string" || !image.data.startsWith("blob:sha256:")) continue;
+      const hash = image.data.slice("blob:sha256:".length);
+      if (hash.length === 64 && /^[a-f0-9]{64}$/.test(hash)) references.add(hash);
+    }
+  };
+  const message = record.message;
+  if (type === "message" && message && typeof message === "object" && !Array.isArray(message)) {
+    if (typeof message.role === "string" && ["user", "developer", "assistant", "toolResult", "custom", "hookMessage"].includes(message.role)) images(message.content, true);
+    if (message.role === "bashExecution" || message.role === "compactionSummary") images(message.images, false);
+    if (message.role === "toolResult") {
+      const details = message.details;
+      if (details && typeof details === "object" && !Array.isArray(details)) images(details.images, false);
+    }
+  }
+  if (type === "custom_message") images(record.content, true);
+  const preserveData = record.preserveData;
+  if (type === "compaction" && preserveData && typeof preserveData === "object" && !Array.isArray(preserveData)) {
+    let archive: JsonValue | undefined = preserveData.snapcompact;
+    while (archive && typeof archive === "object" && !Array.isArray(archive)) {
+      images(archive.frames, false);
+      const view: JsonValue | undefined = archive.withoutThinking;
+      archive = view && typeof view === "object" && !Array.isArray(view) ? view.archive : undefined;
+    }
+  }
   if (["checkpoint", "branch_checkpoint", "branch-checkpoint", "compacted", "compaction"].includes(type) || (type === "system" && record.subtype === "compact_boundary")) {
     descriptor(record);
     descriptor(record.payload);

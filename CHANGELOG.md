@@ -17,6 +17,9 @@
   selected execution, recover unaccepted refused selections and block historical
   queue/schedule writes. Recover handoffs by durable input acceptance, not merely
   an allocated or deleted thread.
+- Retain canonical native OMP image blobs from declared message, saved-image and
+  snapcompact frame positions. Resolve only the lowercase SHA-256 hash filename
+  beneath explicitly selected artifact roots, never blob-like text/tool arguments.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact

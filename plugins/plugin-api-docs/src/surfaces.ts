@@ -1265,6 +1265,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         bullets: [
           "Discover explicit machine/profile roots and preview bounded source bytes; archive selected or bulk OMP, Claude Code and Codex histories",
           "Page and search full retained native records, stream original JSONL and referenced artifacts, and inspect source identities, branches, checksums and recoverable import progress",
+          "Retain canonical OMP blob:sha256 image references from native image positions, including saved images and snapcompact frames; select their blob directory explicitly as an artifact root, with no file authority from ordinary text or tool arguments",
           "Keep full native history and state separate from next-turn model context; Core timeline values are bounded display previews",
           "Request exclusive same-identity native admission separately without a prompt; unsupported ownership or original receipt adoption refuses rather than inventing an identity or account binding",
           "Explicitly create a different handoff dialogue with user-supplied next-turn context and an archive link; no imported tool, hook or configuration is executed by archiving",

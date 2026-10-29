@@ -36,6 +36,13 @@ not arbitrary message text or tool arguments. Separate authentication/configurat
 files are excluded. Reads traverse no-follow directory descriptors and validate
 the opened file and native recorded workspace/size; hosts without confined
 descriptor traversal refuse rather than falling back to pathname reads.
+Canonical OMP image `data` references (`blob:sha256:` plus exactly 64 lowercase
+hex characters) address the extensionless hash file under an explicitly selected
+artifact root. Only native message/custom-message image content, saved execution,
+tool-result `details.images` or compaction-summary images, and compaction
+`preserveData.snapcompact.frames` (including `withoutThinking.archive` variants)
+grant this authority. Ordinary text, tool arguments and unrelated metadata do not;
+native record bytes stay intact.
 
 Import and writer identities use the canonical session file, not the selected
 discovery root. `attemptedSource` records an uncommitted candidate separately;
