@@ -69,6 +69,8 @@ it.each([1000, 1001])("round-trips a valid %i ms startup policy when editing onl
     fireEvent.click(await screen.findByRole("button", { name: "Edit context Millisecond policy" }));
     const dialog = await screen.findByRole("dialog", { name: "Execution context" });
     const name = await within(dialog).findByRole("textbox", { name: "Name" });
+    const initialDeadline = await within(dialog).findByLabelText(/^Startup deadline\b/i);
+    expect(initialDeadline.getAttribute("value")).toBe(String(deadlineMs / 1000));
     fireEvent.change(name, { target: { value: "Renamed millisecond policy" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await screen.findByRole("button", { name: "Edit context Renamed millisecond policy" });
@@ -77,7 +79,7 @@ it.each([1000, 1001])("round-trips a valid %i ms startup policy when editing onl
 
     fireEvent.click(screen.getByRole("button", { name: "Edit context Renamed millisecond policy" }));
     const reopened = await screen.findByRole("dialog", { name: "Execution context" });
-    const deadline = await within(reopened).findByRole("spinbutton", { name: "Startup deadline (seconds)" });
+    const deadline = await within(reopened).findByLabelText(/^Startup deadline\b/i);
     expect(deadline.getAttribute("value")).toBe(String(deadlineMs / 1000));
   } finally {
     cleanup();
