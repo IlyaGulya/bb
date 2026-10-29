@@ -20,6 +20,10 @@
 - Retain canonical native OMP image blobs from declared message, saved-image and
   snapcompact frame positions. Resolve only the lowercase SHA-256 hash filename
   beneath explicitly selected artifact roots, never blob-like text/tool arguments.
+- Allow native OMP image blobs with hardlinked display sidecars only after
+  whole-record image authority, confined SHA-256 and image-format verification.
+  Cache verification by host-observed file revision across chunks; preserve
+  generic hardlink bans and reject mismatches, non-images and argument fragments.
 - Keep workflow and Jira detail siblings in separate reconciliation key spaces
   so asynchronous detail refreshes cannot orphan launchers or open portals.
   Present workflow setup as a centered persistent desktop overlay and compact

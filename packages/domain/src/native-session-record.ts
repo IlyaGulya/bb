@@ -62,20 +62,9 @@ export function nativeArtifactReferences(value: NativeRecordObject): string[] {
   }
   return [...references];
 }
-function structuredNativeArtifacts(record: NativeRecordObject, body: NativeRecordObject, type: string): string[] {
+export function nativeOmpImageReferences(record: NativeRecordObject): string[] {
   const references = new Set<string>();
-  const add = (value: JsonValue | undefined) => {
-    if (typeof value === "string" && value.length) references.add(value.startsWith("blob://") ? value.slice(7) : value);
-  };
-  const descriptor = (value: JsonValue | undefined) => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return;
-    for (const key of ["path", "filePath", "blobPath", "artifactPath", "blobId", "checkpointPath", "statePath"]) add(value[key]);
-    for (const key of ["blob", "attachment", "artifact"]) {
-      const child = value[key];
-      if (typeof child === "string") add(child);
-      else if (child && typeof child === "object" && !Array.isArray(child)) { add(child.path); add(child.filePath); }
-    }
-  };
+  const type = record.type;
   const images = (values: JsonValue | undefined, requireImageType: boolean) => {
     if (!Array.isArray(values)) return;
     for (const image of values) {
@@ -105,6 +94,22 @@ function structuredNativeArtifacts(record: NativeRecordObject, body: NativeRecor
       archive = view && typeof view === "object" && !Array.isArray(view) ? view.archive : undefined;
     }
   }
+  return [...references];
+}
+function structuredNativeArtifacts(record: NativeRecordObject, body: NativeRecordObject, type: string): string[] {
+  const references = new Set(nativeOmpImageReferences(record));
+  const add = (value: JsonValue | undefined) => {
+    if (typeof value === "string" && value.length) references.add(value.startsWith("blob://") ? value.slice(7) : value);
+  };
+  const descriptor = (value: JsonValue | undefined) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    for (const key of ["path", "filePath", "blobPath", "artifactPath", "blobId", "checkpointPath", "statePath"]) add(value[key]);
+    for (const key of ["blob", "attachment", "artifact"]) {
+      const child = value[key];
+      if (typeof child === "string") add(child);
+      else if (child && typeof child === "object" && !Array.isArray(child)) { add(child.path); add(child.filePath); }
+    }
+  };
   if (["checkpoint", "branch_checkpoint", "branch-checkpoint", "compacted", "compaction"].includes(type) || (type === "system" && record.subtype === "compact_boundary")) {
     descriptor(record);
     descriptor(record.payload);

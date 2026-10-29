@@ -43,6 +43,16 @@ tool-result `details.images` or compaction-summary images, and compaction
 `preserveData.snapcompact.frames` (including `withoutThinking.archive` variants)
 grant this authority. Ordinary text, tool arguments and unrelated metadata do not;
 native record bytes stay intact.
+Hardlinked native image blobs are the only exception to the unshared-file rule:
+the authority must occupy a whole OMP JSONL record, and the confined opened file
+must match the canonical SHA-256 and identify PNG, JPEG, GIF, WebP or SVG image
+bytes. Filenames and declared MIME alone are insufficient; unrecognized formats
+refuse. A bounded host-side cache binds successful verification to content hash
+and the opened device/inode/size/mtime/ctime revision, so unchanged chunks do not
+rehash the full image. Caller-supplied revisions never establish verification.
+Every chunk retains descriptor/path confinement and revision checks. Generic
+artifacts and JSONL sources still reject hardlinks, including generic descriptors
+that name an image previously verified through its native image reference.
 
 Import and writer identities use the canonical session file, not the selected
 discovery root. `attemptedSource` records an uncommitted candidate separately;
