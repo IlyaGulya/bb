@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { clientTurnRequestIdSchema, executionContextSnapshotSchema, type ThreadEvent } from "@bb/domain";
+import { clientTurnRequestIdSchema, executionContextSnapshotSchema, providerStartupDiagnosticSchema, type ThreadEvent } from "@bb/domain";
 import { createAgentRuntime } from "./runtime.js";
-import { RuntimeStartup } from "./runtime-startup.js";
+import { ProviderStartupError, RuntimeStartup } from "./runtime-startup.js";
 import type { AgentRuntime, AgentRuntimeBridgeLaunch, AgentRuntimeExecutionOptions } from "./types.js";
 
 const fixture = fileURLToPath(new URL("./test/bridges/bounded-startup-fixture.mjs", import.meta.url));
@@ -147,4 +147,45 @@ it("blocks retry while stop is pending and retains ownership when stop cannot be
   await expect(startup.run({ threadId: "same-thread", policy: { deadlineMs: 60_000, optionalMcpServers: [] }, stop: async () => {}, work: async () => {} })).rejects.toMatchObject({ code: "provider_startup_stop_unverified" });
   expect(startup.isActive("same-thread")).toBe(true);
   expect(events.at(-1)).toMatchObject({ type: "system/operation", status: "failed", metadata: { retryBlocked: true } });
+});
+
+it("retains an ordinary pre-hook cause internally while publishing only allowlisted startup failure fields", async () => {
+  const events: ThreadEvent[] = [];
+  const startup = new RuntimeStartup((event) => events.push(event));
+  const sensitive = {
+    message: "SYNTHETIC_SENSITIVE_PREHOOK_MESSAGE",
+    code: "SYNTHETIC_UNTRUSTED_PROVIDER_CODE",
+    stage: "SYNTHETIC_UNTRUSTED_PROVIDER_STAGE",
+    credential: "SYNTHETIC_SECRET_VALUE",
+    path: "/synthetic/private/provider-item",
+    output: "SYNTHETIC_RAW_NATIVE_OUTPUT",
+  };
+  const original = Object.assign(new Error(sensitive.message), {
+    code: sensitive.code,
+    stage: sensitive.stage,
+    details: { credential: sensitive.credential, path: sensitive.path },
+    stdout: sensitive.output,
+  });
+  const threadId = "ordinary-prehook-failure";
+  const error: unknown = await startup.run({
+    threadId,
+    policy: { deadlineMs: 3_000, optionalMcpServers: [] },
+    stop: async () => {},
+    work: () => startup.track(threadId, async () => { throw original; }),
+  }).catch((failure: unknown) => failure);
+  if (!(error instanceof ProviderStartupError)) throw new Error("Expected a classified startup failure", { cause: error });
+  expect.soft(error.cause).toBe(original);
+  expect(error.code).toBe("provider_startup_failed");
+  expect(error.message).toBe(new ProviderStartupError("provider_startup_failed").message);
+  const terminal = events.at(-1);
+  if (terminal?.type !== "system/operation" || terminal.operation !== "provider_startup" || terminal.status !== "failed") {
+    throw new Error("Expected a terminal startup diagnostic");
+  }
+  const diagnostic = providerStartupDiagnosticSchema.parse(terminal.metadata);
+  expect.soft(diagnostic).toMatchObject({
+    phase: "stopped", failureStage: "initializing", code: "provider_startup_failed", retryBlocked: false,
+    hookEvent: null, hookId: null, hookState: null,
+  });
+  const publicOutput = JSON.stringify({ code: error.code, message: error.message, error, events, diagnostic });
+  for (const value of Object.values(sensitive)) expect(publicOutput).not.toContain(value);
 });
