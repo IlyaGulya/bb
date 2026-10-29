@@ -1,3 +1,5 @@
+import { useProductAnalyticsCommit } from "@/hooks/useProductAnalyticsCommit";
+import { beginProductAnalyticsAction, recordProductAnalytics } from "@/lib/product-analytics";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
@@ -913,6 +915,10 @@ export function OnboardingFlow({
   onClose: () => void;
 }) {
   const [step, setStep] = useState(initialStep);
+  const observeStep = useProductAnalyticsCommit("ui.onboarding", "step.select", step);
+  const closingAnalytics = useRef<ReturnType<typeof beginProductAnalyticsAction> | null>(null);
+  useEffect(() => () => { void closingAnalytics.current?.complete(); }, []);
+  useEffect(() => { recordProductAnalytics("ui.onboarding", "open", "opened", { actorKind: "unknown" }); }, []);
   const navigationProjects = useSidebarNavigation().data?.projects;
   const [projectIdsAtOpen, setProjectIdsAtOpen] =
     useState<ReadonlySet<string> | null>(null);
@@ -983,6 +989,7 @@ export function OnboardingFlow({
   const close = (outcome: "completed" | "skipped") => {
     if (finishedRef.current) return;
     finishedRef.current = true;
+    closingAnalytics.current = beginProductAnalyticsAction("ui.onboarding", outcome === "completed" ? "finish" : "skip");
     if (outcome === "skipped") {
       recordTelemetryEvent({
         name: "onboarding_step_skipped",
@@ -1009,12 +1016,12 @@ export function OnboardingFlow({
       desktopInfo,
       windowState,
     }),
-    onSelectStep: setStep,
+    onSelectStep: (next) => observeStep(next, () => setStep(next)),
     onSkipAll: () => close("skipped"),
   };
   const goTo = (offset: number) => () => {
     const next = STEP_ORDER[STEP_ORDER.indexOf(step) + offset];
-    if (next !== undefined) setStep(next);
+    if (next !== undefined) observeStep(next, () => setStep(next));
   };
   const advance = (outcome: "completed" | "skipped") => () => {
     recordTelemetryEvent({

@@ -137,8 +137,12 @@ export function createBbMcpHttpHandler(
   version: string,
   onError: (error: Error) => void,
 ): BbMcpHttpHandler {
+  const observeAnalytics = dependencies.observeAnalytics;
   const handler = createMcpHandler(
-    () => createBbMcpServer(dependencies, version),
+    ({ requestInfo }) => createBbMcpServer(observeAnalytics === undefined ? dependencies : {
+      ...dependencies,
+      observeAnalytics: (action, run) => observeAnalytics(action, run, requestInfo),
+    }, version),
     { legacy: "stateless", onerror: onError },
   );
   return {

@@ -79,6 +79,7 @@ import {
   type PromptWithGroups,
 } from "./deferred-first-turn-context.js";
 import type { TelemetryEvent } from "../system/telemetry.js";
+import { rememberAnalyticsTurnMode } from "../system/product-analytics-turns.js";
 import { assertThreadHostAcceptsWork } from "./thread-host-admission.js";
 
 type SendThreadMessageMode = SendMessageRequest["mode"];
@@ -91,6 +92,7 @@ type SendThreadMessagePayload = SendMessageRequest & {
 
 interface SendThreadMessageArgs {
   beforeAppendInTransaction?: SendThreadMessageTransactionPreflight;
+  queuedMessageIds?: readonly string[];
   /**
    * Present only when this send re-submits a failed turn. Marks the turn event
    * as attempt N of an earlier request, which is what makes the next failure's
@@ -155,6 +157,7 @@ interface AppendAndQueueSendThreadMessageArgs {
   initiator: ThreadTurnInitiator;
   input: PromptInput[];
   inputGroups?: PromptInput[][];
+  queuedMessageIds: readonly string[];
   queueInTransaction: SendThreadMessageQueueRequest;
   requestId: ClientTurnRequestId;
   senderThreadId: string | null;
@@ -407,6 +410,7 @@ function appendAndQueueSendThreadMessageInTransaction({
   initiator,
   input,
   inputGroups,
+  queuedMessageIds,
   queueInTransaction,
   requestId,
   senderThreadId,
@@ -453,6 +457,7 @@ function appendAndQueueSendThreadMessageInTransaction({
         tx,
       });
       activeThread = queueResult.activeThread;
+      rememberAnalyticsTurnMode(db, thread.id, target, { projectId: thread.projectId, queuedMessageIds, transaction: tx });
       return appended;
     },
     { behavior: "immediate" },
@@ -484,6 +489,7 @@ async function sendThreadMessageWithoutContextClear(
   args: SendThreadMessageArgs,
 ): Promise<void> {
   const { environment, payload, thread } = args;
+  const queuedMessageIds = args.queuedMessageIds ?? [];
   ensureThreadIsWritable(thread);
   if (args.trigger === "user") {
     ensureThreadIsNotAwaitingUserInteraction(deps, thread.id);
@@ -601,7 +607,10 @@ async function sendThreadMessageWithoutContextClear(
 
   if (
     await dispatchTurnDuringReprovision({
-      beforeRequestAppendInTransaction: beforeAppendInTransaction,
+      beforeRequestAppendInTransaction: ({ tx }) => {
+        beforeAppendInTransaction({ tx });
+        rememberAnalyticsTurnMode(deps.db, thread.id, { kind: "new-turn" }, { projectId: thread.projectId, queuedMessageIds, transaction: tx });
+      },
       deps,
       environment,
       execution,
@@ -688,6 +697,7 @@ async function sendThreadMessageWithoutContextClear(
       initiator,
       input,
       inputGroups,
+      queuedMessageIds,
       queueInTransaction: ({ tx }) => {
         const dispatchKind = command.mode;
         const currentThread = getThread(tx, thread.id);
@@ -781,6 +791,7 @@ async function sendThreadMessageWithoutContextClear(
     initiator,
     input,
     inputGroups,
+    queuedMessageIds,
     queueInTransaction: () => {
       return { activeThread: null };
     },

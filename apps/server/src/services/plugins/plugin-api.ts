@@ -1,5 +1,6 @@
 import { getPrivateProductAnalytics } from "../system/product-analytics.js";
-import { declarePluginAnalyticsAction } from "../system/product-analytics-declaration.js";
+import { declarePluginAnalyticsAction, validatePluginAnalyticsAction } from "../system/product-analytics-declaration.js";
+import type { ProductAnalyticsActionDeclaration } from "@bb/server-contract";
 import {
   environmentCompositionSchema,
   validateServerAccessProviderDeclaration,
@@ -1324,13 +1325,25 @@ export function createPluginApi(options: {
     register: aiServiceRegistrations.register,
   };
 
+  let analyticsRegistrationId = 0;
+  const analyticsRegistrations = createStagedRegistrations({
+    validate: (declaration: ProductAnalyticsActionDeclaration) => {
+      const normalized = validatePluginAnalyticsAction(declaration);
+      return { ...normalized, id: String(analyticsRegistrationId++) };
+    },
+    bind: () => null,
+    registerLive: ({ id: _id, ...declaration }) => declarePluginAnalyticsAction(getPrivateProductAnalytics(db), pluginId, declaration),
+    alreadyRegisteredMessage: (action) => `Analytics action "${action}" is already declared`,
+    assertLive,
+    isActivated: () => activated,
+    disposeHooks,
+  });
+
   const api: BbPluginApi = {
     experimental_productAnalytics: {
       declareAction(declaration) {
-        assertLive();
-        const registration = declarePluginAnalyticsAction(getPrivateProductAnalytics(db), pluginId, declaration);
-        disposeHooks.push(registration.dispose);
-        return registration.identity;
+        analyticsRegistrations.register(declaration);
+        return { featureId: `plugin.${pluginId}`, action: declaration.action, version: 1 };
       },
       record(event) {
         assertLive();
@@ -1430,6 +1443,7 @@ export function createPluginApi(options: {
       );
       providerRegistrations.flush();
       aiServiceRegistrations.flush();
+      analyticsRegistrations.flush();
       activated = true;
       const cliWarning = cliRecord.registration
         ? pluginCliCollisionWarning(pluginId, cliRecord.registration.name)

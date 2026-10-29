@@ -45,66 +45,6 @@ export const worktreeProviderInputsSchema = z.object({
   branch: gitBranchSelectionSchema,
 });
 
-export const checkoutProviderInputsSchema = z.object({
-  path: z.string().min(1).optional(),
-  branch: z
-    .discriminatedUnion("kind", [
-      z
-        .object({ kind: z.literal("existing"), name: z.string().min(1) })
-        .strict(),
-      z
-        .object({ kind: z.literal("new"), baseBranch: z.string().min(1) })
-        .strict(),
-    ])
-    .optional(),
-});
-
-function checkoutInputsOf(context: TestEnvironmentProviderContext): {
-  path?: string;
-} {
-  const inputs = context.inputs;
-  return typeof inputs === "object" && inputs !== null && !Array.isArray(inputs)
-    ? { ...(typeof inputs.path === "string" ? { path: inputs.path } : {}) }
-    : {};
-}
-
-export function defaultEnvironmentProviderRecords(): PluginEnvironmentProviderRecord[] {
-  const checkout = validatePluginEnvironmentProviderDeclaration({
-    id: DEFAULT_ENVIRONMENT_PROVIDER_ID.projectCheckout,
-    displayName: "Checkout",
-    description: "Prepare a workspace for this thread.",
-    icon: "Folder",
-    requires: { projectCheckout: true },
-    inputs: checkoutProviderInputsSchema,
-    ...providerOperations((context) => {
-      const host = context.host;
-      const path =
-        checkoutInputsOf(context).path ?? context.projectCheckout?.path;
-      if (host === null || path === undefined) {
-        return {
-          action: "reject",
-          message: "Checkout needs a machine with the project",
-        };
-      }
-      return {
-        action: "ready",
-        environment: { type: "host", hostId: host.id, path },
-      };
-    }),
-  });
-  return [{ pluginId: "environment-project-checkout", provider: checkout }];
-}
-
-export function installDefaultEnvironmentProviders(): void {
-  const records = defaultEnvironmentProviderRecords();
-  setPluginEnvironmentProviderBridge({
-    listEnvironmentProviders: () => records,
-    getEnvironmentProvider: (id) =>
-      records.find((record) => record.provider.id === id),
-    invokeProvider: (_pluginId, _label, run) => invokePluginInline(run),
-    decisionTimeoutMs: 10_000,
-  });
-}
 
 export function installFakeEnvironmentProvider(
   args: InstallFakeEnvironmentProviderArgs,

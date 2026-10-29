@@ -29,6 +29,22 @@ cross-project aggregate or new authorization model: the existing owner-facing
 API gate still applies, and an absent/deleted project is not an available
 report scope.
 
+Request observation does not read or clone the incoming body. Scope selectors
+are observed only when the guarded product consumer parses JSON; raw-body
+handlers retain the original bytes. Actual project/thread/environment/terminal
+ownership takes precedence over ambient client context. Explicit observe intent
+does not become an attempt merely because the request uses POST or plugin RPC.
+Queued delivery is accepted admission, and a stale-hash write conflict is a
+failed conflict outcome rather than successful completion.
+
+Shared browser RPC calls use the same app-surface request wrapper as the SDK.
+The central TanStack mutation cache captures bounded provenance when a mutation
+is built, before asynchronous `onMutate` preparation. Each mutation-function
+attempt reuses that capture, including retries and observer option updates, so
+a later view change cannot replace the originating project or operation UUID.
+The binding is restored as soon as the mutation function returns its promise;
+it is not left ambient while asynchronous work settles.
+
 ## Collection and delivery
 
 The server appends validated events in an independent committed SQLite
@@ -47,6 +63,12 @@ outbox can match its queued envelope; the report's stored plane is authoritative
 for normalized QA attribution. A receipt's echoed production tag does not mean
 a smoke/preview server stored production popularity.
 
+Plugin declarations stay local to the candidate handle until activation.
+Disposal retires only the declaration owned by that handle; a failed candidate
+cannot replace the active generation's completion authority. Live framework
+catalog reconciliation retires removed RPC/HTTP/CLI entries without deleting
+their committed history or changing duplicate delivery receipts.
+
 The browser uses IndexedDB and the shared SDK outbox. It retains pending
 records across reload, retries after reconnect, checks per-stage receipt
 identity, and retains missing/mismatched/retry receipts. An accepted or duplicate
@@ -57,6 +79,18 @@ Bounds:
 - Server: 30-day event retention, 100,000 events, 10,000 pending; project at most
   500 pending records per sweep. Instance identity and cumulative delivery
   counters are diagnostic state, not a retained payload/event history.
+- Native and queued dispatch retain only validated QA modes under hashed
+  pending-thread and queued-message keys in existing Core key-value storage.
+  The two marker kinds share a 10,000-entry cap and 30-day expiry in the existing
+  collector sweep. A queued marker is committed with its queue row; its mode is
+  transferred to the pending-thread marker in the existing consumption/admission
+  transaction, including the fast, hook-driven and provisioning paths. An
+  admitted native start consumes the thread marker; paired completion uses the
+  existing durable event attribution across restart. Consumed queue markers are
+  retired. If existing business grouping combines modes, the first non-production
+  mode wins and a gap is exposed, never production popularity for mixed QA work.
+  Marker storage failure remains a visible gap and does not fail the primary
+  dispatch. No request content, new queue or wire field is stored.
 - Browser: 500 pending events, seven-day expiry, 50 events per batch, at most
   ten batches per flush. Reconnect and periodic delivery reuse the same outbox.
 - Storage failures, projection failures, capacity limits, expiry, rejected
@@ -66,9 +100,26 @@ Bounds:
   store can lose events. This is not an exactly-once or lossless guarantee.
 
 `BB_PRODUCT_ANALYTICS_MODE` selects production, preview, smoke or test at the
-server boundary. A non-production server does not accept client production tags
-as production popularity. Reports keep those planes separate. A test suite or
-replayed workload is not production feature demand.
+server boundary. CLI requests also forward an explicit value from their process
+environment, including MCP's inherited CLI environment. A non-production server
+does not accept client production tags as production popularity. Reports keep
+those planes separate. A test suite or replayed workload is not production demand.
+
+MCP semantic search/read/run observers receive the original HTTP request from
+the existing per-request server factory. They retain its bounded operation,
+Core project, actor/session and QA metadata, and use the actual MCP surface.
+Explicit observation intent is not counted as use. Requests without an explicit
+project remain instance-scoped; the existing Core admission gate validates scope
+and the complete event. No request body, tool arguments or results are copied
+into analytics, and no shared mutable request context is introduced.
+
+Authenticated native plugin tools bind deliberate agent intent, agent surface,
+and the owning thread's actual Core project. Their QA mode is read from the
+accepted root-turn start using the existing hashed operation identity and event
+primary key; it is not selected from tool arguments, model accounts or an
+unrelated process environment. The tool and its Core SDK child requests share
+that operation context. Unrecorded/legacy turns use the instance plane; storage
+lookup failure records a diagnostic gap without failing the primary tool.
 
 ## Coverage inventory
 
@@ -82,25 +133,40 @@ from a nonzero counter or the mere existence of an endpoint.
 | Unmapped runtime Core routes | Actual Hono registration inventory | A coverage gap with unknown availability, never fabricated zero popularity. |
 | Bundled/installed/custom plugin RPC and HTTP | Live registered handlers, including unpublished RPC | Shared server outcome observation, not request payloads. Calls require an actual Core project context when scoped. |
 | Plugin CLI | Declared command paths, not argv values | One logical invocation, stable action selection before positional arguments; source CLI/MCP/SDK provenance remains distinct. |
-| Native plugin tools | Actual native tool execution | Semantic result and bounded duration; external business effects require their own completion declaration. |
+| Native plugin tools | Actual authenticated native tool execution | Deliberate agent result and bounded duration; Core SDK children share provenance and QA follows the recorded root turn. External business effects require their own completion declaration. |
 | Plugin services and schedules | Shared service lifecycle and claimed schedule execution | System/background activity, separate from intentional human use and separately scoped Core child actions. |
 | Native execution/provider | Accepted root-turn start/completion effects | Actual execution result; runtime system attribution is not inferred human/provider choice. Observed admission-to-completion time can include delivery delay. |
-| Core UI | Visible route entry, meaningful navigation, shared command dispatch | Exposed/opened/started/terminal navigation; accepted command dispatch is not downstream completion. Trusted input/automation provenance is separate from background exposure and unknown opens. |
-| Bundled local plugin commands | Monaco command identities and Prompt Library composer command | Backend-declared identities and the existing shared Core command path, not a second tracker. |
-| Custom local plugin actions | Explicit private analytics declarations | Client-local versus server completion authority is explicit; plugin disposal retires availability. See the Plugin Guide. |
+| Core UI | Workspace host acknowledgement, committed split/navigation state, palette opening and deferred command selection, settled intentional search, timeline expansion, interaction resolution, execution selection, attachment and voice lifecycle, appearance and onboarding | Initiating project/actor/QA metadata is captured before asynchronous work. Committed local state and returned asynchronous admission remain distinct from downstream completion. No search strings, selections, filenames, audio or transcript content are collected. |
+| Registered local plugin controls | Shared slot callback invocation and committed component consumption | Code-declared `ui.plugin.<id>` / `slot.<kind>.<id>.run` or `.mount`; callback completion is local handler completion, not downstream business success. Mounts are unknown-actor observations, not registration, visibility or inferred clicks. Thread-owned components resolve the actual Core thread project. |
+| Custom semantic plugin actions | Existing explicit private analytics declarations | Client-local versus server completion authority is explicit; plugin disposal retires availability. Component consumption does not imply coverage of every internal control. See the Plugin Guide. |
 | MCP discovery/read/run | Existing MCP semantic handlers and their CLI subprocess boundary | Source MCP remains distinguishable; no tool arguments, business payloads or outputs enter analytics. |
 
-UI-only controls without a declared semantic action remain explicit coverage
-gaps. Skills, themes and thread integrations without a semantic lifecycle
-contract are inventoried as gaps. Provider/environment/machine registration
-does not prove current host installation or project readiness; availability
-remains unknown where that cannot be established. BBDEV-39's player/gate and
-BBDEV-42's demo pipeline are separate unavailable/pending capabilities until
-their owning changes supply actual instrumentation. None of these gaps may be
-interpreted as unused features or silently called accepted coverage.
+Registered plugin callbacks and component consumers publish at most 500 local
+action declarations per active backend handle through the typed
+`experimental_productAnalytics.declareLocalActions` path. These identities cannot
+replace Core/server actions. The same outbox declares queued local identities
+before delivery; disabled or removed apps cannot grant new completion authority.
+Catalog delivery failures become visible gaps rather than failing a control.
+Actual mention search/resolution, selected runtime skill injection and theme
+resource consumption use the same collector. Skill injection is a system
+observation, not evidence that a model read or followed instructions. Missing
+asynchronous skill provenance is a diagnostic gap rather than guessed production
+usage. Theme prefetch is not human selection. Provider/host readiness remains
+unknown unless actually established. BBDEV-39 and BBDEV-42 remain separate
+unavailable/pending capabilities until their owning source is integrated.
 
-Local-only CLI guide/help, plugin-authoring commands and CLI error diagnostics
-are also explicit gaps: a server request observer cannot prove their use.
+Local-only CLI guide/help, plugin new/types/build/dev and CLI diagnostics record
+actual invocation/exit through the shared SDK outbox. A filesystem adapter uses
+500 exclusive reservation directories, seven-day expiry and per-envelope identity
+checks. A replayed receipt cannot remove a different queued action. The spool is
+isolated by a hash of the configured server URL; events retain their actual Core
+project, actor and QA plane. Exit recording uses synchronous filesystem admission;
+it does not wait for network delivery. Subsequent local activity retries pending
+delivery. `bb diagnostics product-analytics --json` exposes local health without
+event payloads. A watch starting is not a successful build. Diagnostic totals are
+bounded lower bounds after their 1 MiB log saturates; overflow, concurrent crashes,
+expiry, unavailable storage and device loss can leave gaps. This is not a power-loss
+or exactly-once guarantee. Production popularity cannot be inferred from these gaps.
 
 ## Owner report
 

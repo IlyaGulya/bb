@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
-import { and, count, eq, isNull, lt, sql } from "drizzle-orm";
-import { projects, productAnalyticsEvents as events, productAnalyticsHealth as health, type DbConnection } from "@bb/db";
+import { and, count, eq, isNull, like, lt, sql } from "drizzle-orm";
+import { appSettingsValues, projects, productAnalyticsEvents as events, productAnalyticsHealth as health, type DbConnection } from "@bb/db";
 import {
   productAnalyticsEventSchema,
   productAnalyticsModeSchema,
@@ -23,6 +23,7 @@ import { CLIENT_ANALYTICS_FEATURES, CORE_ANALYTICS_ROUTES } from "./product-anal
 export const ANALYTICS_RETENTION_MS = 30 * 86_400_000;
 export const ANALYTICS_MAX_PENDING = 10_000;
 export const ANALYTICS_MAX_EVENTS = 100_000;
+export const ANALYTICS_PENDING_TURN_MODE_PREFIX = "productAnalytics.pendingTurn.";
 export interface AnalyticsContext {
   operationId: string;
   scope: ProductAnalyticsScope;
@@ -44,7 +45,8 @@ export function productAnalyticsContext(): AnalyticsContext | undefined {
 export function analyticsScopeKey(scope: ProductAnalyticsScope): string {
   return scope.kind === "instance" ? "instance" : scope.projectId;
 }
-function eventKey(event: ProductAnalyticsEvent): string {
+type AnalyticsOperation = Pick<ProductAnalyticsEvent, "scope" | "operationId" | "featureId" | "action" | "version">;
+function eventKey(event: AnalyticsOperation & Pick<ProductAnalyticsEvent, "stage">): string {
   return createHash("sha256").update(JSON.stringify([analyticsScopeKey(event.scope), event.operationId, event.featureId, event.action, event.version, event.stage])).digest("hex");
 }
 function emptyRow(feature: ProductAnalyticsFeature): ProductAnalyticsRow {
@@ -74,8 +76,9 @@ export class PrivateProductAnalytics {
   private timer: ReturnType<typeof setInterval> | null = null;
   private instanceId = "";
   private catalogProvider: () => ProductAnalyticsFeature[] = () => [];
+  private dynamicCatalogKeys = new Set<string>();
   constructor(private readonly db: DbConnection, readonly release: string, readonly mode: ProductAnalyticsMode, private readonly logger: ServerLogger) {
-    for (const feature of [...CORE_ANALYTICS_ROUTES, ...CLIENT_ANALYTICS_FEATURES]) this.register(feature, feature.featureId.startsWith("ui.") ? "client" : "server");
+    for (const feature of [...CORE_ANALYTICS_ROUTES, ...CLIENT_ANALYTICS_FEATURES]) this.register(feature, feature.featureId.startsWith("ui.") || feature.featureId === "cli.local" ? "client" : "server");
     try {
       this.initializeIdentity();
     } catch {
@@ -105,7 +108,15 @@ export class PrivateProductAnalytics {
   setCatalogProvider(provider: () => ProductAnalyticsFeature[]): void { this.catalogProvider = provider; }
   private refreshCatalog(): boolean {
     try {
-      for (const feature of this.catalogProvider()) this.register(feature);
+      const features = this.catalogProvider();
+      const keys = new Set(features.map((feature) => `${feature.featureId}:${feature.action}`));
+      for (const key of this.dynamicCatalogKeys) {
+        if (keys.has(key)) continue;
+        const feature = this.catalog.get(key);
+        if (feature !== undefined) this.register({ ...feature, availability: "unavailable" });
+      }
+      for (const feature of features) this.register(feature);
+      this.dynamicCatalogKeys = keys;
       return true;
     } catch {
       this.failure("instance", this.mode);
@@ -117,8 +128,18 @@ export class PrivateProductAnalytics {
     this.catalog.set(`${feature.featureId}:${feature.action}`, feature);
     if (feature.featureId === "plugin.tasks" && feature.action === "video.open" && feature.coverage === "lifecycle" && feature.availability === "available") this.catalog.delete("demo.player:run");
     const key = `${feature.featureId}:${feature.action}`;
-    if (completionSource === "client" || (feature.featureId.startsWith("plugin.") && feature.action === "open" && feature.coverage === "lifecycle")) this.clientCompletionFeatures.add(key);
+    if (completionSource === "client" || (feature.featureId.startsWith("plugin.") && feature.action === "open" && feature.coverage === "lifecycle") || (feature.featureId.startsWith("ui.plugin.") && feature.coverage === "lifecycle")) this.clientCompletionFeatures.add(key);
     else this.clientCompletionFeatures.delete(key);
+  }
+  registerOwned(feature: ProductAnalyticsFeature, completionSource: "server" | "client"): { dispose(): void } {
+    this.register(feature, completionSource);
+    const key = `${feature.featureId}:${feature.action}`;
+    return {
+      dispose: () => {
+        if (this.catalog.get(key) !== feature) return;
+        this.register({ ...feature, availability: "unavailable" });
+      },
+    };
   }
   registerRouteGaps(routes: readonly { method: string; path: string }[]): void {
     for (const route of routes) {
@@ -175,7 +196,7 @@ export class PrivateProductAnalytics {
       return this.db.transaction(() => {
         const id = eventKey(event);
         if (this.db.select({ id: events.id }).from(events).where(eq(events.id, id)).get()) return receipt("duplicate", "none");
-        if (!this.catalog.has(`${event.featureId}:${event.action}`) && !this.refreshCatalog()) return receipt("retry", "storage_unavailable");
+        if ((event.featureId.startsWith("plugin.") || event.featureId.startsWith("ui.plugin.") || !this.catalog.has(`${event.featureId}:${event.action}`)) && !this.refreshCatalog()) return receipt("retry", "storage_unavailable");
         const feature = this.catalog.get(`${event.featureId}:${event.action}`);
         if (!feature || feature.coverage === "gap" || feature.availability === "unavailable") return receipt("rejected", "unknown_feature");
         if (source === "client" && event.stage === "completed" && !this.clientCompletionFeatures.has(`${event.featureId}:${event.action}`)) return receipt("rejected", "server_authoritative");
@@ -202,7 +223,16 @@ export class PrivateProductAnalytics {
   admitBatch(batch: ProductAnalyticsEvent[]): ProductAnalyticsAck {
     return { receipts: batch.map((event) => this.admit(event, "client")) };
   }
-  record(featureId: string, action: string, stage: ProductAnalyticsEvent["stage"], outcome: ProductAnalyticsEvent["outcome"] = "none", errorCode: ProductAnalyticsEvent["errorCode"] = "none", durationMs: number | null = null, override?: Partial<AnalyticsContext>): ProductAnalyticsReceipt {
+  modeForOperation(operation: AnalyticsOperation): ProductAnalyticsMode {
+    try {
+      const stored = this.db.select({ mode: events.mode }).from(events).where(eq(events.id, eventKey({ ...operation, stage: "started" }))).get();
+      return productAnalyticsModeSchema.parse(stored?.mode ?? this.mode);
+    } catch {
+      this.noteGap(operation.scope);
+      return this.mode;
+    }
+  }
+  record(featureId: string, action: string, stage: ProductAnalyticsEvent["stage"], outcome: ProductAnalyticsEvent["outcome"] = "none", errorCode: ProductAnalyticsEvent["errorCode"] = "none", durationMs: number | null = null, override?: Partial<AnalyticsContext> & { timestamp?: number }): ProductAnalyticsReceipt {
     const context = contextStorage.getStore();
     const event: ProductAnalyticsEvent = {
       operationId: override?.operationId ?? context?.operationId ?? randomUUID(),
@@ -212,7 +242,7 @@ export class PrivateProductAnalytics {
       actorSessionId: override?.actorSessionId ?? context?.actorSessionId ?? null,
       surface: override?.surface ?? context?.surface ?? "system",
       mode: override?.mode ?? context?.mode ?? this.mode,
-      stage, outcome, errorCode, timestamp: Date.now(),
+      stage, outcome, errorCode, timestamp: override?.timestamp ?? Date.now(),
       durationMs: durationMs === null ? null : Math.min(86_400_000, Math.max(0, Math.round(durationMs))),
     };
     if (override?.scope === undefined && context?.scopeKnown === false) {
@@ -243,6 +273,7 @@ export class PrivateProductAnalytics {
           this.db.update(health).set({ expired: sql`${health.expired} + ${row.value}`, gaps: sql`${health.gaps} + ${row.pending}` }).where(eq(health.scopeMode, `${row.scope}:${row.mode}`)).run();
         }
         this.db.delete(events).where(lt(events.timestamp, now - ANALYTICS_RETENTION_MS)).run();
+        this.db.delete(appSettingsValues).where(and(like(appSettingsValues.key, `${ANALYTICS_PENDING_TURN_MODE_PREFIX}%`), lt(appSettingsValues.updatedAt, now - ANALYTICS_RETENTION_MS))).run();
         const pending = this.db.select({ id: events.id, scope: events.scope, mode: events.mode }).from(events).where(isNull(events.projectedAt)).orderBy(events.admittedAt).limit(500).all();
         for (const event of pending) {
           this.db.update(events).set({ projectedAt: now }).where(eq(events.id, event.id)).run();

@@ -5,6 +5,7 @@ import {
   type QuickJSContext,
   type QuickJSDeferredPromise,
   type QuickJSHandle,
+  type QuickJSSyncVariant,
   type QuickJSRuntime,
   type QuickJSWASMModule,
 } from "quickjs-emscripten-core";
@@ -60,11 +61,15 @@ const MAX_MEMORY_PAGES = 32_768;
 const TRANSFER_MARGIN_BYTES = 4 * 1024;
 const CANCELLED_REASON = "The call was cancelled.";
 
-declare const WebAssembly: {
-  Memory: new (descriptor: { initial: number; maximum: number }) => {
-    grow(deltaPages: number): number;
-  };
-};
+declare const WebAssembly: typeof globalThis extends {
+  WebAssembly: infer RuntimeWebAssembly;
+}
+  ? RuntimeWebAssembly
+  : {
+      Memory: new (descriptor: { initial: number; maximum: number }) => {
+        grow(deltaPages: number): number;
+      };
+    };
 
 class SandboxMemory extends WebAssembly.Memory {
   exhausted = false;
@@ -90,6 +95,12 @@ interface SandboxInstance {
 
 let idleInstance: SandboxInstance | null = null;
 
+function syncVariant(
+  module: QuickJSSyncVariant | { default: QuickJSSyncVariant },
+): QuickJSSyncVariant {
+  return "default" in module ? module.default : module;
+}
+
 async function acquireInstance(
   memoryLimitBytes: number,
 ): Promise<SandboxInstance> {
@@ -106,7 +117,7 @@ async function acquireInstance(
   }
   const memory = new SandboxMemory(pages);
   const module = await newQuickJSWASMModuleFromVariant(
-    newVariant(SINGLEFILE_RELEASE_SYNC, { wasmMemory: memory }),
+    newVariant(syncVariant(SINGLEFILE_RELEASE_SYNC), { wasmMemory: memory }),
   );
   return { memory, module };
 }

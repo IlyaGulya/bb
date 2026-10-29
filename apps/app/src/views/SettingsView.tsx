@@ -1,3 +1,4 @@
+import { useProductAnalyticsCommit } from "@/hooks/useProductAnalyticsCommit";
 import { ProductAnalyticsSettingsSection } from "@/components/settings/ProductAnalyticsSettingsSection";
 import { MobileAppSection } from "@/components/settings/MobileAppSection";
 import { MachineEnvironmentSettings } from "@/components/settings/MachineEnvironmentSettings";
@@ -694,6 +695,7 @@ export function AppearanceSettingsSection({
   themePreference,
 }: AppearanceSettingsSectionProps) {
   const paletteSelectedRef = useRef(false);
+  const observeThemePreference = useProductAnalyticsCommit("ui.appearance", "mode.select", themePreference);
   const previewPalette = (themeId: string | null) => {
     if (themeId === null && paletteSelectedRef.current) return;
     onAppearanceThemePreview(themeId);
@@ -729,7 +731,7 @@ export function AppearanceSettingsSection({
                 {THEME_PREFERENCE_OPTIONS.map((option) => (
                   <DropdownMenuItem
                     key={option.value}
-                    onSelect={() => onThemePreferenceChange(option.value)}
+                    onSelect={() => observeThemePreference(option.value, () => onThemePreferenceChange(option.value))}
                   >
                     {option.label}
                     <Icon

@@ -1,3 +1,4 @@
+import { observeProductAnalyticsAsync } from "@/lib/product-analytics";
 import {
   mutationOptions,
   type QueryClient,
@@ -52,11 +53,11 @@ export function resolveThreadPendingInteractionMutationOptions(
       interactionId,
       resolution,
     }: ResolveThreadPendingInteractionMutationRequest): Promise<PendingInteraction> =>
-      sdk.threads.interactions.resolve({
+      observeProductAnalyticsAsync("ui.interactions", "resolve", () => sdk.threads.interactions.resolve({
         interactionId,
         resolution,
         threadId,
-      }),
+      }), (interaction) => interaction.status === "resolved" ? "succeeded" : interaction.status === "interrupted" ? "cancelled" : "accepted"),
     onSuccess: (interaction, variables) => {
       applyResolvedThreadPendingInteraction({ interaction, queryClient });
       invalidateThreadPendingInteractionResolutionQueries({

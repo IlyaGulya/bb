@@ -156,6 +156,11 @@ export function registerSystemRoutes(
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
   const routes = publicApiRoutes.system;
+  post(routes.productAnalyticsLocalActions, (context, payload) => {
+    context.header("cache-control", "no-store");
+    if (!pluginService.declareLocalAnalyticsActions(payload)) throw new ApiError(409, "conflict", "Plugin app is not available or its action catalog is full");
+    return context.json({ ok: true });
+  });
   post(routes.productAnalyticsEvents, (context, payload) => {
     context.header("cache-control", "no-store");
     return context.json(getPrivateProductAnalytics(deps.db).admitBatch(payload.events));

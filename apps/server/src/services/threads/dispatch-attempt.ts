@@ -1,5 +1,6 @@
 import { assertNativeHistoryWritable } from "./native-history-guard.js";
 import { requestQueuedMachineReadiness } from "./queued-message-dispatch.js";
+import { rememberAnalyticsTurnMode } from "../system/product-analytics-turns.js";
 import {
   cancelPreparingMachinePause,
   isMachineWaitingForExecution,
@@ -384,7 +385,7 @@ async function runDispatchAttempt(
     waitingOn: QueuedMessageWaitingOn,
     sendAt: number | null,
   ): DispatchAttemptOutcome => {
-    const entry = recordQueuedMessageWait(deps, {
+    const entry = recordQueuedMessageWait({ db: deps.db, hub: deps.hub, analyticsDb: deps.db }, {
       thread,
       message: queuedMessage,
       waitingOn,
@@ -617,6 +618,7 @@ async function runDispatchAttempt(
       payload: resolvedPayload,
       thread,
       trigger: args.trigger,
+      ...(claimed === null ? {} : { queuedMessageIds: claimed.map((row) => row.id) }),
       ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
       beforeAppendInTransaction: ({ tx }) => {
         if (getThread(tx, thread.id)?.status !== thread.status) {
@@ -796,6 +798,7 @@ async function admitPendingThread(
           titleProvided: startContext.titleProvided,
           preparationOnly: startContext.preparationOnly,
         });
+        rememberAnalyticsTurnMode(deps.db, args.thread.id, { kind: "new-turn" }, { projectId: args.thread.projectId, queuedMessageIds: args.claimed?.map((row) => row.id) ?? [], transaction: tx });
         return starting;
       },
       { behavior: "immediate" },

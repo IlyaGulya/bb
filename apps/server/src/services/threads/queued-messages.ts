@@ -102,6 +102,7 @@ import {
 } from "../lib/lifecycle-api-errors.js";
 import { resolvePromptAttachmentReferences } from "../projects/attachments.js";
 import { requestQueuedMessageDispatch } from "./queued-message-dispatch.js";
+import { rememberAnalyticsTurnMode, rememberQueuedAnalyticsMode } from "../system/product-analytics-turns.js";
 import { assertThreadHostAcceptsWork } from "./thread-host-admission.js";
 import {
   ThreadContextClearInProgressError,
@@ -276,6 +277,7 @@ export async function createQueuedMessageForThread(
           payload: { kind: "inline" },
           systemNotice: null,
         });
+        rememberQueuedAnalyticsMode(deps.db, tx, queuedMessage.id);
         return { currentThread, hasProviderSession, queuedMessage };
       },
       { behavior: "immediate" },
@@ -597,6 +599,7 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
       if (!outcome.applied) {
         throw createQueuedMessageClaimLostError();
       }
+      rememberAnalyticsTurnMode(deps.db, thread.id, { kind: "new-turn" }, { projectId: thread.projectId, queuedMessageIds: args.queuedMessages.map((row) => row.id), transaction: tx });
       return { activeThread: outcome.thread, command };
     },
     { behavior: "immediate" },

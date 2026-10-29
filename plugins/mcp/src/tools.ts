@@ -64,7 +64,7 @@ export interface ToolDependencies {
   runCli: CliRunner;
   loadCommandIndex: () => Promise<CommandIndex>;
   sandboxLimits?: Partial<SandboxLimits>;
-  observeAnalytics?: (action: "search" | "read" | "run", run: () => Promise<ToolTextResult>) => Promise<ToolTextResult>;
+  observeAnalytics?: (action: "search" | "read" | "run", run: () => Promise<ToolTextResult>, request?: Request) => Promise<ToolTextResult>;
 }
 
 function truncate(text: string): string {

@@ -1,4 +1,5 @@
 import { subscribeComposerSubmitted } from "./composer-submissions";
+import { fetchWithAppSurface } from "./app-surface";
 import {
   useCallback,
   useContext,
@@ -246,7 +247,7 @@ export function useRpc<
   const client = useMemo(
     () => ({
       call: (method: string, input?: unknown) =>
-        callPluginRpc(fetch, pluginId, method, input),
+        callPluginRpc(fetchWithAppSurface, pluginId, method, input),
     }),
     [pluginId],
   );

@@ -40,8 +40,13 @@ admission, not completed projection, and does not promise lossless collection
 after device loss, expiry, overflow or a failed admission.
 
 For owned non-production verification, set BB_PRODUCT_ANALYTICS_MODE to preview,
-smoke or test in that server's process environment and restart it. This knob
-does not enable or change anonymous vendor telemetry and is not an opt-out.
+smoke or test in that server's process environment and restart it. The CLI also
+forwards an explicit process value, including through MCP's CLI environment:
+
+  BB_PRODUCT_ANALYTICS_MODE=smoke bb project list --json
+
+This tags the invocation without changing server configuration or actor
+classification. The knob does not change anonymous telemetry and is not an opt-out.
 
 Theming — the app-wide palette and typography
 
@@ -376,6 +381,19 @@ diagnostics, `bb settings general telemetryEnabled false`, or SDK
 `system.updateGeneralSettings` with `telemetryEnabled`. The saved preference
 takes effect immediately. `BB_TELEMETRY=false` always disables telemetry, even
 when the saved preference is enabled.
+
+Private product analytics is separate from anonymous vendor telemetry and uses
+this BB server, not a vendor backend. `bb analytics --json` reports one logical
+scope and QA mode. `bb diagnostics product-analytics [--json]` shows the local
+acknowledged delivery queue for the configured server without event payloads:
+pending, retrying, gaps, expired and storage status. Local guide/help, plugin
+new/types/build/dev and CLI diagnostics use the same outbox. Their metadata is
+bounded action identity and outcome, never argv, paths, searches, output or raw
+errors. The local spool retains at most 500 events for seven days and retries on
+subsequent local CLI activity; server identity is isolated by a hash of its
+configured URL. Overflow, expiry and storage/process/device loss can leave gaps;
+diagnostic totals saturate at their bounded log limit. A watch starting is not
+a successful build, and explicit QA modes stay separate from production.
 
 Mobile app downloads
 

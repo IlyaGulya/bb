@@ -1,3 +1,4 @@
+import { localProductAnalyticsOutbox } from "../product-analytics.js";
 import { rmSync } from "node:fs";
 import { Command } from "commander";
 import { action } from "../action.js";
@@ -56,6 +57,13 @@ export function registerDiagnosticsCommands(program: Command): void {
   const diagnostics = program
     .command("diagnostics")
     .description("Inspect local bb CLI diagnostics");
+  diagnostics.command("product-analytics").description("Show this server's local acknowledged analytics queue health; no event payloads").option("--json", "Print machine-readable JSON output").action(action(async (opts: { json?: boolean }) => {
+    const outbox = localProductAnalyticsOutbox();
+    await outbox.refreshHealth();
+    const health = outbox.getSnapshot();
+    if (outputJson(opts, health)) return;
+    console.log(`Private analytics: ${health.pending} pending · ${health.failed} retrying · ${health.gaps} gaps · ${health.expired} expired · storage ${health.storage}`);
+  }));
 
   diagnostics
     .command("cli-errors")

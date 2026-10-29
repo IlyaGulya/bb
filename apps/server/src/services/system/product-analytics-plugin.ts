@@ -13,6 +13,7 @@ export async function observePluginAnalytics<T>(service: PrivateProductAnalytics
     ...override,
   };
   service.register(pluginAnalyticsFeature(pluginId, action, [context.surface]));
+  if (inherited !== undefined && !context.intent) return runWithProductAnalytics(context, run);
   return runWithProductAnalytics(context, async () => {
     const started = performance.now();
     service.record(`plugin.${pluginId}`, action, "started");

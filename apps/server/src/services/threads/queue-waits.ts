@@ -27,8 +27,9 @@ import {
 } from "../plugins/plugin-thread-events.js";
 import { toThreadQueuedMessage } from "./thread-queued-messages.js";
 import { assertThreadHostAcceptsWork } from "./thread-host-admission.js";
+import { rememberQueuedAnalyticsMode } from "../system/product-analytics-turns.js";
 
-type QueueWaitDeps = { db: DbQueryConnection; hub: DbNotifier };
+type QueueWaitDeps = { db: DbQueryConnection; hub: DbNotifier; analyticsDb: DbConnection };
 
 export const QUEUED_MESSAGE_CLAIM_LOST_CODE = "queued_message_claim_lost";
 export const QUEUED_MESSAGE_AUTO_SEND_PAUSED_CODE =
@@ -124,7 +125,7 @@ export function recordQueuedMessageWait(
       (tx) => {
         assertNativeHistoryWritable(tx, args.thread.id);
         assertThreadHostAcceptsWork(tx, args.thread);
-        return createQueuedThreadMessageInTransaction(tx, {
+        const queuedMessage = createQueuedThreadMessageInTransaction(tx, {
           threadId: args.thread.id,
           content: args.message.input,
           senderThreadId: args.message.senderThreadId,
@@ -140,6 +141,8 @@ export function recordQueuedMessageWait(
           payload: args.message.payload,
           systemNotice: args.message.systemNotice,
         });
+        rememberQueuedAnalyticsMode(deps.analyticsDb, tx, queuedMessage.id);
+        return queuedMessage;
       },
       { behavior: "immediate" },
     );

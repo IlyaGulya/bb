@@ -1,3 +1,4 @@
+import { observeProductAnalyticsAsync } from "@/lib/product-analytics";
 import { atom } from "jotai";
 import { useMemo } from "react";
 import type {
@@ -71,7 +72,7 @@ export function useWorkspaceOpenTargets(
       return null;
     }
     const port = daemonPort;
-    return (request: OpenInTargetRequest) => daemonOpenInTarget(port, request);
+    return (request: OpenInTargetRequest) => observeProductAnalyticsAsync("ui.workspace", "open", () => daemonOpenInTarget(port, request), () => "accepted");
   }, [
     args.enabled,
     localHostDaemonReachable,

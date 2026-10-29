@@ -25,7 +25,7 @@ export default defineWorkspaceTestConfig({
     environment: "node",
     setupFiles: ["src/test/setup.ts"],
     testTimeout: 15_000,
-    projects: sharedWorkerProjects({
+    projects: [...sharedWorkerProjects({
       pkgDir: __dirname,
       aliases: { "@": path.resolve(__dirname, "./src") },
       name: "@bb/app",
@@ -33,10 +33,19 @@ export default defineWorkspaceTestConfig({
       exclude: [
         "dist/**",
         "node_modules/**",
+        "src/lib/product-analytics-consumer.dom.test.tsx",
         ...(process.env.BB_SIDEBAR_BENCH === "1"
           ? []
           : ["src/components/sidebar/sidebar.bench.test.tsx"]),
       ],
-    }),
+    }), ...sharedWorkerProjects({
+      pkgDir: __dirname,
+      aliases: { "@": path.resolve(__dirname, "./src") },
+      name: "@bb/app:analytics-consumer",
+      include: ["src/lib/product-analytics-consumer.dom.test.tsx"],
+    }).map((project) => {
+      if (typeof project !== "object" || project === null || !("test" in project) || typeof project.test !== "object" || project.test === null) throw new Error("Analytics fixture requires an inline test project");
+      return { ...project, test: { ...project.test, globalSetup: [path.resolve(__dirname, "../server/test/helpers/product-analytics-dom-setup.ts")] } };
+    })],
   },
 });

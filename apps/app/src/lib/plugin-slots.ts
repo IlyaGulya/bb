@@ -1,3 +1,4 @@
+import { instrumentPluginLocalRegistration, publishPluginLocalAnalytics, resetPluginLocalAnalytics } from "./plugin-local-analytics";
 import { setAppIcons } from "@bb/shared-ui/icon-registry";
 import { useSyncExternalStore } from "react";
 import type {
@@ -228,10 +229,11 @@ function flattenRegistrations(
   set: PluginRegistrationSet,
 ): FlattenedPluginSlots {
   const stamp = <T extends object>(
+    kind: SlotKind,
     registrations: readonly T[] | undefined,
   ): readonly (T & PluginSlotBase)[] =>
     (registrations ?? []).map((registration) => ({
-      ...registration,
+      ...instrumentPluginLocalRegistration(pluginId, kind, registration),
       pluginId,
       generation,
     }));
@@ -242,31 +244,31 @@ function flattenRegistrations(
     ),
   ];
   return {
-    homepageSections: stamp(set.homepageSections),
-    settingsSections: stamp(set.settingsSections),
-    appOverlays: stamp(set.appOverlays),
-    navPanels: stamp(set.navPanels),
-    threadPanelActions: stamp(set.threadPanelActions),
-    newThreadPanelActions: stamp(set.newThreadPanelActions),
-    composerCustomizations: stamp(set.composerCustomizations),
-    pendingInteractions: stamp(set.pendingInteractions),
-    sidebarFooterItems: stamp<CollectedSidebarFooterItem>(sidebarFooterItems),
-    threadLists: stamp(set.threadLists),
-    threadHeaderActions: stamp(set.threadHeaderActions),
-    threadActions: stamp(set.threadActions),
-    browserToolbarActions: stamp(set.browserToolbarActions),
-    fileOpeners: stamp(set.fileOpeners),
-    sourceCodeRenderers: stamp(set.sourceCodeRenderers),
-    diffRenderers: stamp(set.diffRenderers),
-    messageDirectives: stamp(set.messageDirectives),
-    codeFenceRenderers: stamp(set.codeFenceRenderers),
-    messageActions: stamp(set.messageActions),
-    commandPaletteActions: stamp(set.commandPaletteActions),
-    providerIcons: stamp(set.providerIcons),
-    icons: stamp(set.icons),
-    timelineRenderers: stamp(set.timelineRenderers),
-    environmentProviderInputs: stamp(set.environmentProviderInputs),
-    machineProviderInputs: stamp(set.machineProviderInputs),
+    homepageSections: stamp("homepageSections", set.homepageSections),
+    settingsSections: stamp("settingsSections", set.settingsSections),
+    appOverlays: stamp("appOverlays", set.appOverlays),
+    navPanels: stamp("navPanels", set.navPanels),
+    threadPanelActions: stamp("threadPanelActions", set.threadPanelActions),
+    newThreadPanelActions: stamp("newThreadPanelActions", set.newThreadPanelActions),
+    composerCustomizations: stamp("composerCustomizations", set.composerCustomizations),
+    pendingInteractions: stamp("pendingInteractions", set.pendingInteractions),
+    sidebarFooterItems: stamp<CollectedSidebarFooterItem>("sidebarFooterItems", sidebarFooterItems),
+    threadLists: stamp("threadLists", set.threadLists),
+    threadHeaderActions: stamp("threadHeaderActions", set.threadHeaderActions),
+    threadActions: stamp("threadActions", set.threadActions),
+    browserToolbarActions: stamp("browserToolbarActions", set.browserToolbarActions),
+    fileOpeners: stamp("fileOpeners", set.fileOpeners),
+    sourceCodeRenderers: stamp("sourceCodeRenderers", set.sourceCodeRenderers),
+    diffRenderers: stamp("diffRenderers", set.diffRenderers),
+    messageDirectives: stamp("messageDirectives", set.messageDirectives),
+    codeFenceRenderers: stamp("codeFenceRenderers", set.codeFenceRenderers),
+    messageActions: stamp("messageActions", set.messageActions),
+    commandPaletteActions: stamp("commandPaletteActions", set.commandPaletteActions),
+    providerIcons: stamp("providerIcons", set.providerIcons),
+    icons: stamp("icons", set.icons),
+    timelineRenderers: stamp("timelineRenderers", set.timelineRenderers),
+    environmentProviderInputs: stamp("environmentProviderInputs", set.environmentProviderInputs),
+    machineProviderInputs: stamp("machineProviderInputs", set.machineProviderInputs),
   };
 }
 
@@ -444,6 +446,7 @@ export function setPluginSlotRegistrations(
   pluginId: string,
   registrations: PluginRegistrationSet,
 ): void {
+  resetPluginLocalAnalytics(pluginId);
   registrationsByPluginId.set(pluginId, registrations);
   const generation = (generationByPluginId.get(pluginId) ?? 0) + 1;
   generationByPluginId.set(pluginId, generation);
@@ -451,6 +454,7 @@ export function setPluginSlotRegistrations(
     pluginId,
     flattenRegistrations(pluginId, generation, registrations),
   );
+  publishPluginLocalAnalytics(pluginId);
   emitChange();
 }
 

@@ -47,6 +47,8 @@ export const productAnalyticsActionDeclarationSchema = z.object({
   completionSource: z.enum(["client", "server"]),
 }).strict();
 export type ProductAnalyticsActionDeclaration = z.infer<typeof productAnalyticsActionDeclarationSchema>;
+export const productAnalyticsLocalActionsSchema = z.object({ pluginId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/), actions: z.array(z.object({ action: identifier.regex(/^slot\./), coverage: z.enum(["lifecycle", "observation"]) }).strict()).max(500) }).strict();
+export type ProductAnalyticsLocalActions = z.infer<typeof productAnalyticsLocalActionsSchema>;
 export const productAnalyticsBatchSchema = z.object({ events: z.array(productAnalyticsEventSchema).min(1).max(50) }).strict();
 export type ProductAnalyticsBatch = z.infer<typeof productAnalyticsBatchSchema>;
 export interface ProductAnalyticsReceipt {

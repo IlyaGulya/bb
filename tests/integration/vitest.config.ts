@@ -43,7 +43,7 @@ export default defineWorkspaceTestConfig({
           isolate: false,
           globalSetup: ["./global-setup.ts"],
           include: ["fake/**/*.test.ts"],
-          exclude: ["fake/thread-startup-shutdown.test.ts"],
+          exclude: ["fake/thread-startup-shutdown.test.ts", "fake/smoke/product-analytics-mcp-consumer.test.ts", "fake/smoke/product-analytics-file-conflict.test.ts"],
         },
       },
       ...startupShutdownProjects,
@@ -54,6 +54,14 @@ export default defineWorkspaceTestConfig({
           include: ["native-roots-golden/**/*.test.ts"],
         },
       },
+      ...sharedWorkerProjects({
+        pkgDir: __dirname,
+        name: "@bb/integration-tests:analytics",
+        include: ["fake/smoke/product-analytics-mcp-consumer.test.ts", "fake/smoke/product-analytics-file-conflict.test.ts"],
+      }).map((project) => {
+        if (typeof project !== "object" || project === null || !("test" in project) || typeof project.test !== "object" || project.test === null) throw new Error("Analytics fixtures require an inline test project");
+        return { ...project, test: { ...project.test, isolate: true, globalSetup: ["./global-setup.ts"] } };
+      }),
     ],
   },
 });

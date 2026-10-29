@@ -100,6 +100,14 @@
   scrolling outside its drag grip, and retain task navigation/view controls.
   Make parent navigation independent from card drag and keep filter counts out
   of scrolling chips. Require explicit permitted Jira import destinations.
+- Extend private analytics through actual workspace/split/navigation, palette and
+  search, timeline/interaction, execution selection, attachment, voice,
+  appearance and onboarding producers. Preserve initiating scope and QA metadata
+  through local completion; do not treat accepted work as downstream success.
+  Observe registered plugin controls and actual skill/theme/mention consumption.
+  Deliver local CLI guide/help/authoring/diagnostic outcomes through the shared
+  bounded outbox, with `bb diagnostics product-analytics` for local delivery.
+  Correct analytics relative-time argument contracts and settings search discovery.
 - Add owner-local private feature analytics across Core routes, live plugin
   registrations, UI navigation and command intent, CLI/SDK/MCP calls and actual
   root-turn/provider outcomes. Keep anonymous vendor telemetry unchanged.
@@ -122,6 +130,23 @@
   keyed digests instead of raw DOM values/text, refuse known protected fields
   and arbitrary container text, and reject legacy receipts without rewriting
   historical artifacts.
+- Preserve raw request bodies and guard ordering in private analytics. Respect
+  explicit observation intent, report queued sends as accepted and stale-hash
+  writes as conflicts, and resolve terminal actions from actual ownership.
+  Carry explicit CLI/MCP and native QA modes through existing durable lifecycle
+  attribution. Stage plugin declarations until activation and retire removed
+  framework actions without losing acknowledged history or duplicate receipts.
+- Correct private analytics scheduler UUID imports, bound JSON-call forwarding
+  types, and align consumer fixtures with normalized SDK input and fetch types
+  without changing outcome classification or delivery semantics.
+- Preserve shared browser RPC provenance and capture TanStack mutation scope,
+  intent and operation identity before asynchronous preparation and retries.
+  Bind authenticated native tool and Core SDK child usage to deliberate agent
+  provenance and the owning root turn's persisted QA mode.
+- Retain actual MCP request provenance in semantic tool observations through
+  the existing per-request factory. Persist queued QA modes with their rows and
+  transfer them at actual dispatch admission across restart, reusing bounded
+  Core mode markers without replacing the queue or changing wire fields.
 - Fence Tasks Start against concurrent draft revision/selection changes in its
   launch-receipt transaction. Retain the first validated bugfix reproduction
   across Return, permit retry after an exit-zero attempt, and keep legacy

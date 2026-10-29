@@ -42,6 +42,15 @@ or scope/account overrides. Its return is enqueue intent, never an admission
 receipt. Before stabilization: qualify Tasks open/play/seek/close/error through
 lost ACK, offline/reconnect and the projected private report; confirm completion
 authority, asynchronous media outcomes and privacy on desktop/compact/mobile.
+`sdk.experimental_productAnalytics.declareLocalActions` binds bounded slot action
+metadata to an active app plugin's current backend handle, exclusively in
+`ui.plugin.<id>`. Core slot publication and actual slot callback/component
+consumers use it. The shared acknowledged outbox declares queued local identities
+before delivery; a disabled app cannot acquire fresh completion authority.
+`ExperimentalProductAnalyticsOperation` and outbox `noteGap` are shared by Core
+UI/CLI producers. Audit active-handle retirement, concurrent browser generations,
+local completion authority, thread scope, component observations, failed catalog
+delivery and CLI process-exit/durable-store behavior before stabilization.
 
 Docs: Plugin Guide, `private-analytics` surface in
 `plugins/plugin-api-docs/src/surfaces.ts`.

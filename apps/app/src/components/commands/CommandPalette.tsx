@@ -1,3 +1,5 @@
+import { captureProductAnalyticsContext, observeProductAnalyticsLocal, withProductAnalyticsContext } from "@/lib/product-analytics";
+import { useProductAnalyticsCommit } from "@/hooks/useProductAnalyticsCommit";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { defineSplit } from "@/lib/define-split";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -71,6 +73,8 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [actions, setActions] = useState<readonly PaletteAction[]>([]);
   const [searchingThreads, setSearchingThreads] = useState(false);
+  const observeOpen = useProductAnalyticsCommit("ui.commands", "open", open);
+  const observeSearchOpen = useProductAnalyticsCommit("ui.search", "open", searchingThreads && open);
   const [installedPlugins, setInstalledPlugins] = useState<
     readonly PluginSettingsCandidate[]
   >([]);
@@ -179,7 +183,7 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
     const target = invocationTarget(invocation);
     prepareOpen(target);
     setSearchingThreads(false);
-    setOpen(true);
+    observeOpen(true, () => setOpen(true));
     return true;
   });
 
@@ -189,7 +193,7 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
       const target = invocationTarget(invocation);
       prepareOpen(target);
       setSearchingThreads(true);
-      setOpen(true);
+      observeSearchOpen(true, () => observeOpen(true, () => setOpen(true)));
       return true;
     },
     100,
@@ -215,12 +219,14 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
       action.run();
       return;
     }
-    pendingRunRef.current = action.run;
+    const context = captureProductAnalyticsContext();
+    pendingRunRef.current = () => withProductAnalyticsContext(context, () => observeProductAnalyticsLocal("ui.commands", "select", action.run));
     setOpen(false);
   }, []);
 
   const runAfterClose = useCallback((run: () => void) => {
-    pendingRunRef.current = run;
+    const context = captureProductAnalyticsContext();
+    pendingRunRef.current = () => withProductAnalyticsContext(context, run);
     setOpen(false);
   }, []);
 

@@ -1,3 +1,4 @@
+import { beginProductAnalyticsAction, observeProductAnalyticsLocal } from "@/lib/product-analytics";
 import {
   useCallback,
   useEffect,
@@ -141,6 +142,14 @@ export function ThreadSearchPaletteMode({
   const searchable = hasThreadSearchableQuery(trimmedQuery);
   const searchResultsAreCurrent =
     !searchable || threadSearch.debouncedQuery === trimmedQuery;
+  const searchAnalytics = useRef<ReturnType<typeof beginProductAnalyticsAction> | null>(null);
+  useEffect(() => {
+    if (searchAnalytics.current === null || !searchable || !searchResultsAreCurrent || threadSearch.isFetching || threadSearch.isDebouncing) return;
+    if (!threadSearch.isError && threadSearch.data === undefined) return;
+    void searchAnalytics.current.complete(threadSearch.isError ? "failed" : "succeeded", threadSearch.isError ? "unavailable" : "none");
+    searchAnalytics.current = null;
+  }, [searchable, searchResultsAreCurrent, threadSearch.data, threadSearch.isDebouncing, threadSearch.isError, threadSearch.isFetching]);
+  useEffect(() => () => { void searchAnalytics.current?.complete("cancelled", "cancelled"); }, []);
 
   const projectNamesById = useMemo(() => {
     const entries = [
@@ -318,13 +327,13 @@ export function ThreadSearchPaletteMode({
           });
           return;
         }
-        navigate(
+        observeProductAnalyticsLocal("ui.search", "select", () => navigate(
           getThreadRoutePath({
             projectId: row.projectId,
             threadId: row.threadId,
           }),
           { state },
-        );
+        ), { kind: "project", projectId: row.projectId });
       });
     },
     [isCompact, navigate, runAfterClose, store],
@@ -430,6 +439,8 @@ export function ThreadSearchPaletteMode({
       listRef={listRef}
       modeChip={threadSearchModeChip(onExit, isCompact)}
       onInputChange={(value) => {
+        void searchAnalytics.current?.complete("cancelled", "cancelled");
+        searchAnalytics.current = hasThreadSearchableQuery(value) ? beginProductAnalyticsAction("ui.search", "query") : null;
         setQuery(value);
         setHighlightedIndex(0);
         setHighlightedKey(null);
