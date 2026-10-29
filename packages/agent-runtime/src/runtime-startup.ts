@@ -7,6 +7,8 @@ interface StartupRun {
   controller: AbortController;
   operationId: string;
   phase: ProviderStartupDiagnostic["phase"];
+  failureStage: ProviderStartupDiagnostic["failureStage"];
+  failureCause: Error | null;
   hookEvent: ThreadStartupNotification["hookEvent"];
   hookId: string | null;
   hookState: ThreadStartupNotification["hookState"];
@@ -25,7 +27,7 @@ interface StartupRun {
 }
 
 export class ProviderStartupError extends Error {
-  constructor(readonly code: ProviderStartupCode) {
+  constructor(readonly code: ProviderStartupCode, cause?: Error) {
     super({
       provider_startup_timeout: "Provider startup timed out. This attempt was stopped; change prerequisites before retrying this thread.",
       provider_startup_cancelled: "Provider startup was cancelled. This thread and its checkpoint are retained.",
@@ -33,7 +35,7 @@ export class ProviderStartupError extends Error {
       provider_startup_stop_unverified: "Provider startup could not confirm that its owned processes stopped. Retry is blocked; operator verification is required.",
       provider_startup_capability_unverified: "This provider cannot prove required startup capabilities. Select a supported provider or explicitly record optional MCP servers in the context policy.",
       provider_startup_auth_required: "A required native capability reports that human authentication is needed. Complete target-local setup, then retry this thread.",
-    }[code]);
+    }[code], cause === undefined ? undefined : { cause });
     this.name = "ProviderStartupError";
   }
 }
@@ -187,7 +189,7 @@ export class RuntimeStartup {
       controller: new AbortController(), operationId: randomUUID(), phase: "initializing",
       hookEvent: null, hookId: null, hookState: null, policy: args.policy,
       startedAt: performance.now(), stop: args.stop, stopPromise: null, reject, ready: false, prepared: false, deadline: null,
-      stopSettled: false, failureCode: null,
+      stopSettled: false, failureCode: null, failureStage: null, failureCause: null,
       heartbeat: null,
       work: new Set(),
     };
@@ -214,7 +216,7 @@ export class RuntimeStartup {
     } catch (error) {
       if (!run.ready) {
         await this.fail(args.threadId, run, error);
-        if (this.blocked.has(args.threadId)) throw new ProviderStartupError("provider_startup_stop_unverified");
+        if (this.blocked.has(args.threadId)) throw new ProviderStartupError("provider_startup_stop_unverified", run.failureCause ?? undefined);
         if (error instanceof Error && "code" in error && error.code === "auth_required" && run.failureCode === "provider_startup_auth_required") throw error;
         run.controller.signal.throwIfAborted();
       }
@@ -230,7 +232,7 @@ export class RuntimeStartup {
     if (!run) return false;
     if (run?.ready) return false;
     await this.interrupt(threadId, run, "provider_startup_cancelled");
-    if (this.blocked.has(threadId)) throw new ProviderStartupError("provider_startup_stop_unverified");
+    if (this.blocked.has(threadId)) throw new ProviderStartupError("provider_startup_stop_unverified", run.failureCause ?? undefined);
     return true;
   }
 
@@ -251,6 +253,7 @@ export class RuntimeStartup {
   }
 
   private fail(threadId: string, run: StartupRun, error: unknown): Promise<void> {
+    if (!run.stopPromise && error instanceof Error) run.failureCause = error;
     const authRequired = error instanceof Error && "code" in error && error.code === "auth_required";
     const code = error instanceof ProviderStartupError ? error.code : authRequired ? "provider_startup_auth_required" : "provider_startup_failed";
     return this.interrupt(threadId, run, code);
@@ -260,7 +263,8 @@ export class RuntimeStartup {
     if (run.ready) return;
     if (run.stopPromise) return run.stopPromise;
     run.prepared = false;
-    const failure = new ProviderStartupError(code);
+    const failure = new ProviderStartupError(code, run.failureCause ?? undefined);
+    run.failureStage = run.phase === "stopping" || run.phase === "stopped" ? null : run.phase;
     run.phase = "stopping";
     run.failureCode = code;
     run.stopPromise = Promise.resolve().then(async () => {
@@ -273,7 +277,7 @@ export class RuntimeStartup {
       run.stopSettled = true;
       run.phase = "stopped";
       const settled = this.blocked.has(threadId)
-        ? new ProviderStartupError("provider_startup_stop_unverified") : failure;
+        ? new ProviderStartupError("provider_startup_stop_unverified", run.failureCause ?? undefined) : failure;
       this.publish(threadId, run, "failed", settled.code);
       run.reject(settled);
       this.releaseIfSettled(threadId, run);
@@ -299,7 +303,7 @@ export class RuntimeStartup {
       operation: "provider_startup", operationId: run.operationId, status,
       message: `${phase} · ${Math.floor(elapsedMs / 1000)}s elapsed · ${run.policy.deadlineMs / 1000}s startup deadline. ${result}`,
       metadata: {
-        phase: run.phase, elapsedMs, deadlineMs: run.policy.deadlineMs,
+        phase: run.phase, failureStage: run.failureStage, elapsedMs, deadlineMs: run.policy.deadlineMs,
         hookEvent: run.hookEvent, hookId: run.hookId, hookState: run.hookState,
         code, retryBlocked: this.blocked.has(threadId) || (!run.ready && !run.stopSettled),
         optionalMcpServerCount: run.policy.optionalMcpServers.length,

@@ -67,6 +67,16 @@ the owned process tree before acknowledging stop. If that termination cannot be
 confirmed, it retains ownership and the retry blocker instead of reporting
 successful cancellation or treating a scheduled background retry as cleanup.
 
+Startup diagnostics retain the coordinator's last known stage in `failureStage`
+before switching to `stopping`/`stopped`: `initializing`, `hook`, `capabilities`,
+or `ready`. It is `null` before interruption and when parsing older receipts
+without a captured stage. The existing failure code remains allowlisted; no
+provider-supplied stage or arbitrary exception code is copied into diagnostics.
+The original caught exception remains available by identity as non-enumerable,
+internal `Error.cause`, not as serialized metadata or transcript content. Public
+failure messages remain generic. Daemon protocol 245 carries the enriched
+startup diagnostic.
+
 ## Project preparation and transfer API
 
 The core SDK exposes these methods under `BbSdk.projects`. Each input also

@@ -179,6 +179,7 @@ export const providerStartupCodeSchema = z.enum([
 export type ProviderStartupCode = z.infer<typeof providerStartupCodeSchema>;
 export const providerStartupDiagnosticSchema = providerStartupSignalSchema.extend({
   phase: z.enum([...providerStartupSignalSchema.shape.phase.options, "stopping", "stopped"]),
+  failureStage: providerStartupSignalSchema.shape.phase.nullable().default(null),
   elapsedMs: z.number().int().nonnegative(),
   deadlineMs: z.number().int().min(1_000).max(30 * 60_000),
   code: providerStartupCodeSchema.nullable(),
