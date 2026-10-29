@@ -467,3 +467,36 @@ describe("reviewed task memory invariants", () => {
     expect(catalog.memories.some((memory) => memory.id === privateFact.id)).toBe(false);
   });
 });
+
+describe("reviewed binding removal lifecycle", () => {
+  it.each([false, true])("detaches a deleted task by its original key with saved memory = %s", async (savedMemory) => {
+    const f = await fixture();
+    const fact = savedMemory ? await f.create("binding-removal-control") : null;
+    expect((await f.call("listMemories", { ...f.selection, offset: 0 }, memoryRpcContract.listMemories.output)).memories).toEqual(fact ? [fact] : []);
+    const ctx = { projectId: "proj_personal", threadId: "thr_personal" };
+    const bind = (context: string, expectedVersion: number, remove = false) => f.host.harness.behavior.runCli([
+      "bind", "--task", f.task.key, "--context", context, "--expected-version", String(expectedVersion), ...(remove ? ["--remove"] : []),
+    ], ctx);
+    const bindings = () => f.call("getTaskBindings", ctx, memoryRpcContract.getTaskBindings.output);
+    const attached = await bind("research", 0);
+    expect(attached.exitCode, attached.stderr).toBe(0);
+    expect(await bindings()).toEqual({ version: 1, tasks: [f.selection.task] });
+    const liveRemoval = await bind("research", 1, true);
+    expect(liveRemoval.exitCode, liveRemoval.stderr).toBe(0);
+    expect(await bindings()).toEqual({ version: 2, tasks: [] });
+    expect((await bind("research", 2)).exitCode).toBe(0);
+    expect((await bind("delivery", 3)).exitCode).toBe(0);
+    expect(await bindings()).toEqual({ version: 4, tasks: [f.selection.task, f.otherContext.task] });
+    expect(tasksRpcContract.deleteTask.output.parse(await f.tasksHost.harness.behavior.callRpc("deleteTask", { taskId: f.task.id })).deleted).toBe(true);
+    const stale = await bind("research", 3, true);
+    expect(stale.exitCode).toBe(1);
+    expect(await bindings()).toEqual({ version: 4, tasks: [f.selection.task, f.otherContext.task] });
+    const removed = await bind("research", 4, true);
+    expect(removed.exitCode, removed.stderr).toBe(0);
+    expect(await bindings()).toEqual({ version: 5, tasks: [f.otherContext.task] });
+    const remaining = await bind("delivery", 5, true);
+    expect(remaining.exitCode, remaining.stderr).toBe(0);
+    expect(await bindings()).toEqual({ version: 6, tasks: [] });
+    if (fact) expect((await f.history(fact.name)).map((entry) => entry.snapshot)).toEqual([fact]);
+  });
+});

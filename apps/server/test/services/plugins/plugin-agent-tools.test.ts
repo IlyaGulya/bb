@@ -1,6 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { type DbConnection } from "@bb/db";
@@ -88,6 +89,32 @@ describe("bb.agents.registerTool", () => {
   afterEach(async () => {
     await service.stop();
     await rm(workDir, { recursive: true, force: true });
+  });
+
+  it("loads native Memory through the path-plugin source boundary and preserves CLI writes", async () => {
+    const control = await writePlugin(workDir, {
+      name: "bb-plugin-memory-source-control",
+      serverSource: `export default function plugin(bb) {
+        bb.agents.registerTool({ name: "source_control", description: "Owned source-loader control", parameters: { type: "object" }, execute: () => "Source control evidence" });
+      }`,
+    });
+    const controlEntry = await service.installPath(control);
+    expect(controlEntry.status, controlEntry.statusDetail ?? "").toBe("running");
+    expect(service.listAgentTools().map((tool) => tool.name)).toContain("source_control");
+    const memoryRoot = fileURLToPath(new URL("../../../../../plugins/memory", import.meta.url));
+    const entry = await service.installPath(memoryRoot);
+    expect(entry.status, entry.statusDetail ?? "").toBe("running");
+    const saved = await service.runCliCommand("memory", [
+      "add", "--general", "--scope", "global", "--name", "source-loaded-note",
+      "--summary", "Memory loaded through the production source compiler",
+      "--details", "Owned source-development consumer evidence", "--reason", "Verify the documented source loader",
+    ], {});
+    expect(saved.exitCode, saved.stderr).toBe(0);
+    const read = await service.runCliCommand("memory", ["get", "source-loaded-note", "--general", "--scope", "global", "--json"], {});
+    expect(read.exitCode, read.stderr).toBe(0);
+    expect(z.object({ memory: z.object({ name: z.string(), summary: z.string(), version: z.number() }) }).parse(JSON.parse(read.stdout ?? "")).memory).toEqual({
+      name: "source-loaded-note", summary: "Memory loaded through the production source compiler", version: 1,
+    });
   });
 
   it("rejects duplicate tool names within one factory execution", async () => {
