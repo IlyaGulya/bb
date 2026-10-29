@@ -1,4 +1,3 @@
-import { fileURLToPath } from "node:url";
 import { productAnalyticsEventSchema } from "@bb/server-contract";
 import { seedEnvironment, seedThread } from "./seed.js";
 import { SqliteQueueStore } from "./product-analytics-queue.js";
@@ -36,11 +35,9 @@ export default async function setup(project: TestProject) {
     try {
       fixture.harness.config.serverPort = port;
       fixture.harness.pluginService.bindSdk({ baseUrl: `http://127.0.0.1:${port}` });
-      const preferencesPath = fileURLToPath(new URL("../../../../plugins/push-notifications/preferences.ts", import.meta.url));
-      const contractPath = fileURLToPath(new URL("../../../../plugins/push-notifications/contract.ts", import.meta.url));
       const serverSource = options.notifications ? `import { defineRpcContract } from "@get-bb/plugin-sdk";
-import { createNotificationPreferences } from ${JSON.stringify(preferencesPath)};
-import { pushNotificationsRpcContract } from ${JSON.stringify(contractPath)};
+import { createNotificationPreferences } from "./preferences.js";
+import { pushNotificationsRpcContract } from "./contract.js";
 export default function plugin(bb) {
   const preferences = createNotificationPreferences({ bb, getDefaults: async () => ({ defaultLevel: "all", childLevel: "input-only" }), publish: (threads) => bb.realtime.publish("threadNotifications", { threads }) });
   bb.rpc.register(defineRpcContract({ "threadNotifications.list": pushNotificationsRpcContract["threadNotifications.list"], "threadNotifications.set": pushNotificationsRpcContract["threadNotifications.set"] }), {
@@ -48,9 +45,9 @@ export default function plugin(bb) {
     "threadNotifications.set": ({ threadId, level }) => preferences.set(threadId, level),
   });
 }` : options.pluginSource;
-      const actionPath = fileURLToPath(new URL("../../../../plugins/push-notifications/notificationsAction.ts", import.meta.url));
-      const appSource = options.appSource ?? (options.notifications ? `import { definePluginApp } from "@get-bb/plugin-sdk/app"; import { notificationsThreadAction } from ${JSON.stringify(actionPath)}; export default definePluginApp((app) => { app.slots.experimental_threadAction(notificationsThreadAction); });` : undefined);
-      const pluginId = serverSource === undefined ? null : (await installConsumerPlugin(fixture.harness, serverSource, { appSource })).pluginId;
+      const appSource = options.appSource ?? (options.notifications ? `import { definePluginApp } from "@get-bb/plugin-sdk/app"; import { notificationsThreadAction } from "./notificationsAction.js"; export default definePluginApp((app) => { app.slots.experimental_threadAction(notificationsThreadAction); });` : undefined);
+      const sourceFiles = options.notifications ? ["preferences.ts", "contract.ts", "notificationsAction.ts"].map((name) => new URL(`../../../../plugins/push-notifications/${name}`, import.meta.url)) : [];
+      const pluginId = serverSource === undefined ? null : (await installConsumerPlugin(fixture.harness, serverSource, { appSource, sourceFiles })).pluginId;
       const personalEnvironment = seedEnvironment(fixture.harness.deps, { hostId: fixture.host.id, projectId: fixture.personal.id, status: "ready" });
       const personalThread = seedThread(fixture.harness.deps, { projectId: fixture.personal.id, environmentId: personalEnvironment.id, status: "idle" });
       const secondWorkThread = seedThread(fixture.harness.deps, { projectId: fixture.work.id, environmentId: fixture.environment.id, status: "idle" });
