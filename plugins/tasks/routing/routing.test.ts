@@ -489,3 +489,93 @@ describe("review regressions: explicit separate-new-work answers", () => {
     expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
   });
 });
+
+describe("follow-up regressions: context-only separate-work references", () => {
+  it.each(["archived", "deleted", "unavailable", "excessive"] as const)("creates separate work once under its local-away budget without resolving %s context references", async boundary => {
+    const f = setup();
+    const historicalThread = "thr_historicalcontext";
+    f.harness.sdk.stub("threads.get", async () => {
+      if (boundary === "unavailable" || boundary === "excessive") throw new Error("Historical native context is unavailable");
+      return makeThreadResponse({ id: historicalThread, projectId: "proj_code", archivedAt: boundary === "archived" ? "2026-10-29T00:00:00.000Z" : null, deletedAt: boundary === "deleted" ? "2026-10-29T00:00:00.000Z" : null });
+    });
+    const body = boundary === "excessive" ? Array.from({ length: 21 }, (_, index) => `thr_historicalcontext${index}`).join(" ") : `Historical context only: ${historicalThread}`;
+    const { item } = await f.inbox.createInbox({ title: "Separate work from historical context", body, context: "work" });
+    const grant = await enable(f, item.id, [], ["preview", "create"], 2);
+    const advice = routeOutcomeSchema.parse(await f.harness.callRpc("previewInboxRoute", { id: item.id, operationId: "context-only-preview", grantId: grant.id, sourceRevision: item.revision, expectedRevision: 0, projectId: f.project.id, taskRef: "", newTask: true, semantic: false }));
+    expect(advice).toMatchObject({ state: "applied", proposal: { decision: { kind: "new", projectId: f.project.id }, taskId: null, threadId: null, owner: "none", workerThreadIds: [] } });
+    expect(f.harness.sdk.callsTo("threads.get")).toEqual([]);
+    expect(f.persistence.grant(grant.id)).toMatchObject({ attempts: 1, maxAttempts: 2, state: "active" });
+    const input = { id: item.id, operationId: "context-only-create", grantId: grant.id, expectedRevision: 1, action: { kind: "create" as const } };
+    const created = routeOutcomeSchema.parse(await f.harness.callRpc("applyInboxRoute", input));
+    expect(created).toMatchObject({ state: "applied", item: { state: "resolved", threadId: null } });
+    const taskId = z.string().min(1).parse(created.item?.taskId);
+    expect(f.store.tasks.getTask(taskId)).toMatchObject({ projectId: f.project.id, title: item.title, description: body });
+    expect(routeOutcomeSchema.parse(await f.harness.callRpc("applyInboxRoute", input))).toEqual(created);
+    expect(f.store.tasks.listTasks().map(task => task.id)).toEqual([taskId]);
+    expect(f.store.tasks.listTaskThreads(taskId)).toEqual([]);
+    expect(f.persistence.grant(grant.id)).toMatchObject({ attempts: 2, maxAttempts: 2, state: "exhausted" });
+    expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
+  });
+
+  it("keeps an explicit CLI task answer and its managed writer ahead of separate-work intent", async () => {
+    const f = setup();
+    const task = f.store.tasks.createTask({ projectId: f.project.id, title: "Explicit managed owner" });
+    seedWorkflowOwnership(f.store, task.id, "proj_code", "in_review");
+    f.harness.sdk.stub("threads.get", async () => { throw new Error("Incidental historical context must not be read"); });
+    const { item } = await f.inbox.createInbox({ title: "Historical context with an explicit answer", body: "The old discussion was thr_unavailablecontext", context: "work" });
+    const response = await f.harness.runCli(["route", "preview", item.id, "--operation", "explicit-managed-answer", "--revision", "0", "--source-revision", item.revision, "--project", f.project.prefix, "--task", task.key, "--new-task", "--json"]);
+    expect(response.exitCode).toBe(0);
+    const advice = routeOutcomeSchema.parse(JSON.parse(response.stdout));
+    expect(advice).toMatchObject({ state: "applied", proposal: { decision: { kind: "existing", taskId: task.id }, owner: "managed", threadId: "thr_ownedretainedwriter" } });
+    const applied = routeOutcomeSchema.parse(await f.harness.callRpc("applyInboxRoute", { id: item.id, operationId: "link-explicit-managed-answer", grantId: null, expectedRevision: 1, action: { kind: "link" } }));
+    expect(applied).toMatchObject({ state: "applied", item: { taskId: task.id }, proposal: { threadId: "thr_ownedretainedwriter" } });
+    expect(f.store.tasks.getTask(task.id)?.status).toBe("in_review");
+    expect(f.store.tasks.listTasks().map(candidate => candidate.id)).toEqual([task.id]);
+    expect(f.harness.sdk.callsTo("threads.get")).toEqual([]);
+    expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
+  });
+
+  it("does not bypass an unavailable explicit SDK thread answer as if it were incidental context", async () => {
+    const f = setup();
+    f.harness.sdk.stub("threads.get", async () => { throw new Error("The explicit native answer is unavailable"); });
+    f.harness.sdk.stub("plugins.callRpc", async (raw: unknown) => {
+      const input = z.object({ pluginId: z.literal("tasks"), method: z.string(), input: z.unknown() }).parse(raw);
+      return f.harness.callRpc(input.method, input.input, { experimental_caller: { kind: "plugin", pluginId: "routing-consumer" } });
+    });
+    const { item } = await f.inbox.createInbox({ title: "Explicit unavailable answer", body: "Untrusted background context", context: "work" });
+    const advice = await createTaskRoutingClient(f.bb.sdk.plugins).preview({ id: item.id, operationId: "unavailable-explicit-answer", grantId: null, sourceRevision: item.revision, expectedRevision: 0, projectId: f.project.id, taskRef: "thr_explicitunavailable", newTask: true, semantic: false });
+    expect(advice.state).toBe("parked");
+    expect(f.harness.sdk.callsTo("threads.get")).toHaveLength(1);
+    expect(new InboxStore(f.store.database).get(item.id)).toMatchObject({ taskId: null, threadId: null, state: "open" });
+    expect(f.store.tasks.listTasks()).toEqual([]);
+    expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
+  });
+
+  it.each(["task", "thread"] as const)("retains an actual stored %s intake link ahead of unavailable context and new-task intent", async kind => {
+    const f = setup();
+    f.store.tasks.updateProject(f.project.id, { linkedBbProjectId: "proj_code" });
+    const task = f.store.tasks.createTask({ projectId: f.project.id, title: "Existing native task" });
+    const threadId = "thr_storedintakeowner";
+    f.harness.sdk.stub("threads.get", async (raw: unknown) => {
+      const input = z.object({ threadId: z.string() }).parse(raw);
+      if (input.threadId !== threadId) throw new Error("Historical context is unavailable");
+      return makeThreadResponse({ id: threadId, projectId: "proj_code", status: "idle" });
+    });
+    const { item } = await f.inbox.createInbox({ title: "Retain existing intake ownership", body: "Historical context was thr_unavailablecontext", context: "work" });
+    if (kind === "task") await f.harness.callRpc("linkInboxTask", { id: item.id, taskId: task.id });
+    else {
+      expect((await preview(f, item.id, { taskRef: threadId })).proposal?.decision).toMatchObject({ kind: "existing-thread", threadId });
+      const linked = routeOutcomeSchema.parse(await f.harness.callRpc("applyInboxRoute", { id: item.id, operationId: "store-thread-intake-link", grantId: null, expectedRevision: 1, action: { kind: "link" } }));
+      expect(linked.item).toMatchObject({ threadId, taskId: null });
+    }
+    const advice = await preview(f, item.id, { newTask: true });
+    expect(advice.state).toBe("applied");
+    expect(advice.proposal?.decision).toMatchObject(kind === "task" ? { kind: "existing", taskId: task.id } : { kind: "existing-thread", threadId });
+    const denied = routeOutcomeSchema.parse(await f.harness.callRpc("applyInboxRoute", { id: item.id, operationId: "do-not-replace-intake-link", grantId: null, expectedRevision: advice.proposal!.revision, action: { kind: "create" } }));
+    expect(denied.state).toBe("parked");
+    expect(new InboxStore(f.store.database).get(item.id)).toMatchObject(kind === "task" ? { taskId: task.id, threadId: null } : { taskId: null, threadId });
+    expect(f.store.tasks.listTasks().map(candidate => candidate.id)).toEqual([task.id]);
+    expect(f.store.tasks.getTask(task.id)).toEqual(task);
+    expect(f.state).toMatchObject({ spawned: 0, sent: 0, callbacks: 0 });
+  });
+});
