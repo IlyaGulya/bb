@@ -10,7 +10,7 @@ import { TasksRefreshProvider } from "../../shell/refresh.js";
 import { TaskWorkflowPanel } from "./workflow.js";
 import { registerTaskWorkflows } from "../../workflow/index.js";
 import { seedWorkflowOwnership } from "../../workflow/ownership.test-fixtures.js";
-import { workflowRpcContract } from "../../shared/workflow-contract.js";
+import { workflowRpcContract, type TaskWorkflow } from "../../shared/workflow-contract.js";
 import { buildReviewStartSchema, type BuildReviewStart } from "../../workflow/remote-contract.js";
 import type { WorkflowSelection } from "../../shared/workflow-preparation.js";
 import { CompactViewportOverrideProvider } from "@/components/ui/hooks/use-compact-viewport";
@@ -31,6 +31,10 @@ async function workflowRunFixture() {
   let holdAcknowledgement = false;
   let rejectStart = false;
   let holdSnapshot = false;
+  let workspaceBranch = "owned-ui";
+  let capturedSnapshot: { runs: TaskWorkflow[] } | null = null;
+  let acknowledgedMutation: TaskWorkflow | null = null;
+  const mutationAcknowledged = workflowViewGate();
   const acknowledged = workflowViewGate();
   const releaseAcknowledgement = workflowViewGate();
   const observed = workflowViewGate();
@@ -58,7 +62,7 @@ async function workflowRunFixture() {
     providers: { models: async () => ({ models: [{ id: "bb-cpa/personal-codex/gpt-6.1-sol", model: "bb-cpa/personal-codex/gpt-6.1-sol", displayName: "Sol 6.1", description: "Owned UI model", supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }], defaultReasoningEffort: "high", isDefault: true }], selectedOnlyModels: [], modelLoadError: null }) },
     environments: {
       get: async () => ({ id: "ui-environment", hostId: "ui-host", projectId: "proj_view", path: "/owned/ui-workflow", status: "ready", lifecycle: { phase: "active" }, hostLifecycle: "active" }),
-      status: async () => ({ outcome: "available", workspace: { checkout: { kind: "branch", branchName: "owned-ui", headSha: "a".repeat(40) }, workingTree: { hasUncommittedChanges: false } } }),
+      status: async () => ({ outcome: "available", workspace: { checkout: { kind: "branch", branchName: workspaceBranch, headSha: "a".repeat(40) }, workingTree: { hasUncommittedChanges: false } } }),
     },
     threads: {
       get: async ({ threadId }) => { const thread = threads.get(threadId); if (!thread) throw new Error(`Unknown UI thread ${threadId}`); return thread; },
@@ -73,10 +77,13 @@ async function workflowRunFixture() {
       },
     },
     plugins: { callRpc: async args => {
+      if (args.method === "releaseBuildReviewContexts") return { released: true };
       if (args.method === "startBuildReview") {
         const request = buildReviewStartSchema.parse(args.input);
         requests.push(request);
-        threads.set("thr_ui_native_writer", makeThreadResponse({ id: "thr_ui_native_writer", projectId: "proj_view", environmentId: "ui-environment", status: "active" }));
+        const writer = native.workers[0];
+        if (!writer) throw new Error("Owned workflow fixture has no retained writer");
+        threads.set(writer.threadId, makeThreadResponse({ id: writer.threadId, projectId: "proj_view", environmentId: "ui-environment", status: "active" }));
         return { ...native, key: request.key };
       }
       const request = requests[0];
@@ -96,6 +103,25 @@ async function workflowRunFixture() {
   const preparation = await handlers.getTaskWorkflowPreparation({ taskId: task.id });
   if (preparation?.state !== "ready") throw new Error("UI fixture preparation did not become ready");
   const launch = { taskId: task.id, preparationId: preparation.id };
+  function reviewed() {
+    const owner = seedWorkflowOwnership(store, task.id, "proj_view", "in_review");
+    const result = owner.view.native?.result;
+    const writer = native.workers[0];
+    if (!result || !writer) throw new Error("Owned workflow fixture has no reviewed result or writer");
+    workspaceBranch = result.build.branch;
+    writer.threadId = "thr_ownedretainedwriter";
+    for (const id of [owner.request.originThreadId, "thr_ownedretainedwriter", "thr_ownedretainedreviewer"]) {
+      threads.set(id, makeThreadResponse({ id, projectId: "proj_view", environmentId: "ui-environment", status: "idle" }));
+    }
+    return owner;
+  }
+  function advanceNativeReview() {
+    const writer = native.workers[0];
+    const thread = writer && threads.get(writer.threadId);
+    if (!thread) throw new Error("Owned retained writer is unavailable");
+    threads.set(thread.id, { ...thread, status: "idle" });
+    native.phase = "Independent review";
+  }
   const rpc = Object.fromEntries([...Object.keys(workflowSetupContract), ...Object.keys(workflowRpcContract)].map(method => [method, (input: unknown) => host.harness.callRpc(method, input)]));
   function render(compact: boolean) {
     return renderSlot({ component: WorkflowRunHarness }, { taskId: task.id, compact }, {
@@ -119,10 +145,23 @@ async function workflowRunFixture() {
           if (holdAcknowledgement) await releaseAcknowledgement.promise;
           return run;
         },
+        returnTaskWorkflow: async input => {
+          const run = workflowRpcContract.returnTaskWorkflow.output.parse(await host.harness.callRpc("returnTaskWorkflow", input));
+          acknowledgedMutation = run;
+          mutationAcknowledged.release();
+          return run;
+        },
+        acceptTaskWorkflow: async input => {
+          const run = workflowRpcContract.acceptTaskWorkflow.output.parse(await host.harness.callRpc("acceptTaskWorkflow", input));
+          acknowledgedMutation = run;
+          mutationAcknowledged.release();
+          return run;
+        },
         taskWorkflows: async input => {
           const result = workflowRpcContract.taskWorkflows.output.parse(await host.harness.callRpc("taskWorkflows", input));
           if (holdSnapshot) {
             holdSnapshot = false;
+            capturedSnapshot = result;
             snapshotEntered.release();
             await releaseSnapshot.promise;
             snapshotReturned.release();
@@ -133,7 +172,7 @@ async function workflowRunFixture() {
       },
     });
   }
-  return { store, task, handlers, launch, selection, requests, native, render, acknowledged: acknowledged.promise, observed: observed.promise, release: releaseAcknowledgement.release, hold: () => { holdAcknowledgement = true; }, withdraw: () => { withdrawn = true; }, reject: () => { rejectStart = true; }, holdSnapshot: () => { holdSnapshot = true; }, snapshotEntered: snapshotEntered.promise, snapshotReturned: snapshotReturned.promise, releaseSnapshot: releaseSnapshot.release };
+  return { store, task, handlers, launch, selection, requests, native, render, reviewed, advanceNativeReview, acknowledged: acknowledged.promise, observed: observed.promise, release: releaseAcknowledgement.release, hold: () => { holdAcknowledgement = true; }, withdraw: () => { withdrawn = true; }, reject: () => { rejectStart = true; }, holdSnapshot: () => { holdSnapshot = true; }, snapshot: () => capturedSnapshot, snapshotEntered: snapshotEntered.promise, snapshotReturned: snapshotReturned.promise, releaseSnapshot: releaseSnapshot.release, mutationAcknowledged: mutationAcknowledged.promise, mutation: () => acknowledgedMutation };
 }
 
 function expectRunDetails(dialog: HTMLElement, phase: string) {
@@ -414,4 +453,92 @@ it.each([false, true])("a true Start rejection preserves the open setup and save
   expect(new WorkflowPreparationStore(fixture.store).savedDraft(fixture.task.id)?.selection).toEqual(fixture.selection);
   expect(fixture.store.database.prepare("SELECT id FROM task_workflow_runs WHERE task_id = ?").all(fixture.task.id)).toEqual([]);
   expect(fixture.requests).toEqual([]);
+});
+
+it("an older same-ID poll cannot undo an acknowledged Return revision", async () => {
+  const fixture = await workflowRunFixture();
+  const owner = fixture.reviewed();
+  const slot = fixture.render(false);
+  try {
+    fireEvent.click(await slot.findByRole("button", { name: "Workflow details" }));
+    const dialog = await slot.findByRole("dialog", { name: "Workflow details" });
+    const details = await within(dialog).findByRole("region", { name: "Workflow run details" });
+    await within(details).findByRole("button", { name: "Accept reviewed result" });
+    fixture.holdSnapshot();
+    await fixture.snapshotEntered;
+    expect(fixture.snapshot()?.runs).toMatchObject([{ id: owner.request.group, revision: 1, state: "in_review" }]);
+    fireEvent.change(within(details).getByRole("textbox", { name: "Human feedback" }), { target: { value: "Keep the retained writer and implement the review feedback" } });
+    await act(async () => {
+      fireEvent.click(within(details).getByRole("button", { name: "Return to same writer" }));
+      await fixture.mutationAcknowledged;
+    });
+    expect(fixture.mutation()).toMatchObject({ id: owner.request.group, revision: 2, state: "running" });
+    expect(owner.workflows.get(owner.request.group)).toMatchObject({ revision: 2, state: "running" });
+    expectRunDetails(dialog, fixture.native.phase);
+    expect(within(dialog).queryByRole("button", { name: "Accept reviewed result" })).toBeNull();
+    await act(async () => { fixture.releaseSnapshot(); await fixture.snapshotReturned; });
+    expect(within(dialog).getByRole("article").textContent).toMatch(/\brevision\s+2\b/);
+    expectRunDetails(dialog, fixture.native.phase);
+    expect(within(dialog).queryByRole("button", { name: "Accept reviewed result" })).toBeNull();
+    expect(within(dialog).queryByRole("textbox", { name: "Human feedback" })).toBeNull();
+    expect(owner.workflows.get(owner.request.group)).toMatchObject({ revision: 2, state: "running" });
+  } finally {
+    fixture.releaseSnapshot();
+  }
+});
+
+it("an older same-revision poll cannot restore Accept after acknowledged acceptance", async () => {
+  const fixture = await workflowRunFixture();
+  const owner = fixture.reviewed();
+  const slot = fixture.render(false);
+  try {
+    fireEvent.click(await slot.findByRole("button", { name: "Workflow details" }));
+    const dialog = await slot.findByRole("dialog", { name: "Workflow details" });
+    const details = await within(dialog).findByRole("region", { name: "Workflow run details" });
+    const accept = await within(details).findByRole("button", { name: "Accept reviewed result" });
+    fixture.holdSnapshot();
+    await fixture.snapshotEntered;
+    expect(fixture.snapshot()?.runs).toMatchObject([{ id: owner.request.group, revision: 1, state: "in_review" }]);
+    await act(async () => { fireEvent.click(accept); await fixture.mutationAcknowledged; });
+    expect(fixture.mutation()).toMatchObject({ id: owner.request.group, revision: 1, state: "accepted" });
+    expect(owner.workflows.get(owner.request.group)).toMatchObject({ revision: 1, state: "accepted" });
+    expect(within(dialog).queryByRole("button", { name: "Accept reviewed result" })).toBeNull();
+    expect(within(dialog).queryByRole("textbox", { name: "Human feedback" })).toBeNull();
+    await act(async () => { fixture.releaseSnapshot(); await fixture.snapshotReturned; });
+    expect(within(dialog).getByRole("article").textContent).toMatch(/\brevision\s+1\b/);
+    expect(within(dialog).queryByRole("button", { name: "Accept reviewed result" })).toBeNull();
+    expect(within(dialog).queryByRole("textbox", { name: "Human feedback" })).toBeNull();
+    expect(owner.workflows.get(owner.request.group)).toMatchObject({ revision: 1, state: "accepted" });
+  } finally {
+    fixture.releaseSnapshot();
+  }
+});
+
+it("a poll begun after Return acknowledgement still admits current same-ID progress", async () => {
+  const fixture = await workflowRunFixture();
+  const owner = fixture.reviewed();
+  const slot = fixture.render(false);
+  try {
+    fireEvent.click(await slot.findByRole("button", { name: "Workflow details" }));
+    const dialog = await slot.findByRole("dialog", { name: "Workflow details" });
+    const details = await within(dialog).findByRole("region", { name: "Workflow run details" });
+    const feedback = await within(details).findByRole("textbox", { name: "Human feedback" });
+    fireEvent.change(feedback, { target: { value: "Continue the retained writer with the requested correction" } });
+    await act(async () => {
+      fireEvent.click(within(details).getByRole("button", { name: "Return to same writer" }));
+      await fixture.mutationAcknowledged;
+    });
+    expect(fixture.mutation()).toMatchObject({ id: owner.request.group, revision: 2, state: "running" });
+    expectRunDetails(dialog, fixture.native.phase);
+    fixture.advanceNativeReview();
+    fixture.holdSnapshot();
+    await fixture.snapshotEntered;
+    expect(fixture.snapshot()?.runs).toMatchObject([{ id: owner.request.group, revision: 2, state: "running", native: { phase: fixture.native.phase } }]);
+    await act(async () => { fixture.releaseSnapshot(); await fixture.snapshotReturned; });
+    expectRunDetails(dialog, fixture.native.phase);
+    expect(within(dialog).queryByRole("button", { name: "Accept reviewed result" })).toBeNull();
+    expect(owner.workflows.get(owner.request.group)).toMatchObject({ revision: 2, state: "running", native: { phase: fixture.native.phase } });
+  } finally {
+    fixture.releaseSnapshot();
+  }
 });
