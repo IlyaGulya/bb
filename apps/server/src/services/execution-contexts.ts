@@ -346,7 +346,7 @@ export function observeThreadExecutionEligibility(
       if (executionContext !== null) requireEnabledContext(executionContext, thread.projectId);
       if (environment === null || environment.projectId !== thread.projectId || environment.status !== "ready")
         throw new ApiError(409, "thread_environment_unavailable", "The thread's current execution environment is unavailable.");
-      if (host === null || host.phase !== "active")
+      if (host === null || host.lifecycle.phase !== "active")
         throw new ApiError(409, "execution_host_unavailable", "The thread's current execution host is unavailable.");
       if (host.status !== "connected")
         throw new ApiError(409, "execution_host_disconnected", "The execution host has no active connected daemon session.");
@@ -364,7 +364,7 @@ export function observeThreadExecutionEligibility(
     const generation = createHash("sha256").update(JSON.stringify([
       routing, binding, modelConnection, executionContext,
       environment === null ? null : [environment.id, environment.projectId, environment.hostId, environment.path, environment.status],
-      currentHost, host?.phase, environment === null ? null : deps.hub.getDaemonSessionIdForHost(environment.hostId), issue,
+      currentHost, host?.lifecycle.phase, environment === null ? null : deps.hub.getDaemonSessionIdForHost(environment.hostId), issue,
     ])).digest("hex");
     return {
       thread: routing, binding, modelConnection, executionContext,
