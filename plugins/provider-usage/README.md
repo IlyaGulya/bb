@@ -84,6 +84,15 @@ The existing `getUsage` input and maintenance behavior are unchanged. No copied
 `provider-usage.v1` source contract, database schema, or host-daemon wire field
 changes are required for this consumer association.
 
+Discoverable consumer declarations use classic Zod's Standard JSON Schema export,
+matching the existing source-contract and SDK discovery-test convention. The
+publisher requires `schema["~standard"].jsonSchema.input/output` for the matching
+wire direction and requests `target: "draft-2020-12"`. Validation alone is not
+sufficient: installed Zod 4.6.5 mini schemas do not expose these exporters, while
+classic schemas provide them through Zod's built-in Standard JSON Schema factory.
+Both `getUsage` and `getThreadUsage` remain discoverable; their validation shapes
+and maintenance/selected-consumer routing are unchanged by this export correction.
+
 `bb settings usage --json` and `bb.sdk.system.usageLimits()` remain the
 host-local provider-maintenance view; they do not aggregate shared pool accounts.
 

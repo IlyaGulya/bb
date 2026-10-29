@@ -1,4 +1,4 @@
-import { z } from "zod/mini";
+import { z } from "zod";
 import { providerUsageSchema } from "./usage-schema.js";
 
 const nameSchema = z.string().check(z.minLength(1));

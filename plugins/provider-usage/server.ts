@@ -4,7 +4,7 @@ import {
   selectUsageResources,
 } from "./usage-normalization.js";
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
-import { z } from "zod/mini";
+import { z } from "zod";
 import {
   usageSnapshotSchema,
   type UsageMachine,

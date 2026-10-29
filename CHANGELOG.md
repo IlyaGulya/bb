@@ -10,6 +10,9 @@
   revocation guards, and late-response fencing. Keep All accounts/settings as a
   clearly separate maintenance browser, with the selected consumer available via
   the same typed plugin RPC and existing CLI RPC commands.
+- Restore Provider Usage RPC registration by declaring consumer schemas with
+  Zod's built-in Standard JSON Schema exporters. Keep maintenance `getUsage` and
+  selected `getThreadUsage` discoverable without changing validation or routing.
 - Give Tasks one header workflow action backed by the shared persistent drawer;
   retain single-agent dispatch as a secondary action. Keep draft selections and
   explicit unavailable choices while Core definition/account catalog events and
