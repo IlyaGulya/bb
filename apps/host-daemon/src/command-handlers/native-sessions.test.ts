@@ -80,6 +80,25 @@ describe("explicit native source boundaries", () => {
     await expect(readNativeSession({ ...saved.input, artifact: { ...saved.proof, recordSha256: "0".repeat(64) } })).rejects.toThrow();
   });
 
+  it("rejects generic checkpoint fragments inside ordinary tool arguments", async () => {
+    const saved = await fixture();
+    const checkpoint = { type: "checkpoint", id: "state-a", artifactPath: saved.proof.reference };
+    const argumentsRecord = JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", name: "untrusted", arguments: { label: "Synthetic argument π", entry: checkpoint } }] } });
+    await writeFile(saved.path, `${saved.header}${saved.record}\n${argumentsRecord}\n`);
+    const discovered = await discoverNativeSessions({ roots: [saved.root], cursor: 0, limit: 100 });
+    const source = discovered.sessions[0];
+    if (!source) throw new Error(discovered.warnings.join("; "));
+    const input = { ...saved.input, source };
+    const complete = await readNativeSession({ ...input, artifact: saved.proof });
+    expect(Buffer.from(complete.content, "base64").toString("utf8")).toBe("original-artifact");
+    const enclosing = { ...saved.proof, recordOffset: Buffer.byteLength(`${saved.header}${saved.record}\n`), recordLength: Buffer.byteLength(argumentsRecord), recordSha256: checksum(argumentsRecord) };
+    await expect(readNativeSession({ ...input, artifact: enclosing })).rejects.toThrow();
+    const nested = argumentsRecord.indexOf(saved.record);
+    if (nested < 0) throw new Error("Synthetic checkpoint must occur inside the tool arguments.");
+    const fragment = { ...saved.proof, recordOffset: enclosing.recordOffset + Buffer.byteLength(argumentsRecord.slice(0, nested)) };
+    await expect(readNativeSession({ ...input, artifact: fragment })).rejects.toThrow();
+  });
+
   it.each([".credentials.json", "neighbor.jsonl"])("never admits a referenced %s file as an artifact", async (reference) => {
     const saved = await fixture(reference);
     await writeFile(join(saved.artifacts, reference), "synthetic-sensitive-or-neighbor-data");
