@@ -1,10 +1,26 @@
-import { defineWorkspaceTestConfig } from "../../vitest.shared.js";
+import { defineWorkspaceTestConfig, sharedWorkerProjects } from "../../vitest.shared.js";
 
 const parsedTimeoutScale = Number(process.env.BB_TEST_TIMEOUT_SCALE ?? 1);
 const timeoutScale =
   Number.isFinite(parsedTimeoutScale) && parsedTimeoutScale > 0
     ? parsedTimeoutScale
     : 1;
+
+const startupShutdownProjects = sharedWorkerProjects({
+  pkgDir: __dirname,
+  name: "@bb/integration-tests:startup-shutdown",
+  include: ["fake/thread-startup-shutdown.test.ts"],
+}).map((project) => typeof project === "string" ? project : {
+  ...project,
+  test: {
+    ...project.test,
+    globalSetup: ["../../apps/server/test/setup/migrated-db-template.ts"],
+    setupFiles: [
+      "../../apps/server/test/setup/stored-event-decode-freeze.ts",
+      "../../apps/server/test/setup/warm-test-harness.ts",
+    ],
+  },
+});
 
 export default defineWorkspaceTestConfig({
   test: {
@@ -27,8 +43,10 @@ export default defineWorkspaceTestConfig({
           isolate: false,
           globalSetup: ["./global-setup.ts"],
           include: ["fake/**/*.test.ts"],
+          exclude: ["fake/thread-startup-shutdown.test.ts"],
         },
       },
+      ...startupShutdownProjects,
       {
         extends: true,
         test: {

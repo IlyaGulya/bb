@@ -8,13 +8,14 @@ import { clientTurnRequestIdSchema, executionContextSnapshotSchema } from "@bb/d
 import type { AgentRuntimeBridgeLaunch } from "@bb/agent-runtime";
 import { spawnManagedProcess } from "@bb/process-utils";
 import { createDeferredPromise } from "@bb/test-helpers";
-import { RuntimeManager, createFakeWorkspace } from "@bb/host-daemon/test";
+import { RuntimeManager } from "../../../apps/host-daemon/src/runtime-manager.js";
+import { createFakeWorkspace } from "../../../apps/host-daemon/src/test/runtime-manager-workspace.js";
 import { MemoryBridge } from "@bb/agent-runtime/test";
-import { applyLoggedThreadLifecycleEvent } from "../../src/services/threads/lifecycle-outcome.js";
-import { retryFailedTurn } from "../../src/services/threads/turn-retry.js";
-import { toThreadQueuedMessage } from "../../src/services/threads/thread-queued-messages.js";
-import { seedEnvironment, seedHostSession, seedProjectWithSource, seedStoredEvent, seedThread, seedThreadRuntimeState } from "../helpers/seed.js";
-import { withTestHarness } from "../helpers/test-app.js";
+import { applyLoggedThreadLifecycleEvent } from "../../../apps/server/src/services/threads/lifecycle-outcome.js";
+import { retryFailedTurn } from "../../../apps/server/src/services/threads/turn-retry.js";
+import { toThreadQueuedMessage } from "../../../apps/server/src/services/threads/thread-queued-messages.js";
+import { seedEnvironment, seedHostSession, seedProjectWithSource, seedStoredEvent, seedThread, seedThreadRuntimeState } from "../../../apps/server/test/helpers/seed.js";
+import { withTestHarness } from "../../../apps/server/test/helpers/test-app.js";
 
 vi.mock("@bb/process-utils", async (importOriginal) => ({
   ...await importOriginal<typeof import("@bb/process-utils")>(),

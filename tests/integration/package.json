@@ -11,11 +11,13 @@
     "e2e:mobile-connect-stub": "node --import tsx mobile-e2e/connect-stub.ts"
   },
   "dependencies": {
+    "@bb/agent-runtime": "workspace:*",
     "@bb/config": "workspace:*",
     "@bb/db": "workspace:*",
     "@bb/domain": "workspace:*",
     "@bb/host-daemon": "workspace:*",
     "@bb/host-daemon-contract": "workspace:*",
+    "@bb/process-utils": "workspace:*",
     "@bb/server": "workspace:*",
     "@bb/server-contract": "workspace:*",
     "@bb/test-helpers": "workspace:*",
