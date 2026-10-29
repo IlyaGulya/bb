@@ -86,18 +86,36 @@ Artifact sources consume Source30's native Tasks `listTaskArtifacts` and
 and thread panels use their authoritative Core execution-context binding.
 References persist the artifact ID, actual context, raw-text SHA-256 and
 bounded inspected excerpt, never another artifact store. Reads validate the
-selected Core project and actual execution context; artifact facts, historical
-snapshots and proposals are excluded from other contexts and general notes.
-Task/comment-only evidence retains its existing logical-context scope.
-Native original status and URL come from Tasks; Memory's inspector reads
+selected Core project and actual execution context. Server-owned
+`lineage.evidenceContextIds` retains originating evidence restrictions
+independently of the current source kind. Reflection preserves those
+restrictions; replacements inherit them. Catalog, FTS, reads, version-specific
+history, proposals and injected summaries require every retained restriction
+to match the reader's permitted actual context. A task/comment provenance
+change is not declassification. Independently native task/comment evidence
+retains its existing logical-context scope.
+
+An append-only private Memory migration reconstructs existing restrictions
+from retained revisions and pinned replacement ancestry, including proposal
+before-snapshots. Earlier native-only snapshots remain native-only; later
+provenance changes cannot erase acquired restrictions. Conflicting historical
+origins fail closed rather than choosing a wider context. No new archive,
+Core database migration or governance action is introduced.
+
+Stored-original controls pass the persisted artifact ID, execution context and
+raw-text hash to `readMemoryArtifact` as `pin`. The server validates that pin
+against the actual native result before returning evidence. Deletion and UUID
+reuse cannot silently substitute different content. Fresh inspection uses a
+null pin; CLI `artifact --revision <stored-hash>` requests pinned inspection.
+Native original status and URL still come from Tasks; the inspector reads
 retained selected text/metadata, not image bytes or full transcripts.
 
-The consumer schemas in `tasks-consumer.ts` project the published native RPC
-outputs through the SDK. Runtime modules do not import sibling plugin source
-or weaken source-loader boundaries. This checkout does not contain Source30's
-artifact implementation; the controller must integrate the supplied Tasks
-contract before integrated artifact checks. No checks, visual proof, collector
-delivery or runtime-change acceptance are claimed by this source checkpoint.
+The consumer schemas in `tasks-consumer.ts` project native RPC outputs through
+the SDK. Runtime modules do not import sibling plugin source or weaken
+source-loader boundaries. The integrated build requires the real Source30
+implementation. These security changes are a source checkpoint: unchanged
+regression after-proof, migration qualification, compiled UI/native proof and
+independent review remain required. No after-pass or activation is claimed.
 
 `memoryAnalytics` returns the identities supplied by the shared Source38
 declarations. The UI submits those identities through
