@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { idSchema } from "../tasks/shared/contract.js";
+import { executionContextIdSchema, taskIdSchema } from "./tasks-consumer.js";
 
 export const taskScopeSchema = z.object({
-  taskId: idSchema,
+  taskId: taskIdSchema,
   context: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,79}$/),
 }).strict();
 export type TaskScope = z.infer<typeof taskScopeSchema>;
@@ -10,8 +10,11 @@ export type TaskScope = z.infer<typeof taskScopeSchema>;
 export const memorySelectionSchema = z.object({
   projectId: z.string().startsWith("proj_").nullable(),
   task: taskScopeSchema.nullable(),
+  executionContextId: executionContextIdSchema.nullable().default(null),
 }).strict().refine((value) => value.task === null || value.projectId !== null, {
   message: "Task memory requires a Core project",
+}).refine((value) => value.executionContextId === null || value.task !== null, {
+  message: "Artifact visibility requires an explicit task scope",
 });
 export type MemorySelection = z.infer<typeof memorySelectionSchema>;
 
@@ -20,15 +23,21 @@ export const memoryLinkSchema = z.object({
   version: z.number().int().positive(),
 }).strict();
 
-export const sourceSelectionSchema = z.object({
+const nativeSourceSelectionSchema = z.object({
   kind: z.enum(["task", "comment"]),
-  commentId: idSchema.nullable(),
+  commentId: taskIdSchema.nullable(),
   revision: z.string().min(1).max(80),
   observedAt: z.number().int().nonnegative(),
   quote: z.string().max(600),
 }).strict().refine((value) => (value.kind === "comment") === (value.commentId !== null), {
   message: "Only comment sources require a comment identifier",
 });
+
+export const artifactSourceSelectionSchema = z.object({
+  kind: z.literal("artifact"), commentId: z.null(), artifactId: z.uuid(), executionContextId: executionContextIdSchema,
+  revision: z.string().regex(/^[a-f0-9]{64}$/), observedAt: z.number().int().nonnegative(), quote: z.string().max(600),
+}).strict();
+export const sourceSelectionSchema = z.union([nativeSourceSelectionSchema, artifactSourceSelectionSchema]);
 
 export const lineageSchema = z.object({
   taskKey: z.string().regex(/^[A-Z][A-Z0-9]{0,9}-[1-9][0-9]*$/),

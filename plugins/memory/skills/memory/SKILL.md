@@ -14,9 +14,10 @@ index. Do not change provider-native memory or project/account defaults.
 The task/context interfaces in this source require controller-owned integrated
 checks, independent review and an actual OMP → native Claude runtime-change
 scenario before activation or deployment. This skill is a command contract,
-not evidence of an installed or accepted runtime. Source30's versioned artifact
-SourceRefs must be integrated by the controller through their real API; do not
-invent artifact adapters, revisions or references.
+not evidence of an installed or accepted runtime. The artifact consumer uses
+Source30's real Tasks `listTaskArtifacts` and `getTaskArtifact` RPCs; the
+controller must integrate that Tasks implementation before artifact QA or
+activation. Memory does not implement an alternative artifact archive.
 
 ## Scope and current summary
 
@@ -32,6 +33,13 @@ bb memory search "storage decision" --task BBDEV-29 --context personal-research 
 bb memory get storage-choice --task BBDEV-29 --context personal-research --json
 bb memory history storage-choice --task BBDEV-29 --context personal-research --json
 ```
+
+Use `bb memory history <id-or-name> --version <inspected-version>` with the
+same task/context selectors to read an exact retained revision. Omitting
+`--version` uses the recent window (`--limit`, default 20, maximum 100); the
+RPC returns the newest 100 revisions. An exact version remains retrievable
+after it leaves that window. Replacement buttons request the stored canonical
+ID and pinned version, not the latest revision.
 
 Task selectors use a named task key, not a manually transcribed opaque ID.
 Context names are 1–80 lowercase letters, digits, dots, underscores or hyphens.
@@ -92,6 +100,44 @@ Stored provenance records which revision was inspected; it does not assert
 that the live original can never change. Native task/comment references are
 not an immutable artifact-version archive.
 
+Visible, explicitly retained Source30 thread decisions are another source,
+not an automatic transcript import. Discover permitted actual execution
+contexts with `bb memory contexts`, then use:
+
+```sh
+bb memory sources --task BBDEV-29 --context personal-research --execution-context '<id returned by contexts>'
+bb memory artifacts --task BBDEV-29 --context personal-research --execution-context '<id returned by contexts>'
+bb memory artifact '<id returned by artifacts>' --task BBDEV-29 --context personal-research --execution-context '<id returned by contexts>'
+```
+
+These commands emit JSON. A threaded caller uses its authoritative Core
+execution-context binding; a conflicting override is rejected. Outside a
+thread, choose a permitted context explicitly. A logical context name or model
+account is never an execution-context identity. The UI offers named context
+choices and locks thread panels to their actual binding. Without an actual
+context, task/comment sources remain available but artifact facts are excluded.
+
+`artifact` reads native metadata, retained selected text, raw source hash,
+source status and the native original URL, not image bytes or a full thread
+archive. For attached images or annotations, inspect the original task.
+Artifact source JSON is `{kind:"artifact",commentId:null,artifactId,
+executionContextId,revision,observedAt,quote}`. Use the returned `source` as the
+base; `revision` is the retained raw-text SHA-256, not a fabricated timestamp.
+An optional quote must be an exact excerpt of the retained selected text,
+at most 600 characters. Observation time must follow artifact retention.
+The same native read, authoritative project/context checks, hash and excerpt
+validation run for creation, proposal and apply. Original-message changes do
+not rewrite the retained evidence. Native source status describes current
+availability; deletion or revoked access to the artifact itself may prevent
+inspection. Memory stores the source reference, not a second artifact copy.
+
+Artifact-backed records and historical snapshots are visible only in their
+permitted actual execution context, including catalog, FTS, history, proposals
+and injected summaries. Task/comment-only history and proposals keep their
+original project/task/logical-context scope. Moving a task does not move its
+retained evidence to the destination project. Context permission checks are
+repeated on reads; a stored reference does not grant access by itself.
+
 Keep the evidence types explicit:
 
 - `observation`: what was actually observed;
@@ -134,8 +180,9 @@ its real implementation is present. Unknown fields are rejected, not ignored.
 To replace a current decision, create a new named fact with `replaces` set to
 `{"id":"<id from scoped get>","version":<inspected version>}`. The store creates
 the new fact and marks the old record `replaced` atomically. Both links and the
-old revision remain inspectable through get/history. A stale, replaced or
-cross-context replacement base fails without creating an orphan fact.
+old revision remain inspectable through history, including exact-version
+reads beyond the recent window. A stale, replaced or cross-context replacement
+base fails without creating an orphan fact.
 
 Task changes use diff-first proposals, not ordinary `update`. A proposal never
 changes current memory by itself. Do not use soft deletion to mean obsolete.
@@ -207,20 +254,30 @@ returns up to 100 ranked matches; clear it to browse every active record.
 ## SDK and safety
 
 The typed `memoryRpcContract` uses the same store through native plugin RPC:
-explicit top-level `projectId` and `task` scope fields, scoped get/search/history, bindings,
-task summary, creation and reflection proposal/decision methods. A task value
-is `{taskId,context}`; explicit `null` means general notes. Settings RPC no
-longer provides an unscoped all-project memory read or ID-only mutation.
-`listMemories` takes `{projectId,task,offset}` and returns
+top-level `projectId`, `task` and `executionContextId` scope fields, scoped
+get/search/history, bindings, task summary, creation and reflection methods.
+A task is `{taskId,context}`; `task:null` means general notes. The boundary
+normalizes omitted execution contexts to `null`; internal selections carry
+an explicit value. `memoryHistory` accepts `name` and nullable `version`;
+`null` selects the newest 100 revisions. `listMemoryExecutionContexts`,
+`listMemoryArtifacts` and `readMemoryArtifact` are the artifact discovery and
+inspection paths shared by UI and CLI. Settings RPC does not provide an
+unscoped all-project read or ID-only mutation.
+`listMemories` takes `{projectId,task,executionContextId,offset}` and returns
 `{memories,total,previousOffset,nextOffset}`; `null` marks a page boundary.
 `memoryAnalytics` returns the shared collector's declared action identities.
 The UI sends those through `useSdk().experimental_productAnalytics.record`,
 never a guessed plugin namespace. These declarations cover local openings,
 not server-side write completion.
+The local `source.inspect` action covers explicit artifact selection and
+original-reader controls on facts, history and proposal diffs. It records an
+opening only; native RPC/CLI result observation remains a separate boundary.
+These events contain actual Core scope, never artifact/source/context data.
 Scoped mutation requests carry their Core `projectId` at the same top-level
 boundary Source38 already understands. Do not wrap requests in `selection`
 or add a second tracker to infer scope from nested task/context content.
-Persisted proposal selections are still `{projectId,task}` snapshots.
+Persisted proposal selections retain `{projectId,task,executionContextId}`;
+older task/comment-only snapshots normalize their absent context to `null`.
 
 Never persist credentials/auth, raw configuration paths, provider prompts,
 transcripts, tool/MCP payloads, sensitive raw data or large history dumps.

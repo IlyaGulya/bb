@@ -8,9 +8,9 @@ import {
 } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { isMemoryKind, MEMORY_KINDS, type MemoryKind } from "./memory-kinds.js";
-import { tasksRpcContract } from "../tasks/shared/contract.js";
+import { executionContextIdSchema, taskArtifactProjection, taskArtifactViewProjection, tasksReadProjection } from "./tasks-consumer.js";
 import {
-  bindingStateSchema, lineageSchema, memorySelectionSchema,
+  artifactSourceSelectionSchema, bindingStateSchema, lineageSchema, memorySelectionSchema,
   reflectionChangeSchema, reflectionProposalSchema, taskMemoryDraftSchema,
   taskScopeSchema, type MemoryLineage, type MemorySelection,
   type ReflectionChange, type ReflectionProposal, type TaskScope,
@@ -22,6 +22,11 @@ const MAX_RESULT_LIMIT = 100;
 const bindingTaskKeysSchema = z.record(taskScopeSchema.shape.taskId, lineageSchema.shape.taskKey);
 const NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,79}$/;
 const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]{0,39}$/;
+const reflectionVisibilitySql = `(json_extract(proposal_json, '$.selection.executionContextId') IS ? OR NOT EXISTS (
+  SELECT 1 FROM json_each(proposal_json, '$.diffs') AS diff
+  WHERE json_extract(diff.value, '$.before.lineage.source.kind') = 'artifact'
+     OR json_extract(diff.value, '$.after.source.kind') = 'artifact'
+))`;
 
 type MemoryScope = "global" | "project";
 type ReadScope = MemoryScope | "all";
@@ -109,13 +114,26 @@ export const memoryRpcContract = defineRpcContract({
   },
   listMemorySources: {
     input: memorySelectionSchema,
-    output: z.object({ taskKey: z.string(), sources: z.array(z.object({
-      kind: z.enum(["task", "comment"]), commentId: z.string().nullable(), revision: z.string(), label: z.string(),
-    }).strict()) }).strict(),
+    output: z.object({ taskKey: z.string(), sources: z.array(z.union([
+      z.object({ kind: z.enum(["task", "comment"]), commentId: z.string().nullable(), revision: z.string(), label: z.string() }).strict(),
+      artifactSourceSelectionSchema.omit({ observedAt: true, quote: true }).extend({ label: z.string() }).strict(),
+    ])) }).strict(),
+  },
+  listMemoryExecutionContexts: {
+    input: z.object({ projectId: z.string().startsWith("proj_") }).strict(),
+    output: z.object({ contexts: z.array(z.object({ id: executionContextIdSchema, name: z.string() }).strict()) }).strict(),
+  },
+  listMemoryArtifacts: {
+    input: memorySelectionSchema,
+    output: z.object({ artifacts: z.array(taskArtifactProjection) }).strict(),
+  },
+  readMemoryArtifact: {
+    input: memorySelectionSchema.safeExtend({ artifactId: z.uuid() }),
+    output: z.object({ view: taskArtifactViewProjection, source: artifactSourceSelectionSchema }).strict(),
   },
   threadMemoryState: {
     input: z.object({ threadId: z.string().startsWith("thr_") }).strict(),
-    output: z.object({ projectId: z.string(), bindings: bindingStateSchema }).strict(),
+    output: z.object({ projectId: z.string(), executionContextId: executionContextIdSchema.nullable(), bindings: bindingStateSchema }).strict(),
   },
   searchMemories: {
     input: memorySelectionSchema.safeExtend({ query: z.string().min(1).max(200) }),
@@ -126,7 +144,7 @@ export const memoryRpcContract = defineRpcContract({
     output: z.object({ memory: memoryRecordSchema.nullable() }).strict(),
   },
   memoryHistory: {
-    input: memorySelectionSchema.safeExtend({ name: z.string() }),
+    input: memorySelectionSchema.safeExtend({ name: z.string(), version: z.number().int().positive().nullable().default(null) }),
     output: z.object({ history: z.array(z.object({ version: z.number(), action: z.string(), snapshot: memoryRecordSchema, createdAt: z.number() }).strict()) }).strict(),
   },
   taskSummary: {
@@ -285,8 +303,8 @@ function createMemoryId(): string {
   return `mem_${randomBytes(8).toString("base64url").toLowerCase()}`;
 }
 
-function memorySelectionFrom(input: MemorySelection): MemorySelection {
-  return { projectId: input.projectId, task: input.task };
+function memorySelectionFrom(input: z.input<typeof memorySelectionSchema>): MemorySelection {
+  return memorySelectionSchema.parse({ projectId: input.projectId, task: input.task, executionContextId: input.executionContextId });
 }
 
 function scopeKey(scope: MemoryScope, projectId: string | null, task: TaskScope | null): string {
@@ -391,11 +409,19 @@ function scopeSql(
   scope: ReadScope,
   projectId: string | undefined,
   task: TaskScope | null = null,
-): { sql: string; params: string[] } {
+  executionContextId: string | null = null,
+  snapshotScoped = false,
+): { sql: string; params: Array<string | null> } {
   if (task) {
     if (!projectId || scope === "global") throw new CliError("Task memory requires project scope");
-    return { sql: "m.scope = 'project' AND m.project_id = ? AND m.task_id = ? AND m.context_name = ?",
-      params: [projectId, task.taskId, task.context] };
+    const sql = "m.scope = 'project' AND m.project_id = ? AND m.task_id = ? AND m.context_name = ?";
+    const params: Array<string | null> = [projectId, task.taskId, task.context];
+    if (snapshotScoped) return { sql, params };
+    params.push(executionContextId);
+    return {
+      sql: `${sql} AND (json_extract(m.lineage_json, '$.source.kind') IS NOT 'artifact' OR json_extract(m.lineage_json, '$.source.executionContextId') = ?)`,
+      params,
+    };
   }
   if (scope === "global") return { sql: "m.scope = 'global' AND m.task_id IS NULL", params: [] };
   if (scope === "project") {
@@ -521,9 +547,10 @@ class MemoryStore {
     ctxProjectId: string | undefined,
     task: TaskScope | null = null,
     readScope: ReadScope = "all",
+    executionContextId: string | null = null,
   ): MemoryRecord {
     return this.db.transaction(() => {
-      const current = this.get(id, readScope, ctxProjectId, false, task, true);
+      const current = this.get(id, readScope, ctxProjectId, false, task, true, executionContextId);
       if (!current)
         throw new CliError(`memory "${id}" was not found in the current scope`);
       if (current.version !== input.expectedVersion) {
@@ -594,9 +621,10 @@ class MemoryStore {
     ctxProjectId: string | undefined,
     task: TaskScope | null = null,
     readScope: ReadScope = "all",
+    executionContextId: string | null = null,
   ): MemoryRecord {
     return this.db.transaction(() => {
-      const current = this.get(id, readScope, ctxProjectId, false, task, true);
+      const current = this.get(id, readScope, ctxProjectId, false, task, true, executionContextId);
       if (!current)
         throw new CliError(`memory "${id}" was not found in the current scope`);
       if (current.version !== expectedVersion) {
@@ -641,8 +669,9 @@ class MemoryStore {
     touch = true,
     task: TaskScope | null = null,
     exactId = false,
+    executionContextId: string | null = null,
   ): MemoryRecord | null {
-    const scoped = scopeSql(scope, projectId, task);
+    const scoped = scopeSql(scope, projectId, task, executionContextId);
     const row: unknown = this.db
       .prepare(
         `SELECT m.* FROM memories m
@@ -669,11 +698,12 @@ class MemoryStore {
     task: TaskScope | null = null,
     currentOnly = false,
     offset = 0,
+    executionContextId: string | null = null,
   ): {
     memories: MemoryRecord[];
     total: number;
   } {
-    const scoped = scopeSql(scope, projectId, task);
+    const scoped = scopeSql(scope, projectId, task, executionContextId);
     const lifecycleSql = currentOnly ? " AND json_extract(m.lineage_json, '$.state') = 'current'" : "";
     const rows: unknown[] = this.db
       .prepare(
@@ -703,8 +733,9 @@ class MemoryStore {
     projectId: string | undefined,
     limit: number,
     task: TaskScope | null = null,
+    executionContextId: string | null = null,
   ): MemoryRecord[] {
-    const scoped = scopeSql(scope, projectId, task);
+    const scoped = scopeSql(scope, projectId, task, executionContextId);
     const rows: unknown[] = this.db
       .prepare(
         `SELECT m.* FROM memories_fts f
@@ -717,8 +748,8 @@ class MemoryStore {
     return rows.map(parseMemoryRow);
   }
 
-  history(id: string, projectId: string | undefined, limit: number, task: TaskScope | null = null, readScope: ReadScope = "all"): unknown[] {
-    const scoped = scopeSql(readScope, projectId, task);
+  history(id: string, projectId: string | undefined, limit: number, task: TaskScope | null = null, readScope: ReadScope = "all", version: number | null = null, executionContextId: string | null = null): unknown[] {
+    const scoped = scopeSql(readScope, projectId, task, executionContextId, true);
     return this.db
       .prepare(
         `SELECT h.version, h.action, h.snapshot_json, h.source_thread_id,
@@ -728,10 +759,12 @@ class MemoryStore {
            WHERE (m.id = ? OR m.name = ?) AND ${scoped.sql}
            ORDER BY CASE WHEN m.id = ? THEN 0 ELSE 1 END,
              CASE WHEN m.scope = 'project' THEN 0 ELSE 1 END, m.updated_at DESC LIMIT 1)
+         AND (? IS NULL OR h.version = ?)
+         AND (json_extract(h.snapshot_json, '$.lineage.source.kind') IS NOT 'artifact' OR json_extract(h.snapshot_json, '$.lineage.source.executionContextId') = ?)
          ORDER BY h.version DESC
          LIMIT ?`,
       )
-      .all(id, id, ...scoped.params, id, limit);
+      .all(id, id, ...scoped.params, id, version, version, executionContextId, limit);
   }
 
   retainedTaskId(projectId: string, taskKey: string): string | null {
@@ -792,19 +825,19 @@ class MemoryStore {
     })();
   }
 
-  addTask(input: MemoryCreate): MemoryRecord {
+  addTask(input: MemoryCreate, executionContextId: string | null): MemoryRecord {
     if (!input.task || !input.lineage || input.scope !== "project" || !input.projectId)
       throw new CliError("Task memory requires explicit project, task, context and provenance");
     return this.db.transaction(() => {
       const link = input.lineage?.replaces;
-      const prior = link ? this.get(link.id, "project", input.projectId ?? undefined, false, input.task, true) : null;
+      const prior = link ? this.get(link.id, "project", input.projectId ?? undefined, false, input.task, true, executionContextId) : null;
       if (link && (!prior || prior.version !== link.version || prior.lineage?.state !== "current"))
         throw new CliError("Replacement base changed or is outside this task/context");
       const record = this.add(input);
       if (prior?.lineage) this.update(prior.id, {
         expectedVersion: prior.version, lineage: { ...prior.lineage, state: "replaced", replacedBy: { id: record.id, version: record.version } },
         sourceThreadId: input.sourceThreadId, writeReason: input.writeReason,
-      }, input.projectId ?? undefined, input.task);
+      }, input.projectId ?? undefined, input.task, "project", executionContextId);
       return record;
     })();
   }
@@ -817,7 +850,7 @@ class MemoryStore {
       const diffs = changes.map((change) => {
         const after = { ...change, summary: validateText("summary", change.summary, 400),
           details: validateText("details", change.details, 16000), reason: validateText("reason", change.reason, 500) };
-        const before = this.get(after.id, "project", projectId, false, task);
+        const before = this.get(after.id, "project", projectId, false, task, false, selection.executionContextId);
         if (!before?.lineage || before.lineage.state === "replaced") throw new CliError("Reflection base is unavailable or replaced");
         if (seen.has(before.id)) throw new CliError("Reflection cannot change a record twice");
         seen.add(before.id);
@@ -836,8 +869,8 @@ class MemoryStore {
 
   proposals(selection: MemorySelection): ReflectionProposal[] {
     if (!selection.task || !selection.projectId) return [];
-    return this.db.prepare("SELECT proposal_json FROM memory_reflections WHERE project_id = ? AND task_id = ? AND context_name = ? ORDER BY rowid DESC LIMIT 100")
-      .all(selection.projectId, selection.task.taskId, selection.task.context).map((row: unknown) => {
+    return this.db.prepare(`SELECT proposal_json FROM memory_reflections WHERE project_id = ? AND task_id = ? AND context_name = ? AND ${reflectionVisibilitySql} ORDER BY rowid DESC LIMIT 100`)
+      .all(selection.projectId, selection.task.taskId, selection.task.context, selection.executionContextId).map((row: unknown) => {
         if (!isRecord(row)) throw new CliError("Invalid reflection storage row");
         return reflectionProposalSchema.parse(JSON.parse(String(row.proposal_json)));
       });
@@ -845,8 +878,8 @@ class MemoryStore {
 
   proposal(selection: MemorySelection, id: string): ReflectionProposal {
     if (!selection.task || !selection.projectId) throw new CliError("Reflection requires explicit task/context scope");
-    const row: unknown = this.db.prepare("SELECT proposal_json FROM memory_reflections WHERE id = ? AND project_id = ? AND task_id = ? AND context_name = ?")
-      .get(id, selection.projectId, selection.task.taskId, selection.task.context);
+    const row: unknown = this.db.prepare(`SELECT proposal_json FROM memory_reflections WHERE id = ? AND project_id = ? AND task_id = ? AND context_name = ? AND ${reflectionVisibilitySql}`)
+      .get(id, selection.projectId, selection.task.taskId, selection.task.context, selection.executionContextId);
     if (!isRecord(row)) throw new CliError("Reflection was not found in this task/context");
     return reflectionProposalSchema.parse(JSON.parse(String(row.proposal_json)));
   }
@@ -856,14 +889,14 @@ class MemoryStore {
       const proposal = this.proposal(selection, id);
       if (proposal.state !== "pending") throw new CliError("Reflection already has an explicit decision");
       if (decision === "apply") for (const diff of proposal.diffs) {
-        const current = this.get(diff.before.id, "project", selection.projectId ?? undefined, false, selection.task, true);
+        const current = this.get(diff.before.id, "project", selection.projectId ?? undefined, false, selection.task, true, selection.executionContextId);
         if (!current?.lineage || current.version !== diff.before.version) throw new CliError("Reflection base version conflict; nothing applied");
         const after = diff.after;
         this.update(current.id, { expectedVersion: diff.before.version, summary: after.summary, details: after.details,
           kind: after.classification === "decision" ? "decision" : "fact",
           lineage: { ...current.lineage, classification: after.classification, state: after.state, source: after.source },
           sourceThreadId: threadId, writeReason: after.reason,
-        }, selection.projectId ?? undefined, selection.task);
+        }, selection.projectId ?? undefined, selection.task, "project", selection.executionContextId);
       }
       const decided: ReflectionProposal = { ...proposal, state: decision === "apply" ? "applied" : "rejected", decidedAt: Date.now() };
       this.db.prepare("UPDATE memory_reflections SET proposal_json = ? WHERE id = ?").run(JSON.stringify(decided), id);
@@ -959,9 +992,10 @@ function renderCatalog(store: MemoryStore, projectId: string | undefined, maxCha
 
 function renderTaskSummary(store: MemoryStore, selection: MemorySelection, taskKey: string, maxChars = 3000): string {
   if (!selection.task || !selection.projectId) throw new CliError("Select a task and logical context");
-  const { memories, total } = store.list("project", selection.projectId, MAX_RESULT_LIMIT, selection.task, true);
+  const { memories, total } = store.list("project", selection.projectId, MAX_RESULT_LIMIT, selection.task, true, 0, selection.executionContextId);
   const header = `Task memory: ${taskKey}; project=${selection.projectId}; context=${selection.task.context}\nEvidence may be stale. Assumptions are not observations. Open originals and revision history before changing a decision.\n`;
-  const retrieval = `bb memory catalog --task ${taskKey} --context ${selection.task.context} --json`;
+  const executionSelector = selection.executionContextId ? ` --execution-context '${selection.executionContextId.replaceAll("'", "'\\''")}'` : "";
+  const retrieval = `bb memory catalog --task ${taskKey} --context ${selection.task.context}${executionSelector} --json`;
   const footer = `\nRead more: ${retrieval}`;
   const lines: string[] = [];
   let length = header.length + footer.length;
@@ -970,7 +1004,8 @@ function renderTaskSummary(store: MemoryStore, selection: MemorySelection, taskK
     const lineage = memory.lineage;
     if (!lineage) continue;
     const source = lineage.source;
-    const line = `- ${memory.name} v${memory.version} [${lineage.classification}] ${normalizeOneLine(memory.summary)}\n  source=${source.kind}:${source.commentId ?? lineage.taskKey}@${source.revision}; observed=${new Date(source.observedAt).toISOString()}; memoryUpdated=${new Date(memory.updatedAt).toISOString()}`;
+    const origin = source.kind === "artifact" ? `artifact:${source.artifactId}; executionContext=${source.executionContextId}; read=bb_task_artifact_read` : `${source.kind}:${source.commentId ?? lineage.taskKey}`;
+    const line = `- ${memory.name} v${memory.version} [${lineage.classification}] ${normalizeOneLine(memory.summary)}\n  source=${origin}@${source.revision}; observed=${new Date(source.observedAt).toISOString()}; memoryUpdated=${new Date(memory.updatedAt).toISOString()}`;
     if (length + line.length + 1 > maxChars) break;
     lines.push(line);
     length += line.length + 1;
@@ -1062,40 +1097,115 @@ export default async function plugin(bb: BbPluginApi) {
   const store = new MemoryStore(db);
 
 
-  async function taskFor(selection: MemorySelection) {
+  async function taskFor(selection: Pick<MemorySelection, "projectId" | "task">) {
     if (!selection.projectId || !selection.task) throw new CliError("Select an explicit project, task and logical context");
     validateName(selection.task.context);
-    const { task } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "getTask", input: { taskId: selection.task.taskId }, outputSchema: tasksRpcContract.getTask.output });
+    const { task } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "getTask", input: { taskId: selection.task.taskId }, outputSchema: tasksReadProjection.getTask.output });
     if (!task) throw new CliError("Task is unavailable");
-    const { projects } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listProjects", input: {}, outputSchema: tasksRpcContract.listProjects.output });
+    const { projects } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listProjects", input: {}, outputSchema: tasksReadProjection.listProjects.output });
     if (!projects.some((project) => project.id === task.projectId && project.linkedBbProjectId === selection.projectId))
       throw new CliError("Task is not linked to the selected Core project");
     await bb.sdk.projects.get({ projectId: selection.projectId });
     return task;
   }
 
+  async function validateExecutionContext(selection: Pick<MemorySelection, "projectId" | "executionContextId">) {
+    if (selection.executionContextId === null) return;
+    const context = await bb.sdk.experimental_executionContexts.get({ id: selection.executionContextId });
+    if (!context.enabled || !selection.projectId || !context.projectIds.includes(selection.projectId))
+      throw new CliError("Execution context is unavailable for the selected Core project");
+  }
+
+  async function readerExecutionContext(projectId: string, threadId: string): Promise<string | null> {
+    const [thread, binding] = await Promise.all([
+      bb.sdk.threads.get({ threadId }), bb.sdk.experimental_executionContexts.getThreadBinding({ threadId }),
+    ]);
+    if (thread.deletedAt !== null || thread.projectId !== projectId) throw new CliError("Reader thread does not belong to this Core project");
+    const executionContextId = binding?.executionContext?.id ?? null;
+    if (executionContextId !== null) {
+      const context = await bb.sdk.experimental_executionContexts.get({ id: executionContextId });
+      if (!context.enabled || !context.projectIds.includes(projectId)) throw new CliError("Reader execution context is unavailable");
+    }
+    return executionContextId;
+  }
+
+  async function listExecutionContexts(projectId: string) {
+    await bb.sdk.projects.get({ projectId });
+    return { contexts: (await bb.sdk.experimental_executionContexts.list()).filter((context) => context.enabled && context.projectIds.includes(projectId)).map(({ id, name }) => ({ id, name })) };
+  }
+
+  async function listArtifacts(selection: MemorySelection) {
+    await validateHistoricalSelection(selection);
+    if (!selection.task || selection.executionContextId === null) throw new CliError("Select a task and actual execution context to inspect retained thread decisions");
+    const artifacts = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listTaskArtifacts",
+      input: { taskId: selection.task.taskId, executionContextId: selection.executionContextId }, outputSchema: tasksReadProjection.listTaskArtifacts.output });
+    return artifacts.filter((artifact) => artifact.taskId === selection.task?.taskId && artifact.bbProjectId === selection.projectId && artifact.executionContextId === selection.executionContextId);
+  }
+
+  async function readArtifact(selection: MemorySelection, artifactId: string) {
+    await validateHistoricalSelection(selection);
+    if (!selection.task || selection.executionContextId === null) throw new CliError("Select a task and actual execution context to read retained thread evidence");
+    const view = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "getTaskArtifact",
+      input: { taskId: selection.task.taskId, executionContextId: selection.executionContextId, artifactId }, outputSchema: tasksReadProjection.getTaskArtifact.output });
+    if (view.artifact.id !== artifactId || view.artifact.taskId !== selection.task.taskId || view.artifact.bbProjectId !== selection.projectId || view.artifact.executionContextId !== selection.executionContextId)
+      throw new CliError("Retained artifact is outside the selected task, project or execution context");
+    return view;
+  }
+
+  async function listSources(selection: MemorySelection) {
+    await validateExecutionContext(selection);
+    const task = await taskFor(selection);
+    const { comments } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listComments", input: { taskId: task.id }, outputSchema: tasksReadProjection.listComments.output });
+    const artifacts = selection.executionContextId === null ? [] : await listArtifacts(selection);
+    return { taskKey: task.key, sources: [
+      { kind: "task" as const, commentId: null, revision: task.updatedAt, label: `${task.key} · task revision ${task.updatedAt}` },
+      ...comments.map((comment) => ({ kind: "comment" as const, commentId: comment.id, revision: comment.createdAt, label: `${comment.authorName} · comment ${comment.createdAt}` })),
+      ...artifacts.map((artifact) => ({ kind: "artifact" as const, commentId: null, artifactId: artifact.id, executionContextId: artifact.executionContextId,
+        revision: artifact.source.textSha256, label: `Retained decision · ${normalizeOneLine(artifact.decision).slice(0, 80)} · ${artifact.id}` })),
+    ] };
+  }
+
+  async function inspectArtifact(selection: MemorySelection, artifactId: string) {
+    const view = await readArtifact(selection, artifactId);
+    return { view, source: artifactSourceSelectionSchema.parse({ kind: "artifact", commentId: null, artifactId: view.artifact.id,
+      executionContextId: view.artifact.executionContextId, revision: view.artifact.source.textSha256, observedAt: Date.now(), quote: "" }) };
+  }
+
   async function validateSelection(selection: MemorySelection) {
     if (selection.task) await taskFor(selection);
+    await validateExecutionContext(selection);
     return selection;
   }
 
   async function validateHistoricalSelection(selection: MemorySelection) {
     if (selection.task) validateName(selection.task.context);
     if (selection.projectId) await bb.sdk.projects.get({ projectId: selection.projectId });
+    await validateExecutionContext(selection);
     return selection;
   }
 
   async function taskSummary(selection: MemorySelection) {
     const task = await taskFor(selection);
+    await validateExecutionContext(selection);
     return renderTaskSummary(store, selection, task.key);
   }
 
   async function validateSource(selection: MemorySelection, source: MemoryLineage["source"]) {
     const task = await taskFor(selection);
+    await validateExecutionContext(selection);
+    if (source.kind === "artifact") {
+      if (source.executionContextId !== selection.executionContextId) throw new CliError("Artifact source does not match the selected execution context");
+      const { artifact } = await readArtifact(selection, source.artifactId);
+      if (source.revision !== artifact.source.textSha256) throw new CliError("Retained artifact source hash does not match its immutable evidence");
+      if (source.observedAt < Date.parse(artifact.createdAt) || source.observedAt > Date.now()) throw new CliError("Observation time must follow artifact retention and not be in the future");
+      if (source.quote && !artifact.source.quote.includes(source.quote)) throw new CliError("Source excerpt must belong to the actual retained selected quote");
+      if (source.quote) validateText("source quote", source.quote, 600);
+      return task;
+    }
     let revision = task.updatedAt;
     let text = `${task.title}\n${task.description}`;
     if (source.kind === "comment") {
-      const { comments } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listComments", input: { taskId: task.id }, outputSchema: tasksRpcContract.listComments.output });
+      const { comments } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listComments", input: { taskId: task.id }, outputSchema: tasksReadProjection.listComments.output });
       const comment = comments.find((entry) => entry.id === source.commentId);
       if (!comment) throw new CliError("Source comment does not belong to this task");
       revision = comment.createdAt;
@@ -1116,7 +1226,7 @@ export default async function plugin(bb: BbPluginApi) {
       name: draft.name, summary: draft.summary, details: draft.details,
       kind: draft.classification === "decision" ? "decision" : "fact", tags: [], importance: 50, pinned: false,
       sourceThreadId: threadId, writeReason: draft.reason,
-    });
+    }, selection.executionContextId);
   }
 
   async function validateThread(projectId: string, threadId: string) {
@@ -1149,14 +1259,14 @@ export default async function plugin(bb: BbPluginApi) {
   }
 
   const analytics = {
-    actions: ["scope.select", "draft.open", "reflection.review"].map((action) =>
+    actions: ["scope.select", "draft.open", "reflection.review", "source.inspect"].map((action) =>
       bb.experimental_productAnalytics.declareAction({ action, surfaces: ["web", "compact", "mobile", "desktop"], completionSource: "client" }),
     ),
   };
 
   async function resolveTaskKey(taskKey: string) {
-    const { task } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "getTaskByKey", input: { taskKey }, outputSchema: tasksRpcContract.getTaskByKey.output });
-    const { projects } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listProjects", input: {}, outputSchema: tasksRpcContract.listProjects.output });
+    const { task } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "getTaskByKey", input: { taskKey }, outputSchema: tasksReadProjection.getTaskByKey.output });
+    const { projects } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listProjects", input: {}, outputSchema: tasksReadProjection.listProjects.output });
     const project = projects.find((entry) => entry.id === task?.projectId);
     if (!task || !project?.linkedBbProjectId) throw new CliError("Task requires an explicit link to a Core project before using shared memory");
     await bb.sdk.projects.get({ projectId: project.linkedBbProjectId });
@@ -1171,31 +1281,29 @@ export default async function plugin(bb: BbPluginApi) {
     async listMemoryProjects() {
       return { projects: (await bb.sdk.projects.list({ includePersonal: true })).map((project) => ({ id: project.id, name: project.name })) };
     },
-    async listMemorySources(selection) {
-      const task = await taskFor(selection);
-      const { comments } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listComments", input: { taskId: task.id }, outputSchema: tasksRpcContract.listComments.output });
-      return { taskKey: task.key, sources: [
-        { kind: "task" as const, commentId: null, revision: task.updatedAt, label: `${task.key} · task revision ${task.updatedAt}` },
-        ...comments.map((comment) => ({ kind: "comment" as const, commentId: comment.id, revision: comment.createdAt,
-          label: `${comment.authorName} · comment ${comment.createdAt}` })),
-      ] };
-    },
+    async listMemorySources(input) { return listSources(memorySelectionFrom(input)); },
+    async listMemoryExecutionContexts({ projectId }) { return listExecutionContexts(projectId); },
+    async listMemoryArtifacts(input) { return { artifacts: await listArtifacts(memorySelectionFrom(input)) }; },
+    async readMemoryArtifact(input) { return inspectArtifact(memorySelectionFrom(input), input.artifactId); },
     async threadMemoryState({ threadId }) {
-      const thread = await bb.sdk.threads.get({ threadId });
-      return { projectId: thread.projectId, bindings: store.bindings(thread.projectId, threadId) };
+      const [thread, binding] = await Promise.all([bb.sdk.threads.get({ threadId }), bb.sdk.experimental_executionContexts.getThreadBinding({ threadId })]);
+      if (thread.deletedAt !== null) throw new CliError("Reader thread is unavailable");
+      const executionContextId = binding?.executionContext?.id ?? null;
+      await validateExecutionContext({ projectId: thread.projectId, executionContextId });
+      return { projectId: thread.projectId, executionContextId, bindings: store.bindings(thread.projectId, threadId) };
     },
     async searchMemories(input) {
       const selection = memorySelectionFrom(input);
       await validateHistoricalSelection(selection);
-      return { memories: store.search(input.query, selection.projectId ? "project" : "global", selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task) };
+      return { memories: store.search(input.query, selection.projectId ? "project" : "global", selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task, selection.executionContextId) };
     },
     async listMemoryTasks({ projectId, search }) {
       await bb.sdk.projects.get({ projectId });
-      const { projects } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listProjects", input: {}, outputSchema: tasksRpcContract.listProjects.output });
+      const { projects } = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listProjects", input: {}, outputSchema: tasksReadProjection.listProjects.output });
       const tasks = [];
       for (const project of projects) {
         if (project.linkedBbProjectId !== projectId) continue;
-        const page = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listTasks", input: { projectId: project.id, search, limit: 20 }, outputSchema: tasksRpcContract.listTasks.output });
+        const page = await bb.sdk.plugins.callRpc({ pluginId: "tasks", method: "listTasks", input: { projectId: project.id, search, limit: 20 }, outputSchema: tasksReadProjection.listTasks.output });
         for (const task of page.tasks) tasks.push({ id: task.id, key: task.key, title: task.title, revision: task.updatedAt });
       }
       return { tasks };
@@ -1204,7 +1312,7 @@ export default async function plugin(bb: BbPluginApi) {
       const { offset } = input;
       const selection = memorySelectionFrom(input);
       await validateHistoricalSelection(selection);
-      const page = store.list(selection.projectId ? "project" : "global", selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task, false, offset);
+      const page = store.list(selection.projectId ? "project" : "global", selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task, false, offset, selection.executionContextId);
       return { memories: page.memories, total: page.total,
         previousOffset: offset === 0 ? null : Math.max(0, offset - MAX_RESULT_LIMIT),
         nextOffset: offset + page.memories.length < page.total ? offset + page.memories.length : null };
@@ -1212,19 +1320,20 @@ export default async function plugin(bb: BbPluginApi) {
     async getMemory(input) {
       const selection = memorySelectionFrom(input);
       await validateSelection(selection);
-      return { memory: store.get(input.name, selection.projectId ? "project" : "global", selection.projectId ?? undefined, true, selection.task) };
+      return { memory: store.get(input.name, selection.projectId ? "project" : "global", selection.projectId ?? undefined, true, selection.task, false, selection.executionContextId) };
     },
     async memoryHistory(input) {
       const selection = memorySelectionFrom(input);
       await validateHistoricalSelection(selection);
-      return { history: store.history(input.name, selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task, selection.projectId ? "project" : "global").map((row) => {
+      return { history: store.history(input.name, selection.projectId ?? undefined, MAX_RESULT_LIMIT, selection.task, selection.projectId ? "project" : "global", input.version ?? null, selection.executionContextId).map((row) => {
         if (!isRecord(row)) throw new CliError("Invalid memory history row");
         const snapshot = JSON.parse(String(row.snapshot_json));
         return { version: Number(row.version), action: String(row.action), createdAt: Number(row.created_at),
           snapshot: memoryRecordSchema.parse({ task: null, lineage: null, ...snapshot }) };
       }) };
     },
-    async taskSummary(selection) {
+    async taskSummary(input) {
+      const selection = memorySelectionFrom(input);
       return { summary: selection.task ? await taskSummary(selection) : renderCatalog(store, selection.projectId ?? undefined), generatedAt: Date.now() };
     },
     async createTaskMemory(input) {
@@ -1239,7 +1348,8 @@ export default async function plugin(bb: BbPluginApi) {
       return replaceTaskBindings(projectId, threadId, expectedVersion, tasks);
     },
     async proposeReflection(input) { return proposeReflection(memorySelectionFrom(input), input.changes); },
-    async listReflections(selection) {
+    async listReflections(input) {
+      const selection = memorySelectionFrom(input);
       await validateHistoricalSelection(selection);
       return { proposals: store.proposals(selection) };
     },
@@ -1262,7 +1372,7 @@ export default async function plugin(bb: BbPluginApi) {
       const selection = memorySelectionFrom(input);
       await validateSelection(selection);
       const memory = store.forget(input.id, input.expectedVersion, "Explicitly deleted in Memory settings", null,
-        selection.projectId ?? undefined, selection.task, selection.projectId ? "project" : "global");
+        selection.projectId ?? undefined, selection.task, selection.projectId ? "project" : "global", selection.executionContextId);
       return { deleted: { id: memory.id, version: memory.version } };
     },
   });
@@ -1282,38 +1392,51 @@ export default async function plugin(bb: BbPluginApi) {
       }
     }
     if (eligible.length === 0) return { tools: [], skills: ["memory"] };
+    const hasArtifacts = db.prepare("SELECT 1 FROM memories WHERE project_id = ? AND deleted_at IS NULL AND json_extract(lineage_json, '$.source.kind') = 'artifact' LIMIT 1").get(project.id) !== undefined;
+    const executionContextId = hasArtifacts ? await readerExecutionContext(project.id, thread.id) : null;
     const budget = Math.min(3000, Math.floor((CATALOG_MAX_CHARS - 802 - (eligible.length - 1) * 2) / eligible.length));
-    const summaries = eligible.map(({ scope, key }) => renderTaskSummary(store, { projectId: project.id, task: scope }, key, budget));
+    const summaries = eligible.map(({ scope, key }) => renderTaskSummary(store, { projectId: project.id, task: scope, executionContextId }, key, budget));
     return { tools: [], skills: ["memory"], instructions: summaries.join("\n\n") };
   });
 
   const taskOptions = {
     task: { type: "string", description: "Explicit BB task key, for example BBDEV-29" },
     context: { type: "string", description: "Logical context name, independent of provider or payer" },
+    "execution-context": { type: "string", description: "Actual execution context ID for retained thread artifacts; threaded callers must use their bound context" },
     general: { type: "boolean", description: "Explicitly select general notes, not a thread task binding" },
   } as const;
 
-  async function cliSelection(ctx: { projectId?: string; threadId?: string }, options: { task?: string; context?: string; general: boolean }, historical = false): Promise<MemorySelection> {
+  async function cliSelection(ctx: { projectId?: string; threadId?: string }, options: { task?: string; context?: string; general: boolean; "execution-context"?: string }, historical = false): Promise<MemorySelection> {
     const projectId = ctx.projectId ?? null;
     if (options.general) {
-      if (options.task || options.context) throw new CliError("--general cannot be combined with --task or --context");
-      return { projectId, task: null };
+      if (options.task || options.context || options["execution-context"]) throw new CliError("--general cannot be combined with task or execution-context selectors");
+      return { projectId, task: null, executionContextId: null };
+    }
+    async function finish(task: TaskScope | null): Promise<MemorySelection> {
+      let executionContextId = options["execution-context"] === undefined ? null : executionContextIdSchema.parse(options["execution-context"]);
+      if (!task && executionContextId !== null) throw new CliError("--execution-context requires an explicit task scope");
+      if (task && ctx.threadId && projectId) {
+        const actual = await readerExecutionContext(projectId, ctx.threadId);
+        if (executionContextId !== null && executionContextId !== actual) throw new CliError("Select the invoking thread's actual execution context");
+        executionContextId = actual;
+      }
+      const selection = memorySelectionSchema.parse({ projectId, task, executionContextId });
+      return historical ? validateHistoricalSelection(selection) : validateSelection(selection);
     }
     if (options.task || options.context) {
       if (!options.task || !options.context || !projectId) throw new CliError("--task and --context require each other and a Core project");
       if (historical) {
         const taskId = (ctx.threadId ? store.retainedBindingTaskId(projectId, ctx.threadId, options.task, options.context) : null) ?? store.retainedTaskId(projectId, options.task);
-        if (taskId) return validateHistoricalSelection(memorySelectionSchema.parse({ projectId, task: { taskId, context: options.context } }));
+        if (taskId) return finish({ taskId, context: options.context });
       }
       const resolved = await resolveTaskKey(options.task);
       if (resolved.projectId !== projectId) throw new CliError("Task is not linked to the current Core project");
       validateName(options.context);
-      return memorySelectionSchema.parse({ projectId, task: { taskId: resolved.task.id, context: options.context } });
+      return finish({ taskId: resolved.task.id, context: options.context });
     }
     const bindings = ctx.threadId && projectId ? store.bindings(projectId, ctx.threadId).tasks : [];
     if (bindings.length > 1) throw new CliError("This thread has multiple explicit bindings; select --task and --context, or --general");
-    const task = bindings[0] ?? null;
-    return historical ? validateHistoricalSelection({ projectId, task }) : validateSelection({ projectId, task });
+    return finish(bindings[0] ?? null);
   }
 
   bb.cli.register(
@@ -1323,6 +1446,29 @@ export default async function plugin(bb: BbPluginApi) {
       description:
         "Memories are summaries first: search or list, then read one in full.\nProject scope holds repository facts; global scope holds durable user preferences.",
       commands: {
+        contexts: cliCommand({
+          summary: "List actual execution contexts permitted for this Core project",
+          async run(_input, ctx) {
+            if (!ctx.projectId) throw new CliError("Execution context discovery requires a Core project");
+            return { exitCode: 0, stdout: jsonOutput(await listExecutionContexts(ctx.projectId)) };
+          },
+        }),
+        sources: cliCommand({
+          summary: "List explicit task/comment revisions and visible retained thread decisions",
+          options: { ...taskOptions },
+          async run(input, ctx) { return { exitCode: 0, stdout: jsonOutput(await listSources(await cliSelection(ctx, input.options))) }; },
+        }),
+        artifacts: cliCommand({
+          summary: "List retained decisions visible in the selected task and actual execution context",
+          options: { ...taskOptions },
+          async run(input, ctx) { return { exitCode: 0, stdout: jsonOutput({ artifacts: await listArtifacts(await cliSelection(ctx, input.options, true)) }) }; },
+        }),
+        artifact: cliCommand({
+          summary: "Inspect one actual retained thread decision and return its validated Memory source",
+          positionals: [{ name: "id", description: "Artifact ID returned by memory artifacts", required: true }],
+          options: { ...taskOptions },
+          async run(input, ctx) { return { exitCode: 0, stdout: jsonOutput(await inspectArtifact(await cliSelection(ctx, input.options, true), z.uuid().parse(input.positionals.id))) }; },
+        }),
         summary: cliCommand({
           summary: "Read the same bounded current task summary used by every runtime",
           options: { ...taskOptions, json: { type: "boolean", description: "Emit JSON" } },
@@ -1450,7 +1596,7 @@ export default async function plugin(bb: BbPluginApi) {
           async run(input, ctx) {
             const { scope, limit, offset } = input.options;
             const selection = await cliSelection(ctx, input.options);
-            const result = store.list(scope, ctx.projectId, limit, selection.task, false, offset);
+            const result = store.list(scope, ctx.projectId, limit, selection.task, false, offset, selection.executionContextId);
             return {
               exitCode: 0,
               stdout: input.options.json
@@ -1502,7 +1648,7 @@ export default async function plugin(bb: BbPluginApi) {
             if (!query) throw new CliError("search requires a query");
             const { scope, limit } = input.options;
             const selection = await cliSelection(ctx, input.options);
-            const memories = store.search(query, scope, ctx.projectId, limit, selection.task);
+            const memories = store.search(query, scope, ctx.projectId, limit, selection.task, selection.executionContextId);
             return {
               exitCode: 0,
               stdout: input.options.json
@@ -1549,6 +1695,7 @@ export default async function plugin(bb: BbPluginApi) {
               ctx.projectId,
               true,
               selection.task,
+              false, selection.executionContextId,
             );
             if (!memory) {
               throw new CliError(
@@ -1795,7 +1942,7 @@ export default async function plugin(bb: BbPluginApi) {
           },
           async run(input, ctx) {
             const selection = await cliSelection(ctx, input.options);
-            const current = store.get(input.positionals.id, "all", ctx.projectId, false, selection.task);
+            const current = store.get(input.positionals.id, "all", ctx.projectId, false, selection.task, false, selection.executionContextId);
             if (!current) throw new CliError("Memory was not found in the current scope");
             const memory = store.forget(
               current.id,
@@ -1804,6 +1951,7 @@ export default async function plugin(bb: BbPluginApi) {
               ctx.threadId ?? null,
               ctx.projectId,
               selection.task,
+              "all", selection.executionContextId,
             );
             return {
               exitCode: 0,
@@ -1823,6 +1971,7 @@ export default async function plugin(bb: BbPluginApi) {
           ],
           options: {
             ...taskOptions,
+            version: { type: "integer", min: 1, max: MAX_EXPECTED_VERSION, description: "Read this exact retained version, even beyond the newest 100 revisions" },
             limit: {
               type: "integer",
               min: 1,
@@ -1843,6 +1992,7 @@ export default async function plugin(bb: BbPluginApi) {
               ctx.projectId,
               input.options.limit,
               selection.task,
+              "all", input.options.version ?? null, selection.executionContextId,
             );
             if (history.length === 0) {
               throw new CliError(`memory history for "${id}" was not found`);

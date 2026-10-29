@@ -66,15 +66,38 @@ project/task/context scope; a task move or relink does not migrate them into
 another project's catalog. Persisted replacement and reflection targets are
 canonical IDs, never names that can redirect a reviewed write.
 
-The typed `listMemories` RPC takes `{projectId,task,offset}` and returns
+The typed `listMemories` RPC takes
+`{projectId,task,executionContextId,offset}` and returns
 `{memories,total,previousOffset,nextOffset}`. Offsets are explicit and native
 pages are bounded to 100 rows. FTS search remains a bounded ranked lookup;
 clear search to browse all retained active records in the selected scope.
-Scoped RPC requests use top-level `projectId` and `task` fields, plus their
-method fields (`draft`, `changes`, `name`, or versioned mutation values).
-Source38 reads that existing Core selector boundary; it does not recursively
-inspect Memory's payload. Stored proposal selections and lineage keep their
-original shape. There is no legacy nested-`selection` request alias.
+`memoryHistory` accepts a nullable `version`; CLI `history --version N` and
+replacement controls read that exact retained revision even beyond the newest
+100 revisions.
+Scoped RPC requests use top-level Core `projectId`, `task` and nullable
+`executionContextId`, plus method fields. The boundary fills a missing
+execution context once; internal routes receive explicit values. Source38
+reads the existing Core selector boundary, not Memory payloads. There is no
+legacy nested-`selection` request alias.
+
+Artifact sources consume Source30's native Tasks `listTaskArtifacts` and
+`getTaskArtifact` RPCs. `bb memory contexts`, `sources`, `artifacts` and
+`artifact` expose discovery and inspection; settings use named context choices,
+and thread panels use their authoritative Core execution-context binding.
+References persist the artifact ID, actual context, raw-text SHA-256 and
+bounded inspected excerpt, never another artifact store. Reads validate the
+selected Core project and actual execution context; artifact facts, historical
+snapshots and proposals are excluded from other contexts and general notes.
+Task/comment-only evidence retains its existing logical-context scope.
+Native original status and URL come from Tasks; Memory's inspector reads
+retained selected text/metadata, not image bytes or full transcripts.
+
+The consumer schemas in `tasks-consumer.ts` project the published native RPC
+outputs through the SDK. Runtime modules do not import sibling plugin source
+or weaken source-loader boundaries. This checkout does not contain Source30's
+artifact implementation; the controller must integrate the supplied Tasks
+contract before integrated artifact checks. No checks, visual proof, collector
+delivery or runtime-change acceptance are claimed by this source checkpoint.
 
 `memoryAnalytics` returns the identities supplied by the shared Source38
 declarations. The UI submits those identities through

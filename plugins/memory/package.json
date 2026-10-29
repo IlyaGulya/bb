@@ -20,6 +20,7 @@
     "app.tsx",
     "memory-kinds.ts",
     "lineage.ts",
+    "tasks-consumer.ts",
     "memory-workspace.tsx",
     "skills",
     "README.md"

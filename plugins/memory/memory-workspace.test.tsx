@@ -38,7 +38,7 @@ async function fixture() {
   const threadId = "thr_memory_workspace";
   const project = tasks.tasks.createProject({ name: "Owned Memory workspace", prefix: "MEMORY", color: "blue", linkedBbProjectId: projectId });
   const task = tasks.tasks.createTask({ projectId: project.id, title: "Inspect storage evidence", description: "R1: retain originals in SQLite." });
-  const selection: MemorySelection = { projectId, task: { taskId: task.id, context: "research" } };
+  const selection: MemorySelection = { projectId, task: { taskId: task.id, context: "research" }, executionContextId: null };
   const host = createFakePluginHost({
     pluginId: "memory", agentSkillIds: ["memory"],
     sdk: {
@@ -50,6 +50,7 @@ async function fixture() {
         list: async () => [{ id: projectId, name: "Personal" }],
       },
       threads: { get: async ({ threadId: selected }) => makeThreadResponse({ id: selected, projectId }) },
+      experimental_executionContexts: { getThreadBinding: async () => null, list: async () => [] },
       plugins: { callRpc: async (args) => {
         if (args.pluginId !== "tasks") throw new Error("Unexpected source plugin");
         return args.outputSchema.parse(await tasksHost.harness.behavior.callRpc(args.method, args.input));

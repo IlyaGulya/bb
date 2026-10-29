@@ -34,6 +34,10 @@ async function fixture() {
         list: async () => [{ id: "proj_personal", name: "Personal" }, { id: "proj_work", name: "Work" }],
       },
       threads: { get: async ({ threadId }) => makeThreadResponse({ id: threadId, projectId: threadId === "thr_work" ? "proj_work" : "proj_personal" }) },
+      experimental_executionContexts: {
+        getThreadBinding: async () => null,
+        get: async ({ id }) => ({ id, enabled: true, projectIds: ["proj_personal"] }),
+      },
       plugins: { callRpc: async (args) => {
         if (args.pluginId !== "tasks") throw new Error("Unexpected plugin");
         return args.outputSchema.parse(await tasksHost.harness.callRpc(args.method, args.input));
@@ -42,10 +46,10 @@ async function fixture() {
   });
   hosts.push(host);
   await memoryPlugin(host.bb);
-  const selection: MemorySelection = { projectId: "proj_personal", task: { taskId: task.id, context: "research" } };
+  const selection: MemorySelection = { projectId: "proj_personal", task: { taskId: task.id, context: "research" }, executionContextId: null };
   const otherContext: MemorySelection = { ...selection, task: { taskId: task.id, context: "delivery" } };
-  const general: MemorySelection = { projectId: "proj_personal", task: null };
-  const global: MemorySelection = { projectId: null, task: null };
+  const general: MemorySelection = { projectId: "proj_personal", task: null, executionContextId: null };
+  const global: MemorySelection = { projectId: null, task: null, executionContextId: null };
   const source = () => ({ kind: "task" as const, commentId: null, revision: tasks.tasks.getTask(task.id)!.updatedAt, observedAt: Date.now(), quote: "Keep originals." });
   async function call<T>(method: string, input: unknown, output: z.ZodType<T>): Promise<T> {
     return output.parse(await host.harness.callRpc(method, input));
@@ -178,6 +182,28 @@ describe("task/context memory boundaries", () => {
     expect(await f.read("late-replacement")).toBeNull();
     expect(await f.read("wrong-context-replacement", f.otherContext)).toBeNull();
     await expect(f.propose(old.id, 2)).rejects.toThrow();
+  });
+
+  it("retrieves the exact linked replacement revision after it leaves the recent history window", async () => {
+    const f = await fixture();
+    const original = await f.create("original-storage");
+    const replacement = await f.create("replacement-storage", f.selection, { replaces: { id: original.id, version: original.version } });
+    const link = (await f.read(original.id))!.lineage!.replacedBy!;
+    for (let version = 1; version <= 101; version++) {
+      const proposal = await f.propose(replacement.id, version, `Reviewed replacement conclusion ${version + 1}.`);
+      await f.decide(proposal.id);
+    }
+    expect((await f.history(replacement.id)).map((entry) => entry.version)).toEqual(Array.from({ length: 100 }, (_, index) => 102 - index));
+    const exact = await f.call("memoryHistory", { ...f.selection, name: link.id, version: link.version }, memoryRpcContract.memoryHistory.output);
+    expect(exact.history.map((entry) => entry.snapshot)).toEqual([replacement]);
+    const cli = await f.host.harness.behavior.runCli([
+      "history", link.id, "--version", String(link.version), "--task", f.task.key, "--context", "research", "--json",
+    ], { projectId: "proj_personal" });
+    expect(cli.exitCode, cli.stderr).toBe(0);
+    const retained = z.object({ history: z.array(z.object({ snapshot_json: z.string() })) }).parse(JSON.parse(cli.stdout ?? ""));
+    expect(retained.history.map((entry) => JSON.parse(entry.snapshot_json))).toEqual([replacement]);
+    expect((await f.call("memoryHistory", { ...f.otherContext, name: link.id, version: link.version }, memoryRpcContract.memoryHistory.output)).history).toEqual([]);
+    expect((await f.call("memoryHistory", { ...f.selection, name: link.id, version: 103 }, memoryRpcContract.memoryHistory.output)).history).toEqual([]);
   });
 
   it("bounds injected summaries without copying details or old decisions into the prompt", async () => {
@@ -350,7 +376,7 @@ describe("reviewed task memory invariants", () => {
     expect(instructions).not.toContain(fact.summary);
     const retained = await f.history(fact.name);
     expect(retained.map((entry) => entry.snapshot)).toEqual([fact]);
-    expect(await f.history(fact.id, { projectId: "proj_work", task: f.selection.task })).toEqual([]);
+    expect(await f.history(fact.id, { ...f.selection, projectId: "proj_work" })).toEqual([]);
   });
 
   it("retains Memory history and permits rejecting a pending diff after the source task is deleted", async () => {
@@ -373,6 +399,21 @@ describe("reviewed task memory invariants", () => {
     expect(retained.history.map((entry) => JSON.parse(entry.snapshot_json))).toEqual([fact]);
     expect(await f.decide(proposal.id, "reject")).toMatchObject({ id: proposal.id, state: "rejected" });
     expect((await f.history(fact.name)).map((entry) => entry.snapshot)).toEqual([fact]);
+  });
+
+  it("keeps task-only proposals inspectable and rejectable without their author's execution-context selector", async () => {
+    const f = await fixture();
+    const fact = await f.create("legacy-context-decision");
+    const proposal = await f.call("proposeReflection", { ...f.selection, executionContextId: "owned-memory-context", changes: [{
+      id: fact.id, expectedVersion: fact.version, summary: "A proposed task-only conclusion.",
+      details: "Retain the task original without importing thread evidence.", classification: "decision", state: "current",
+      source: f.source(), reason: "Review task-only evidence",
+    }] }, memoryRpcContract.proposeReflection.output);
+    expect((await f.call("listReflections", f.selection, memoryRpcContract.listReflections.output)).proposals.map((entry) => entry.id)).toContain(proposal.id);
+    expect(await f.call("getReflection", { ...f.selection, id: proposal.id }, memoryRpcContract.getReflection.output)).toMatchObject({ id: proposal.id, state: "pending" });
+    await f.tasksHost.harness.behavior.callRpc("deleteTask", { taskId: f.task.id });
+    expect(await f.decide(proposal.id, "reject")).toMatchObject({ id: proposal.id, state: "rejected" });
+    expect((await f.history(fact.id)).map((entry) => entry.snapshot)).toEqual([fact]);
   });
 
   it.each(["accessToken", "token"])("rejects a synthetic %s credential object without rejecting ordinary tokenization metadata", async (field) => {

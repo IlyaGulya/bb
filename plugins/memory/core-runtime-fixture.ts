@@ -44,6 +44,7 @@ export async function createTaskMemoryFixture(projectId: string, sdk: FixtureSdk
   const selection: MemorySelection = {
     projectId,
     task: { taskId: task.id, context: "owned-research" },
+    executionContextId: null,
   };
   const draft = (name: string, summary: string) => ({
     name,

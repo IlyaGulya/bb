@@ -12,7 +12,7 @@ Keep bounded task/context decisions and explicit general notes in BB's native Me
 
 Use `bb memory summary`, `catalog`, `search`, `get` and `history` with an explicit task key and logical context, or select general notes explicitly with `--general`. Catalog pages support `--limit` and `--offset`. Task changes use a reviewable proposal followed by explicit apply/reject; replacements and obsolescence retain their original revisions.
 
-Live task linkage controls new writes and active injection, not retained historical scope. Moving, relinking, unlinking or deleting a task does not migrate its Memory evidence into another project or global notes. Native task/comment revision references are not an immutable source-artifact archive; Source30 integration must use its real API.
+Live task linkage controls new writes and active injection, not retained historical scope. Moving, relinking, unlinking or deleting a task does not migrate its Memory evidence into another project or global notes. Exact-version history reads preserve pinned replacement revisions beyond the newest 100 revisions. Native task/comment revision references are not an immutable source archive. The Source30 consumer uses the real Tasks artifact RPCs, authoritative Core project and actual execution-context checks, retained selected quotes/hashes and native original links; it does not copy an artifact store or read image bytes. Artifact facts and their historical snapshots/proposals stay within the permitted actual context, while task/comment-only evidence keeps its logical-context scope. The controller must integrate Source30's implementation before artifact checks or activation.
 
 ## Requirements
 
