@@ -10,7 +10,7 @@ const startupShutdownProjects = sharedWorkerProjects({
   pkgDir: __dirname,
   name: "@bb/integration-tests:startup-shutdown",
   include: ["fake/thread-startup-shutdown.test.ts"],
-}).map((project) => typeof project === "string" ? project : {
+}).map((project) => typeof project !== "object" || project === null || !("test" in project) ? project : {
   ...project,
   test: {
     ...project.test,
