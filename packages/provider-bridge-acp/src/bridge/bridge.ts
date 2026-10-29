@@ -141,6 +141,7 @@ import {
   ACP_NATIVE_REASONING_EFFORTS,
   buildAgentModelCatalog,
   buildAcpNativeReasoningSupport,
+  buildGatewayModelCatalog,
   buildModelCatalogFromConfigOptions,
   buildModelCatalogFromSessionModels,
   acpNativeReasoningLevelToValue,
@@ -2916,15 +2917,7 @@ async function handleRequest(
           artifactPath: fileURLToPath(import.meta.url),
         });
         sendResult(request.id, {
-          models: models.map((model) => ({
-            id: `bb-cpa/${model.id}`,
-            model: `bb-cpa/${model.id}`,
-            displayName: model.name,
-            description: `CPA ${gateway.accountPrefix}; native ${gateway.modelProvider} metadata`,
-            supportedReasoningEfforts: [],
-            defaultReasoningEffort: "medium",
-            isDefault: false,
-          })),
+          models: buildGatewayModelCatalog(models, gateway),
           selectedOnlyModels: [],
         });
         return;

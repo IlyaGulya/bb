@@ -732,6 +732,12 @@ describe("acp bridge", () => {
     expect(model.defaultReasoningEffort).toBe("high");
   });
 
+  it("keeps supported medium when a native default has no ACP vocabulary mapping", async () => {
+    const model = await gatewayListedModel({ thinking: { efforts: ["low", "medium", "high", "future-effort"], defaultLevel: "future-effort" } });
+    expect(model.supportedReasoningEfforts.map(effort => effort.reasoningEffort)).toEqual(["low", "medium", "high"]);
+    expect(model.defaultReasoningEffort).toBe("medium");
+  });
+
   it.each([
     ["missing thinking", {}],
     ["null thinking", { thinking: null }],

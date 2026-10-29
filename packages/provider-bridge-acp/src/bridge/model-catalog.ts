@@ -1,5 +1,6 @@
 import { compareReasoningLevels } from "@bb/domain";
 import type { AvailableModel, ReasoningLevel, ServiceTier } from "@bb/domain";
+import type { GatewayModel, ModelGateway } from "@bb/provider-bridge-protocol/model-gateway";
 import type { AcpConfigOption, AcpSessionModels } from "../wire.js";
 
 interface RawAgentModel {
@@ -200,6 +201,35 @@ export function buildAcpNativeReasoningSupport(
         ? currentLevel
         : supportedReasoningEfforts[0].reasoningEffort,
   };
+}
+
+export function buildGatewayModelCatalog(
+  models: readonly GatewayModel[],
+  gateway: ModelGateway,
+): AvailableModel[] {
+  return models.map((model) => {
+    const efforts = model.reasoning ? model.thinking?.efforts ?? [] : [];
+    const nativeDefault = model.thinking?.defaultLevel;
+    const reasoning = buildAcpNativeReasoningSupport({
+      id: "reasoning_effort",
+      type: "select",
+      currentValue:
+        nativeDefault != null &&
+        acpNativeValueToReasoningLevel(nativeDefault) !== undefined &&
+        efforts.includes(nativeDefault)
+          ? nativeDefault
+          : "medium",
+      options: efforts.map((value) => ({ value })),
+    });
+    return {
+      id: `bb-cpa/${model.id}`,
+      model: `bb-cpa/${model.id}`,
+      displayName: model.name,
+      description: `CPA ${gateway.accountPrefix}; native ${gateway.modelProvider} metadata`,
+      ...reasoning,
+      isDefault: false,
+    };
+  });
 }
 
 export function buildModelCatalogFromConfigOptions(

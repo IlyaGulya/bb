@@ -21,6 +21,13 @@ export const gatewayModelSchema = z
     id: z.string().min(1),
     name: z.string(),
     reasoning: z.boolean(),
+    thinking: z
+      .object({
+        efforts: z.array(z.string()).nullish(),
+        defaultLevel: z.string().nullish(),
+      })
+      .passthrough()
+      .nullish(),
     input: z.array(z.enum(["text", "image"])),
     supportsTools: z.boolean().optional(),
     cost: z.object({
