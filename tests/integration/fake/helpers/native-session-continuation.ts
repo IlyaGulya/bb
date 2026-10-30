@@ -4,7 +4,7 @@ import { expect } from "vitest";
 import { saveModelConnection } from "@bb/db";
 import { modelConnectionSchema } from "@bb/domain";
 import { nativeImportContinueSchema, type NativeImportContinue } from "@bb/server-contract";
-import { discoverNativeSessions, readNativeSession } from "../../../../apps/host-daemon/src/command-handlers/native-sessions.js";
+import { discoverNativeSessions, readNativeSession, snapshotNativeSession } from "../../../../apps/host-daemon/src/command-handlers/native-sessions.js";
 import { createTestAppHarness } from "../../../../apps/server/test/helpers/test-app.js";
 import { seedEnvironment, seedHostSession, seedProjectWithSource } from "../../../../apps/server/test/helpers/seed.js";
 import { reportQueuedCommandSuccess, waitForQueuedCommand } from "../../../../apps/server/test/helpers/commands.js";
@@ -33,7 +33,9 @@ export async function createNativeContinuationFixture() {
   const page = await discoverNativeSessions({ roots: [{ engine: "codex", path: root, profile: "Synthetic continuation profile", artifactRoots: [] }], cursor: 0, limit: 100 });
   const source = page.sessions[0];
   if (!source) throw new Error(page.warnings.join("; "));
-  imports = new NativeSessionImports({ db: harness.db, hub: harness.hub, dataDir: harness.config.dataDir, read: (_host, input, signal) => readNativeSession(input, signal) });
+  imports = new NativeSessionImports({ db: harness.db, hub: harness.hub, dataDir: harness.config.dataDir,
+    read: (_host, input, signal) => readNativeSession(input, signal),
+    snapshot: (_host, source, resolveOriginal, signal) => snapshotNativeSession({ source, resolveOriginal }, signal) });
   const manifest = await imports.settle((await imports.start({ hostId: host.id, projectId: project.id, source })).id);
   expect(manifest.status).toBe("ready");
   const connection = saveModelConnection(harness.db, modelConnectionSchema.parse({ id: "synthetic-native-connection", name: "Synthetic native connection", provider: "codex", hostId: host.id, nativeAuth: { configDir: join(harness.config.dataDir, "synthetic-config") }, createdAt: 1, updatedAt: 1 }));

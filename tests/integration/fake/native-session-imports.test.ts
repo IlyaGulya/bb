@@ -10,7 +10,7 @@ import { createMigratedConnection } from "@bb/db/testing";
 import { threadEventItemSchema, turnScope, type JsonValue, type ThreadEventRow } from "@bb/domain";
 import type { NativeEngine, NativeRead } from "@bb/host-daemon-contract";
 import { threadTimelineResponseSchema, timelineRowChildren, type TimelineRow } from "@bb/server-contract";
-import { discoverNativeSessions, readNativeSession } from "../../../apps/host-daemon/src/command-handlers/native-sessions.js";
+import { discoverNativeSessions, readNativeSession, snapshotNativeSession } from "../../../apps/host-daemon/src/command-handlers/native-sessions.js";
 import { NativeSessionImports } from "../../../apps/server/src/services/threads/native-session-imports.js";
 import { buildThreadTimelineWithProfile } from "../../../apps/server/src/services/threads/timeline.js";
 import { findThreadEvent, listThreadEventRows } from "../../../apps/server/src/services/threads/thread-data.js";
@@ -74,7 +74,7 @@ async function fixture(engine: NativeEngine, output = "Saved tool result", befor
     const imports = new NativeSessionImports({ db, hub: noopNotifier, dataDir: join(directory, "core"), read: async (_hostId, input, signal) => {
       await beforeRead?.(input, signal);
       return readNativeSession(input, signal);
-    } });
+    }, snapshot: (_hostId, source, resolveOriginal, signal) => snapshotNativeSession({ source, resolveOriginal }, signal) });
     services.push(imports);
     return imports;
   }

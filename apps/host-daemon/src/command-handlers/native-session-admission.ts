@@ -33,6 +33,8 @@ export async function resumeImportedNativeSession(runtime: AgentRuntime, args: R
     if (existing.state === "uncertain") throw new NativeOwnershipUncertainError("Native runtime release could not be confirmed; another admission cannot start.");
     await existing.promise;
     signal?.throwIfAborted();
+    await readNativeSessionIdentity(source, purpose === "archive-admission");
+    if (purpose === "archive-admission" && source.snapshotId === undefined) await readNativeSession({ source, offset: 0, length: 1, artifact: null }, signal);
     await assertImportedNativeIdentity(runtime, args.threadId, source.sessionId);
     return;
   }
@@ -42,8 +44,8 @@ export async function resumeImportedNativeSession(runtime: AgentRuntime, args: R
   owner.promise = Promise.resolve().then(async () => {
     let started = false;
     try {
-      if (purpose === "archive-admission") await readNativeSession({ source, offset: 0, length: 1, artifact: null }, signal);
-      else await readNativeSessionIdentity(source);
+      await readNativeSessionIdentity(source, purpose === "archive-admission");
+      if (purpose === "archive-admission" && source.snapshotId === undefined) await readNativeSession({ source, offset: 0, length: 1, artifact: null }, signal);
       signal?.throwIfAborted();
       if (runtime.hasThread(args.threadId)) throw new Error("A competing native runtime appeared before import construction.");
       started = true;

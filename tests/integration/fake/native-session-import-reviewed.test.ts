@@ -52,10 +52,11 @@ describe("reviewed native archive boundaries", () => {
     await expect(saved.imports.bytes({ importId: ready.id, file: `artifact-${nativeChecksum(reference)}`, offset: 0, length: 256 })).rejects.toMatchObject({ status: 404 });
   });
 
-  it("rejects a forged zero-byte descriptor for a nonempty native source", async () => {
+  it("replaces a forged zero-byte discovery descriptor with the authoritative complete native snapshot", async () => {
     const saved = await createNativeArchiveFixture();
     const result = await saved.imports.settle((await saved.imports.start({ ...saved.selection, source: { ...saved.source, sizeBytes: 0 } })).id);
-    expect(result).toMatchObject({ status: "failed", records: 0, bytes: 0, sha256: null });
+    expect(result).toMatchObject({ status: "ready", records: saved.records.length, bytes: Buffer.byteLength(saved.original), sha256: nativeChecksum(saved.original) });
+    await expectOriginalArchive(saved, result.id);
   });
 
   it("deduplicates the same physical session discovered through overlapping roots", async () => {

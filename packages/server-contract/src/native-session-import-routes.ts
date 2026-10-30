@@ -1,13 +1,16 @@
 import { defineRoute, jsonRequest, jsonResponse, queryRequest, binaryResponse, type EmptyInput } from "@bb/hono-typed-routes";
-import type { NativeDiscovery, NativeChunk } from "@bb/host-daemon-contract";
+import type { NativeDiscovery, NativeChunk, NativeSessionRoot } from "@bb/host-daemon-contract";
 import {
-  nativeImportDiscoverSchema, nativeImportStartSchema, nativeImportIdSchema,
+  nativeImportDiscoverSchema, nativeImportStartSchema, nativeImportIdSchema, nativeImportLocationsSchema, nativeImportListSchema,
   nativeImportPageSchema, nativeImportBytesSchema, nativeImportContinueSchema, nativeImportHandoffSchema,
   nativeImportPreviewSchema, nativeImportThreadSchema, nativeImportFileSchema, type NativeImportBatch,
   type NativeImportManifest, type NativeImportPageResponse,
 } from "./api/native-session-imports.js";
 
 export const nativeSessionImportRoutes = {
+  locations: defineRoute({ path: "/native-session-imports/locations", method: "post", request: jsonRequest<EmptyInput, typeof nativeImportLocationsSchema._output>(nativeImportLocationsSchema), response: jsonResponse<{ roots: NativeSessionRoot[]; warnings: string[] }>() }),
+  list: defineRoute({ path: "/native-session-imports/list", method: "post", request: jsonRequest<EmptyInput, typeof nativeImportListSchema._output>(nativeImportListSchema), response: jsonResponse<NativeImportManifest[]>() }),
+  refresh: defineRoute({ path: "/native-session-imports/refresh", method: "post", request: jsonRequest<EmptyInput, typeof nativeImportIdSchema._output>(nativeImportIdSchema), response: jsonResponse<NativeImportManifest, 200 | 202>({ status: 200 }) }),
   preview: defineRoute({ path: "/native-session-imports/preview", method: "post", request: jsonRequest<EmptyInput, typeof nativeImportPreviewSchema._output>(nativeImportPreviewSchema), response: jsonResponse<NativeChunk>() }),
   forThread: defineRoute({ path: "/native-session-imports/for-thread", method: "post", request: jsonRequest<EmptyInput, typeof nativeImportThreadSchema._output>(nativeImportThreadSchema), response: jsonResponse<NativeImportManifest | null>() }),
   file: defineRoute({ path: "/native-session-imports/file", method: "get", request: queryRequest<EmptyInput, typeof nativeImportFileSchema._output>(nativeImportFileSchema), response: binaryResponse<Uint8Array>() }),

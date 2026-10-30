@@ -62,13 +62,41 @@ separation; real owner decision/report and version-bound video evidence.
 Source declarations and tests alone are not live acceptance.
 ## `sdk.experimental_nativeSessionImports`
 
-Discover explicit host-local native history roots, preview bounded source bytes,
-start selected or bulk archive jobs, resume/cancel import processing, page/search
-retained records, and stream the permanent original JSONL and referenced artifacts.
-`admit` separately requests provider-controlled exclusive same-identity loading
-without a prompt; `handoff` explicitly creates a different native dialogue with
-user-selected next-turn context and an archive link. Neither discovery nor
-archiving creates agents or Tasks. Source profile labels do not select payers.
+Find known host-local history/artifact roots through `locations({ hostId })`
+(`{ roots: NativeSessionRoot[], warnings: string[] }`), discover selected roots,
+preview bounded source bytes, and start selected or bulk archive jobs.
+`list({ hostId?, projectId?, limit? })` returns recent `NativeImportManifest[]`,
+newest first, with a server default of 30 and bounds of 1–100. `refresh({ importId })`
+resolves the original and updates the same archive/Core thread, returning its
+existing manifest lifecycle (`importing` or `ready`) without source/project/model
+setup. Every SDK operation accepts the existing optional cancellation signal.
+`resume` continues interrupted archive processing; it does not capture a fresh
+source snapshot. Existing get/forThread, cancel, record paging/search, bytes and
+download operations remain available. `admit` separately requests provider-controlled
+exclusive same-identity loading without a prompt; `handoff` explicitly creates a
+different native dialogue with user-selected next-turn context and an archive
+link. Neither discovery nor archiving creates agents or Tasks. Source profile
+labels do not select payers, and archiving requires no model account selection.
+
+Start/refresh capture immutable complete-record JSONL snapshots at request time,
+retaining the original path/root/artifact authority in source descriptors.
+Incomplete trailing records are excluded; records completed later require another
+explicit refresh, not continuous synchronization. Mutation during snapshot copying
+is rejected. An offline source or ambiguous original is an error, not no-new-content.
+The prior committed archive/provenance survives failure and can be retried.
+Legacy frozen checkpoint sources resolve to actual originals by engine, native
+session ID and workspace through bounded known locations; no production path is
+hardcoded and no ambiguous candidate is silently selected.
+
+Native archive downloads retain first-accepted record bytes. Legitimate OMP title
+record/title-header changes are retained separately in `manifest.headerVersions`
+(ordinal, observedAt, sourceRevision, sourcePath, file, bytes, sha256), downloadable
+by `header-<sha256>` file keys. Old conversation/tool/attachment mutation still
+refuses. `sourceBoundaryBytes` records the latest accepted native snapshot length,
+which may differ from retained archive `bytes` after title changes; do not claim
+the native download is always byte-identical to the latest live file.
+`previousSources` retains prior descriptors when original source resolution
+rebinds an archive; import/thread IDs and existing record/event identities stay fixed.
 
 **Core callers.** The new-thread import page, imported-history header link and
 `bb thread import` commands use this SDK area and the same Core import and
@@ -124,7 +152,7 @@ its terminal `[Raw output: artifact://N]` footer (including native lowercase
 requires one retained session-local ID matching that result's safe tool name:
 `N.<tool>-original.log` or the older `N.<tool>.log`, such as `N.eval.log`.
 Lookup is confined to the selected JSONL file's adjacent stem directory, which
-must be covered by an explicit artifact root; there is no cwd, neighbor-session
+must be covered by a known or explicitly selected artifact root; there is no cwd, neighbor-session
 or arbitrary-root fallback. Duplicate ID candidates, auth/configuration files,
 symlinks and non-image hardlinks refuse. A bounded directory-revision cache avoids
 rescanning unchanged directories for each chunk; descriptor-pinned lookup/read,
@@ -172,10 +200,13 @@ Ordinary queued/scheduled writes remain blocked until admission. Handoff recover
 uses a request fingerprint and durable accepted input, not allocation existence;
 deleted allocations cannot be reported as completed dialogues.
 
-**Before stabilization.** Prove large multi-chunk imports, cancellation and crash
-recovery, prefix/checksum rejection, duplicate-free reimport, full-value search
-and streaming artifact retrieval. Exercise SDK/CLI and desktop/compact controls
-against the same real service, including accessibility and native-shell downloads.
+**Before stabilization.** Prove known-location discovery, filtered recent lists,
+explicit refresh of growing and partial-record sources, frozen-checkpoint original
+resolution/ambiguity rejection, header-version provenance, large multi-chunk imports,
+cancellation and crash recovery, prefix/checksum rejection, duplicate-free refresh,
+full-value search and streaming artifact/header retrieval. Exercise SDK/CLI and
+desktop/compact controls against the same real service, including accessibility
+and native-shell downloads.
 Qualify provider writer-lock, exact identity/path/workspace and original payer
 semantics on supported runtimes before claiming native admission. Source code
 and authored fixtures are not real-host acceptance or permission for a live pilot.

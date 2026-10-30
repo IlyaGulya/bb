@@ -964,6 +964,32 @@ downgrade, and retry failures with backoff from 5 seconds to 5 minutes. Remove
 the flag from the launchd plist or systemd user unit and reload the service to
 opt out.
 
+### Import native conversations
+
+Open **New thread → Import native history**, choose the source machine and
+destination project, then **Find conversations**. BB discovers known OMP,
+Claude Code and Codex history locations on that machine. Select conversations
+by title or workspace; ordinary imports need no filesystem path, checkpoint,
+model or account. Technical location overrides remain under **Advanced**.
+
+**Recent imports** reopens saved archives after a reload. An imported Core
+conversation also links back to its archive. **Refresh · import new messages**
+captures complete records from the original native session and appends them to
+the same archive and Core conversation without starting or prompting an agent.
+Records still being written, including partial UTF-8, wait for another refresh.
+This is an explicit snapshot update, not continuous synchronization.
+
+Original conversation records and artifacts remain retained. OMP title/header
+updates are preserved separately, so retained archive bytes can differ from the
+latest source snapshot. Older frozen imports reconnect to a unique original by
+engine, native identity and workspace; ambiguity or an unavailable source leaves
+the accepted archive intact and reports an error. **Resume interrupted
+processing** only retries an already captured import.
+
+Native admission and handoff are separate explicit operations. Once either has
+been selected, the source archive cannot be refreshed. Importing history is not
+a backup of working trees or every native agent file.
+
 ### Machine installer
 
 `BB_DATA_DIR` on the installer selects the machine's state directory instead of

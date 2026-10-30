@@ -176,9 +176,12 @@ const WORKSPACE_DIFF_AVAILABLE_RESULT: JsonObject = {
 };
 
 const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
+  "native.sessions.locations": { roots: [], warnings: [] },
+  "native.sessions.snapshot": { engine: "omp", path: "/fixture/sessions/source.jsonl", rootPath: "/fixture/sessions", profile: "Fixture", artifactRoots: [], sessionId: "fixture-native-session", title: "Fixture", cwd: "/fixture/workspace", sizeBytes: 10, revision: "snapshot-revision", modifiedAt: 1, snapshotId: "fixture-snapshot" },
   "native.sessions.discover": { sessions: [], nextCursor: null, warnings: [], incomplete: false },
   "native.sessions.read": { content: "", offset: 0, sizeBytes: 0, revision: "fixture-revision", sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
   "native.sessions.admit": { admitted: false, ownership: "unclaimed", reason: "Synthetic provider ownership refusal" },
+  "capture.exchange": { enabled: false, status: { pendingBytes: 0, pendingChunks: 0, artifacts: 0, lastAckAt: null, gap: "none", droppedBytes: 0 }, manifest: null, chunk: null },
   "environment.hook.run": {},
   "environment.hook.cancel": { status: "terminated" },
   "desktop.browser.list_instances": { instances: [] },

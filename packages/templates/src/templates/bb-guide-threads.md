@@ -189,15 +189,28 @@ Lifecycle ownership:
 
 Native history archives (experimental):
 
+  bb thread import locations --host <name-or-id> [--json]
+  bb thread import discover --host <name-or-id> [--engine <omp|claude|codex>]
+    [--cursor <number>] [--json]
   bb thread import discover --host <name-or-id> --engine <omp|claude|codex>
     --root <absolute-host-path> --profile <label>
     [--artifact-root <paths...>] [--cursor <number>] [--json]
+  bb thread import list [--host <name-or-id>] [--project <name-or-id>]
+    [--limit <number>] [--json]
 
-  Explicit roots include work-profile and overridden history directories. Only
-  native JSONL files are discovered. Profile labels record provenance, not payer
-  selection. Discovery is bounded; follow nextCursor or choose a narrower root
-  when incomplete. Save --json output locally and select its sessions (or a plain
-  descriptor array) for --sources. No agent or Task starts during discovery.
+  Locations finds known native history/artifact roots on the selected machine,
+  including safely available profile/context locations, with honest warnings.
+  Discover uses those locations for all engines by default; --engine filters them.
+  No filesystem or profile flags are needed for ordinary native history. Advanced
+  --root requires --engine and --profile; --profile/--artifact-root require --root.
+  Explicit roots support work profiles and overridden directories. Profile labels
+  record provenance, never payer selection; no account is needed merely to archive.
+  Only native JSONL files are discovered. Discovery is bounded; follow nextCursor
+  or choose a narrower root when incomplete. Save --json output locally and select
+  its sessions (or a plain descriptor array) for --sources. No agent or Task starts.
+  List returns recent saved imports across reloads, newest first, with optional
+  machine/project filters; --limit is 1–100 (default 30). Use its import ID for
+  get, refresh, records or download without rediscovering paths or reentering a project.
 
   bb thread import preview --host <name-or-id> --sources <file>
     [--index <number>] [--offset <bytes>] [--json]
@@ -206,26 +219,48 @@ Native history archives (experimental):
   bb thread import get <import-id> [--json]
   bb thread import cancel <import-id> [--json]
   bb thread import resume <import-id> [--json]
+  bb thread import refresh <import-id> [--json]
 
   Preview defaults to source index 0 and byte offset 0. Start archives every
   selected descriptor, in batches of at most 100; failures retain their input
   indices. Get reports progress, checksums and unavailable referenced artifacts.
-  Cancel retains committed history; resume continues import processing, not a
-  model conversation. Re-select a changed source through discover/start: committed
-  prefixes must still match. Originals are never replaced by the importer.
+  Cancel retains committed history; resume continues interrupted archive processing,
+  not a fresh source snapshot or a model conversation. Refresh independently finds
+  the original source on its enrolled machine and updates the same import and BB
+  conversation without a source/project/model form. It returns importing or ready;
+  use get to inspect progress. Starting the same native dialogue reuses its archive.
+
+  Start/refresh capture an immutable complete-record snapshot at request time.
+  An unfinished trailing JSONL record is excluded, not silently truncated into a
+  record; later completed records require another explicit refresh. The native
+  source is only read, never written or run. Offline sources, ambiguous originals
+  and mutation of previously accepted conversation records are errors, not
+  "nothing new"; the prior committed archive remains available for retry.
+  Legacy frozen checkpoints resolve to the actual original by engine, native
+  session ID and workspace in known locations, refusing ambiguous candidates.
+
+  The native download retains first-accepted record bytes. Legitimate OMP title
+  and session-header title changes are retained separately in headerVersions,
+  with observed time, source revision/path and checksums; download their file keys
+  just like artifacts. Thus native archive bytes need not exactly match the latest
+  live file after header changes. sourceBoundaryBytes records the accepted native
+  snapshot boundary; bytes records the retained archive length. previousSources
+  preserves earlier source descriptors when an original is rebound. Snapshot
+  descriptors retain original path/root/artifact provenance, not temporary paths.
 
   bb thread import records <import-id> [--after <ordinal>]
     [--query <text>] [--json]
   bb thread import download <import-id> --output <new-local-file>
-    [--file <native-or-artifact-key>]
+    [--file <native-artifact-or-header-key>]
 
   Records page from ordinal 0 and search full retained native values, including
   tool results beyond timeline previews. Continue with nextAfter even when a
-  bounded search page has no matches. Download streams original bytes to a new
-  private file and refuses to overwrite an existing file. The default file is
-  native; artifact keys come from the manifest. Referenced blobs must be inside
-  explicit artifact roots and proven by a native record; credentials/configuration
-  files, symbolic links and neighboring sessions are not imported as artifacts.
+  bounded search page has no matches. Download streams retained archive bytes to
+  a new private file and refuses to overwrite an existing file. The default file
+  is native; artifact keys and headerVersions file keys come from the manifest.
+  Referenced blobs must be inside known or explicitly selected artifact roots and
+  proven by a native record; credentials/configuration files, symbolic links and
+  neighboring sessions are not imported as artifacts.
 
   bb thread import admit <import-id> --environment <id>
     --model-connection <id> --execution-context <id-or-none>
@@ -243,5 +278,6 @@ Native history archives (experimental):
   dialogue with only the supplied next-turn context and an original archive link;
   it is not native resume. The permanent full archive stays separately accessible.
   The new-thread Import native history page uses this same SDK/Core path, with
-  named machine/project/account/context choices and explicit continuation controls.
+  named machine/project choices, recent imports and independent Refresh controls.
+  Account/context/model choices are separate, explicit continuation controls.
 

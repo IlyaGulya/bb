@@ -20,25 +20,68 @@ function namedId<T extends { id: string; name: string }>(values: T[], token: str
 }
 function printManifest(manifest: NativeImportManifest) {
   console.log(`${manifest.source.title} · ${manifest.status} · ${manifest.mode}`);
-  console.log(`Import: ${manifest.id}\nThread: ${manifest.threadId ?? "not yet registered"}\nProgress: ${manifest.bytes}/${manifest.source.sizeBytes} bytes; ${manifest.records} native records`);
+  console.log(`Import: ${manifest.id}\nThread: ${manifest.threadId ?? "not yet registered"}\nRetained archive: ${manifest.bytes} bytes; ${manifest.records} native records`);
+  console.log(`Native snapshot boundary: ${manifest.sourceBoundaryBytes ?? manifest.source.sizeBytes} bytes`);
+  if (manifest.previousSources.length) console.log(`Previous source locations: ${manifest.previousSources.length} (see --json for provenance)`);
+  for (const header of manifest.headerVersions) console.log(`Native header version: record ${header.ordinal} · ${header.file} · ${header.bytes} bytes (download with --file)`);
   console.log(manifest.reason);
   if (manifest.error) console.error(manifest.error);
   for (const artifact of manifest.artifacts.filter((entry) => entry.status === "unavailable")) console.error(`Artifact unavailable: ${artifact.reference}: ${artifact.reason}`);
 }
 export function registerNativeImportCommands(parent: Command, getUrl: () => string): void {
   const command = parent.command("import").description("Discover and archive native OMP, Claude and Codex sessions without starting agents; admit or hand off separately");
+  command.command("locations").description("Find known native history and artifact locations on one machine")
+    .requiredOption("--host <name-or-id>", "Source machine")
+    .option("--json", "Print roots and warnings")
+    .action(action(async (opts: { host: string; json?: boolean }) => {
+      const sdk = createCliBbSdk(getUrl());
+      const result = await sdk.experimental_nativeSessionImports.locations({ hostId: namedId(await sdk.hosts.list(), opts.host, "Machine") });
+      if (outputJson(opts, result)) return;
+      for (const root of result.roots) console.log(`${root.engine} · ${root.profile}\n  ${root.path}${root.artifactRoots.length ? `\n  Artifacts: ${root.artifactRoots.join(", ")}` : ""}`);
+      for (const warning of result.warnings) console.error(warning);
+      if (!result.roots.length) console.log("No known native history locations are available. Use discover with an explicit --root and --profile.");
+    }));
+  command.command("list").description("Find recent saved native imports without copying import IDs")
+    .option("--host <name-or-id>", "Filter by source machine")
+    .option("--project <name-or-id>", "Filter by destination project")
+    .option("--limit <number>", "Maximum recent imports, 1–100; server default 30")
+    .option("--json", "Print saved import manifests")
+    .action(action(async (opts: { host?: string; project?: string; limit?: string; json?: boolean }) => {
+      const sdk = createCliBbSdk(getUrl());
+      const result = await sdk.experimental_nativeSessionImports.list({
+        hostId: opts.host === undefined ? undefined : namedId(await sdk.hosts.list(), opts.host, "Machine"),
+        projectId: opts.project === undefined ? undefined : namedId(await sdk.projects.list(), opts.project, "Project"),
+        limit: opts.limit === undefined ? undefined : z.coerce.number().int().min(1).max(100).parse(opts.limit),
+      });
+      if (outputJson(opts, result)) return;
+      for (const manifest of result) {
+        printManifest(manifest);
+        console.log(`Source: ${manifest.source.engine} · ${manifest.source.cwd ?? "workspace not recorded"}`);
+      }
+      if (!result.length) console.log("No saved native imports match these filters.");
+    }));
   command.command("discover")
     .requiredOption("--host <name-or-id>", "Source machine")
-    .requiredOption("--engine <engine>", "omp, claude, or codex")
-    .requiredOption("--root <absolute-path>", "Explicit native history directory, not an auth directory")
-    .requiredOption("--profile <label>", "Source profile provenance; not an inferred payer")
+    .option("--engine <engine>", "Filter known locations: omp, claude, or codex; required with --root")
+    .option("--root <absolute-path>", "Advanced: explicit native history directory, not an auth directory")
+    .option("--profile <label>", "Advanced: explicit source profile provenance; required with --root, never an inferred payer")
     .option("--artifact-root <paths...>", "Explicit directories containing referenced blobs/artifacts")
     .option("--cursor <number>", "Discovery cursor", "0")
     .option("--json", "Print source descriptors suitable for --sources")
-    .action(action(async (opts: { host: string; engine: string; root: string; profile: string; artifactRoot?: string[]; cursor: string; json?: boolean }) => {
+    .action(action(async (opts: { host: string; engine?: string; root?: string; profile?: string; artifactRoot?: string[]; cursor: string; json?: boolean }) => {
       const sdk = createCliBbSdk(getUrl());
       const hostId = namedId(await sdk.hosts.list(), opts.host, "Machine");
-      const result = await sdk.experimental_nativeSessionImports.discover({ hostId, roots: [{ engine: nativeEngineSchema.parse(opts.engine), path: opts.root, profile: opts.profile, artifactRoots: opts.artifactRoot ?? [] }], cursor: z.coerce.number().int().nonnegative().parse(opts.cursor), limit: 100 });
+      const engine = opts.engine === undefined ? undefined : nativeEngineSchema.parse(opts.engine);
+      if (opts.root !== undefined && (engine === undefined || !opts.profile)) throw new Error("An explicit --root requires --engine and --profile.");
+      if (opts.root === undefined && (opts.profile !== undefined || opts.artifactRoot !== undefined)) throw new Error("--profile and --artifact-root require an explicit --root.");
+      const locations = opts.root === undefined ? await sdk.experimental_nativeSessionImports.locations({ hostId }) : {
+        roots: [{ engine: nativeEngineSchema.parse(engine), path: opts.root, profile: z.string().min(1).parse(opts.profile), artifactRoots: opts.artifactRoot ?? [] }],
+        warnings: [],
+      };
+      const roots = locations.roots.filter((root) => engine === undefined || root.engine === engine);
+      if (!roots.length) throw new Error([...locations.warnings, "No matching native history locations are available. Select another engine or use an explicit --root and --profile."].join("\n"));
+      const discovered = await sdk.experimental_nativeSessionImports.discover({ hostId, roots, cursor: z.coerce.number().int().nonnegative().parse(opts.cursor), limit: 100 });
+      const result = { ...discovered, warnings: [...locations.warnings, ...discovered.warnings] };
       if (outputJson(opts, result)) return;
       for (const source of result.sessions) console.log(`${source.title}\n  ${source.engine} · ${source.profile} · ${source.cwd ?? "workspace not recorded"}\n  ${source.path} (${source.sizeBytes} bytes)\n  Native ID: ${source.sessionId}`);
       for (const warning of result.warnings) console.error(warning);
@@ -72,7 +115,7 @@ export function registerNativeImportCommands(parent: Command, getUrl: () => stri
       if (!outputJson(opts, result)) { result.imports.forEach(printManifest); result.failures.forEach((failure) => console.error(`Selection ${failure.index}: ${failure.message}`)); }
       if (result.failures.length) process.exitCode = 1;
     }));
-  for (const method of ["get", "resume", "cancel"] as const) command.command(`${method} <import-id>`).description(method === "resume" ? "Resume committed import processing, not a model session" : `${method} an import`)
+  for (const method of ["get", "resume", "refresh", "cancel"] as const) command.command(`${method} <import-id>`).description(method === "resume" ? "Resume interrupted archive processing, not a fresh source snapshot or a model session" : method === "refresh" ? "Capture complete native records available now and update the same archive/thread; no model turn" : `${method} an import`)
     .option("--json", "Print machine-readable import state").action(action(async (importId: string, opts: { json?: boolean }) => {
       const result = await createCliBbSdk(getUrl()).experimental_nativeSessionImports[method]({ importId });
       if (!outputJson(opts, result)) printManifest(result);
@@ -84,7 +127,7 @@ export function registerNativeImportCommands(parent: Command, getUrl: () => stri
       for (const record of result.records) console.log(`${record.ordinal} · ${record.type} · ${record.timestamp === null ? "timestamp not recorded" : new Date(record.timestamp).toISOString()}\n${record.preview}\n  Original bytes ${record.offset}–${record.offset + record.length}; native ID ${record.nativeId ?? "not recorded"}`);
       if (result.nextAfter !== null) console.log(`Continue: --after ${result.nextAfter}`);
     }));
-  command.command("download <import-id>").requiredOption("--output <file>", "New local file; never overwrites an existing source").option("--file <name>", "native, or an artifact file key from the manifest", "native")
+  command.command("download <import-id>").requiredOption("--output <file>", "New local file; never overwrites an existing source").option("--file <name>", "native, an artifact key, or a headerVersions file key from the manifest", "native")
     .action(action(async (importId: string, opts: { output: string; file: string }) => {
       const response = await createCliBbSdk(getUrl()).experimental_nativeSessionImports.download({ importId, file: opts.file });
       if (!response.body) throw new Error("Archive download has no response stream");

@@ -2,9 +2,15 @@ import { z } from "zod";
 import { nativeDiscoverSchema, nativeSessionSourceSchema } from "@bb/host-daemon-contract";
 
 export const nativeImportDiscoverSchema = nativeDiscoverSchema.extend({ hostId: z.string().min(1) }).strict();
+export const nativeImportLocationsSchema = z.object({ hostId: z.string().min(1) }).strict();
+export const nativeImportListSchema = z.object({
+  hostId: z.string().min(1).optional(),
+  projectId: z.string().min(1).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+}).strict();
 export const nativeImportPreviewSchema = z.object({ hostId: z.string().min(1), source: nativeSessionSourceSchema, offset: z.number().int().nonnegative(), length: z.number().int().min(1).max(256 * 1024) }).strict();
 export const nativeImportThreadSchema = z.object({ threadId: z.string().min(1) }).strict();
-export const nativeImportFileSchema = z.object({ importId: z.string().regex(/^[a-f0-9]{64}$/), file: z.string().regex(/^(?:native|artifact-[a-f0-9]{64})$/) }).strict();
+export const nativeImportFileSchema = z.object({ importId: z.string().regex(/^[a-f0-9]{64}$/), file: z.string().regex(/^(?:native|(?:artifact|header)-[a-f0-9]{64})$/) }).strict();
 export const nativeImportSelectionSchema = z.object({
   hostId: z.string().min(1),
   projectId: z.string().min(1),
@@ -18,7 +24,7 @@ export const nativeImportPageSchema = nativeImportIdSchema.extend({
   query: z.string().max(1024),
 }).strict();
 export const nativeImportBytesSchema = nativeImportIdSchema.extend({
-  file: z.string().regex(/^(?:native|artifact-[a-f0-9]{64})$/),
+  file: z.string().regex(/^(?:native|(?:artifact|header)-[a-f0-9]{64})$/),
   offset: z.number().int().nonnegative(),
   length: z.number().int().min(1).max(256 * 1024),
 }).strict();
@@ -37,6 +43,12 @@ export const nativeImportManifestSchema = z.object({
   projectId: z.string(),
   source: nativeSessionSourceSchema,
   attemptedSource: nativeSessionSourceSchema.nullable(),
+  previousSources: z.array(nativeSessionSourceSchema).default([]),
+  sourceBoundaryBytes: z.number().int().nonnegative().nullable().default(null),
+  headerVersions: z.array(z.object({
+    ordinal: z.number().int().positive(), observedAt: z.number(), sourceRevision: z.string(), sourcePath: z.string(),
+    file: z.string().regex(/^header-[a-f0-9]{64}$/), bytes: z.number().int().positive(), sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict()).default([]),
   threadId: z.string().nullable(),
   status: z.enum(["paused", "importing", "ready", "cancelled", "failed"]),
   mode: z.enum(["archive", "native-admitted", "new-handoff"]),

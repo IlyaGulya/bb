@@ -410,6 +410,8 @@ function commandRpcResponseSuccessSchemaFor<
 const hostDaemonOnlineRpcResponseSuccessSchema = z.discriminatedUnion(
   "commandType",
   [
+    onlineRpcResponseSuccessSchemaFor("native.sessions.locations"),
+    onlineRpcResponseSuccessSchemaFor("native.sessions.snapshot"),
     onlineRpcResponseSuccessSchemaFor("native.sessions.discover"),
     onlineRpcResponseSuccessSchemaFor("native.sessions.read"),
     onlineRpcResponseSuccessSchemaFor("native.sessions.admit"),

@@ -6,7 +6,7 @@ import { createProject, noopNotifier, upsertHost } from "@bb/db";
 import { createMigratedConnection } from "@bb/db/testing";
 import type { JsonValue } from "@bb/domain";
 import type { NativeEngine } from "@bb/host-daemon-contract";
-import { discoverNativeSessions, readNativeSession } from "../../../../apps/host-daemon/src/command-handlers/native-sessions.js";
+import { discoverNativeSessions, readNativeSession, snapshotNativeSession } from "../../../../apps/host-daemon/src/command-handlers/native-sessions.js";
 import { NativeSessionImports } from "../../../../apps/server/src/services/threads/native-session-imports.js";
 
 const cleanup = new Set<() => Promise<void>>();
@@ -45,7 +45,9 @@ export async function createNativeArchiveFixture(options: {
   await writeFile(path, original);
   const host = upsertHost(db, noopNotifier, { name: "Synthetic native source" });
   const { project } = createProject(db, noopNotifier, { name: "Synthetic import destination", source: { type: "local_path", hostId: host.id, path: cwd } });
-  imports = new NativeSessionImports({ db, hub: noopNotifier, dataDir: join(directory, "core"), read: (_hostId, input, signal) => readNativeSession(input, signal) });
+  imports = new NativeSessionImports({ db, hub: noopNotifier, dataDir: join(directory, "core"),
+    read: (_hostId, input, signal) => readNativeSession(input, signal),
+    snapshot: (_hostId, source, resolveOriginal, signal) => snapshotNativeSession({ source, resolveOriginal }, signal) });
   async function discover(rootPath = sourceRoot) {
     const page = await discoverNativeSessions({ roots: [{ engine, path: rootPath, profile: "Explicit fixture profile", artifactRoots: [artifactRoot] }], cursor: 0, limit: 100 });
     const source = page.sessions.find((entry) => entry.path === path);

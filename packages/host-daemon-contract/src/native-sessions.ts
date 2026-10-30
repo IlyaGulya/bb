@@ -17,10 +17,27 @@ export const nativeSessionSourceSchema = nativeSessionRootSchema.extend({
   sizeBytes: z.number().int().nonnegative(),
   revision: z.string().min(1),
   modifiedAt: z.number(),
+  snapshotId: z.string().min(1).max(128).optional(),
 }).strict();
 export type NativeEngine = z.infer<typeof nativeEngineSchema>;
 export type NativeSessionRoot = z.infer<typeof nativeSessionRootSchema>;
 export type NativeSessionSource = z.infer<typeof nativeSessionSourceSchema>;
+
+export const nativeLocationsSchema = z.object({
+  roots: z.array(nativeSessionRootSchema).max(16).default([]),
+}).strict();
+export const nativeLocationsResultSchema = z.object({
+  roots: z.array(nativeSessionRootSchema).max(16),
+  warnings: z.array(z.string()),
+}).strict();
+export const nativeSnapshotSchema = z.object({
+  source: nativeSessionSourceSchema,
+  resolveOriginal: z.boolean(),
+  roots: z.array(nativeSessionRootSchema).max(16).default([]),
+}).strict();
+export type NativeLocations = z.infer<typeof nativeLocationsResultSchema>;
+export type NativeLocationInput = z.input<typeof nativeLocationsSchema>;
+export type NativeSnapshot = z.input<typeof nativeSnapshotSchema>;
 
 export const nativeDiscoverSchema = z.object({
   roots: z.array(nativeSessionRootSchema).min(1).max(16),
@@ -58,10 +75,14 @@ export type NativeRead = z.infer<typeof nativeReadSchema>;
 export type NativeChunk = z.infer<typeof nativeChunkSchema>;
 
 export const nativeSessionCommandSchemas = {
+  "native.sessions.locations": nativeLocationsSchema.extend({ type: z.literal("native.sessions.locations") }).strict(),
+  "native.sessions.snapshot": nativeSnapshotSchema.extend({ type: z.literal("native.sessions.snapshot") }).strict(),
   "native.sessions.discover": nativeDiscoverSchema.extend({ type: z.literal("native.sessions.discover") }).strict(),
   "native.sessions.read": nativeReadSchema.extend({ type: z.literal("native.sessions.read") }).strict(),
 };
 export const nativeSessionResultSchemas = {
+  "native.sessions.locations": nativeLocationsResultSchema,
+  "native.sessions.snapshot": nativeSessionSourceSchema,
   "native.sessions.discover": nativeDiscoverySchema,
   "native.sessions.read": nativeChunkSchema,
 };

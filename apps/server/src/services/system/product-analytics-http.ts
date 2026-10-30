@@ -2,8 +2,9 @@ import { outcomeForStatus, withProductAnalyticsJsonResult } from "./product-anal
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Context, MiddlewareHandler } from "hono";
-import { environments, getTerminalSession, threads, type DbConnection } from "@bb/db";
-import { eq } from "drizzle-orm";
+import { environments, getTerminalSession, threadPluginMetadata, threads, type DbConnection } from "@bb/db";
+import { NATIVE_HISTORY_OWNER } from "@bb/domain";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import {
   PRODUCT_ANALYTICS_HEADERS as headers,
   productAnalyticsActorSchema,
@@ -19,6 +20,7 @@ const selectorSchema = z.object({
   projectId: z.string().regex(/^proj_[a-zA-Z0-9_-]+$/).optional().catch(undefined),
   threadId: z.string().regex(/^thr_[a-zA-Z0-9_-]+$/).optional().catch(undefined),
   environmentId: z.string().regex(/^env_[a-zA-Z0-9_-]+$/).optional().catch(undefined),
+  importId: z.string().regex(/^[a-f0-9]{64}$/).optional().catch(undefined),
 });
 export function analyticsScopeFromSelectors(db: DbConnection, selectors: z.infer<typeof selectorSchema>): ProductAnalyticsScope | null {
   const projects = new Set<string>();
@@ -35,6 +37,15 @@ export function analyticsScopeFromSelectors(db: DbConnection, selectors: z.infer
     const environment = db.select({ projectId: environments.projectId }).from(environments).where(eq(environments.id, selectors.environmentId)).get();
     if (!environment) return null;
     projects.add(environment.projectId);
+  }
+  if (selectors.importId !== undefined) {
+    const owners = db.select({ projectId: threads.projectId }).from(threadPluginMetadata).innerJoin(threads, eq(threads.id, threadPluginMetadata.threadId)).where(and(
+      eq(threadPluginMetadata.pluginId, NATIVE_HISTORY_OWNER),
+      sql`json_extract(${threadPluginMetadata.metadataJson}, '$.importId') = ${selectors.importId}`,
+      isNull(threads.deletedAt),
+    )).limit(2).all();
+    if (owners.length !== 1) return null;
+    projects.add(owners[0]!.projectId);
   }
   if (projects.size > 1) return null;
   const projectId = [...projects][0];
@@ -73,7 +84,8 @@ export function privateAnalyticsMiddleware(db: DbConnection, service: PrivatePro
         return { kind: "instance" };
       }
       const selectors = { ...query, ...body };
-      if (declaredProject !== undefined && selectors.projectId === undefined && selectors.threadId === undefined && selectors.environmentId === undefined) selectors.projectId = declaredProject;
+      if (!route?.path.startsWith("/native-session-imports/")) selectors.importId = undefined;
+      if (declaredProject !== undefined && selectors.projectId === undefined && selectors.threadId === undefined && selectors.environmentId === undefined && selectors.importId === undefined) selectors.projectId = declaredProject;
       return analyticsScopeFromSelectors(db, selectors);
     };
     const initialScope = resolveScope({});

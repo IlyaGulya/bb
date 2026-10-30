@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, open, readFile, rename, type FileHandle } from "node:fs/promises";
+import { mkdir, open, opendir, readFile, rename, type FileHandle } from "node:fs/promises";
 import { join, posix } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -9,7 +9,7 @@ import {
   upsertThreadSearchSegments, type DbConnection, type DbNotifier,
 } from "@bb/db";
 import { nativeOmpSpillReferences, parseNativeHistoryRecord, threadEventItemSchema, type NativeHistoryRecord } from "@bb/domain";
-import { NATIVE_SESSION_CHUNK_BYTES, type NativeChunk, type NativeRead } from "@bb/host-daemon-contract";
+import { NATIVE_SESSION_CHUNK_BYTES, type NativeChunk, type NativeRead, type NativeSessionSource } from "@bb/host-daemon-contract";
 import {
   nativeImportManifestSchema, nativeImportRecordSchema, type NativeImportBytes,
   type NativeImportManifest, type NativeImportPage, type NativeImportPageResponse,
@@ -26,6 +26,7 @@ export interface NativeImportDependencies {
   hub: DbNotifier;
   dataDir: string;
   read(hostId: string, input: NativeRead, signal: AbortSignal): Promise<NativeChunk>;
+  snapshot(hostId: string, source: NativeSessionSource, resolveOriginal: boolean, signal: AbortSignal): Promise<NativeSessionSource>;
 }
 export function nativeImportIdentity(selection: NativeImportSelection): string {
   return hash(JSON.stringify([selection.hostId, selection.source.engine, posix.normalize(selection.source.path), selection.source.sessionId, selection.projectId]));
@@ -50,6 +51,38 @@ async function atomicJson(path: string, value: NativeImportManifest | NativeImpo
   try { await directory.sync(); } finally { await directory.close(); }
 }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : "Native import failed"; }
+async function* recordLines(size: number, read: (offset: number, length: number) => Promise<Buffer>): AsyncGenerator<{ bytes: Buffer; offset: number }> {
+  let pending: Buffer[] = [];
+  let pendingBytes = 0;
+  let recordOffset = 0;
+  for (let offset = 0; offset < size;) {
+    const bytes = await read(offset, Math.min(NATIVE_SESSION_CHUNK_BYTES, size - offset));
+    if (!bytes.length) throw new Error("Native record stream ended before its authoritative boundary.");
+    offset += bytes.length;
+    let start = 0;
+    for (let index = 0; index < bytes.length; index++) if (bytes[index] === 10) {
+      pending.push(bytes.subarray(start, index + 1));
+      pendingBytes += index + 1 - start;
+      if (pendingBytes > MAX_RECORD_BYTES) throw new Error("Native record exceeds the 64 MiB parsing boundary.");
+      yield { bytes: Buffer.concat(pending, pendingBytes), offset: recordOffset };
+      recordOffset += pendingBytes;
+      pending = []; pendingBytes = 0; start = index + 1;
+    }
+    if (start < bytes.length) { pending.push(bytes.subarray(start)); pendingBytes += bytes.length - start; }
+    if (pendingBytes > MAX_RECORD_BYTES) throw new Error("Native record exceeds the 64 MiB parsing boundary.");
+  }
+  if (pendingBytes) yield { bytes: Buffer.concat(pending, pendingBytes), offset: recordOffset };
+}
+function equivalentOmpHeader(original: Buffer, latest: Buffer, ordinal: number): boolean {
+  if (ordinal > 2) return false;
+  const objectSchema = z.record(z.string(), z.unknown());
+  const a = objectSchema.parse(JSON.parse(original.toString("utf8")));
+  const b = objectSchema.parse(JSON.parse(latest.toString("utf8")));
+  if (a.type !== b.type || (a.type !== "session" && a.type !== "title")) return false;
+  const allowed = a.type === "session" ? ["title", "titleSource"] : ["title", "updatedAt", "pad"];
+  for (const key of allowed) { delete a[key]; delete b[key]; }
+  return JSON.stringify(a) === JSON.stringify(b);
+}
 export class NativeSessionImports {
   private readonly running = new Map<string, { controller: AbortController; promise: Promise<void> }>();
   private readonly transitions = new Map<string, Promise<void>>();
@@ -92,25 +125,56 @@ export class NativeSessionImports {
     if (manifest.status === "importing" && !this.running.has(id)) manifest.status = "paused";
     return manifest;
   }
-  async start(selection: NativeImportSelection): Promise<NativeImportManifest> {
-    return this.exclusive(nativeImportIdentity(selection), () => this.startSelected(selection));
+  async list(input: { hostId?: string; projectId?: string; limit?: number } = {}): Promise<NativeImportManifest[]> {
+    const manifests: NativeImportManifest[] = [];
+    let directory;
+    try { directory = await opendir(this.root); }
+    catch (error) { if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return []; throw error; }
+    for await (const entry of directory) {
+      if (!entry.isDirectory() || !/^[a-f0-9]{64}$/.test(entry.name)) continue;
+      const manifest = await this.get(entry.name);
+      if ((!input.hostId || manifest.hostId === input.hostId) && (!input.projectId || manifest.projectId === input.projectId)) manifests.push(manifest);
+    }
+    manifests.sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
+    return input.limit === undefined ? manifests : manifests.slice(0, input.limit);
   }
-  private async startSelected(selection: NativeImportSelection): Promise<NativeImportManifest> {
-    const id = nativeImportIdentity(selection);
+  async start(selection: NativeImportSelection): Promise<NativeImportManifest> {
+    const identity = hash(JSON.stringify([selection.hostId, selection.projectId, selection.source.engine, selection.source.sessionId, selection.source.cwd]));
+    return this.exclusive(identity, async () => {
+      const matches = (await this.list({ hostId: selection.hostId, projectId: selection.projectId })).filter((entry) =>
+        entry.source.engine === selection.source.engine && entry.source.sessionId === selection.source.sessionId && entry.source.cwd === selection.source.cwd);
+      if (matches.length > 1) throw new ApiError(409, "invalid_request", "Multiple imports already claim this native dialog. Open an existing archive rather than starting another.");
+      const id = matches[0]?.id ?? nativeImportIdentity(selection);
+      return this.exclusive(id, () => this.startSelected(selection, id));
+    });
+  }
+  async refresh(id: string, signal: AbortSignal = new AbortController().signal): Promise<NativeImportManifest> {
+    return this.exclusive(id, async () => {
+      const manifest = await this.get(id);
+      if (this.running.has(id)) return manifest;
+      if (manifest.mode !== "archive") throw new ApiError(409, "invalid_request", "Only an archive can refresh its original native source.");
+      const source = await this.deps.snapshot(manifest.hostId, manifest.source, true, signal);
+      return this.startSelected({ hostId: manifest.hostId, projectId: manifest.projectId, source }, id);
+    });
+  }
+  private async startSelected(selection: NativeImportSelection, id: string): Promise<NativeImportManifest> {
     await mkdir(join(this.directory(id), "records"), { recursive: true, mode: 0o700 });
     let manifest: NativeImportManifest;
     try { manifest = await this.get(id); }
     catch (error) {
       if (!(error instanceof ApiError && error.status === 404)) throw error;
-      manifest = { version: 1, id, ...selection, attemptedSource: null, threadId: null, status: "paused", mode: "archive", continuationThreadId: null,
+      manifest = { version: 1, id, ...selection, attemptedSource: null, previousSources: [], headerVersions: [], sourceBoundaryBytes: null,
+        threadId: null, status: "paused", mode: "archive", continuationThreadId: null,
         reason: "Archive only. Native continuation requires a separate provider-controlled exclusive admission; no agent was started.",
         error: null, bytes: 0, records: 0, nextSequence: 1, sha256: null, boundaryBytes: 0, boundarySha256: null,
         createdAt: Date.now(), updatedAt: Date.now(), artifacts: [] };
       await this.save(manifest);
     }
     if (this.running.has(id)) return manifest;
-    if (manifest.mode !== "archive" && manifest.source.revision !== selection.source.revision) throw new ApiError(409, "invalid_request", "An admitted or handed-off source cannot be rewritten. Its retained archive remains unchanged.");
-    if (selection.source.sizeBytes < manifest.bytes) throw new ApiError(409, "invalid_request", "Native source is shorter than the committed archive; original data will not be overwritten.");
+    if (manifest.mode !== "archive") {
+      if (manifest.source.revision === selection.source.revision && posix.normalize(manifest.source.path) === posix.normalize(selection.source.path) && JSON.stringify(manifest.source.artifactRoots) === JSON.stringify(selection.source.artifactRoots)) return manifest;
+      throw new ApiError(409, "invalid_request", "An admitted or handed-off source cannot be rewritten. Its retained archive remains unchanged.");
+    }
     if (manifest.status === "ready" && manifest.source.revision === selection.source.revision && posix.normalize(manifest.source.path) === posix.normalize(selection.source.path) && JSON.stringify(manifest.source.artifactRoots) === JSON.stringify(selection.source.artifactRoots) && manifest.artifacts.every((entry) => entry.status === "ready")) return manifest;
     manifest.attemptedSource = selection.source;
     manifest.status = "paused";
@@ -163,34 +227,62 @@ export class NativeSessionImports {
   }
   private async run(manifest: NativeImportManifest, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted();
+    manifest.attemptedSource = await this.deps.snapshot(manifest.hostId, manifest.attemptedSource ?? manifest.source, false, signal);
+    await this.save(manifest);
     await this.read(manifest, 0, 1, signal);
     const directory = this.directory(manifest.id);
     const path = join(directory, "native.jsonl");
     const digest = createHash("sha256");
+    const source = manifest.attemptedSource;
+    const remote = recordLines(source.sizeBytes, async (offset, length) => Buffer.from((await this.read(manifest, offset, length, signal)).content, "base64"));
+    const proofs = new Map<number, Pick<NativeImportRecord, "offset" | "length" | "sha256">>();
+    const neededProofs = new Set(manifest.artifacts.filter((entry) => entry.status === "unavailable").map((entry) => entry.recordOrdinal));
+    const versions: { metadata: NativeImportManifest["headerVersions"][number]; bytes: Buffer }[] = [];
+    let ordinal = 0;
+    let needsSeparator = false;
     if (manifest.bytes > 0) {
       const file = await open(path, "r");
       try {
-        for (let offset = 0; offset < manifest.bytes;) {
-          const length = Math.min(NATIVE_SESSION_CHUNK_BYTES, manifest.bytes - offset);
-          const remote = Buffer.from((await this.read(manifest, offset, length, signal)).content, "base64");
-          const local = Buffer.alloc(length);
-          const result = await file.read(local, 0, length, offset);
-          if (result.bytesRead !== length || !local.equals(remote)) throw new Error("Native source prefix differs from the committed archive. Existing history was preserved; refusing resume.");
-          digest.update(local);
-          offset += length;
+        const local = recordLines(manifest.bytes, async (offset, length) => {
+          const bytes = Buffer.alloc(length);
+          if ((await file.read(bytes, 0, length, offset)).bytesRead !== length) throw new Error("Committed native archive is incomplete.");
+          return bytes;
+        });
+        for await (const archived of local) {
+          signal.throwIfAborted();
+          const latest = await remote.next();
+          if (latest.done) throw new Error("Native source is shorter than the committed archive. Existing history was preserved.");
+          ordinal++;
+          const bytes = latest.value.bytes;
+          const terminated = archived.bytes.at(-1) !== 10 && archived.offset + archived.bytes.length === manifest.bytes && bytes.at(-1) === 10 && archived.bytes.equals(bytes.subarray(0, -1));
+          if (!archived.bytes.equals(bytes) && !terminated) {
+            if (source.engine !== "omp" || !equivalentOmpHeader(archived.bytes, bytes, ordinal)) throw new Error("Native source prefix differs from the committed archive. Existing history was preserved; refusing resume.");
+            const sha256 = hash(bytes);
+            const name = `header-${sha256}`;
+            if (!manifest.headerVersions.some((entry) => entry.ordinal === ordinal && entry.sha256 === sha256)) {
+              versions.push({ metadata: { ordinal, observedAt: Date.now(), sourceRevision: source.revision, sourcePath: source.path, file: name, bytes: bytes.length, sha256 }, bytes });
+            }
+          }
+          if (neededProofs.has(ordinal)) proofs.set(ordinal, { offset: latest.value.offset, length: bytes.length, sha256: hash(bytes) });
+          digest.update(archived.bytes);
+          needsSeparator = archived.bytes.at(-1) !== 10;
         }
       } finally { await file.close(); }
-      if (digest.copy().digest("hex") !== manifest.boundarySha256) throw new Error("Committed native archive checksum mismatch.");
+      if (ordinal !== manifest.records || digest.copy().digest("hex") !== manifest.boundarySha256) throw new Error("Committed native archive checksum or record count mismatch.");
     }
-    if (manifest.attemptedSource !== null) {
-      manifest.source = manifest.attemptedSource;
-      manifest.attemptedSource = null;
-      await this.save(manifest);
+    for (const version of versions) {
+      const header = await open(join(directory, version.metadata.file), "w", 0o600);
+      try { await header.writeFile(version.bytes); await header.sync(); } finally { await header.close(); }
     }
+    if (manifest.source.path !== source.path || manifest.source.rootPath !== source.rootPath) manifest.previousSources.push(manifest.source);
+    manifest.source = source;
+    manifest.attemptedSource = null;
+    manifest.headerVersions.push(...versions.map((entry) => entry.metadata));
+    await this.save(manifest);
     for (const artifact of manifest.artifacts.filter((entry) => entry.status === "unavailable")) {
       const record = nativeImportRecordSchema.parse(JSON.parse(await readFile(join(directory, "records", `${artifact.recordOrdinal}.json`), "utf8")));
       if (!record.artifactReferences.includes(artifact.reference)) throw new Error("Retained artifact provenance does not match its source record.");
-      await this.copyArtifact(manifest, record, artifact.reference, signal);
+      await this.copyArtifact(manifest, record, artifact.reference, signal, proofs.get(record.ordinal));
     }
     if (manifest.threadId === null) {
       const recovered = this.deps.db.select({ threadId: threadPluginMetadata.threadId }).from(threadPluginMetadata).where(and(
@@ -206,9 +298,7 @@ export class NativeSessionImports {
     }
     if (!getThread(this.deps.db, manifest.threadId)) throw new Error("Imported Core thread no longer exists.");
     const output = await open(path, manifest.bytes === 0 ? "w" : "r+", 0o600);
-    let pending: Buffer[] = [];
-    let pendingBytes = 0;
-    let readOffset = manifest.bytes;
+    let currentSourceOffset = 0;
     const commit = async (line: Buffer) => {
       signal.throwIfAborted();
       if (!line.length) return;
@@ -216,6 +306,9 @@ export class NativeSessionImports {
       if (line.toString("utf8").trim()) record = parseNativeHistoryRecord(JSON.parse(line.toString("utf8")), manifest.records + 1);
       if (record?.sessionId && record.sessionId !== manifest.source.sessionId) throw new Error("Native source session identity changed inside the selected stream.");
       const ordinal = manifest.records + 1;
+      const separatorBytes = needsSeparator ? 1 : 0;
+      if (separatorBytes) await writeAll(output, Buffer.from("\n"), manifest.bytes);
+      await writeAll(output, line, manifest.bytes + separatorBytes);
       const projected = record ? nativeHistoryEvents({ importId: manifest.id, threadId: manifest.threadId!, sessionId: manifest.source.sessionId,
         ordinal, sequence: 0, record, recordSha256: hash(line), fallbackTimestamp: manifest.source.modifiedAt,
         toolContext: (itemId) => {
@@ -242,15 +335,17 @@ export class NativeSessionImports {
         return { start, eventCount: legacy && recovered ? recovered.count : prepared.length };
       }, { behavior: "immediate" });
       if (eventCount) this.deps.hub.notifyThread(manifest.threadId!, ["events-appended"], { timelineSequence: getLatestThreadSequence(this.deps.db, { threadId: manifest.threadId! }) });
-      const metadata: NativeImportRecord = { ordinal, offset: manifest.bytes, length: line.length, sha256: hash(line),
+      const metadata: NativeImportRecord = { ordinal, offset: manifest.bytes + separatorBytes, length: line.length, sha256: hash(line),
         nativeId: record?.id ?? null, parentId: record?.parentId ?? null, type: record?.type ?? "native-blank",
         timestamp: record?.timestamp ?? null, sourceSeqStart: start, sourceSeqEnd: start + eventCount,
         preview: record?.parts.map((part) => part.text || part.name || part.kind).join("\n").slice(0, 1024) ?? "", artifactReferences: record?.artifacts ?? [] };
       await atomicJson(join(directory, "records", `${ordinal}.json`), metadata);
-      if (record) for (const reference of record.artifacts) await this.copyArtifact(manifest, metadata, reference, signal);
+      if (record) for (const reference of record.artifacts) await this.copyArtifact(manifest, metadata, reference, signal, { offset: currentSourceOffset, length: line.length, sha256: hash(line) });
+      if (separatorBytes) digest.update("\n");
       digest.update(line);
       await output.sync();
-      manifest.bytes += line.length;
+      manifest.bytes += separatorBytes + line.length;
+      needsSeparator = false;
       manifest.boundaryBytes = manifest.bytes;
       manifest.boundarySha256 = digest.copy().digest("hex");
       manifest.records = ordinal;
@@ -259,31 +354,18 @@ export class NativeSessionImports {
     };
     try {
       await output.truncate(manifest.bytes);
-      while (readOffset < manifest.source.sizeBytes) {
+      for await (const entry of remote) {
         signal.throwIfAborted();
-        const chunk = await this.read(manifest, readOffset, Math.min(NATIVE_SESSION_CHUNK_BYTES, manifest.source.sizeBytes - readOffset), signal);
-        const bytes = Buffer.from(chunk.content, "base64");
-        if (chunk.sizeBytes !== manifest.source.sizeBytes) throw new Error("Native source boundary changed during import.");
-        await writeAll(output, bytes, readOffset);
-        readOffset += bytes.length;
-        let start = 0;
-        for (let index = 0; index < bytes.length; index++) if (bytes[index] === 10) {
-          const segment = bytes.subarray(start, index + 1);
-          pending.push(segment); pendingBytes += segment.length;
-          if (pendingBytes > MAX_RECORD_BYTES) throw new Error("Native record exceeds the 64 MiB parsing boundary. The committed archive is retained; no partial record was projected.");
-          await commit(Buffer.concat(pending, pendingBytes));
-          pending = []; pendingBytes = 0; start = index + 1;
-        }
-        if (start < bytes.length) { const remainder = bytes.subarray(start); pending.push(remainder); pendingBytes += remainder.length; }
-        if (pendingBytes > MAX_RECORD_BYTES) throw new Error("Native record exceeds the 64 MiB parsing boundary. No record was silently truncated.");
+        currentSourceOffset = entry.offset;
+        await commit(entry.bytes);
       }
-      if (pendingBytes) await commit(Buffer.concat(pending, pendingBytes));
+      manifest.sourceBoundaryBytes = manifest.source.sizeBytes;
       manifest.sha256 = digest.digest("hex");
       manifest.status = "ready";
       await this.save(manifest);
     } finally { await output.close(); }
   }
-  private async copyArtifact(manifest: NativeImportManifest, record: NativeImportRecord, reference: string, signal: AbortSignal): Promise<void> {
+  private async copyArtifact(manifest: NativeImportManifest, record: NativeImportRecord, reference: string, signal: AbortSignal, proof: Pick<NativeImportRecord, "offset" | "length" | "sha256"> = record): Promise<void> {
     const existing = manifest.artifacts.find((entry) => entry.reference === reference);
     if (existing?.status === "ready") return;
     const file = `artifact-${hash(reference)}`;
@@ -296,7 +378,7 @@ export class NativeSessionImports {
     try {
       do {
         const chunk = await this.read(manifest, offset, NATIVE_SESSION_CHUNK_BYTES, signal, {
-          reference, recordOffset: record.offset, recordLength: record.length, recordSha256: record.sha256, revision,
+          reference, recordOffset: proof.offset, recordLength: proof.length, recordSha256: proof.sha256, revision,
         });
         if (revision !== null && (chunk.revision !== revision || chunk.sizeBytes !== size)) throw new Error("Referenced native artifact changed during import.");
         revision = chunk.revision; size = chunk.sizeBytes;
@@ -379,8 +461,8 @@ export class NativeSessionImports {
   }
   async bytes(input: NativeImportBytes): Promise<{ content: string; sizeBytes: number; offset: number; sha256: string }> {
     const manifest = await this.get(input.importId);
-    const artifact = manifest.artifacts.find((entry) => entry.file === input.file && entry.status === "ready");
-    if (input.file !== "native" && !artifact) throw new ApiError(404, "invalid_request", "Retained native artifact is unavailable");
+    const artifact = manifest.artifacts.find((entry) => entry.file === input.file && entry.status === "ready") ?? manifest.headerVersions.find((entry) => entry.file === input.file);
+    if (input.file !== "native" && !artifact) throw new ApiError(404, "invalid_request", "Retained native artifact or header version is unavailable");
     const sizeBytes = artifact?.bytes ?? manifest.bytes;
     const file = await open(join(this.directory(input.importId), input.file === "native" ? "native.jsonl" : input.file), "r");
     try {
@@ -392,8 +474,8 @@ export class NativeSessionImports {
   }
   async download(id: string, name: string): Promise<Response> {
     const manifest = await this.get(id);
-    const artifact = manifest.artifacts.find((entry) => entry.file === name && entry.status === "ready");
-    if (name !== "native" && !artifact) throw new ApiError(404, "invalid_request", "Native archive artifact not found");
+    const artifact = manifest.artifacts.find((entry) => entry.file === name && entry.status === "ready") ?? manifest.headerVersions.find((entry) => entry.file === name);
+    if (name !== "native" && !artifact) throw new ApiError(404, "invalid_request", "Native archive artifact or header version not found");
     const size = artifact?.bytes ?? manifest.bytes;
     const file = await open(join(this.directory(id), name === "native" ? "native.jsonl" : name), "r");
     let offset = 0;

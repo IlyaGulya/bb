@@ -1446,6 +1446,18 @@ export const hostDaemonCommandRegistry = {
     ]),
     transport: "onlineRpc", retryable: false, flushEventsBeforeResult: true, envLane: "read",
   }),
+  "native.sessions.locations": defineHostDaemonCommandDescriptor({
+    type: "native.sessions.locations",
+    schema: nativeSessionCommandSchemas["native.sessions.locations"],
+    resultSchema: nativeSessionResultSchemas["native.sessions.locations"],
+    transport: "onlineRpc", retryable: true, flushEventsBeforeResult: false, envLane: null,
+  }),
+  "native.sessions.snapshot": defineHostDaemonCommandDescriptor({
+    type: "native.sessions.snapshot",
+    schema: nativeSessionCommandSchemas["native.sessions.snapshot"],
+    resultSchema: nativeSessionResultSchemas["native.sessions.snapshot"],
+    transport: "onlineRpc", retryable: false, flushEventsBeforeResult: false, envLane: null,
+  }),
   "native.sessions.discover": defineHostDaemonCommandDescriptor({
     type: "native.sessions.discover",
     schema: nativeSessionCommandSchemas["native.sessions.discover"],

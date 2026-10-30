@@ -218,11 +218,14 @@ for the full report. The omitted scope is instance-only, not all projects.
 - `bb thread new`
 - `bb thread fork`
 - `bb thread import`
+- `bb thread import locations`
+- `bb thread import list`
 - `bb thread import discover`
 - `bb thread import preview`
 - `bb thread import start`
 - `bb thread import get`
 - `bb thread import resume`
+- `bb thread import refresh`
 - `bb thread import cancel`
 - `bb thread import records`
 - `bb thread import download`

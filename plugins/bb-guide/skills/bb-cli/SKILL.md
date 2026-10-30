@@ -24,7 +24,8 @@ bb status --json
 
 | Task                                                                    | Read                           |
 | ----------------------------------------------------------------------- | ------------------------------ |
-| Spawn, hand off, fork, or import native history; edit a sent message     | `bb guide threads`             |
+| Spawn, hand off, fork, or edit a sent message                            | `bb guide threads`             |
+| Discover, import, list or refresh native history archives               | `bb guide threads`             |
 | List, inspect, wait on, or open threads                                 | `bb guide thread-inspection`   |
 | Message threads, answer interactions, manage queues                     | `bb guide thread-messaging`    |
 | Stop, clear, compact, retry, archive, or delete threads                 | `bb guide thread-lifecycle`    |

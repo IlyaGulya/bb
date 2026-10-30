@@ -27,6 +27,7 @@ export function analyticsRoutes(): AnalyticsRoute[] {
         }
         return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       }).join("/");
+      const observation = value.method === "get" || (keys[0] === "nativeSessionImports" && (keys[1] === "locations" || keys[1] === "list"));
       result.push({
         featureId: `core.${keys[0]}`,
         action: keys.slice(1).join("."),
@@ -34,9 +35,9 @@ export function analyticsRoutes(): AnalyticsRoute[] {
         label: `${keys[0]} · ${keys.slice(1).join(" · ")}`,
         entrypoints: [`${value.method.toUpperCase()} ${value.path}`, entrypoint],
         surfaces: ["web", "compact", "mobile", "desktop", "cli", "sdk", "agent", "mcp", "api"],
-        coverage: value.method === "get" ? "observation" : "admission",
+        coverage: observation ? "observation" : "admission",
         availability: "available",
-        limitation: value.method === "get" ? "Reads and refreshes are observations, not intentional use without an explicit intent." : "Measures the action's server admission result, not completion of asynchronous downstream work.",
+        limitation: observation ? "Reads and refreshes are observations, not intentional use without an explicit intent." : "Measures the action's server admission result, not completion of asynchronous downstream work.",
         method: value.method.toUpperCase(),
         path: value.path,
         pattern: new RegExp(`^${pattern}/?$`),

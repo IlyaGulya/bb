@@ -2,6 +2,11 @@
 
 ## AgentOS fork — unreleased
 
+- Make native conversation import self-service: discover known OMP/Claude/Codex
+  locations, select conversations by title, reopen recent imports, and refresh
+  the same archive/Core conversation without paths, checkpoints or model turns.
+  Capture complete records from growing sources, retain original OMP headers
+  with separate metadata provenance, and reconnect legacy frozen imports safely.
 - Keep first-use workflow checks open while entering commands, so autosave
   preserves the complete smoke command instead of closing after its first character.
 - Restore Tasks bundled-build prerequisites and declared runtime outputs so clean

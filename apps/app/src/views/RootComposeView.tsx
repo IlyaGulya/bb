@@ -1497,7 +1497,7 @@ function RootComposeSurface({
       isCreating: quickCreateProject.isCreating,
     },
     onRequestMachineSetup: handleRequestMachineSetup,
-  })}<Button type="button" variant="ghost" className="self-start text-muted-foreground" onClick={() => navigate("/native-session-imports")}>Import native history</Button></div>;
+  })}<Button type="button" variant="ghost" className="min-h-11 self-start text-muted-foreground" onClick={() => navigate(`/native-session-imports?${new URLSearchParams({ ...(isProjectless ? {} : { projectId }), ...(rootProjectHostId ? { hostId: rootProjectHostId } : {}) })}`)}>Import native history</Button></div>;
 
   return (
     <PluginDetailPanelContext.Provider value={pluginDetails}>

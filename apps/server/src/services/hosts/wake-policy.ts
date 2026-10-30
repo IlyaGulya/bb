@@ -1,6 +1,8 @@
 import { type HostDaemonRpcCommand } from "@bb/host-daemon-contract";
 
 const hostCommandWakePolicy = {
+  "native.sessions.locations": "never",
+  "native.sessions.snapshot": "never",
   "native.sessions.discover": "never",
   "native.sessions.read": "never",
   "native.sessions.admit": "work",

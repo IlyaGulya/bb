@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { NativeChunk, NativeDiscovery } from "@bb/host-daemon-contract";
+import type { NativeChunk, NativeDiscovery, NativeSessionRoot } from "@bb/host-daemon-contract";
 import type {
   nativeImportDiscoverSchema, nativeImportPreviewSchema,
   NativeImportBatch, NativeImportBytes, NativeImportContinue, NativeImportHandoff, NativeImportManifest,
@@ -9,6 +9,9 @@ import { signalRequestArgs, type CreateSdkAreaArgs } from "./common.js";
 
 type Signal = { signal?: AbortSignal };
 export interface ExperimentalNativeSessionImportsArea {
+  locations(input: { hostId: string } & Signal): Promise<{ roots: NativeSessionRoot[]; warnings: string[] }>;
+  list(input: { hostId?: string; projectId?: string; limit?: number } & Signal): Promise<NativeImportManifest[]>;
+  refresh(input: { importId: string } & Signal): Promise<NativeImportManifest>;
   discover(input: z.infer<typeof nativeImportDiscoverSchema> & Signal): Promise<NativeDiscovery>;
   preview(input: z.infer<typeof nativeImportPreviewSchema> & Signal): Promise<NativeChunk>;
   start(input: NativeImportStart & Signal): Promise<NativeImportBatch>;
@@ -25,6 +28,9 @@ export interface ExperimentalNativeSessionImportsArea {
 export function createNativeSessionImportsArea({ transport }: CreateSdkAreaArgs): ExperimentalNativeSessionImportsArea {
   const api = transport.api.v1["native-session-imports"];
   return {
+    locations: ({ signal, ...json }) => transport.readJson(api.locations.$post({ json }, ...signalRequestArgs(signal))),
+    list: ({ signal, ...json }) => transport.readJson(api.list.$post({ json }, ...signalRequestArgs(signal))),
+    refresh: ({ signal, ...json }) => transport.readJson(api.refresh.$post({ json }, ...signalRequestArgs(signal))),
     discover: ({ signal, ...json }) => transport.readJson(api.discover.$post({ json }, ...signalRequestArgs(signal))),
     preview: ({ signal, ...json }) => transport.readJson(api.preview.$post({ json }, ...signalRequestArgs(signal))),
     start: ({ signal, ...json }) => transport.readJson(api.start.$post({ json }, ...signalRequestArgs(signal))),
