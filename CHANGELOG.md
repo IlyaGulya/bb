@@ -2,6 +2,10 @@
 
 ## AgentOS fork — unreleased
 
+- Restore native conversation discovery, snapshot reads and numeric OMP spills
+  on macOS using ancestor-symlink-safe file opens and pinned-directory identity
+  checks instead of Linux-style descriptor traversal. Advance worker protocol
+  to 251 so enrolled Macs receive the corrected reader.
 - Make native conversation import self-service: discover known OMP/Claude/Codex
   locations, select conversations by title, reopen recent imports, and refresh
   the same archive/Core conversation without paths, checkpoints or model turns.

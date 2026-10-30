@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -21,7 +21,7 @@ const directories: string[] = [];
 afterEach(async () => { race.afterStat = null; for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(), "bb-native-race-"));
+  const directory = await mkdtemp(join(await realpath(tmpdir()), "bb-native-race-"));
   directories.push(directory);
   const sessions = join(directory, "sessions");
   const artifacts = join(directory, "artifacts");

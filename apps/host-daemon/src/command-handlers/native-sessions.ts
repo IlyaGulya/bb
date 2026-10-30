@@ -13,7 +13,8 @@ const verifiedImages = new Map<string, Promise<void>>();
 const MAX_VERIFIED_IMAGES = 128;
 const spillDirectories = new Map<string, Map<string, string | null>>();
 const MAX_SPILL_DIRECTORIES = 16;
-const descriptorRoot = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
+const noFollowFlag = process.platform === "darwin" ? 0x20000000 : constants.O_NOFOLLOW;
+let darwinConfinement: Promise<void> | undefined;
 const forbidden = /(?:^|[/\\])(?:\.?auth(?:\.db(?:-wal|-shm)?|\.json)?|\.?credentials?[^/\\]*|keychain[^/\\]*|\.env(?:\.[^/\\]*)?|\.?mcp(?:\.json)?|\.npmrc|\.netrc|\.pypirc|\.yarnrc(?:\.yml)?|settings\.json|config\.toml|\.ssh|\.aws|\.gnupg|\.docker|\.kube|\.git-credentials|id_rsa|id_ed25519|tokens?[^/\\]*|secrets?)(?:$|[/\\])/i;
 function contained(root: string, path: string): boolean {
   const suffix = relative(root, path);
@@ -29,30 +30,57 @@ async function safePath(root: string, path: string, imageHash: string | null = n
   if (!stat.isFile() || (stat.nlink !== 1 && imageHash === null)) throw new Error("Native sources must be regular, unshared files unless they are verified canonical OMP images.");
   return { path: canonical, stat, imageHash };
 }
+async function assertDarwinConfinement(): Promise<void> {
+  darwinConfinement ??= (async () => {
+    try {
+      const probe = await open("/var/tmp", constants.O_RDONLY | constants.O_DIRECTORY | noFollowFlag);
+      await probe.close();
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ELOOP") return;
+      throw error;
+    }
+    throw new Error("This macOS host cannot provide ancestor-symlink-safe native file reads.");
+  })();
+  await darwinConfinement;
+}
 async function openConfinedDirectory(path: string): Promise<FileHandle> {
   if (process.platform === "win32" || typeof constants.O_NOFOLLOW !== "number" || typeof constants.O_DIRECTORY !== "number") throw new Error("This host cannot provide confined native file reads.");
   const root = parse(path).root;
-  const flags = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+  const flags = constants.O_RDONLY | constants.O_DIRECTORY | noFollowFlag | constants.O_NONBLOCK;
+  if (process.platform === "darwin") {
+    await assertDarwinConfinement();
+    return open(path, flags);
+  }
   let directory = await open(root, flags);
   try {
     for (const part of relative(root, path).split(sep)) {
       if (!part) continue;
       const previous = directory;
-      directory = await open(`${descriptorRoot}/${previous.fd}/${part}`, flags);
+      directory = await open(`/proc/self/fd/${previous.fd}/${part}`, flags);
       await previous.close();
     }
     return directory;
   } catch (error) { await directory.close(); throw error; }
+}
+async function assertDirectoryIdentity(path: string, directory: FileHandle): Promise<void> {
+  const reopened = await openConfinedDirectory(path);
+  try {
+    const pinned = await directory.stat();
+    const current = await reopened.stat();
+    if (pinned.dev !== current.dev || pinned.ino !== current.ino) throw new Error("Native source directory changed during confined access.");
+  } finally { await reopened.close(); }
 }
 async function openConfined(source: ConfinedNativeFile, parent?: FileHandle): Promise<FileHandle> {
   const parsed = parse(source.path);
   if (!parsed.base) throw new Error("Native source must identify a file.");
   const directory = parent ?? await openConfinedDirectory(parsed.dir);
   try {
-    const file = await open(`${descriptorRoot}/${directory.fd}/${parsed.base}`, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    if (process.platform === "darwin") await assertDirectoryIdentity(parsed.dir, directory);
+    const file = await open(process.platform === "darwin" ? source.path : `/proc/self/fd/${directory.fd}/${parsed.base}`, constants.O_RDONLY | noFollowFlag | constants.O_NONBLOCK);
     try {
       const opened = await file.stat();
       if (!opened.isFile() || (opened.nlink !== 1 && source.imageHash === null) || revision(opened) !== revision(source.stat)) throw new Error("Native source identity changed between validation and confined open.");
+      if (process.platform === "darwin") await assertDirectoryIdentity(parsed.dir, directory);
       return file;
     } catch (error) { await file.close(); throw error; }
   } finally { if (parent === undefined) await directory.close(); }
@@ -621,7 +649,8 @@ async function readNativeSpill(source: ConfinedNativeFile, roots: string[], id: 
     let names = spillDirectories.get(key);
     if (names === undefined) {
       names = new Map<string, string | null>();
-      const entries = await opendir(`${descriptorRoot}/${directory.fd}`);
+      if (process.platform === "darwin") await assertDirectoryIdentity(stem, directory);
+      const entries = await opendir(process.platform === "darwin" ? stem : `/proc/self/fd/${directory.fd}`);
       let visited = 0;
       for await (const entry of entries) {
         signal?.throwIfAborted();
@@ -630,6 +659,7 @@ async function readNativeSpill(source: ConfinedNativeFile, roots: string[], id: 
         const artifactId = match?.[1];
         if (artifactId !== undefined && match?.[0] === entry.name) names.set(artifactId, names.has(artifactId) ? null : entry.name);
       }
+      if (process.platform === "darwin") await assertDirectoryIdentity(stem, directory);
       if (revision(await directory.stat()) !== stamp) throw new Error("Native spill directory changed during lookup.");
       spillDirectories.set(key, names);
       if (spillDirectories.size > MAX_SPILL_DIRECTORIES) {
@@ -648,6 +678,7 @@ async function readNativeSpill(source: ConfinedNativeFile, roots: string[], id: 
     if (artifact === null) throw new Error("Native spill is not a confined, unshared retained log.");
     const result = await readRange(artifact, offset, length, expected, signal, directory);
     if (revision(await directory.stat()) !== stamp) throw new Error("Native spill directory changed during read.");
+    if (process.platform === "darwin") await assertDirectoryIdentity(stem, directory);
     return result;
   } finally { await directory.close(); }
 }

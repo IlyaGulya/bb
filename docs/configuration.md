@@ -990,6 +990,11 @@ Native admission and handoff are separate explicit operations. Once either has
 been selected, the source archive cannot be refreshed. Importing history is not
 a backup of working trees or every native agent file.
 
+Native history reads use confined access on Linux and macOS. On macOS the
+worker checks that the kernel rejects ancestor symlinks before reading history;
+unavailable confinement fails closed instead of following links. Protocol 251
+updates enrolled workers with this macOS reader. Source agents are not restarted.
+
 ### Machine installer
 
 `BB_DATA_DIR` on the installer selects the machine's state directory instead of
